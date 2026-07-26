@@ -518,12 +518,32 @@ void OscilloscopeComponent::paintEnvelopeLane (juce::Graphics& g,
         g.setColour (lineColour.withMultipliedAlpha (0.22f));
         g.fillPath (band);
 
-        // Stroke max/min as separate paths so the right edge of max never joins
-        // the left edge of min (that join was a full-width connector line).
-        strokeWaveform (g, maxPath, pathWidth, lineOpacity, true,
-                        glowEnabled, glowOpacity, glowRadius, glowSpread);
-        strokeWaveform (g, minPath, pathWidth, lineOpacity, true,
-                        false, 0.0f, 0.0f, 0.0f);
+        if (! expanded)
+        {
+            // Compact strip is too short for dual max/min strokes — they read as
+            // two stacked waveforms. Keep the soft fill, draw thickness with stubs.
+            juce::Path stubs;
+            for (int i = runStart; i < runEnd; ++i)
+            {
+                const auto& col = columns[(size_t) i];
+                const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+                appendColumnStub (stubs, px,
+                                  plot.getY() + (0.5f - 0.5f * sampleMax (col)) * plot.getHeight(),
+                                  plot.getY() + (0.5f - 0.5f * sampleMin (col)) * plot.getHeight());
+            }
+
+            strokeWaveform (g, stubs, pathWidth, lineOpacity, true,
+                            glowEnabled, glowOpacity, glowRadius, glowSpread);
+        }
+        else
+        {
+            // Expanded: stroke max/min separately so the right edge of max never
+            // joins the left edge of min (that join was a full-width connector).
+            strokeWaveform (g, maxPath, pathWidth, lineOpacity, true,
+                            glowEnabled, glowOpacity, glowRadius, glowSpread);
+            strokeWaveform (g, minPath, pathWidth, lineOpacity, true,
+                            false, 0.0f, 0.0f, 0.0f);
+        }
     }
 }
 

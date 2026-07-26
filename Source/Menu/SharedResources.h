@@ -516,7 +516,7 @@ public:
 		defaultColors.setMenuScrollBarOutlineColor1(juce::Colour::fromRGBA(20, 20, 20, 255));
 		defaultColors.setMenuListBoxTextColor1(juce::Colour::fromRGBA(245, 245, 245, 255));
 		defaultColors.setMenuListBoxSelectionColor1(juce::Colour::fromRGBA(220, 220, 220, 255));
-		defaultColors.setMenuTextBoxTextColor1(juce::Colour::fromRGBA(220, 220, 220, 255));
+		defaultColors.setMenuTextBoxTextColor1(juce::Colour::fromRGBA(245, 245, 245, 217));
 		// Set all other necessary colors...
 		return defaultColors;
 	}

@@ -9,6 +9,7 @@
 #include "BandChannel.h"
 #include "DynamicEq.h"
 #include "Menu/AnalyserDefaults.h"
+#include "FactoryDefaultsState.h"
 #include <JuceHeader.h>
 
 juce::Image EqProcessor::darkKnob4_StitchedImage;
@@ -88,6 +89,10 @@ EqProcessor::EqProcessor()
     m_analyser(treeState)
 #endif
 {
+    // Hard-coded factory state from user preset "new default" (host may overwrite later).
+    if (auto factoryState = FactoryDefaults::createPluginState(); factoryState.isValid())
+        treeState.replaceState (factoryState);
+
     initializeSharedImages();
 
     treeState.addParameterListener("highpassOnOff", this);
@@ -369,11 +374,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     auto pBand1SpectralExpand = std::make_unique<juce::AudioParameterBool>(
         "band1SpectralExpand", "Band1SpectralExpand", false);
     auto pBand1Sat = std::make_unique<juce::AudioParameterBool>(
-        "band1Sat", "Band1Sat", false);
+        "band1Sat", "Band1Sat", true);
     auto pBand1SatModel = std::make_unique<juce::AudioParameterChoice>(
         "band1SatModel", "Band1SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
     auto pBand1SatPost = std::make_unique<juce::AudioParameterBool>(
-        "band1SatPost", "Band1SatPost", false);
+        "band1SatPost", "Band1SatPost", true);
 
     //Band2
     auto pBand2Frequency = std::make_unique<juce::AudioParameterFloat>("band2Frequency", "Band2Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 1000.0f);
@@ -511,11 +516,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         SpectralDynamics::spectralPackParamId(), "SpectralPack",
         SpectralDynamics::getPackModeChoiceNames(), 0);
 
-    // Built-in analyser defaults match Documents/.../analyser_defaults.xml;
+    // Built-in analyser defaults match factory "new default";
     // AnalyserDefaults::load() still overrides when that file is present.
     juce::StringArray choices = AnalyserDefaults::getBlockSizeNames();
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
-        "BLOCK_ID", "Block", choices, analyserDefaults.getBlockIndex (0))); // 2048
+        "BLOCK_ID", "Block", choices, analyserDefaults.getBlockIndex (2))); // 8192
 
     // Boolean parameters
     params.push_back(std::make_unique<juce::AudioParameterBool>("LEFT_ID", "Left", false));
@@ -531,7 +536,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     // Integer parameters
     // Analysis + UI refresh interval in ms (Ableton Spectrum default ~60 ms).
     // Analysis thread FFTs the latest Block samples on this cadence (overlapping).
-    params.push_back(std::make_unique<juce::AudioParameterInt>("REFRESH_ID", "Refresh", 16, 200, 60));
+    params.push_back(std::make_unique<juce::AudioParameterInt>("REFRESH_ID", "Refresh", 16, 200, 30));
     params.push_back(std::make_unique<juce::AudioParameterInt>("AVG_ID", "Avg", 1, 8, 1));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MAXIMUM_ID", "Maximum", -200, 40, 12));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MINIMUM_ID", "Minimum", -380, 30, -120));
@@ -576,7 +581,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "SPECTRUM_CURVE_RES_ID", "SpectrumCurveSmoothness",
         juce::StringArray { "Off", "Low", "Med", "High" },
-        juce::jlimit (0, 3, analyserDefaults.getInt ("SPECTRUM_CURVE_RES_ID", 2)))); // Med
+        juce::jlimit (0, 3, analyserDefaults.getInt ("SPECTRUM_CURVE_RES_ID", 3)))); // High
     // Show Bars — FFT bin overlay on/off (density is FFT_RESOLUTION_ID).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPECTRUM_FFT_BINS_ID", "SpectrumFftBins", analyserDefaults.getBool ("SPECTRUM_FFT_BINS_ID", true)));
@@ -634,10 +639,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "OSC_LINE_WIDTH_ID", "OscLineWidth",
         juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
-        analyserDefaults.getFloat ("OSC_LINE_WIDTH_ID", 1.0f)));
+        analyserDefaults.getFloat ("OSC_LINE_WIDTH_ID", 1.6f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "OSC_GLOW_ENABLE_ID", "OscGlowEnable",
-        analyserDefaults.getBool ("OSC_GLOW_ENABLE_ID", false)));
+        analyserDefaults.getBool ("OSC_GLOW_ENABLE_ID", true)));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "OSC_GLOW_RADIUS_ID", "OscGlowRadius",
         juce::NormalisableRange<float> (0.0f, 40.0f, 0.1f),
@@ -654,10 +659,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "OSC_EXPANDED_LINE_WIDTH_ID", "OscExpandedLineWidth",
         juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
-        analyserDefaults.getFloat ("OSC_EXPANDED_LINE_WIDTH_ID", 2.5f)));
+        analyserDefaults.getFloat ("OSC_EXPANDED_LINE_WIDTH_ID", 2.6f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "OSC_EXPANDED_GLOW_ENABLE_ID", "OscExpandedGlowEnable",
-        analyserDefaults.getBool ("OSC_EXPANDED_GLOW_ENABLE_ID", false)));
+        analyserDefaults.getBool ("OSC_EXPANDED_GLOW_ENABLE_ID", true)));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "OSC_EXPANDED_GLOW_RADIUS_ID", "OscExpandedGlowRadius",
         juce::NormalisableRange<float> (0.0f, 80.0f, 0.1f),
@@ -770,7 +775,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
 
     // Autogain: compensates EQ loudness change via an internal offset (not the Out knob).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
-        "autoGain", "Auto Gain", false));
+        "autoGain", "Auto Gain", true));
 
     // Side Check (S<=M): global post-EQ BP-lattice bus — tuck Side when louder than Mid per slice.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -801,11 +806,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "PROPORTIONAL_Q_ID", "Proportional Q", false));
 
-    // Processing / phase mode (Pro-Q-style). Default = classic IIR minimum phase.
+    // Processing / phase mode (Pro-Q-style). Factory default = Linear Phase.
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         PhaseMode::paramId(), "Phase Mode",
         PhaseMode::getChoiceNames(),
-        PhaseMode::minimumPhase));
+        PhaseMode::linearPhase));
 
     // LFO + Shape + mod matrix (3 voices + custom curve → band freq/gain/Q).
     LfoMod::addParameters (params);
@@ -1396,13 +1401,14 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     // Reset smoothed values with appropriate time constants
 
-    // Highpass
-    smoothknob1.reset(sampleRate, 0.00025);
-    smoothknob2.reset(sampleRate, 0.0005);
+    // Highpass / lowpass: longer ramps reduce zipper clicks when steep
+    // cascaded stages rewrite coeffs (high-Q Butterworth rings hard on snaps).
+    smoothknob1.reset(sampleRate, 0.020);
+    smoothknob2.reset(sampleRate, 0.020);
    
     // Lowpass
-    smoothknob3.reset(sampleRate, 0.00025);
-    smoothknob4.reset(sampleRate, 0.0005);
+    smoothknob3.reset(sampleRate, 0.020);
+    smoothknob4.reset(sampleRate, 0.020);
     
     // High Shelf
     smoothknob5.reset(sampleRate, 0.00025);
@@ -2569,19 +2575,37 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 void EqProcessor::updateHighpass(float cutoff, float q, int slopeChoice)
 {
     auto stages = FilterSlope::makeHighpassCoeffs (getSampleRate(), cutoff, q, slopeChoice);
-    highpassActiveStages = juce::jlimit (1, FilterSlope::maxBiquadStages, stages.size());
+    const int newStages = juce::jlimit (1, FilterSlope::maxBiquadStages, stages.size());
+    // Slope / stage-count changes leave stale z^-1 state in newly activated or
+    // topology-swapped stages → audible clicks that grow with steepness.
+    const bool topologyChanged = (slopeChoice != lastHighpass.i)
+                                 || (newStages != highpassActiveStages);
+
+    highpassActiveStages = newStages;
 
     for (int i = 0; i < highpassActiveStages; ++i)
         *highpassStages[(size_t) i].state = *stages.getUnchecked (i);
+
+    if (topologyChanged)
+        for (auto& stage : highpassStages)
+            stage.reset();
 }
 
 void EqProcessor::updateLowpass(float cutoff, float q, int slopeChoice)
 {
     auto stages = FilterSlope::makeLowpassCoeffs (getSampleRate(), cutoff, q, slopeChoice);
-    lowpassActiveStages = juce::jlimit (1, FilterSlope::maxBiquadStages, stages.size());
+    const int newStages = juce::jlimit (1, FilterSlope::maxBiquadStages, stages.size());
+    const bool topologyChanged = (slopeChoice != lastLowpass.i)
+                                 || (newStages != lowpassActiveStages);
+
+    lowpassActiveStages = newStages;
 
     for (int i = 0; i < lowpassActiveStages; ++i)
         *lowpassStages[(size_t) i].state = *stages.getUnchecked (i);
+
+    if (topologyChanged)
+        for (auto& stage : lowpassStages)
+            stage.reset();
 }
 
 void EqProcessor::updateHighShelf(float cutoff, float q, float gain)

@@ -466,7 +466,7 @@ private:
 
     /** Linear-phase FIR EQ path (used when phaseMode == Linear Phase). */
     LinearPhaseEqEngine linearPhaseEngine;
-    int lastPhaseMode = PhaseMode::minimumPhase;
+    int lastPhaseMode = PhaseMode::linearPhase;
 
     /** Pre-EQ copy for spectral sidechain detect (threshold must not track cut/boost). */
     juce::AudioBuffer<float> spectralDetectBuffer;

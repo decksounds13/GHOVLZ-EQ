@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "../SharedResources.h"
 #include "../../EqProcessor.h"
+#include "../../FactoryDefaultsState.h"
 #include "UIElementsList.h"
 
 ThemeList::ThemeList(SharedResources& resources)
@@ -557,6 +558,8 @@ void ThemeList::createDefaultPreset() {
     const auto now = juce::Time::getCurrentTime();
     defaultTheme.setCreated (now);
     defaultTheme.setModified (now);
+    // Factory DSP/UI state from user preset "new default".
+    defaultTheme.setPluginState (FactoryDefaults::createPluginState());
 
     presets.insert (0, defaultTheme);
     presetNames.insert (0, "Default");

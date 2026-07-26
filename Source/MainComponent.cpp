@@ -297,8 +297,10 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     frequencyResponseComponent.setInterceptsMouseClicks(true, true);
 
-    addAndMakeVisible(verticalGradientMeterPostL);
-    addAndMakeVisible(verticalGradientMeterPostR);
+    addAndMakeVisible (verticalGradientMeterL);
+    addAndMakeVisible (verticalGradientMeterR);
+    addAndMakeVisible (verticalGradientMeterPostL);
+    addAndMakeVisible (verticalGradientMeterPostR);
 
     styleChromeButton (meterChannelModeButton);
     meterChannelModeButton.setClickingTogglesState (false);
@@ -973,6 +975,12 @@ void MainComponent::raiseMenuSystemAboveWordmark()
         oscDimmer.toFront (false);
         oscilloscope.toFront (false);
     }
+
+    // Side meters above graph / scope; keep with the L/R↔M/S chrome control.
+    verticalGradientMeterL.toFront (false);
+    verticalGradientMeterR.toFront (false);
+    verticalGradientMeterPostL.toFront (false);
+    verticalGradientMeterPostR.toFront (false);
 
     oscZoomInButton.toFront (false);
     oscZoomOutButton.toFront (false);

@@ -135,7 +135,9 @@ float LinearPhaseEqEngine::magnitudeAt (float frequencyHz) const
                 mag *= (float) coeffs->getMagnitudeForFrequency ((double) f, sr);
     }
 
-    return juce::jmax (1.0e-8f, mag);
+    // Allow true zero at stopband (HP DC / LP Nyquist). Do not floor here —
+    // a tiny DC target previously crushed highpass IRs during renormalization.
+    return juce::jmax (0.0f, mag);
 }
 
 void LinearPhaseEqEngine::rebuildImpulseResponse()
@@ -172,18 +174,36 @@ void LinearPhaseEqEngine::rebuildImpulseResponse()
         ir[(size_t) n] *= w;
     }
 
-    // Restore DC gain after windowing.
-    float sum = 0.0f;
-    for (float c : ir)
-        sum += c;
-
+    // Restore passband gain after windowing. DC restore is correct for LP /
+    // bass-centred responses, but fatal for highpass (target DC ≈ 0 → scale
+    // crushes the whole IR). Use Nyquist when that is the stronger passband.
+    const float nyquist = (float) (sampleRate * 0.5);
     const float targetDc = magnitudeAt (0.0f);
-    if (std::abs (sum) > 1.0e-12f)
+    const float targetNyq = magnitudeAt (nyquist);
+
+    float sumDc = 0.0f;
+    float sumNyq = 0.0f;
+    for (int n = 0; n < irLength; ++n)
     {
-        const float scale = targetDc / sum;
+        const float c = ir[(size_t) n];
+        sumDc += c;
+        sumNyq += ((n & 1) != 0 ? -c : c);
+    }
+
+    float scale = 1.0f;
+    if (targetDc >= targetNyq)
+    {
+        if (std::abs (sumDc) > 1.0e-12f)
+            scale = targetDc / sumDc;
+    }
+    else if (std::abs (sumNyq) > 1.0e-12f)
+    {
+        scale = targetNyq / sumNyq;
+    }
+
+    if (std::abs (scale - 1.0f) > 1.0e-6f && std::isfinite (scale))
         for (float& c : ir)
             c *= scale;
-    }
 
     responseDirty = false;
 }
