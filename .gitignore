@@ -1,0 +1,52 @@
+# Visual Studio / MSBuild outputs (keep .sln / .vcxproj)
+Builds/**/.vs/
+Builds/**/x64/
+Builds/**/Win32/
+Builds/**/ARM64/
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.idb
+*.iobj
+*.ipdb
+*.recipe
+*.tlog
+*.lastbuildstate
+*.log
+*.aps
+*.suo
+*.user
+*.vcxproj.user
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Built plugin bundles
+*.vst3/
+*.component/
+*.aaxplugin/
+
+# Local build logs
+Builds/**/msbuild_*.log
+msbuild_*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Local / recovery junk
+_recover_dumps/
+_recover_*.csv
+_recover_*.ps1
+
+# Cursor local (optional caches)
+.cursor/

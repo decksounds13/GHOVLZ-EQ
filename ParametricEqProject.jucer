@@ -1,0 +1,452 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="zglKbV" name="ParametricEqProject" projectType="audioplug"
+              useAppConfig="0" addUsingNamespaceToJuceHeader="0" displaySplashScreen="1"
+              jucerFormatVersion="1" pluginFormats="buildVST3" cppLanguageStandard="20"
+              headerPath="Source/Effects Source" companyName="Decksounds" companyWebsite="www.decksounds.com"
+              pluginName="Decksounds - GHOVLZ! EQ" pluginDesc="Decksounds - GHOVLZ! EQ">
+  <MAINGROUP id="TFwMAc" name="ParametricEqProject">
+    <GROUP id="{B7F6F1A6-BAE5-93A9-99C8-E0858B1F883A}" name="Source">
+      <FILE id="om7gAk" name="TextButtonLookAndFeel2.cpp" compile="1" resource="0"
+            file="Source/TextButtonLookAndFeel2.cpp"/>
+      <FILE id="dFa13N" name="TextButtonLookAndFeel2.h" compile="0" resource="0"
+            file="Source/TextButtonLookAndFeel2.h"/>
+      <FILE id="KAjCfS" name="SettingsButtonLookAndFeel .cpp" compile="1"
+            resource="0" file="Source/SettingsButtonLookAndFeel .cpp"/>
+      <FILE id="S4qc8X" name="SettingsButtonLookAndFeel.h" compile="0" resource="0"
+            file="Source/SettingsButtonLookAndFeel.h"/>
+      <GROUP id="{B6401587-609B-BB21-75D1-F67763D4406C}" name="Controls">
+        <GROUP id="{567BE080-79FB-B28D-CF81-1C06892BA3BB}" name="Categories">
+          <FILE id="ZPYfJz" name="AvgControl.cpp" compile="1" resource="0" file="Source/Controls/Categories/AvgControl.cpp"/>
+          <FILE id="ElWlRR" name="AvgControl.h" compile="0" resource="0" file="Source/Controls/Categories/AvgControl.h"/>
+          <FILE id="OdKubA" name="BlockControl.cpp" compile="1" resource="0"
+                file="Source/Controls/Categories/BlockControl.cpp"/>
+          <FILE id="llAI6t" name="BlockControl.h" compile="0" resource="0" file="Source/Controls/Categories/BlockControl.h"/>
+          <FILE id="REMsxm" name="ChannelControls.cpp" compile="1" resource="0"
+                file="Source/Controls/Categories/ChannelControls.cpp"/>
+          <FILE id="GmtLo9" name="ChannelControls.h" compile="0" resource="0"
+                file="Source/Controls/Categories/ChannelControls.h"/>
+          <FILE id="vJyoWs" name="GraphControls.cpp" compile="1" resource="0"
+                file="Source/Controls/Categories/GraphControls.cpp"/>
+          <FILE id="Ok7B9z" name="GraphControls.h" compile="0" resource="0" file="Source/Controls/Categories/GraphControls.h"/>
+          <FILE id="AGS0Fp" name="RefreshControl.cpp" compile="1" resource="0"
+                file="Source/Controls/Categories/RefreshControl.cpp"/>
+          <FILE id="B0hzdr" name="RefreshControl.h" compile="0" resource="0"
+                file="Source/Controls/Categories/RefreshControl.h"/>
+          <FILE id="i6F9bs" name="ScaleXControls.cpp" compile="1" resource="0"
+                file="Source/Controls/Categories/ScaleXControls.cpp"/>
+          <FILE id="rw0laI" name="ScaleXControls.h" compile="0" resource="0"
+                file="Source/Controls/Categories/ScaleXControls.h"/>
+          <FILE id="C2L4li" name="ScaleYControls.cpp" compile="1" resource="0"
+                file="Source/Controls/Categories/ScaleYControls.cpp"/>
+          <FILE id="g2Kbp0" name="ScaleYControls.h" compile="0" resource="0"
+                file="Source/Controls/Categories/ScaleYControls.h"/>
+        </GROUP>
+        <FILE id="i1fbMX" name="Controls.cpp" compile="1" resource="0" file="Source/Controls/Controls.cpp"/>
+        <FILE id="YyRuHJ" name="Controls.h" compile="0" resource="0" file="Source/Controls/Controls.h"/>
+        <FILE id="NuUsI0" name="Separator.cpp" compile="1" resource="0" file="Source/Controls/Separator.cpp"/>
+        <FILE id="Vm4sxy" name="Separator.h" compile="0" resource="0" file="Source/Controls/Separator.h"/>
+      </GROUP>
+      <GROUP id="{142E6F1A-0F80-BAB0-AEB9-FB399B318BD2}" name="Effects">
+        <GROUP id="{350D051B-2A9B-B53E-54EF-C54A7F5EC4BA}" name="MelatoninBlur">
+          <GROUP id="{AC99B67E-BCB6-D0E2-0ED3-494A48EE0AD0}" name="melatonin">
+            <GROUP id="{3788287A-76C7-3151-2BDA-6526773FD2A4}" name="implementations">
+              <FILE id="FHR0NA" name="dequeue.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/dequeue.h"/>
+              <FILE id="tHdJ5w" name="float_vector_stack_blur.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/implementations/float_vector_stack_blur.h"/>
+              <FILE id="eAbFV1" name="gin.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/gin.h"/>
+              <FILE id="T0Z6rj" name="ipp.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/ipp.h"/>
+              <FILE id="lRrcGn" name="ipp_vector.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/ipp_vector.h"/>
+              <FILE id="tRjy1t" name="naive.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/naive.h"/>
+              <FILE id="rj6xm4" name="naive_class.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/naive_class.h"/>
+              <FILE id="bYHbhy" name="naive_with_martin_optimization.h" compile="0"
+                    resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/naive_with_martin_optimization.h"/>
+              <FILE id="TysRiK" name="templated_function.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/implementations/templated_function.h"/>
+              <FILE id="wW3ZQ5" name="templated_function_float.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/implementations/templated_function_float.h"/>
+              <FILE id="pqOjcI" name="vector.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/vector.h"/>
+              <FILE id="R9Lajj" name="vector_class.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/vector_class.h"/>
+              <FILE id="mR6o7y" name="vector_convolution.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/implementations/vector_convolution.h"/>
+              <FILE id="hwNdee" name="vector_optimized.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/implementations/vector_optimized.h"/>
+              <FILE id="GfMyUq" name="vImage.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/vImage.h"/>
+              <FILE id="kfyKUF" name="vImage_macOS14.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/implementations/vImage_macOS14.h"/>
+            </GROUP>
+            <GROUP id="{332B6188-D889-14D3-683F-2901D378A14D}" name="support">
+              <FILE id="IqUIMl" name="cached_shadow.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/support/cached_shadow.h"/>
+              <FILE id="TLuxgX" name="helpers.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/support/helpers.h"/>
+              <FILE id="yMTqNk" name="implementations.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/support/implementations.h"/>
+            </GROUP>
+            <FILE id="MuwpLE" name="cached_blur.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/cached_blur.h"/>
+            <FILE id="ypsOVS" name="shadows.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/shadows.h"/>
+          </GROUP>
+          <FILE id="xx9Eel" name="melatonin_blur.cpp" compile="1" resource="0"
+                file="Source/Effects/MelatoninBlur/melatonin_blur.cpp"/>
+          <FILE id="wIWfcn" name="melatonin_blur.h" compile="0" resource="0"
+                file="Source/Effects/MelatoninBlur/melatonin_blur.h"/>
+        </GROUP>
+        <GROUP id="{2A81825F-D2EC-45FD-7CE0-2096C4EEBA90}" name="shadows-main">
+          <GROUP id="{D94682C6-2C33-25F8-D373-8CE4188B6CF6}" name="source">
+            <FILE id="F7LOHs" name="StackShadow.cpp" compile="1" resource="0" file="Source/Effects/shadows-main/source/StackShadow.cpp"/>
+            <FILE id="ABB2K3" name="StackShadow.h" compile="0" resource="0" file="Source/Effects/shadows-main/source/StackShadow.h"/>
+          </GROUP>
+          <FILE id="y9SDmY" name="shadows.cpp" compile="1" resource="0" file="Source/Effects/shadows-main/shadows.cpp"/>
+          <FILE id="HKzYaf" name="shadows.h" compile="0" resource="0" file="Source/Effects/shadows-main/shadows.h"/>
+        </GROUP>
+        <FILE id="dbVUjn" name="BlurEffect.h" compile="0" resource="0" file="Source/Effects/BlurEffect.h"/>
+        <FILE id="EahhOW" name="RenderDropShadow.h" compile="0" resource="0"
+              file="Source/Effects/RenderDropShadow.h"/>
+      </GROUP>
+      <GROUP id="{5F13B70A-34D3-8576-9B32-1B225E40DA75}" name="Resources">
+        <FILE id="n9KeeU" name="DarkKnob4_Stitched.png" compile="0" resource="1"
+              file="Resources/DarkKnob4_Stitched.png"/>
+        <FILE id="lUVN2S" name="pirulen.ttf" compile="0" resource="1" file="Resources/pirulen.ttf"/>
+      </GROUP>
+      <GROUP id="{C6EBE54F-59E4-D84B-6307-19E5994EDCAC}" name="Visualizer">
+        <GROUP id="{84656482-7330-8DA8-1650-4C41B9100DAE}" name="Layers">
+          <GROUP id="{1F490358-B0A5-26C6-2655-53208898FE61}" name="GraphElements">
+            <FILE id="Lwo4HB" name="GraphBins.cpp" compile="1" resource="0" file="Source/Visualizer/Layers/GraphElements/GraphBins.cpp"/>
+            <FILE id="xkGU1z" name="GraphBins.h" compile="0" resource="0" file="Source/Visualizer/Layers/GraphElements/GraphBins.h"/>
+            <FILE id="SpcBin" name="SpectrumBinOverlay.cpp" compile="1" resource="0"
+                  file="Source/Visualizer/Layers/GraphElements/SpectrumBinOverlay.cpp"/>
+            <FILE id="SpcBiH" name="SpectrumBinOverlay.h" compile="0" resource="0"
+                  file="Source/Visualizer/Layers/GraphElements/SpectrumBinOverlay.h"/>
+            <FILE id="OT85Uh" name="GraphInfoLabel.cpp" compile="1" resource="0"
+                  file="Source/Visualizer/Layers/GraphElements/GraphInfoLabel.cpp"/>
+            <FILE id="gHSREr" name="GraphInfoLabel.h" compile="0" resource="0"
+                  file="Source/Visualizer/Layers/GraphElements/GraphInfoLabel.h"/>
+            <FILE id="iiwZUs" name="GraphLine.cpp" compile="1" resource="0" file="Source/Visualizer/Layers/GraphElements/GraphLine.cpp"/>
+            <FILE id="wObdOA" name="GraphLine.h" compile="0" resource="0" file="Source/Visualizer/Layers/GraphElements/GraphLine.h"/>
+            <FILE id="iKVLvq" name="GraphMaximumsLine.cpp" compile="1" resource="0"
+                  file="Source/Visualizer/Layers/GraphElements/GraphMaximumsLine.cpp"/>
+            <FILE id="tyVZHI" name="GraphMaximumsLine.h" compile="0" resource="0"
+                  file="Source/Visualizer/Layers/GraphElements/GraphMaximumsLine.h"/>
+          </GROUP>
+          <GROUP id="{F050ECE9-7373-8A63-C65B-3DF342D2C1E0}" name="GridElements">
+            <FILE id="Jcurme" name="LinearScale.cpp" compile="1" resource="0" file="Source/Visualizer/Layers/GridElements/LinearScale.cpp"/>
+            <FILE id="cTrtB4" name="LinearScale.h" compile="0" resource="0" file="Source/Visualizer/Layers/GridElements/LinearScale.h"/>
+            <FILE id="ROmsEu" name="LogarithmicScale.cpp" compile="1" resource="0"
+                  file="Source/Visualizer/Layers/GridElements/LogarithmicScale.cpp"/>
+            <FILE id="kd7lr1" name="LogarithmicScale.h" compile="0" resource="0"
+                  file="Source/Visualizer/Layers/GridElements/LogarithmicScale.h"/>
+            <FILE id="le9KmR" name="NoteScale.cpp" compile="1" resource="0" file="Source/Visualizer/Layers/GridElements/NoteScale.cpp"/>
+            <FILE id="wX5D0M" name="NoteScale.h" compile="0" resource="0" file="Source/Visualizer/Layers/GridElements/NoteScale.h"/>
+          </GROUP>
+          <FILE id="eqz8o0" name="Graph.cpp" compile="1" resource="0" file="Source/Visualizer/Layers/Graph.cpp"/>
+          <FILE id="HLuFIr" name="Graph.h" compile="0" resource="0" file="Source/Visualizer/Layers/Graph.h"/>
+          <FILE id="iSgrD1" name="Grid.cpp" compile="1" resource="0" file="Source/Visualizer/Layers/Grid.cpp"/>
+          <FILE id="zJqg4s" name="Grid.h" compile="0" resource="0" file="Source/Visualizer/Layers/Grid.h"/>
+        </GROUP>
+        <FILE id="DbQy2j" name="Analyser.cpp" compile="1" resource="0" file="Source/Visualizer/Analyser.cpp"/>
+        <FILE id="lXE3tJ" name="Analyser.h" compile="0" resource="0" file="Source/Visualizer/Analyser.h"/>
+        <FILE id="kHuSCG" name="Visualizer.cpp" compile="1" resource="0" file="Source/Visualizer/Visualizer.cpp"/>
+        <FILE id="nOiQHC" name="Visualizer.h" compile="0" resource="0" file="Source/Visualizer/Visualizer.h"/>
+      </GROUP>
+      <FILE id="usPQKE" name="ComboBoxLookAndFeel.cpp" compile="1" resource="0"
+            file="Source/ComboBoxLookAndFeel.cpp"/>
+      <FILE id="BFDVNa" name="ComboBoxLookAndFeel.h" compile="0" resource="0"
+            file="Source/ComboBoxLookAndFeel.h"/>
+      <FILE id="cIqw3s" name="EqEditor.cpp" compile="1" resource="0" file="Source/EqEditor.cpp"/>
+      <FILE id="tpMr0Z" name="EqEditor.h" compile="0" resource="0" file="Source/EqEditor.h"/>
+      <FILE id="mOdSc1" name="ModSectionComponent.cpp" compile="1" resource="0"
+            file="Source/ModSectionComponent.cpp"/>
+      <FILE id="mOdSc2" name="ModSectionComponent.h" compile="0" resource="0"
+            file="Source/ModSectionComponent.h"/>
+      <FILE id="lPhEq1" name="LinearPhaseEqEngine.cpp" compile="1" resource="0"
+            file="Source/LinearPhaseEqEngine.cpp"/>
+      <FILE id="lPhEq2" name="LinearPhaseEqEngine.h" compile="0" resource="0"
+            file="Source/LinearPhaseEqEngine.h"/>
+      <FILE id="lFoMd1" name="LfoMod.h" compile="0" resource="0" file="Source/LfoMod.h"/>
+      <FILE id="shMod1" name="ShapeMod.h" compile="0" resource="0" file="Source/ShapeMod.h"/>
+      <FILE id="bNdSc1" name="BandSidechain.h" compile="0" resource="0" file="Source/BandSidechain.h"/>
+      <FILE id="YFOxDL" name="EqProcessor.cpp" compile="1" resource="0" file="Source/EqProcessor.cpp"/>
+      <FILE id="ZjHbAc" name="EqProcessor.h" compile="0" resource="0" file="Source/EqProcessor.h"/>
+      <FILE id="fh4Ljp" name="FrequencyResponseComponent.cpp" compile="1"
+            resource="0" file="Source/FrequencyResponseComponent.cpp"/>
+      <FILE id="uYpSOL" name="FrequencyResponseComponent.h" compile="0" resource="0"
+            file="Source/FrequencyResponseComponent.h"/>
+      <FILE id="lTsmYx" name="MainComponent.cpp" compile="1" resource="0"
+            file="Source/MainComponent.cpp"/>
+      <FILE id="wrCpYs" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
+      <FILE id="zaTGFn" name="OnOffButton1.cpp" compile="1" resource="0"
+            file="Source/OnOffButton1.cpp"/>
+      <FILE id="DAN5Qz" name="OnOffButton1.h" compile="0" resource="0" file="Source/OnOffButton1.h"/>
+      <FILE id="VsOoGx" name="OptionBoxMenu.cpp" compile="1" resource="0"
+            file="Source/OptionBoxMenu.cpp"/>
+      <FILE id="RQoGLs" name="OptionBoxMenu.h" compile="0" resource="0" file="Source/OptionBoxMenu.h"/>
+      <FILE id="DynEqH" name="DynamicEq.h" compile="0" resource="0" file="Source/DynamicEq.h"/>
+      <GROUP id="SpecGrp" name="Spectral">
+        <FILE id="SpBinH" name="SpectralBinning.h" compile="0" resource="0"
+              file="Source/Spectral/SpectralBinning.h"/>
+        <FILE id="SpSetH" name="SpectralBandSettings.h" compile="0" resource="0"
+              file="Source/Spectral/SpectralBandSettings.h"/>
+        <FILE id="SpDynH" name="SpectralDynamicsProcessor.h" compile="0" resource="0"
+              file="Source/Spectral/SpectralDynamicsProcessor.h"/>
+        <FILE id="SpDynC" name="SpectralDynamicsProcessor.cpp" compile="1"
+              resource="0" file="Source/Spectral/SpectralDynamicsProcessor.cpp"/>
+      </GROUP>
+      <FILE id="QUHsxC" name="RotaryImageKnob1.cpp" compile="1" resource="0"
+            file="Source/RotaryImageKnob1.cpp"/>
+      <FILE id="yqYtgu" name="RotaryImageKnob1.h" compile="0" resource="0"
+            file="Source/RotaryImageKnob1.h"/>
+      <FILE id="YTVgBx" name="RotaryImageKnob2.cpp" compile="1" resource="0"
+            file="Source/RotaryImageKnob2.cpp"/>
+      <FILE id="AWXnEW" name="RotaryImageKnob2.h" compile="0" resource="0"
+            file="Source/RotaryImageKnob2.h"/>
+      <FILE id="rPVStH" name="RotaryImageKnob3.cpp" compile="1" resource="0"
+            file="Source/RotaryImageKnob3.cpp"/>
+      <FILE id="jfKRHo" name="RotaryImageKnob3.h" compile="0" resource="0"
+            file="Source/RotaryImageKnob3.h"/>
+      <FILE id="GK2N7w" name="RotaryImageKnob4.cpp" compile="1" resource="0"
+            file="Source/RotaryImageKnob4.cpp"/>
+      <FILE id="GXXcdB" name="RotaryImageKnob4.h" compile="0" resource="0"
+            file="Source/RotaryImageKnob4.h"/>
+      <FILE id="vj6D5f" name="RotaryImageKnob5.cpp" compile="1" resource="0"
+            file="Source/RotaryImageKnob5.cpp"/>
+      <FILE id="VmeEzH" name="RotaryImageKnob5.h" compile="0" resource="0"
+            file="Source/RotaryImageKnob5.h"/>
+      <FILE id="cCUJJB" name="RotaryImageKnob6.cpp" compile="1" resource="0"
+            file="Source/RotaryImageKnob6.cpp"/>
+      <FILE id="rvMAFW" name="RotaryImageKnob6.h" compile="0" resource="0"
+            file="Source/RotaryImageKnob6.h"/>
+      <FILE id="SOH0wD" name="RotaryImageKnobForOptionBox.cpp" compile="1"
+            resource="0" file="Source/RotaryImageKnobForOptionBox.cpp"/>
+      <FILE id="MpsVbN" name="RotaryImageKnobForOptionBox.h" compile="0"
+            resource="0" file="Source/RotaryImageKnobForOptionBox.h"/>
+      <FILE id="W3VlW2" name="RotaryImageKnobLookAndFeel1.cpp" compile="1"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel1.cpp"/>
+      <FILE id="De2u0Z" name="RotaryImageKnobLookAndFeel1.h" compile="0"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel1.h"/>
+      <FILE id="Dc3rAT" name="RotaryImageKnobLookAndFeel2.cpp" compile="1"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel2.cpp"/>
+      <FILE id="AyZTty" name="RotaryImageKnobLookAndFeel2.h" compile="0"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel2.h"/>
+      <FILE id="BzISBq" name="RotaryImageKnobLookAndFeel3.cpp" compile="1"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel3.cpp"/>
+      <FILE id="aTDgx0" name="RotaryImageKnobLookAndFeel3.h" compile="0"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel3.h"/>
+      <FILE id="ZoqIi9" name="RotaryImageKnobLookAndFeel4.cpp" compile="1"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel4.cpp"/>
+      <FILE id="Yf1DC6" name="RotaryImageKnobLookAndFeel4.h" compile="0"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel4.h"/>
+      <FILE id="VCTk5G" name="RotaryImageKnobLookAndFeel5.cpp" compile="1"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel5.cpp"/>
+      <FILE id="ZXbjdl" name="RotaryImageKnobLookAndFeel5.h" compile="0"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel5.h"/>
+      <FILE id="ejeSgt" name="RotaryImageKnobLookAndFeel6.cpp" compile="1"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel6.cpp"/>
+      <FILE id="ose6TU" name="RotaryImageKnobLookAndFeel6.h" compile="0"
+            resource="0" file="Source/RotaryImageKnobLookAndFeel6.h"/>
+      <FILE id="VFqFzK" name="Spectrogram.cpp" compile="1" resource="0" file="Source/Spectrogram.cpp"/>
+      <FILE id="tN8hJP" name="Spectrogram.h" compile="0" resource="0" file="Source/Spectrogram.h"/>
+      <FILE id="GHlFZm" name="TextButtonLookAndFeel.cpp" compile="1" resource="0"
+            file="Source/TextButtonLookAndFeel.cpp"/>
+      <FILE id="I8Wjbj" name="TextButtonLookAndFeel.h" compile="0" resource="0"
+            file="Source/TextButtonLookAndFeel.h"/>
+      <FILE id="FwdrIm" name="VerticalGradientMeter.cpp" compile="1" resource="0"
+            file="Source/VerticalGradientMeter.cpp"/>
+      <FILE id="XILQoR" name="VerticalGradientMeter.h" compile="0" resource="0"
+            file="Source/VerticalGradientMeter.h"/>
+      <GROUP id="{02D75B0D-E02C-84DE-812E-2F54CCA80725}" name="Menu">
+        <GROUP id="{848586D3-B9AD-A624-FD35-80C4D22D0BF7}" name="Gui"/>
+      </GROUP>
+      <GROUP id="{87EF7565-18BB-4BDA-DD64-92E0CB9D2BA5}" name="Controls">
+        <GROUP id="{1654E58C-B640-FC85-1B3C-E2B4C74CF3E8}" name="Categories"/>
+      </GROUP>
+      <GROUP id="{12F1AE37-0044-8B9A-882E-3F69B1D1700A}" name="Effects">
+        <GROUP id="{59DF34DF-CA82-D60B-CAC7-AB41B8B00270}" name="shadows-main">
+          <GROUP id="{A484E163-82F8-9A72-E5B1-5E1FBC45BAC5}" name="source"/>
+        </GROUP>
+      </GROUP>
+      <GROUP id="{C01CA545-0EA7-D0E8-EB48-921F87CF2324}" name="Menu">
+        <GROUP id="{DDC50050-1278-8D6A-27FB-66B3A0D8D4A0}" name="ScreenCaptureLite">
+          <GROUP id="{8D72A22D-D8DE-7F14-F597-DAE7DAD10A00}" name="internal">
+            <FILE id="GvObIZ" name="SCCommon.h" compile="0" resource="0" file="Source/Menu/ScreenCaptureLite/internal/SCCommon.h"/>
+            <FILE id="OGQ1Pd" name="ThreadManager.h" compile="0" resource="0" file="Source/Menu/ScreenCaptureLite/internal/ThreadManager.h"/>
+          </GROUP>
+          <GROUP id="{796F0B14-865F-4F14-27EC-60BAEE88216E}" name="ios">
+            <FILE id="YxkCy1" name="CGFrameProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/ios/CGFrameProcessor.h"/>
+            <FILE id="KfwBAJ" name="NSFrameProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/ios/NSFrameProcessor.h"/>
+            <FILE id="RFshv4" name="NSFrameProcessorm.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/ios/NSFrameProcessorm.h"/>
+            <FILE id="ofSqJA" name="NSMouseCapture.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/ios/NSMouseCapture.h"/>
+            <FILE id="wwbyoz" name="NSMouseProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/ios/NSMouseProcessor.h"/>
+          </GROUP>
+          <GROUP id="{5C815009-EB82-E48C-FFFE-FAA538D2F2B1}" name="linux">
+            <FILE id="lzdO9r" name="X11FrameProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/linux/X11FrameProcessor.h"/>
+            <FILE id="CoGq29" name="X11MouseProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/linux/X11MouseProcessor.h"/>
+          </GROUP>
+          <GROUP id="{D275F803-500C-6264-4524-1E363668311C}" name="windows">
+            <FILE id="Nsux1D" name="DXFrameProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/windows/DXFrameProcessor.h"/>
+            <FILE id="dm3nix" name="GDIFrameProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/windows/GDIFrameProcessor.h"/>
+            <FILE id="cOLqS6" name="GDIHelpers.h" compile="0" resource="0" file="Source/Menu/ScreenCaptureLite/windows/GDIHelpers.h"/>
+            <FILE id="wnixN9" name="GDIMouseProcessor.h" compile="0" resource="0"
+                  file="Source/Menu/ScreenCaptureLite/windows/GDIMouseProcessor.h"/>
+          </GROUP>
+          <FILE id="Mjbjup" name="ScreenCapture.h" compile="0" resource="0" file="Source/Menu/ScreenCaptureLite/ScreenCapture.h"/>
+          <FILE id="tAX8J8" name="ScreenCapture_C_API.h" compile="0" resource="0"
+                file="Source/Menu/ScreenCaptureLite/ScreenCapture_C_API.h"/>
+        </GROUP>
+        <FILE id="EK5GPq" name="SourceCode.cpp" compile="1" resource="0" file="Source/Menu/ScreenCaptureLite/SourceCode.cpp"/>
+        <FILE id="MOxOPH" name="SourceCode.h" compile="0" resource="0" file="Source/Menu/ScreenCaptureLite/SourceCode.h"/>
+        <FILE id="GvqcCQ" name="Theme.cpp" compile="1" resource="0" file="Source/Menu/Theme.cpp"/>
+        <FILE id="EKkBoE" name="Theme.h" compile="0" resource="0" file="Source/Menu/Theme.h"/>
+        <FILE id="AnDefC" name="AnalyserDefaults.cpp" compile="1" resource="0"
+              file="Source/Menu/AnalyserDefaults.cpp"/>
+        <FILE id="AnDefH" name="AnalyserDefaults.h" compile="0" resource="0"
+              file="Source/Menu/AnalyserDefaults.h"/>
+        <FILE id="QP1GJp" name="Menu.cpp" compile="1" resource="0" file="Source/Menu/Menu.cpp"/>
+        <FILE id="T5MfAt" name="Menu.h" compile="0" resource="0" file="Source/Menu/Menu.h"/>
+        <FILE id="ELEC7g" name="SharedResources.cpp" compile="1" resource="0"
+              file="Source/Menu/SharedResources.cpp"/>
+        <FILE id="cLCiKA" name="SharedResources.h" compile="0" resource="0"
+              file="Source/Menu/SharedResources.h"/>
+        <GROUP id="{F7ACC9E5-61F2-F5EE-0D03-BAD6763ADEBB}" name="Gui">
+          <FILE id="GaoKLh" name="AppearanceComponent.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/AppearanceComponent.cpp"/>
+          <FILE id="VjAvKm" name="AppearanceComponent.h" compile="0" resource="0"
+                file="Source/Menu/Gui/AppearanceComponent.h"/>
+          <FILE id="SpcCmp" name="SpectrumComponent.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/SpectrumComponent.cpp"/>
+          <FILE id="SpcCmH" name="SpectrumComponent.h" compile="0" resource="0"
+                file="Source/Menu/Gui/SpectrumComponent.h"/>
+          <FILE id="FftCmp" name="FftComponent.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/FftComponent.cpp"/>
+          <FILE id="FftCmH" name="FftComponent.h" compile="0" resource="0" file="Source/Menu/Gui/FftComponent.h"/>
+          <FILE id="qk5kRr" name="ApplyButton.cpp" compile="1" resource="0" file="Source/Menu/Gui/ApplyButton.cpp"/>
+          <FILE id="BUPJpv" name="ApplyButton.h" compile="0" resource="0" file="Source/Menu/Gui/ApplyButton.h"/>
+          <FILE id="QYwoOb" name="ColorPicker.cpp" compile="1" resource="0" file="Source/Menu/Gui/ColorPicker.cpp"/>
+          <FILE id="QBSd2U" name="ColorPicker.h" compile="0" resource="0" file="Source/Menu/Gui/ColorPicker.h"/>
+          <FILE id="VJ47RO" name="ColorValuesInput.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/ColorValuesInput.cpp"/>
+          <FILE id="DEl42g" name="ColorValuesInput.h" compile="0" resource="0"
+                file="Source/Menu/Gui/ColorValuesInput.h"/>
+          <FILE id="V8OSQv" name="CustomHeader.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/CustomHeader.cpp"/>
+          <FILE id="AKnaOw" name="CustomHeader.h" compile="0" resource="0" file="Source/Menu/Gui/CustomHeader.h"/>
+          <FILE id="JTNMVS" name="CustomHeader2.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/CustomHeader2.cpp"/>
+          <FILE id="zh9aiQ" name="CustomHeader2.h" compile="0" resource="0" file="Source/Menu/Gui/CustomHeader2.h"/>
+          <FILE id="lxxGnN" name="CustomScrollBar.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/CustomScrollBar.cpp"/>
+          <FILE id="rRFuof" name="CustomScrollBar.h" compile="0" resource="0"
+                file="Source/Menu/Gui/CustomScrollBar.h"/>
+          <FILE id="cNFohu" name="CustomSliderLookAndFeel.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/CustomSliderLookAndFeel.cpp"/>
+          <FILE id="Rp47pO" name="CustomSliderLookAndFeel.h" compile="0" resource="0"
+                file="Source/Menu/Gui/CustomSliderLookAndFeel.h"/>
+          <FILE id="kMhNsJ" name="CustomTabBarLookAndFeel.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/CustomTabBarLookAndFeel.cpp"/>
+          <FILE id="aJxto3" name="CustomTabBarLookAndFeel.h" compile="0" resource="0"
+                file="Source/Menu/Gui/CustomTabBarLookAndFeel.h"/>
+          <FILE id="yHQBVU" name="CustomTextButton1.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/CustomTextButton1.cpp"/>
+          <FILE id="N2FPDi" name="CustomTextButton1.h" compile="0" resource="0"
+                file="Source/Menu/Gui/CustomTextButton1.h"/>
+          <FILE id="q25cn6" name="CustomTwoValueSliderLookAndFeel.cpp" compile="1"
+                resource="0" file="Source/Menu/Gui/CustomTwoValueSliderLookAndFeel.cpp"/>
+          <FILE id="cWtBdH" name="CustomTwoValueSliderLookAndFeel.h" compile="0"
+                resource="0" file="Source/Menu/Gui/CustomTwoValueSliderLookAndFeel.h"/>
+          <FILE id="p5Oa4P" name="HueSelector.cpp" compile="1" resource="0" file="Source/Menu/Gui/HueSelector.cpp"/>
+          <FILE id="GRVbwP" name="HueSelector.h" compile="0" resource="0" file="Source/Menu/Gui/HueSelector.h"/>
+          <FILE id="cf57MB" name="HueSelectorOverlayComponent.cpp" compile="1"
+                resource="0" file="Source/Menu/Gui/HueSelectorOverlayComponent.cpp"/>
+          <FILE id="IslRuV" name="HueSelectorOverlayComponent.h" compile="0"
+                resource="0" file="Source/Menu/Gui/HueSelectorOverlayComponent.h"/>
+          <FILE id="UOqU8R" name="QuadPicker.cpp" compile="1" resource="0" file="Source/Menu/Gui/QuadPicker.cpp"/>
+          <FILE id="wPB0ii" name="QuadPicker.h" compile="0" resource="0" file="Source/Menu/Gui/QuadPicker.h"/>
+          <FILE id="wos1lo" name="QuadPickerOverlayComponent.cpp" compile="1"
+                resource="0" file="Source/Menu/Gui/QuadPickerOverlayComponent.cpp"/>
+          <FILE id="KllSPH" name="QuadPickerOverlayComponent.h" compile="0" resource="0"
+                file="Source/Menu/Gui/QuadPickerOverlayComponent.h"/>
+          <FILE id="SVBr8E" name="ThemeList.cpp" compile="1" resource="0" file="Source/Menu/Gui/ThemeList.cpp"/>
+          <FILE id="PhGypz" name="ThemeList.h" compile="0" resource="0" file="Source/Menu/Gui/ThemeList.h"/>
+          <FILE id="fMeovy" name="UIElementsList.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/UIElementsList.cpp"/>
+          <FILE id="eC8I4d" name="Eyedropper.cpp" compile="1" resource="0" file="Source/Menu/Gui/Eyedropper.cpp"/>
+          <FILE id="PFfvpd" name="Eyedropper.h" compile="0" resource="0" file="Source/Menu/Gui/Eyedropper.h"/>
+          <FILE id="lvMtr1" name="LevelMetersComponent.cpp" compile="1" resource="0"
+                file="Source/Menu/Gui/LevelMetersComponent.cpp"/>
+          <FILE id="lvMtr2" name="LevelMetersComponent.h" compile="0" resource="0"
+                file="Source/Menu/Gui/LevelMetersComponent.h"/>
+          <FILE id="FitC1L" name="UIElementsList.h" compile="0" resource="0"
+                file="Source/Menu/Gui/UIElementsList.h"/>
+        </GROUP>
+      </GROUP>
+      <GROUP id="{C5FBF624-F620-1683-C27F-F461EEE56CB0}" name="Visualizer">
+        <GROUP id="{D781D1A6-6B3F-050C-6B75-1FB9849F2519}" name="Layers">
+          <GROUP id="{DAEAC6C0-8BE2-95A0-3C9F-AE917E332899}" name="GraphElements"/>
+          <GROUP id="{E08A5290-0FFD-1AF2-BBE5-D4B6E1F41D41}" name="GridElements"/>
+        </GROUP>
+      </GROUP>
+    </GROUP>
+    <FILE id="GeVqv4" name="ArrowSliderLookAndFeel.h" compile="0" resource="0"
+          file="Source/ArrowSliderLookAndFeel.h"/>
+    <FILE id="Y4bWu4" name="BrandWordmark.h" compile="0" resource="0" file="Source/BrandWordmark.h"/>
+    <FILE id="oeylIR" name="CustomPopup.cpp" compile="1" resource="0" file="Source/CustomPopup.cpp"/>
+    <FILE id="hX0vTQ" name="CustomPopup.h" compile="0" resource="0" file="Source/CustomPopup.h"/>
+    <FILE id="gm14xh" name="TwoThumbSliderLookAndFeel.h" compile="0" resource="0"
+          file="Source/TwoThumbSliderLookAndFeel.h"/>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="gin" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="gin_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="1"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+    <MODULE id="juce_opengl" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+  </MODULES>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_VST3_CAN_REPLACE_VST2="0"/>
+  <EXPORTFORMATS>
+    <VS2022 targetFolder="Builds/VisualStudio2022">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="ParametricEqProject"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="ParametricEqProject"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_opengl" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="../../../../../JUCE/modules"/>
+        <MODULEPATH id="gin_graphics" path="../../../../../modules"/>
+        <MODULEPATH id="gin" path="../../../../../modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../../../../JUCE/modules"/>
+      </MODULEPATHS>
+    </VS2022>
+  </EXPORTFORMATS>
+</JUCERPROJECT>

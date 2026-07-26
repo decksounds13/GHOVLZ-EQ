@@ -1,0 +1,449 @@
+#pragma once
+
+#include "EqProcessor.h"
+#include "OptionBoxMenu.h"
+#include <JuceHeader.h>
+#include "BinaryData.h"
+#include "MelatoninBlur/melatonin/shadows.h"
+
+class EqProcessor; // Forward declaration
+class EqEditor;    // Forward declaration
+
+class CustomTimer; // Forward declaration
+
+/** Compact-UI output gain: click-drag vertically. Shift/Alt = fine (JUCE Slider convention). */
+class OutputGainScrubber : public juce::Component,
+                           private juce::AudioProcessorValueTreeState::Listener
+{
+public:
+    OutputGainScrubber (juce::AudioProcessorValueTreeState& state, juce::UndoManager* undoMgr);
+    ~OutputGainScrubber() override;
+
+    void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    void mouseEnter (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+
+private:
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
+    void refreshText();
+    void beginGesture();
+    void endGesture();
+
+    juce::AudioProcessorValueTreeState& treeState;
+    juce::UndoManager* undoManager = nullptr;
+    juce::String displayText { "0.0 dB" };
+    float dragStartDb = 0.0f;
+    bool gestureActive = false;
+    bool hovered = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OutputGainScrubber)
+};
+
+class FrequencyResponseComponent : public juce::Component,
+    public juce::AudioProcessorValueTreeState::Listener,
+    public juce::ComponentListener,
+    private juce::Timer
+{
+
+public:
+    FrequencyResponseComponent(EqProcessor& processor);
+    ~FrequencyResponseComponent();
+
+    std::function<void()> handle1DragStart;
+    std::function<void()> handle1DragEnd;
+
+    void resized() override;
+    void mouseDown(const juce::MouseEvent& event) override;
+    void mouseDrag(const juce::MouseEvent& event) override;
+    void mouseUp(const juce::MouseEvent& event) override;
+    void mouseDoubleClick(const juce::MouseEvent& event) override;
+    void mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
+    void mouseMove(const juce::MouseEvent& event) override;
+
+    void showOptionBoxForHandle (int bandIndex, float handlePosX, float handlePosY);
+    void showHandleModMenu (int bandIndex);
+    void resetBandToDefaultsAndDeactivate (int bandIndex);
+    void activateOrSelectBandAtFrequency (float frequencyHz);
+    int bandIndexForFrequencyZone (float frequencyHz) const;
+    float xToFrequency (float x) const;
+    void setOptionBoxInteractionFaded (bool shouldFade);
+
+    OptionBoxMenu* getOptionBoxMenu() noexcept { return optionBoxMenu.get(); }
+    void setOptionBoxVisible (bool shouldBeVisible);
+
+    /** Called with band index 0-7 while handle/OptionBox knobs are manipulated; -1 to clear. */
+    std::function<void(int)> onBandManipulationHighlight;
+    /** Fired when the OptionBox is shown/hidden so the host can fix overlay z-order. */
+    std::function<void()> onOptionBoxVisibilityChanged;
+
+    /** Sync ▲/▼ minimize control with editor compact state (lives on the graph, not faceplate). */
+    void syncUiModeButton (bool isCompact);
+    void syncModButton (bool isOpen);
+
+    void updateBand1();
+    void updateBand2();
+    void updateBand3();
+    void updateBand4();
+    void updateLowpass();
+    void updateHighpass();
+    void updateLowShelf();
+    void updateHighShelf();
+
+    void parameterChanged(const juce::String& parameterID, float newValue) override;
+
+    void setCoefficients(const juce::dsp::IIR::Coefficients<float>& newCoefficients, double newSampleRate)
+    {
+        coefficients = newCoefficients;
+        sampleRate = newSampleRate;
+        repaint();
+    }
+
+    void paint(juce::Graphics& g) override;
+
+    void setEditor(EqEditor* newEditor) {
+        editor = newEditor;
+    }
+
+
+    float currentBandGain = 0.0f;
+    float currentBandFrequency = 0.0f;
+    float currentBandQ = 0.0f;
+   
+    std::function<void(const juce::Rectangle<int>&)> onDirtyBounds;
+
+private:
+
+
+    juce::dsp::IIR::Coefficients<float> coefficients;
+
+    double sampleRate = 48000.0;
+
+    bool isMouseDragging = false;
+
+    float dotX = 0.0f;
+    float dotY = 0.0f;
+    float dot2X = 0.0f;
+
+    float x = 0.0f;
+    float y = 0.0f;
+    float newX = 0.0f;
+    float newY = 0.0f;
+
+    float dragOffsetX = 0.0f;
+    float dragOffsetY = 0.0f;
+    float dragOffsetX2 = 0.0f;
+    float dragOffsetY2 = 0.0f;
+    float dragOffsetX3 = 0.0f;
+    float dragOffsetY3 = 0.0f;
+    float dragOffsetX4 = 0.0f;
+    float dragOffsetY4 = 0.0f;
+    float dragOffsetX5 = 0.0f;
+    float dragOffsetY5 = 0.0f;
+    float dragOffsetX6 = 0.0f;
+    float dragOffsetY6 = 0.0f;
+    float dragOffsetX7 = 0.0f;
+    float dragOffsetY7 = 0.0f;
+    float dragOffsetX8 = 0.0f;
+    float dragOffsetY8 = 0.0f;
+
+    
+    bool isHandle1Dragging = false;
+    bool isHandle2Dragging = false;
+    bool isHandle3Dragging = false;
+    bool isHandle4Dragging = false;
+    bool isHandle5Dragging = false;
+    bool isHandle6Dragging = false;
+    bool isHandle7Dragging = false;
+    bool isHandle8Dragging = false;
+    
+
+    float dragOffsetXHandle1 = 0.0f;
+    float dragOffsetYHandle1 = 0.0f;
+    float dragOffsetXHandle2 = 0.0f;
+    float dragOffsetYHandle2 = 0.0f;
+    float dragOffsetXHandle3 = 0.0f;
+    float dragOffsetYHandle3 = 0.0f;
+    float dragOffsetXHandle4 = 0.0f;
+    float dragOffsetYHandle4 = 0.0f;
+    float dragOffsetXHandle5 = 0.0f;
+    float dragOffsetYHandle5 = 0.0f;
+    float dragOffsetXHandle6 = 0.0f;
+    float dragOffsetYHandle6 = 0.0f;
+    float dragOffsetXHandle7 = 0.0f;
+    float dragOffsetYHandle7 = 0.0f;
+    float dragOffsetXHandle8 = 0.0f;
+    float dragOffsetYHandle8 = 0.0f;
+
+    float handleX = -1000.0f;
+    float handleY = -1000.0f;
+    float handleX2 = -1000.0f;
+    float handleY2 = -1000.0f;
+    float handleX3 = -1000.0f;
+    float handleY3 = -1000.0f;
+    float handleX4 = -1000.0f;
+    float handleY4 = -1000.0f;
+    float handleX5 = -1000.0f;
+    float handleY5 = -1000.0f;
+    float handleX6 = -1000.0f;
+    float handleY6 = -1000.0f;
+    float handleX7 = -1000.0f;
+    float handleY7 = -1000.0f;
+    float handleX8 = -1000.0f;
+    float handleY8 = -1000.0f;
+    int previousGraphWidth = 0;
+    int previousGraphHeight = 0;
+
+    bool shouldRedrawBand1 = false;
+    bool shouldRedrawBand2 = false;
+    bool shouldRedrawBand3 = false;
+    bool shouldRedrawBand4 = false;
+    bool shouldRedrawLowpass = false;
+    bool shouldRedrawHighpass = false;
+    bool shouldRedrawLowShelf = false;
+    bool shouldRedrawHighShelf = false;
+
+    bool isMouseHoveringOverHandle1 = false;
+    bool isMouseHoveringOverHandle2 = false;
+    bool isMouseHoveringOverHandle3 = false;
+    bool isMouseHoveringOverHandle4 = false;
+    bool isMouseHoveringOverHandle5 = false;
+    bool isMouseHoveringOverHandle6 = false;
+    bool isMouseHoveringOverHandle7 = false;
+    bool isMouseHoveringOverHandle8 = false;
+
+    juce::Label band1Label;
+    juce::Label band2Label;
+    juce::Label band3Label;
+    juce::Label band4Label;
+    juce::Label band5Label;
+    juce::Label band6Label;
+    juce::Label band7Label;
+    juce::Label band8Label;
+
+    juce::Label infoLabel;
+
+    float cursorX = 0.0f;
+    float cursorY = 0.0;
+    bool mouseInside = false;
+
+    float arrayCurrentBandGain[8];
+    float arrayCurrentBandFrequency[8];
+    float arrayCurrentBandQ[8];
+
+    bool isMouseHoveringOverHandle[8] = { false };
+    bool isHandleDragging[8] = { false };
+
+    bool timerActive = false;
+    int timerCounter = 0; // To keep track of how many times the timer has been fired
+
+    bool isOptionBoxVisible = false;
+
+
+    EqEditor* editor = nullptr;
+    EqProcessor& processor;
+
+    bool isAnyHandleMouseOver = false;
+    bool anyHandleDragging = false;
+
+    int downsamplingStep = 8;  // Only add a point every 5 steps
+
+    juce::Path band1ResponsePath;
+    bool needsUpdateBand1 = true;
+    
+    juce::Path band2ResponsePath;
+    bool needsUpdateBand2 = true;
+  
+    juce::Path band3ResponsePath;
+    bool needsUpdateBand3 = true;
+  
+    juce::Path band4ResponsePath;
+    bool needsUpdateBand4 = true;
+  
+    juce::Path highpassResponsePath;
+    bool needsUpdateHighpass = true;
+  
+    juce::Path lowpassResponsePath;
+    bool needsUpdateLowpass = true;
+   
+    juce::Path highShelfResponsePath;
+    bool needsUpdateHighShelf = true;
+  
+    juce::Path lowShelfResponsePath;
+    bool needsUpdateLowShelf = true;
+  
+    juce::Path combinedResponsePath;
+    bool needsUpdateCombined = true;
+
+    // Melatonin dual-layer glow for the cumulative EQ sum curve.
+    melatonin::DropShadow sumCurveGlow {
+        {
+            { juce::Colour::fromRGBA (255, 180, 60, 90), 16, { 0, 0 }, 2 },
+            { juce::Colour::fromRGBA (255, 220, 120, 140), 6, { 0, 0 }, 0 }
+        }
+    };
+
+    // Last effective gains used for the magnitude curve (dynamic EQ animation).
+    float lastDynCurveGain1 = 1.0e9f;
+    float lastDynCurveGain2 = 1.0e9f;
+    float lastDynCurveGain3 = 1.0e9f;
+    float lastDynCurveGain4 = 1.0e9f;
+    float lastDynCurveGainHS = 1.0e9f;
+    float lastDynCurveGainLS = 1.0e9f;
+
+    /** True when any on band has Dynamic (D) or Spectral (S), or Side Check is on — drives the curve animation timer. */
+    bool anyActiveDynamicEq() const;
+    /** While any D/S+On band is active: disable image buffer, run ~45 Hz force-rebuild timer.
+        When idle: restore buffering and stop the timer. */
+    void syncDynamicCurveTimer();
+    /** Mark dyn/spectral-active bands (and the sum) dirty so the next paint rebuilds. */
+    void markActiveDynamicBandsDirty();
+    void timerCallback() override;
+
+    // Cached per-band magnitude responses (dB), sized to component width.
+    // Rebuilt from APVTS target values (not audio-smoothed coeffs) so the curve tracks knobs/handles instantly.
+    std::vector<float> responseBand1, responseBand2, responseBand3, responseBand4;
+    std::vector<float> responseHighpass, responseLowpass, responseHighShelf, responseLowShelf;
+    std::vector<float> responseCombined;
+    /** Scratch buffer for sampling published spectral GR onto display frequencies. */
+    std::vector<float> spectralGrScratch;
+    /** Scratch buffer for sampling published Side Check GR onto display frequencies. */
+    std::vector<float> sideCheckGrScratch;
+
+    void ensureResponseBufferSize (int width);
+    void rebuildMagnitudeResponsesIfNeeded (int width);
+    static void fillMagnitudeResponse (const juce::dsp::IIR::Coefficients<float>::Ptr& coeffs,
+                                       const std::vector<float>& frequencies,
+                                       double sr,
+                                       std::vector<float>& outDb,
+                                       int step);
+
+    float getEqDisplayRangeDb() const; // 6, 12, or 24
+    float dbToY (float db, float height) const; // jmap db from -r..r to height..0
+    float yToDb (float y, float height) const; // inverse
+    float getBandPathWidth() const; // from EQ_BAND_PATH_WIDTH_ID, default 3
+    float getSumPathWidth() const; // from EQ_SUM_PATH_WIDTH_ID, default 3
+    bool isMulticolorBandFill() const; // EQ_MULTICOLOR_BAND_FILL_ID, default true
+    bool isShowCrosshair() const; // EQ_SHOW_CROSSHAIR_ID, default true
+    /** Per-band fill: multicolor palette when on; mono golden boost/cut when off. */
+    juce::Colour resolveBandFillColour (juce::Colour multicolorFill, bool isBoostOrPass) const;
+    bool bandGainIsBoost (const char* gainParamId, const char* typeParamId) const;
+
+    void syncEqRangeControls();
+    void adjustEqDisplayRange (int delta);
+
+    juce::Path intelligentDownsample(
+        const juce::Path& originalPath,
+        const std::vector<float>& compositeResponse,
+        int w, int h);
+
+
+    juce::Path intelligentDownsampleToBottom(
+        const juce::Path& originalPath,
+        const std::vector<float>& compositeResponse,
+        int w, int h);
+
+    juce::Path intelligentDownsampleHighpass(
+        const juce::Path& originalPath,
+        const std::vector<float>& compositeResponse,
+        int w, int h);
+
+    juce::Path intelligentDownsampleLowpass(
+        const juce::Path& originalPath,
+        const std::vector<float>& compositeResponse,
+        int w, int h);
+
+
+    juce::Path simpleDownsample(
+        const juce::Path& originalPath,
+        const std::vector<float>& compositeResponse,
+        int w, int h,
+        int downsampleFactor
+    );
+
+    std::string arrayBandName[8] = { "Band 1", "Band 2", "Band 3", "Band 4", "Highpass", "Lowpass", "HighShelf", "LowShelf" };
+    std::string currentBandName;
+
+    
+    int activeBand = -1; // Initialize it to -1 to indicate no active band at the start
+
+    int downsampleFactor = 5;
+
+    int decimationFactor;  
+    float adaptiveThreshold; 
+    
+    juce::AudioProcessorValueTreeState& parameters;  
+
+    std::vector<float> logFrequencies;
+
+    void precomputeLogFrequencies()
+    {
+        int w = getWidth();  // Or however you determine 'w'
+        logFrequencies.clear();
+        logFrequencies.reserve(w);
+        double logMin = std::log10(20);  // 20 Hz
+        double logMax = std::log10(20000);  // 20000 Hz
+        for (int i = 0; i < w; ++i)
+        {
+            double logFreq = logMin + (logMax - logMin) * i / static_cast<double>(w - 1);
+            logFrequencies.push_back(std::pow(10.0, logFreq));
+        }
+    }
+
+
+
+    bool isSmoothKnob1AtTarget = processor.getSmoothKnob1Value() == processor.getTargetValueForSmoothKnob1();
+    bool isSmoothKnob2AtTarget = processor.getSmoothKnob2Value() == processor.getTargetValueForSmoothKnob2();
+    bool isSmoothKnob3AtTarget = processor.getSmoothKnob3Value() == processor.getTargetValueForSmoothKnob3();
+    bool isSmoothKnob4AtTarget = processor.getSmoothKnob4Value() == processor.getTargetValueForSmoothKnob4();
+    bool isSmoothKnob5AtTarget = processor.getSmoothKnob5Value() == processor.getTargetValueForSmoothKnob5();
+    bool isSmoothKnob6AtTarget = processor.getSmoothKnob6Value() == processor.getTargetValueForSmoothKnob6();
+    bool isSmoothKnob7AtTarget = processor.getSmoothKnob7Value() == processor.getTargetValueForSmoothKnob7();
+    bool isSmoothKnob8AtTarget = processor.getSmoothKnob8Value() == processor.getTargetValueForSmoothKnob8();
+    bool isSmoothKnob9AtTarget = processor.getSmoothKnob9Value() == processor.getTargetValueForSmoothKnob9();
+    bool isSmoothKnob10AtTarget = processor.getSmoothKnob10Value() == processor.getTargetValueForSmoothKnob10();
+    //bool isSmoothKnob11AtTarget = processor.getSmoothKnob11Value() == processor.getTargetValueForSmoothKnob11();
+    //bool isSmoothKnob12AtTarget = processor.getSmoothKnob12Value() == processor.getTargetValueForSmoothKnob12();
+    //bool isSmoothKnob13AtTarget = processor.getSmoothKnob13Value() == processor.getTargetValueForSmoothKnob13();
+    bool isSmoothKnob14AtTarget = processor.getSmoothKnob14Value() == processor.getTargetValueForSmoothKnob14();
+    bool isSmoothKnob15AtTarget = processor.getSmoothKnob15Value() == processor.getTargetValueForSmoothKnob15();
+    bool isSmoothKnob16AtTarget = processor.getSmoothKnob16Value() == processor.getTargetValueForSmoothKnob16();
+    bool isSmoothKnob17AtTarget = processor.getSmoothKnob17Value() == processor.getTargetValueForSmoothKnob17();
+    bool isSmoothKnob18AtTarget = processor.getSmoothKnob18Value() == processor.getTargetValueForSmoothKnob18();
+    bool isSmoothKnob19AtTarget = processor.getSmoothKnob19Value() == processor.getTargetValueForSmoothKnob19();
+    bool isSmoothKnob20AtTarget = processor.getSmoothKnob20Value() == processor.getTargetValueForSmoothKnob20();
+    bool isSmoothKnob21AtTarget = processor.getSmoothKnob21Value() == processor.getTargetValueForSmoothKnob21();
+    bool isSmoothKnob22AtTarget = processor.getSmoothKnob22Value() == processor.getTargetValueForSmoothKnob22();
+
+    bool highpassOnOff;
+
+    std::unique_ptr<OnOffButton1> onOffButton1;
+    std::unique_ptr<OnOffButton1> onOffButton2;
+    std::unique_ptr<OnOffButton1> onOffButton3;
+    std::unique_ptr<OnOffButton1> onOffButton4;
+    std::unique_ptr<OnOffButton1> onOffButton5;
+    std::unique_ptr<OnOffButton1> onOffButton6;
+    std::unique_ptr<OnOffButton1> onOffButton7;
+    std::unique_ptr<OnOffButton1> onOffButton8;
+
+    float logMin, logMax;
+
+    std::unique_ptr<OptionBoxMenu> optionBoxMenu;
+
+    /** Right-click alternation: first opens OptionBox, second opens mod menu for same handle. */
+    int lastOptionBoxBandIndex = -1;
+    bool lastHandlePopupWasOptionBox = false;
+
+    juce::TextButton uiModeButton { juce::CharPointer_UTF8 ("\xe2\x96\xb2") }; // ▲ when full
+    juce::TextButton eqRangeMinusButton { "-" };
+    juce::TextButton eqRangePlusButton { "+" };
+    juce::Label eqRangeLabel;
+    juce::TextButton modButton { "Mod" };
+    juce::TextButton proportionalQButton { "P" };
+    juce::TextButton autoGainButton { "A" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> proportionalQAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoGainAttachment;
+    OutputGainScrubber outputGainScrubber;
+};

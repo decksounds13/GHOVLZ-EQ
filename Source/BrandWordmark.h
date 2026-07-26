@@ -1,0 +1,197 @@
+#pragma once
+
+#include <JuceHeader.h>
+#include <JucePluginDefines.h>
+
+/** Temporary GHOVLZ! EQ wordmark — click to cycle Windows system font placeholders. */
+class BrandWordmark : public juce::Component,
+                      public juce::SettableTooltipClient
+{
+public:
+    static constexpr int numFontOptions = 4;
+
+    /** Hero product name painted at full brand weight. */
+    static juce::String getBrandText()
+    {
+        return "GHOVLZ! EQ";
+    }
+
+    /** Secondary product framing — temporary red tag beside the hero brand. */
+    static juce::String getSideCheckTagText()
+    {
+        // Prefer ™; hosts/fonts that lack the glyph still render a readable fallback via paint().
+        return juce::CharPointer_UTF8 ("with SideCheck\xe2\x84\xa2");
+    }
+
+    /** ASCII fallback if the typeface cannot draw ™. */
+    static juce::String getSideCheckTagTextAscii()
+    {
+        return "with SideCheck(TM)";
+    }
+
+    /** UI label synced to JucePlugin_VersionString with a beta suffix. */
+    static juce::String getBetaVersionString()
+    {
+        return juce::String ("v") + JucePlugin_VersionString + "-beta";
+    }
+
+    BrandWordmark()
+    {
+        setInterceptsMouseClicks (true, false);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        refreshTooltip();
+    }
+
+    void setCompactLook (bool shouldBeCompact)
+    {
+        if (compactLook == shouldBeCompact)
+            return;
+
+        compactLook = shouldBeCompact;
+        repaint();
+    }
+
+    int getFontOptionIndex() const noexcept { return fontOptionIndex; }
+
+    juce::String getOptionTitle() const
+    {
+        switch (fontOptionIndex)
+        {
+            case 0:  return "1 - Segoe UI Semibold";
+            case 1:  return "2 - Bahnschrift";
+            case 2:  return "3 - Consolas";
+            default: return "4 - Candara";
+        }
+    }
+
+    juce::String getOptionCharacter() const
+    {
+        switch (fontOptionIndex)
+        {
+            case 0:  return "geometric bold sans";
+            case 1:  return "condensed modern geometric";
+            case 2:  return "technical monospace";
+            default: return "rounded friendly geometric";
+        }
+    }
+
+    juce::String getTypefaceName() const
+    {
+        switch (fontOptionIndex)
+        {
+            case 0:  return "Segoe UI Semibold";
+            case 1:  return "Bahnschrift";
+            case 2:  return "Consolas";
+            default: return "Candara";
+        }
+    }
+
+    juce::Font makeFont (float height) const
+    {
+        auto options = juce::FontOptions().withName (getTypefaceName()).withHeight (height);
+
+        if (fontOptionIndex == 2)
+            options = options.withStyle ("bold");
+
+        return juce::Font (options);
+    }
+
+    static float measureTextWidth (const juce::Font& font, const juce::String& text)
+    {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText (font, text, 0.0f, 0.0f);
+        return ga.getBoundingBox (0, ga.getNumGlyphs(), true).getWidth();
+    }
+
+    /** Prefer ™; fall back to ASCII if the glyph measures as empty / missing. */
+    static juce::String resolveSideCheckTagText (const juce::Font& font)
+    {
+        const auto withTm = getSideCheckTagText();
+        const float tmW = measureTextWidth (font, juce::CharPointer_UTF8 ("\xe2\x84\xa2"));
+        if (tmW > 0.5f)
+            return withTm;
+        return getSideCheckTagTextAscii();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const float h = (float) getHeight();
+        const float brandH = juce::jmax (10.0f, h * (compactLook ? 0.62f : 0.70f));
+        // SideCheck stays at full 2× tag size; beta is 75% of that.
+        const float tagH = juce::jmax (8.0f, brandH * 1.00f);
+        const float versionH = juce::jmax (8.0f, tagH * 0.75f);
+
+        const auto brandFont = makeFont (brandH);
+        const auto tagFont = juce::Font (juce::FontOptions()
+                                             .withName ("Segoe UI")
+                                             .withHeight (tagH)
+                                             .withStyle ("bold"));
+        const auto versionFont = juce::Font (juce::FontOptions()
+                                                 .withName ("Segoe UI")
+                                                 .withHeight (versionH));
+
+        const juce::String brandText (getBrandText());
+        const juce::String sideCheckText (resolveSideCheckTagText (tagFont));
+        const juce::String versionText (getBetaVersionString());
+
+        const float brandW = measureTextWidth (brandFont, brandText);
+        const float gapBrandToTag = juce::jmax (5.0f, brandH * 0.28f);
+        const float gapTagToVersion = juce::jmax (4.0f, brandH * 0.22f);
+        const float sideCheckW = measureTextWidth (tagFont, sideCheckText);
+        const float versionW = measureTextWidth (versionFont, versionText);
+        const float totalW = brandW + gapBrandToTag + sideCheckW + gapTagToVersion + versionW;
+        const float startX = juce::jmax (0.0f, ((float) getWidth() - totalW) * 0.5f);
+
+        const float brandAlpha = compactLook ? 0.55f : 0.92f;
+        // Beta keeps the previous subdued weight; SideCheck is temporary red.
+        const float betaAlpha = compactLook ? 0.30f : 0.45f;
+        const float sideCheckAlpha = brandAlpha;
+
+        float x = startX;
+
+        g.setFont (brandFont);
+        g.setColour (juce::Colours::whitesmoke.withAlpha (brandAlpha));
+        g.drawText (brandText,
+                    juce::Rectangle<float> (x, 0.0f, brandW + 1.0f, h),
+                    juce::Justification::centredLeft,
+                    false);
+        x += brandW + gapBrandToTag;
+
+        // Temporary red bold "with SideCheck™" at full tag size, right of the wordmark.
+        g.setFont (tagFont);
+        g.setColour (juce::Colours::red.withAlpha (sideCheckAlpha));
+        g.drawText (sideCheckText,
+                    juce::Rectangle<float> (x, 0.0f, sideCheckW + 2.0f, h),
+                    juce::Justification::centredLeft,
+                    false);
+        x += sideCheckW + gapTagToVersion;
+
+        // Beta version: subdued color, 75% of SideCheck tag height (click still cycles fonts).
+        g.setFont (versionFont);
+        g.setColour (juce::Colours::whitesmoke.withAlpha (betaAlpha));
+        g.drawText (versionText,
+                    juce::Rectangle<float> (x, 0.0f, versionW + 2.0f, h),
+                    juce::Justification::centredLeft,
+                    false);
+    }
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        fontOptionIndex = (fontOptionIndex + 1) % numFontOptions;
+        refreshTooltip();
+        repaint();
+    }
+
+private:
+    void refreshTooltip()
+    {
+        setTooltip (getBrandText() + " " + getSideCheckTagTextAscii()
+                     + "  |  " + getOptionTitle() + " - " + getOptionCharacter()
+                     + "  (click to cycle fonts)");
+    }
+
+    int fontOptionIndex = 1; // default: Bahnschrift (option 2 / "2A")
+    bool compactLook = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BrandWordmark)
+};
