@@ -381,7 +381,6 @@ void OscilloscopeComponent::strokeWaveform (juce::Graphics& g, const juce::Path&
         const auto core = juce::Colour::fromRGBA (255, 230, 160, 180).withAlpha (glowOpacity * 0.75f);
 
         // Melatonin ignores spread on stroked paths (only expands filled shapes).
-        // Stroke the waveform into a filled outline first so spread thickens the glow.
         const juce::PathStrokeType glowStroke (juce::jmax (1.0f, pathWidth + 0.5f),
                                                juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded);
@@ -398,33 +397,133 @@ void OscilloscopeComponent::strokeWaveform (juce::Graphics& g, const juce::Path&
         waveGlow.setOffset (0, 0, 1);
         waveGlow.setColor (core, 1);
 
-        // Expanded: prefer Melatonin's fast path (full-graph blur is expensive).
+        // Expanded / draft: Melatonin fast path (full-quality blur is expensive at large sizes).
         waveGlow.render (g, glowShape, expanded || ! highQuality);
     }
 
-    // 2× supersampled stroke allocates a full ARGB image each paint — skip when expanded.
-    if (highQuality && ! expanded)
-    {
-        constexpr int ss = 2;
-        const auto bounds = getLocalBounds();
-        const int w = juce::jmax (1, bounds.getWidth());
-        const int h = juce::jmax (1, bounds.getHeight());
+    g.setColour (lineColour);
+    g.strokePath (waveform, stroke);
+}
 
-        juce::Image hiRes (juce::Image::ARGB, w * ss, h * ss, true);
+void OscilloscopeComponent::paintEnvelopeLane (juce::Graphics& g,
+                                               juce::Rectangle<float> plot,
+                                               float pathWidth,
+                                               float lineOpacity,
+                                               bool highQuality,
+                                               bool glowEnabled,
+                                               float glowOpacity,
+                                               float glowRadius,
+                                               float glowSpread,
+                                               bool useLeft,
+                                               bool useRight)
+{
+    const int n = (int) columns.size();
+    if (n <= 0 || plot.getWidth() < 2.0f || plot.getHeight() < 2.0f)
+        return;
+
+    const float xScale = plot.getWidth() / (float) juce::jmax (1, n);
+    const auto lineColour = juce::Colour::fromRGBA (220, 190, 120, 220).withMultipliedAlpha (lineOpacity);
+
+    auto sampleMax = [useLeft, useRight] (const Column& col) -> float
+    {
+        if (useLeft)  return col.maxL;
+        if (useRight) return col.maxR;
+        return col.maxSum;
+    };
+    auto sampleMin = [useLeft, useRight] (const Column& col) -> float
+    {
+        if (useLeft)  return col.minL;
+        if (useRight) return col.minR;
+        return col.minSum;
+    };
+
+    // In-place (non-scroll) mode stores columns as a circular buffer. Spatially
+    // adjacent cells on either side of writeColumn are not temporal neighbours —
+    // connecting them draws a line across the window. Break paths at that seam.
+    const int seamColumn = (! scrollMode && n > 1)
+                               ? juce::jlimit (0, n - 1, writeColumn)
+                               : -1;
+
+    if (! highQuality)
+    {
+        // Draft stubs: one vertical per column (no inter-column connectors).
+        juce::Path stubs;
+        for (int i = 0; i < n; ++i)
         {
-            juce::Graphics g2 (hiRes);
-            g2.addTransform (juce::AffineTransform::scale ((float) ss));
-            g2.setColour (lineColour);
-            g2.strokePath (waveform, stroke);
+            const auto& col = columns[(size_t) i];
+            if (! col.valid)
+                continue;
+
+            const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+            appendColumnStub (stubs, px,
+                              plot.getY() + (0.5f - 0.5f * sampleMax (col)) * plot.getHeight(),
+                              plot.getY() + (0.5f - 0.5f * sampleMin (col)) * plot.getHeight());
         }
 
-        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-        g.drawImage (hiRes, bounds.toFloat());
+        strokeWaveform (g, stubs, pathWidth, lineOpacity, false,
+                        glowEnabled, glowOpacity, glowRadius, glowSpread);
+        return;
     }
-    else
+
+    // High quality: one envelope run per contiguous valid span (never jump gaps/seams).
+    int x = 0;
+    while (x < n)
     {
-        g.setColour (lineColour);
-        g.strokePath (waveform, stroke);
+        while (x < n && ! columns[(size_t) x].valid)
+            ++x;
+
+        if (x >= n)
+            break;
+
+        const int runStart = x;
+        ++x;
+        while (x < n
+               && columns[(size_t) x].valid
+               && ! (seamColumn >= 0 && x == seamColumn))
+            ++x;
+        const int runEnd = x; // exclusive
+
+        juce::Path maxPath, minPath, band;
+
+        for (int i = runStart; i < runEnd; ++i)
+        {
+            const auto& col = columns[(size_t) i];
+            const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+            const float yMax = plot.getY() + (0.5f - 0.5f * sampleMax (col)) * plot.getHeight();
+            const float yMin = plot.getY() + (0.5f - 0.5f * sampleMin (col)) * plot.getHeight();
+
+            if (i == runStart)
+            {
+                maxPath.startNewSubPath (px, yMax);
+                minPath.startNewSubPath (px, yMin);
+                band.startNewSubPath (px, yMax);
+            }
+            else
+            {
+                maxPath.lineTo (px, yMax);
+                minPath.lineTo (px, yMin);
+                band.lineTo (px, yMax);
+            }
+        }
+
+        for (int i = runEnd - 1; i >= runStart; --i)
+        {
+            const auto& col = columns[(size_t) i];
+            const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+            const float yMin = plot.getY() + (0.5f - 0.5f * sampleMin (col)) * plot.getHeight();
+            band.lineTo (px, yMin);
+        }
+
+        band.closeSubPath();
+        g.setColour (lineColour.withMultipliedAlpha (0.22f));
+        g.fillPath (band);
+
+        // Stroke max/min as separate paths so the right edge of max never joins
+        // the left edge of min (that join was a full-width connector line).
+        strokeWaveform (g, maxPath, pathWidth, lineOpacity, true,
+                        glowEnabled, glowOpacity, glowRadius, glowSpread);
+        strokeWaveform (g, minPath, pathWidth, lineOpacity, true,
+                        false, 0.0f, 0.0f, 0.0f);
     }
 }
 
@@ -469,7 +568,7 @@ void OscilloscopeComponent::paint (juce::Graphics& g)
     // Compact strip and expanded overlay have independent line/glow settings.
     const float pathWidth = juce::jlimit (0.5f, 8.0f,
                                           loadFloatParam (expanded ? "OSC_EXPANDED_LINE_WIDTH_ID" : "OSC_LINE_WIDTH_ID",
-                                                          expanded ? 1.0f : 1.5f));
+                                                          expanded ? 2.5f : 1.0f));
     const bool glowEnabled = loadFloatParam (expanded ? "OSC_EXPANDED_GLOW_ENABLE_ID" : "OSC_GLOW_ENABLE_ID", 0.0f) > 0.5f;
     const float glowOpacity = juce::jlimit (0.0f, 1.0f,
                                             loadFloatParam (expanded ? "OSC_EXPANDED_GLOW_OPACITY_ID" : "OSC_GLOW_OPACITY_ID", 75.0f) * 0.01f);
@@ -479,10 +578,6 @@ void OscilloscopeComponent::paint (juce::Graphics& g)
     const float glowSpread = juce::jlimit (0.0f, expanded ? 40.0f : 20.0f,
                                            loadFloatParam (expanded ? "OSC_EXPANDED_GLOW_SPREAD_ID" : "OSC_GLOW_SPREAD_ID",
                                                            expanded ? 2.0f : 1.0f));
-
-    const int n = (int) columns.size();
-    const float xScale = plot.getWidth() / (float) juce::jmax (1, n);
-    juce::Path waveform;
 
     if (channelMode == ChannelMode::splitStereo)
     {
@@ -494,37 +589,16 @@ void OscilloscopeComponent::paint (juce::Graphics& g)
         g.setColour (juce::Colour::fromRGBA (80, 70, 50, 90));
         g.drawHorizontalLine (juce::roundToInt (midY), plot.getX(), plot.getRight());
 
-        for (int x = 0; x < n; ++x)
-        {
-            const auto& col = columns[(size_t) x];
-            if (! col.valid)
-                continue;
-
-            const float px = plot.getX() + ((float) x + 0.5f) * xScale;
-            appendColumnStub (waveform, px,
-                              top.getY() + (0.5f - 0.5f * col.maxL) * top.getHeight(),
-                              top.getY() + (0.5f - 0.5f * col.minL) * top.getHeight());
-            appendColumnStub (waveform, px,
-                              bottom.getY() + (0.5f - 0.5f * col.maxR) * bottom.getHeight(),
-                              bottom.getY() + (0.5f - 0.5f * col.minR) * bottom.getHeight());
-        }
+        paintEnvelopeLane (g, top, pathWidth, lineOpacity, highQuality,
+                           glowEnabled, glowOpacity, glowRadius, glowSpread, true, false);
+        paintEnvelopeLane (g, bottom, pathWidth, lineOpacity, highQuality,
+                           glowEnabled, glowOpacity, glowRadius, glowSpread, false, true);
     }
     else
     {
-        for (int x = 0; x < n; ++x)
-        {
-            const auto& col = columns[(size_t) x];
-            if (! col.valid)
-                continue;
-
-            const float px = plot.getX() + ((float) x + 0.5f) * xScale;
-            appendColumnStub (waveform, px,
-                              plot.getY() + (0.5f - 0.5f * col.maxSum) * plot.getHeight(),
-                              plot.getY() + (0.5f - 0.5f * col.minSum) * plot.getHeight());
-        }
+        paintEnvelopeLane (g, plot, pathWidth, lineOpacity, highQuality,
+                           glowEnabled, glowOpacity, glowRadius, glowSpread, false, false);
     }
 
-    strokeWaveform (g, waveform, pathWidth, lineOpacity, highQuality,
-                    glowEnabled, glowOpacity, glowRadius, glowSpread);
     drawZoomLabel();
 }

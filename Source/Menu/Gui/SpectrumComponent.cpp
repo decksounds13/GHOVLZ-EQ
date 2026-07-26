@@ -44,8 +44,34 @@ SpectrumComponent::Content::Content (SharedResources& resources, juce::AudioProc
     addAndMakeVisible (enableToggle);
     enableAttachment = std::make_unique<ButtonAttachment> (treeState, "SPECTRUM_ANALYSER_ID", enableToggle);
 
+    blockSizeLabel.setText ("FFT Block Size", juce::dontSendNotification);
+    styleSettingsCombo (blockSizeCombo);
+    {
+        const auto names = AnalyserDefaults::getBlockSizeNames();
+        for (int i = 0; i < names.size(); ++i)
+            blockSizeCombo.addItem (names[i], i + 1);
+    }
+    addAndMakeVisible (blockSizeLabel);
+    addAndMakeVisible (blockSizeCombo);
+    blockSizeAttachment = std::make_unique<ComboBoxAttachment> (treeState, "BLOCK_ID", blockSizeCombo);
+
+    refreshLabel.setText ("Refresh", juce::dontSendNotification);
+    styleSlider (refreshSlider);
+    refreshSlider.setTextValueSuffix (" ms");
+    refreshSlider.setTooltip ("How often analysis runs on the latest Block window. Faster = smoother & more CPU.");
+    addAndMakeVisible (refreshLabel);
+    addAndMakeVisible (refreshSlider);
+    refreshAttachment = std::make_unique<SliderAttachment> (treeState, "REFRESH_ID", refreshSlider);
+
+    avgLabel.setText ("Average", juce::dontSendNotification);
+    styleSlider (avgSlider);
+    avgSlider.setTooltip ("Average this many analysed blocks for a smoother display.");
+    addAndMakeVisible (avgLabel);
+    addAndMakeVisible (avgSlider);
+    avgAttachment = std::make_unique<SliderAttachment> (treeState, "AVG_ID", avgSlider);
+
     curveSmoothLabel.setText ("Curve Smoothness", juce::dontSendNotification);
-    styleCurveSmoothCombo (curveSmoothCombo);
+    styleSettingsCombo (curveSmoothCombo);
     curveSmoothCombo.addItem ("Off", 1);
     curveSmoothCombo.addItem ("Low", 2);
     curveSmoothCombo.addItem ("Med", 3);
@@ -186,6 +212,9 @@ SpectrumComponent::Content::Content (SharedResources& resources, juce::AudioProc
     holdTimeAttachment = std::make_unique<SliderAttachment> (treeState, "MAX_HOLD_ID", holdTimeSlider);
 
     styleLabel (titleLabel);
+    styleLabel (blockSizeLabel);
+    styleLabel (refreshLabel);
+    styleLabel (avgLabel);
     styleLabel (curveSmoothLabel);
     styleLabel (layersLabel);
     styleLabel (scaleLabel);
@@ -220,6 +249,7 @@ SpectrumComponent::Content::Content (SharedResources& resources, juce::AudioProc
 
 SpectrumComponent::Content::~Content()
 {
+    blockSizeCombo.setLookAndFeel (nullptr);
     curveSmoothCombo.setLookAndFeel (nullptr);
     treeState.removeParameterListener ("SPECTRUM_RESOLUTION_ID", this);
 }
@@ -294,10 +324,10 @@ void SpectrumComponent::Content::styleSaveDefaultButton (juce::TextButton& butto
     button.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
 }
 
-void SpectrumComponent::Content::styleCurveSmoothCombo (juce::ComboBox& combo)
+void SpectrumComponent::Content::styleSettingsCombo (juce::ComboBox& combo)
 {
-    combo.setLookAndFeel (&curveSmoothLookAndFeel);
-    combo.setColour (juce::Slider::textBoxTextColourId, juce::Colours::whitesmoke.withAlpha (0.8f));
+    combo.setLookAndFeel (&comboLookAndFeel);
+    combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }
 
 void SpectrumComponent::Content::saveAnalyserDefaults()
@@ -340,13 +370,13 @@ void SpectrumComponent::Content::layoutTogglePair (juce::Rectangle<int>& area, j
 
 int SpectrumComponent::Content::getPreferredHeight() const
 {
-    // title + show bins + enable + curve smooth + multicolor + crosshair + layers + scale
+    // title + show bins + enable + block/refresh/avg + curve smooth + multicolor + crosshair + layers + scale
     // + opacity/fill/path/band/sum + sumGlow toggle + 3 sum glow + postGlow toggle + 3 post glow + hold
     return kSpectrumPadY * 2
            + 24 + 8
            + 22 + 6
            + 22 + 6
-           + (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap)
+           + (4 * (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap))
            + 22 + 6
            + 22 + 8
            + kSpectrumLabelH + kSpectrumLabelGap
@@ -375,6 +405,9 @@ void SpectrumComponent::Content::resized()
     enableToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
     area.removeFromTop (6);
 
+    layoutComboRow (area, blockSizeLabel, blockSizeCombo);
+    layoutSliderRow (area, refreshLabel, refreshSlider);
+    layoutSliderRow (area, avgLabel, avgSlider);
     layoutComboRow (area, curveSmoothLabel, curveSmoothCombo);
 
     multicolorBandFillToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));

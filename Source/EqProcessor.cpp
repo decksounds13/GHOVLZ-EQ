@@ -529,8 +529,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::make_unique<juce::AudioParameterBool>("RANGE_ID", "Range", true));
 
     // Integer parameters
-    // Refresh interval in ms (16 ≈ 60 fps, 33 ≈ 30 fps). Not stored in analyser_defaults.xml.
-    params.push_back(std::make_unique<juce::AudioParameterInt>("REFRESH_ID", "Refresh", 16, 200, 33));
+    // Analysis + UI refresh interval in ms (Ableton Spectrum default ~60 ms).
+    // Analysis thread FFTs the latest Block samples on this cadence (overlapping).
+    params.push_back(std::make_unique<juce::AudioParameterInt>("REFRESH_ID", "Refresh", 16, 200, 60));
     params.push_back(std::make_unique<juce::AudioParameterInt>("AVG_ID", "Avg", 1, 8, 1));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MAXIMUM_ID", "Maximum", -200, 40, 12));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MINIMUM_ID", "Minimum", -380, 30, -120));
@@ -633,7 +634,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "OSC_LINE_WIDTH_ID", "OscLineWidth",
         juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
-        analyserDefaults.getFloat ("OSC_LINE_WIDTH_ID", 1.5f)));
+        analyserDefaults.getFloat ("OSC_LINE_WIDTH_ID", 1.0f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "OSC_GLOW_ENABLE_ID", "OscGlowEnable",
         analyserDefaults.getBool ("OSC_GLOW_ENABLE_ID", false)));
@@ -653,7 +654,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "OSC_EXPANDED_LINE_WIDTH_ID", "OscExpandedLineWidth",
         juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
-        analyserDefaults.getFloat ("OSC_EXPANDED_LINE_WIDTH_ID", 1.0f)));
+        analyserDefaults.getFloat ("OSC_EXPANDED_LINE_WIDTH_ID", 2.5f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "OSC_EXPANDED_GLOW_ENABLE_ID", "OscExpandedGlowEnable",
         analyserDefaults.getBool ("OSC_EXPANDED_GLOW_ENABLE_ID", false)));

@@ -101,7 +101,7 @@ OscilloscopeSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (compactSectionLabel);
 
     setupWidth (compactLineWidthLabel, compactLineWidthSlider, compactLineWidthAttachment,
-                "OSC_LINE_WIDTH_ID", "Line Width");
+                "OSC_LINE_WIDTH_ID", "Small Window Line Width");
     setupGlowGroup (compactGlowToggle, compactGlowAttachment, "OSC_GLOW_ENABLE_ID",
                     compactGlowRadiusLabel, compactGlowRadiusSlider, compactGlowRadiusAttachment, "OSC_GLOW_RADIUS_ID",
                     compactGlowSpreadLabel, compactGlowSpreadSlider, compactGlowSpreadAttachment, "OSC_GLOW_SPREAD_ID",
@@ -112,7 +112,7 @@ OscilloscopeSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (expandedSectionLabel);
 
     setupWidth (expandedLineWidthLabel, expandedLineWidthSlider, expandedLineWidthAttachment,
-                "OSC_EXPANDED_LINE_WIDTH_ID", "Line Width");
+                "OSC_EXPANDED_LINE_WIDTH_ID", "Expanded Window Line Width");
     setupGlowGroup (expandedGlowToggle, expandedGlowAttachment, "OSC_EXPANDED_GLOW_ENABLE_ID",
                     expandedGlowRadiusLabel, expandedGlowRadiusSlider, expandedGlowRadiusAttachment, "OSC_EXPANDED_GLOW_RADIUS_ID",
                     expandedGlowSpreadLabel, expandedGlowSpreadSlider, expandedGlowSpreadAttachment, "OSC_EXPANDED_GLOW_SPREAD_ID",

@@ -6,35 +6,39 @@ using ValueTree = juce::AudioProcessorValueTreeState;
 
 // ****************************************************************************
 // ANALYSER CLASS
+// Ableton-style: audio thread fills a ring; analysis thread FFTs the latest
+// Block samples every Refresh ms (overlapping windows).
 // ****************************************************************************
-class Analyser : public juce::AudioProcessorValueTreeState::Listener
+class Analyser : public juce::AudioProcessorValueTreeState::Listener,
+                 private juce::Thread
 {
 public:
     enum class Channels { left, right, both };
 
-    // Constructor
-    Analyser(juce::AudioProcessorValueTreeState& audioProcessorValueTreeState);
-    ~Analyser();
+    Analyser (juce::AudioProcessorValueTreeState& audioProcessorValueTreeState);
+    ~Analyser() override;
 
     // ========================================================================
     void resetScopeMaximumsData();
-
 
     /** Eco mode: skip FFT / spectrum CPU. Dynamic (D) / Spectral (S) DSP stay available. */
     void setEcoMode (bool shouldEnable) noexcept { ecoMode.store (shouldEnable); }
     bool isEcoMode() const noexcept { return ecoMode.load(); }
 
     // ========================================================================
-    void setNextFFTBlockStatus(const bool);
+    /** True when a new analysed frame is ready for the UI (post and/or pre). */
+    void setNextFFTBlockStatus (bool);
     bool getNextFFTBlockStatus();
 
+    bool getNextPreFFTBlockStatus();
+    void setNextPreFFTBlockStatus (bool);
 
     // ========================================================================
     size_t getScopeSize();
     size_t getFftSize() const;
-    float getScopeData(size_t);
+    float getScopeData (size_t);
     float getScopePreData (size_t);
-    float getScopeMaximumsData(size_t);
+    float getScopeMaximumsData (size_t);
     float getOffset();
     void setSampleRate (double sampleRate);
     double getSampleRate() const;
@@ -54,14 +58,13 @@ public:
     /** Highest scope bin whose centre frequency is still on-axis (≤ display max). */
     int getHighestDisplayBinIndex() const;
 
-
     // ========================================================================
-    void pushSamplesIntoFifo(const float, const float) noexcept;
+    void pushSamplesIntoFifo (float, float) noexcept;
     void pushSamplesIntoFifo (const float* left, const float* right, int numSamples) noexcept;
     void pushPreSamplesIntoFifo (const float* left, const float* right, int numSamples) noexcept;
+
+    /** Message-thread: apply dynamic range host updates after a new frame, then clear ready flags. */
     void calculateNextFrameOfSpectrum();
-    bool getNextPreFFTBlockStatus();
-    void setNextPreFFTBlockStatus (bool);
 
     void processFFT();
     void processPreFFT();
@@ -71,29 +74,40 @@ public:
     void calculateCurrentAverageVolume();
     void calculatePreScopeFromFft();
 
-    float getModifiedScopeData(size_t index);
+    float getModifiedScopeData (size_t index);
+
 private:
-    // ========================================================================
+    static constexpr size_t kRingCapacity = 16384; // max BLOCK_ID
 
     float adaptData (float volume, float minDb, float maxDb) const;
 
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
+    void run() override;
 
-    // ========================================================================
-    void parameterChanged(const juce::String& parameterID, float newValue) override;
+    void setFFTBlockSize (int);
+    void setActiveChannel (Channels);
+    void setAvg (size_t);
+    void setVolumeScaleModeAsDynamic (bool);
+    void setVolumeRangeInDecibels (float, float);
+    void setRefreshMs (int);
 
+    void analyseLatestWindow();
+    void pushIntoRing (std::array<float, kRingCapacity>& ring,
+                       std::atomic<size_t>& writePos,
+                       std::atomic<size_t>& filled,
+                       const float* left,
+                       const float* right,
+                       int numSamples) noexcept;
+    bool copyLatestFromRing (const std::array<float, kRingCapacity>& ring,
+                             size_t writePos,
+                             size_t filled,
+                             float* dest,
+                             size_t fftSize) const;
+    void publishAdaptedScopes();
+    void applyDynamicRangeToHost();
+    bool isSpectrumAnalyserParamOn() const;
 
-
-    // ========================================================================
-    void setFFTBlockSize(int);
-    void setActiveChannel(Channels);
-    void setAvg(size_t);
-    void setVolumeScaleModeAsDynamic(bool);
-    void setVolumeRangeInDecibels(float, float);
-
-
-    // ========================================================================
     juce::AudioProcessorValueTreeState& mr_valueTree;
-
 
     juce::dsp::FFT m_forwardFFT_9;
     juce::dsp::FFT m_forwardFFT_10;
@@ -112,21 +126,27 @@ private:
     std::atomic<size_t> m_fftOrder { 11 };   // 2048
     std::atomic<size_t> m_fftSize { 2048 };
     std::atomic<size_t> m_scopeSize { 1024 };
-    std::atomic<size_t> m_fifoIndex { 0 };
 
-    std::atomic<Channels> m_activeChannels{ Channels::both };
+    std::atomic<Channels> m_activeChannels { Channels::both };
 
-    std::atomic<bool> m_blockSizeDefined{ false };
-    std::atomic<bool> m_nextFFTBlockReady{ false };
+    std::atomic<bool> m_blockSizeDefined { false };
+    std::atomic<bool> m_nextFFTBlockReady { false };
     std::atomic<bool> m_preNextFFTBlockReady { false };
-    std::atomic<bool> m_volumeRangeIsDynamamic{ false };
-    std::atomic<bool> m_frequencyIsLogarithmic{ true };
+    std::atomic<bool> m_volumeRangeIsDynamamic { false };
+    std::atomic<bool> m_frequencyIsLogarithmic { true };
     std::atomic<bool> ecoMode { false };
+    std::atomic<bool> m_dynamicRangeNeedsHostUpdate { false };
+    std::atomic<int> m_refreshMs { 60 };
 
-    std::vector<float> m_fifo;
+    std::array<float, kRingCapacity> m_ring {};
+    std::atomic<size_t> m_ringWritePos { 0 };
+    std::atomic<size_t> m_ringFilled { 0 };
+
+    std::array<float, kRingCapacity> m_preRing {};
+    std::atomic<size_t> m_preRingWritePos { 0 };
+    std::atomic<size_t> m_preRingFilled { 0 };
+
     std::vector<float> m_fftData;
-    std::atomic<size_t> m_preFifoIndex { 0 };
-    std::vector<float> m_preFifo;
     std::vector<float> m_preFftData;
     std::vector<float> m_volumsDynamicData;
     std::vector<float> m_volumsMaximumData;
@@ -135,17 +155,20 @@ private:
     std::vector<float> m_scopeMaximumData;
     std::vector<float> m_scopePreData;
 
-    std::atomic<size_t> m_avgFactor{ 1 };
-    std::atomic<size_t> m_avgFifoSize{ 0 };
-    std::atomic<size_t> m_avgFifoWritePointer{ 0 };
-    size_t              m_avgFifoReadPointer;
-    static const size_t m_avgFifoMaximumSize{ 16 };
+    std::atomic<size_t> m_avgFactor { 1 };
+    std::atomic<size_t> m_avgFifoSize { 0 };
+    std::atomic<size_t> m_avgFifoWritePointer { 0 };
+    size_t              m_avgFifoReadPointer { 0 };
+    static const size_t m_avgFifoMaximumSize { 16 };
 
     std::array<std::vector<float>, m_avgFifoMaximumSize> m_avgData;
 
     juce::CriticalSection m_volumeRangeChange;
-    float m_maximumVolumeInDecibels{ 12.0f };
-    float m_minimumVolumeInDecibels{ -120.0f };
+    juce::CriticalSection m_analysisLock;
+    juce::CriticalSection m_scopeLock;
+
+    float m_maximumVolumeInDecibels { 12.0f };
+    float m_minimumVolumeInDecibels { -120.0f };
 
     std::atomic<float> m_offset { 1.0f };
     std::atomic<double> m_sampleRate { 48000.0 };
@@ -154,6 +177,5 @@ private:
 
     double m_lastMaxHoldUpdateMs { 0.0 };
 
-    // ========================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Analyser)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Analyser)
 };

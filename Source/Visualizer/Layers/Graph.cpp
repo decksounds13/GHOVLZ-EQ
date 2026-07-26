@@ -19,10 +19,10 @@ Graph::Graph(
 
   //  toBack();
 
-    // Match 240-ish cadence: REFRESH_ID is ms (default 33 ≈ 30 fps).
-    // Backup used startTimer(60) (~16 fps); prefer the parameter so menu Refresh still works.
+    // REFRESH_ID drives UI paint polling; analysis thread uses the same interval
+    // to FFT the latest Block window (Ableton-style overlapping refresh).
     {
-        int refreshMs = 33;
+        int refreshMs = 60;
         if (auto* p = mr_audioProcessorValueTreeState.getRawParameterValue ("REFRESH_ID"))
             refreshMs = juce::jlimit (16, 200, (int) std::lround (p->load()));
         startTimer (refreshMs);

@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 
+#include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
 #include "CustomScrollBar.h"
 
@@ -17,6 +18,7 @@ public:
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     class Content : public juce::Component,
                     private juce::AudioProcessorValueTreeState::Listener
@@ -35,12 +37,15 @@ private:
         void styleSlider (juce::Slider& slider);
         void styleLabel (juce::Label& label);
         void styleToggle (juce::ToggleButton& toggle);
+        void styleSettingsCombo (juce::ComboBox& combo);
         void styleSaveDefaultButton (juce::TextButton& button);
         void saveAnalyserDefaults();
         void layoutSliderRow (juce::Rectangle<int>& area, juce::Label& label, juce::Slider& slider);
+        void layoutComboRow (juce::Rectangle<int>& area, juce::Label& label, juce::ComboBox& combo);
 
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
+        ComboBoxLookAndFeel comboLookAndFeel;
 
         juce::Label titleLabel;
         juce::TextButton saveDefaultButton { "Save Default" };
@@ -52,6 +57,14 @@ private:
 
         juce::ToggleButton fullHeightToggle { "Full Height Bars" };
         std::unique_ptr<ButtonAttachment> fullHeightAttachment;
+
+        juce::Label blockSizeLabel;
+        juce::ComboBox blockSizeCombo;
+        std::unique_ptr<ComboBoxAttachment> blockSizeAttachment;
+
+        juce::Label refreshLabel;
+        juce::Slider refreshSlider;
+        std::unique_ptr<SliderAttachment> refreshAttachment;
 
         juce::Label opacityLabel;
         juce::Slider opacitySlider;

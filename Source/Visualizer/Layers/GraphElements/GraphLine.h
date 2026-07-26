@@ -59,6 +59,8 @@ protected:
     std::vector<float> m_smoothScratch;
     std::vector<float> m_peakScratch;
     std::vector<char> m_hasBinScratch;
+    std::vector<float> m_pointXScratch;
+    std::vector<float> m_pointMagScratch;
 
     // ========================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GraphLine)

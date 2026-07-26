@@ -73,6 +73,20 @@ private:
     void advanceDisplayFromRing();
     void showContextMenu();
     void appendColumnStub (juce::Path& path, float px, float yMax, float yMin) const;
+
+    /** High-quality continuous min/max envelopes (+ soft fill) for one plot lane. */
+    void paintEnvelopeLane (juce::Graphics& g,
+                            juce::Rectangle<float> plot,
+                            float pathWidth,
+                            float lineOpacity,
+                            bool highQuality,
+                            bool glowEnabled,
+                            float glowOpacity,
+                            float glowRadius,
+                            float glowSpread,
+                            bool useLeft,
+                            bool useRight);
+
     void strokeWaveform (juce::Graphics& g, const juce::Path& waveform,
                          float pathWidth, float lineOpacity, bool highQuality,
                          bool glowEnabled, float glowOpacity, float glowRadius, float glowSpread);

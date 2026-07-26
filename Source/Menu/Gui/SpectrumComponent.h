@@ -40,7 +40,7 @@ private:
         void styleToggle (juce::ToggleButton& toggle);
         void styleScaleButton (juce::TextButton& button);
         void styleSaveDefaultButton (juce::TextButton& button);
-        void styleCurveSmoothCombo (juce::ComboBox& combo);
+        void styleSettingsCombo (juce::ComboBox& combo);
 
         void saveAnalyserDefaults();
         void layoutSliderRow (juce::Rectangle<int>& area, juce::Label& label, juce::Slider& slider);
@@ -57,10 +57,22 @@ private:
         juce::ToggleButton enableToggle { "Show Analyser" };
         std::unique_ptr<ButtonAttachment> enableAttachment;
 
+        juce::Label blockSizeLabel;
+        juce::ComboBox blockSizeCombo;
+        std::unique_ptr<ComboBoxAttachment> blockSizeAttachment;
+
+        juce::Label refreshLabel;
+        juce::Slider refreshSlider;
+        std::unique_ptr<SliderAttachment> refreshAttachment;
+
+        juce::Label avgLabel;
+        juce::Slider avgSlider;
+        std::unique_ptr<SliderAttachment> avgAttachment;
+
         juce::Label curveSmoothLabel;
         juce::ComboBox curveSmoothCombo;
         std::unique_ptr<ComboBoxAttachment> curveSmoothAttachment;
-        ComboBoxLookAndFeel curveSmoothLookAndFeel;
+        ComboBoxLookAndFeel comboLookAndFeel;
 
         juce::ToggleButton multicolorBandFillToggle { "Multicolor Band Fill" };
         std::unique_ptr<ButtonAttachment> multicolorBandFillAttachment;

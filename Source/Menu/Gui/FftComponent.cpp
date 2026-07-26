@@ -46,6 +46,25 @@ FftComponent::Content::Content (SharedResources& resources, juce::AudioProcessor
     addAndMakeVisible (fullHeightToggle);
     fullHeightAttachment = std::make_unique<ButtonAttachment> (treeState, "FFT_FULL_HEIGHT_ID", fullHeightToggle);
 
+    blockSizeLabel.setText ("FFT Block Size", juce::dontSendNotification);
+    styleSettingsCombo (blockSizeCombo);
+    {
+        const auto names = AnalyserDefaults::getBlockSizeNames();
+        for (int i = 0; i < names.size(); ++i)
+            blockSizeCombo.addItem (names[i], i + 1);
+    }
+    addAndMakeVisible (blockSizeLabel);
+    addAndMakeVisible (blockSizeCombo);
+    blockSizeAttachment = std::make_unique<ComboBoxAttachment> (treeState, "BLOCK_ID", blockSizeCombo);
+
+    refreshLabel.setText ("Refresh", juce::dontSendNotification);
+    styleSlider (refreshSlider);
+    refreshSlider.setTextValueSuffix (" ms");
+    refreshSlider.setTooltip ("How often analysis runs on the latest Block window. Faster = smoother & more CPU.");
+    addAndMakeVisible (refreshLabel);
+    addAndMakeVisible (refreshSlider);
+    refreshAttachment = std::make_unique<SliderAttachment> (treeState, "REFRESH_ID", refreshSlider);
+
     opacityLabel.setText ("Opacity", juce::dontSendNotification);
     barWidthLabel.setText ("Bar Width", juce::dontSendNotification);
     intensityLabel.setText ("Intensity", juce::dontSendNotification);
@@ -106,6 +125,8 @@ FftComponent::Content::Content (SharedResources& resources, juce::AudioProcessor
     glowOffsetYAttachment = std::make_unique<SliderAttachment> (treeState, "FFT_GLOW_OFFSET_Y_ID", glowOffsetYSlider);
 
     styleLabel (titleLabel);
+    styleLabel (blockSizeLabel);
+    styleLabel (refreshLabel);
     styleLabel (opacityLabel);
     styleLabel (barWidthLabel);
     styleLabel (intensityLabel);
@@ -129,6 +150,7 @@ FftComponent::Content::Content (SharedResources& resources, juce::AudioProcessor
 
 FftComponent::Content::~Content()
 {
+    blockSizeCombo.setLookAndFeel (nullptr);
     treeState.removeParameterListener ("FFT_RESOLUTION_ID", this);
 }
 
@@ -184,6 +206,12 @@ void FftComponent::Content::styleToggle (juce::ToggleButton& toggle)
     toggle.setColour (juce::ToggleButton::tickDisabledColourId, juce::Colours::darkgrey);
 }
 
+void FftComponent::Content::styleSettingsCombo (juce::ComboBox& combo)
+{
+    combo.setLookAndFeel (&comboLookAndFeel);
+    combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
+}
+
 void FftComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
 {
     button.setClickingTogglesState (false);
@@ -212,14 +240,23 @@ void FftComponent::Content::layoutSliderRow (juce::Rectangle<int>& area, juce::L
     area.removeFromTop (kRowGap);
 }
 
+void FftComponent::Content::layoutComboRow (juce::Rectangle<int>& area, juce::Label& label, juce::ComboBox& combo)
+{
+    label.setBounds (area.removeFromTop (kLabelH));
+    area.removeFromTop (kLabelGap);
+    combo.setBounds (area.removeFromTop (kSliderH).removeFromLeft (juce::jmin (220, area.getWidth())));
+    area.removeFromTop (kRowGap);
+}
+
 int FftComponent::Content::getPreferredHeight() const
 {
-    // title + show bars + show bins + full height + 4 sliders + glow toggle + 5 glow sliders
+    // title + show bars + show bins + full height + block + refresh + 4 sliders + glow toggle + 5 glow sliders
     return kContentPadY * 2
            + 24 + 8
            + 22 + 6
            + 22 + 6
            + 22 + 8
+           + (2 * (kLabelH + kLabelGap + kSliderH + kRowGap))
            + (4 * (kLabelH + kLabelGap + kSliderH + kRowGap))
            + 22 + 6
            + (5 * (kLabelH + kLabelGap + kSliderH + kRowGap));
@@ -242,6 +279,9 @@ void FftComponent::Content::resized()
 
     fullHeightToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
     area.removeFromTop (8);
+
+    layoutComboRow (area, blockSizeLabel, blockSizeCombo);
+    layoutSliderRow (area, refreshLabel, refreshSlider);
 
     layoutSliderRow (area, opacityLabel, opacitySlider);
     layoutSliderRow (area, barWidthLabel, barWidthSlider);

@@ -8,7 +8,7 @@ RefreshControl::RefreshControl(
     addAndMakeVisible( m_refreshSlider );
     m_refreshSlider.setSliderStyle( juce::Slider::SliderStyle::LinearBar );
     m_refreshSlider.setRange( 16, 200, 1 );
-    m_refreshSlider.setValue( 33, juce::dontSendNotification );
+    m_refreshSlider.setValue( 60, juce::dontSendNotification );
     m_refreshSlider.setTextValueSuffix( " ms" );
     m_refreshSlider.setColour(juce::Slider::trackColourId, juce::Colours::darkgoldenrod.withAlpha(0.5f));
     m_refreshSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::whitesmoke.withAlpha(0.8f));

@@ -57,8 +57,6 @@ namespace
         columns.swap (scratch);
     }
 
-    struct BinPoint { float xNorm; float mag; };
-
     /**
      * Standard analyzer reduction onto display columns:
      * - Multiple FFT bins in one pixel → peak (max) of those bins
@@ -75,15 +73,19 @@ namespace
                                ReadBinFn&& readBin,
                                std::vector<float>& outY,
                                std::vector<float>& peakScratch,
-                               std::vector<char>& hasBinScratch)
+                               std::vector<char>& hasBinScratch,
+                               std::vector<float>& pointX,
+                               std::vector<float>& pointMag)
     {
         outY.assign ((size_t) numColumns, height);
 
         if (numColumns < 2 || lastBin < 1)
             return;
 
-        std::vector<BinPoint> points;
-        points.reserve ((size_t) lastBin);
+        pointX.clear();
+        pointMag.clear();
+        pointX.reserve ((size_t) lastBin);
+        pointMag.reserve ((size_t) lastBin);
 
         for (int b = 1; b <= lastBin; ++b)
         {
@@ -91,20 +93,21 @@ namespace
             if (xNorm < 0.0f || xNorm > 1.0f)
                 continue;
 
-            points.push_back ({ xNorm, juce::jlimit (0.0f, 1.0f, readBin ((size_t) b)) });
+            pointX.push_back (xNorm);
+            pointMag.push_back (juce::jlimit (0.0f, 1.0f, readBin ((size_t) b)));
         }
 
-        if (points.size() < 2)
+        if (pointX.size() < 2)
             return;
 
         peakScratch.assign ((size_t) numColumns, -1.0f);
         hasBinScratch.assign ((size_t) numColumns, 0);
 
-        for (const auto& p : points)
+        for (size_t i = 0; i < pointX.size(); ++i)
         {
             const int col = juce::jlimit (0, numColumns - 1,
-                                          (int) std::floor (p.xNorm * (float) numColumns));
-            peakScratch[(size_t) col] = juce::jmax (peakScratch[(size_t) col], p.mag);
+                                          (int) std::floor (pointX[i] * (float) numColumns));
+            peakScratch[(size_t) col] = juce::jmax (peakScratch[(size_t) col], pointMag[i]);
             hasBinScratch[(size_t) col] = 1;
         }
 
@@ -123,22 +126,22 @@ namespace
             {
                 const float xNorm = ((float) c + 0.5f) / (float) numColumns;
 
-                while (leftPt + 1 < points.size() && points[leftPt + 1].xNorm < xNorm)
+                while (leftPt + 1 < pointX.size() && pointX[leftPt + 1] < xNorm)
                     ++leftPt;
 
-                const size_t rightPt = juce::jmin (points.size() - 1, leftPt + 1);
-                const auto& a = points[leftPt];
-                const auto& b = points[rightPt];
-                const float span = b.xNorm - a.xNorm;
+                const size_t rightPt = juce::jmin (pointX.size() - 1, leftPt + 1);
+                const float ax = pointX[leftPt];
+                const float bx = pointX[rightPt];
+                const float span = bx - ax;
 
                 if (span > 1.0e-6f)
                 {
-                    const float t = juce::jlimit (0.0f, 1.0f, (xNorm - a.xNorm) / span);
-                    mag = a.mag + (b.mag - a.mag) * t;
+                    const float t = juce::jlimit (0.0f, 1.0f, (xNorm - ax) / span);
+                    mag = pointMag[leftPt] + (pointMag[rightPt] - pointMag[leftPt]) * t;
                 }
                 else
                 {
-                    mag = a.mag;
+                    mag = pointMag[leftPt];
                 }
             }
 
@@ -302,7 +305,8 @@ void GraphLine::drawFrame (juce::Graphics& g)
         {
             reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
                                   [this] (size_t i) { return mr_analyser.getScopePreData (i); },
-                                  m_columnPre, m_peakScratch, m_hasBinScratch);
+                                  m_columnPre, m_peakScratch, m_hasBinScratch,
+                                  m_pointXScratch, m_pointMagScratch);
             smoothColumns (m_columnPre, m_smoothScratch, smoothRadius);
             appendColumnPath (preCurve, m_columnPre, width);
         }
@@ -311,7 +315,8 @@ void GraphLine::drawFrame (juce::Graphics& g)
         {
             reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
                                   [this] (size_t i) { return getScopeDataFromAnalyser (i); },
-                                  m_columnPost, m_peakScratch, m_hasBinScratch);
+                                  m_columnPost, m_peakScratch, m_hasBinScratch,
+                                  m_pointXScratch, m_pointMagScratch);
             smoothColumns (m_columnPost, m_smoothScratch, smoothRadius);
             appendColumnPath (postCurve, m_columnPost, width);
         }
@@ -320,7 +325,8 @@ void GraphLine::drawFrame (juce::Graphics& g)
         {
             reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
                                   [this] (size_t i) { return mr_analyser.getScopeMaximumsData (i); },
-                                  m_columnHold, m_peakScratch, m_hasBinScratch);
+                                  m_columnHold, m_peakScratch, m_hasBinScratch,
+                                  m_pointXScratch, m_pointMagScratch);
             smoothColumns (m_columnHold, m_smoothScratch, smoothRadius);
             appendColumnPath (holdCurve, m_columnHold, width);
         }
