@@ -43,6 +43,9 @@ public:
     void setSampleRate (double sampleRate);
     double getSampleRate() const;
 
+    /** BLOCK_ID menu index: 0=2048, 1=4096, 2=8192, 3=16384. */
+    void setFFTBlockSize (int);
+
     /** Display axis matches EQ FrequencyResponseComponent: 20 Hz … min(20 kHz, Nyquist). */
     static constexpr float kMinDisplayFrequencyHz = 20.0f;
     static constexpr float kMaxDisplayFrequencyHz = 20000.0f;
@@ -84,7 +87,6 @@ private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void run() override;
 
-    void setFFTBlockSize (int);
     void setActiveChannel (Channels);
     void setAvg (size_t);
     void setVolumeScaleModeAsDynamic (bool);

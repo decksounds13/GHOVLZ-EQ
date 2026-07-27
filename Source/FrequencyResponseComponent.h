@@ -64,6 +64,8 @@ public:
     void mouseMove(const juce::MouseEvent& event) override;
 
     void showOptionBoxForHandle (int bandIndex, float handlePosX, float handlePosY);
+    /** Open / focus OptionBox for a band using its current handle position (faceplate clicks). */
+    void showOptionBoxForBand (int bandIndex);
     void showHandleModMenu (int bandIndex);
     void resetBandToDefaultsAndDeactivate (int bandIndex);
     void activateOrSelectBandAtFrequency (float frequencyHz);

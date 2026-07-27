@@ -24,7 +24,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
  
     juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
 
-    setSize(150, 150);  // Setting the size of the component
+    setSize (designWidth, designHeight);
 
     // ComboBox is populated per-band in setupFilterModelMenu().
     // Same pattern as working Level Meters / Spectrum combos (stock ComboBox + colour LAF).
@@ -36,8 +36,19 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     customComboBox.setColour(juce::ComboBox::outlineColourId, comboBoxOutlineColor);
     customComboBox.setColour(juce::ComboBox::arrowColourId, PluginMenuTheme::text());
     customComboBox.setColour(juce::ComboBox::buttonColourId, comboBoxBackgroundColor);
+    customComboBox.setTooltip ("Filter model");
 
-    // Per-band saturation — right of filter model dropdown.
+    filterSlopeComboBox.setLookAndFeel (&customLookAndFeel);
+    filterSlopeComboBox.addListener (this);
+    addChildComponent (filterSlopeComboBox);
+    filterSlopeComboBox.setColour (juce::ComboBox::backgroundColourId, comboBoxBackgroundColor);
+    filterSlopeComboBox.setColour (juce::ComboBox::textColourId, PluginMenuTheme::text());
+    filterSlopeComboBox.setColour (juce::ComboBox::outlineColourId, comboBoxOutlineColor);
+    filterSlopeComboBox.setColour (juce::ComboBox::arrowColourId, PluginMenuTheme::text());
+    filterSlopeComboBox.setColour (juce::ComboBox::buttonColourId, comboBoxBackgroundColor);
+    filterSlopeComboBox.setTooltip ("Slope - highpass / lowpass steepness");
+
+    // Per-band saturation — right of filter model / slope dropdowns.
     satButton.setClickingTogglesState (true);
     satButton.setTooltip ("Saturation - raising band gain adds harmonics in that region (Q sets how wide). Right-click to choose a model or oversampling.");
     satButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
@@ -207,6 +218,17 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     spectralPackButton.addListener (this);
     addChildComponent (spectralPackButton);
 
+    // Per-band local lattice — same footprint as Pack; sits above Res when S is on.
+    spectralPerBandLatticeButton.setClickingTogglesState (true);
+    spectralPerBandLatticeButton.setTooltip (
+        "Per-band (default on) - each S band has its own local lattice and independent Res. Off: all S bands share the old global linked lattice (like Side Check). Amount is always per-band.");
+    spectralPerBandLatticeButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
+    spectralPerBandLatticeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
+    spectralPerBandLatticeButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
+    spectralPerBandLatticeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    spectralPerBandLatticeButton.setLookAndFeel (&myTextButtonLookAndFeel);
+    addChildComponent (spectralPerBandLatticeButton);
+
     dynThresholdSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     dynThresholdSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     dynThresholdSlider.setTooltip ("Threshold - level where dynamic EQ starts engaging");
@@ -220,7 +242,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     spectralBandwidthSlider.setSliderStyle (juce::Slider::LinearVertical);
     spectralBandwidthSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     spectralBandwidthSlider.setTooltip (
-        "Res (global) - sets how many bandpass filters tile the shared spectral lattice for all S bands. Finer = more filters / more CPU. Linked across every band.");
+        "Res - bandpass density. Global lattice: denser shared grid. With PB on: ~4 filters (broad) up to 128 (surgical) inside each band's Q.");
     spectralBandwidthSlider.setColour (juce::Slider::backgroundColourId, juce::Colour::fromRGBA (40, 35, 28, 255));
     spectralBandwidthSlider.setColour (juce::Slider::trackColourId, juce::Colour::fromRGBA (180, 150, 55, 220));
     spectralBandwidthSlider.setColour (juce::Slider::thumbColourId, juce::Colour::fromRGBA (220, 200, 120, 255));
@@ -283,11 +305,14 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
 
     bool isDraggable = true;
 
+    treeState.addParameterListener (SpectralPerBandLattice::enabledParamId(), this);
+
     resized();
 }
 
 OptionBoxMenu::~OptionBoxMenu()
 {
+    treeState.removeParameterListener (SpectralPerBandLattice::enabledParamId(), this);
     listenToCurrentBandOnOff (false);
     listenToCurrentBandDynamic (false);
     listenToCurrentBandSpectral (false);
@@ -301,6 +326,8 @@ OptionBoxMenu::~OptionBoxMenu()
 
     customComboBox.removeListener (this);
     customComboBox.setLookAndFeel (nullptr);
+    filterSlopeComboBox.removeListener (this);
+    filterSlopeComboBox.setLookAndFeel (nullptr);
 
     // Remove the listener from each button
     midSelectorButton.removeListener(this);
@@ -313,6 +340,7 @@ OptionBoxMenu::~OptionBoxMenu()
     spectralButton.removeListener (this);
     spectralExpandButton.removeListener (this);
     spectralPackButton.removeListener (this);
+    spectralPerBandLatticeAttachment.reset();
     satButton.removeListener (this);
     satButton.removeMouseListener (this);
     satPrePostButton.removeListener (this);
@@ -335,6 +363,7 @@ OptionBoxMenu::~OptionBoxMenu()
     spectralButton.setLookAndFeel (nullptr);
     spectralExpandButton.setLookAndFeel (nullptr);
     spectralPackButton.setLookAndFeel (nullptr);
+    spectralPerBandLatticeButton.setLookAndFeel (nullptr);
     satButton.setLookAndFeel (nullptr);
     satPrePostButton.setLookAndFeel (nullptr);
     spectralSatButton.setLookAndFeel (nullptr);
@@ -444,13 +473,34 @@ void OptionBoxMenu::resized()
     const int nameRight = onOffButton1->getX() - 2;
     bandNameLabel.setBounds (nameLeft, labelY, juce::jmax (20, nameRight - nameLeft), labelHeight);
 
-    const int comboW = juce::roundToInt (getWidth() * 0.42);
     const int satBtnW = 28;
     const int prePostW = 32;
     const int satGap = 3;
-    customComboBox.setBounds(padding * 3, bandNameLabel.getBottom() + elementYSpacing, comboW, comboBoxHeight);
-    satButton.setBounds (customComboBox.getRight() + satGap, customComboBox.getY(), satBtnW, comboBoxHeight);
-    satPrePostButton.setBounds (satButton.getRight() + satGap, customComboBox.getY(), prePostW, comboBoxHeight);
+    const int slopeGap = 3; // ~2.5px padding between type and slope
+    const int slopeW = 64; // "12 dB/oct" with compact combo LAF
+    const bool showSlope = currentBandShowsFilterSlope();
+    const int rowY = bandNameLabel.getBottom() + elementYSpacing;
+    const int rowLeft = padding * 3;
+    const int rowRightLimit = getWidth() - padding;
+
+    if (showSlope)
+    {
+        // Type + slope on one row (no clip); Sat/Pre drop under so the right edge stays clear.
+        const int comboW = juce::jmax (72, rowRightLimit - rowLeft - slopeGap - slopeW);
+        customComboBox.setBounds (rowLeft, rowY, comboW, comboBoxHeight);
+        filterSlopeComboBox.setBounds (customComboBox.getRight() + slopeGap, rowY, slopeW, comboBoxHeight);
+        satButton.setBounds (rowLeft, customComboBox.getBottom() + 3, satBtnW, comboBoxHeight);
+        satPrePostButton.setBounds (satButton.getRight() + satGap, satButton.getY(), prePostW, comboBoxHeight);
+    }
+    else
+    {
+        filterSlopeComboBox.setBounds ({});
+        const int satBlockW = satBtnW + satGap + prePostW;
+        const int comboW = juce::jmax (72, rowRightLimit - rowLeft - satGap - satBlockW);
+        customComboBox.setBounds (rowLeft, rowY, comboW, comboBoxHeight);
+        satButton.setBounds (customComboBox.getRight() + satGap, rowY, satBtnW, comboBoxHeight);
+        satPrePostButton.setBounds (satButton.getRight() + satGap, rowY, prePostW, comboBoxHeight);
+    }
 
     // Post drive under Pre/Post — same compact footprint as Side Check HP/LP (~btnSize).
     constexpr int satDriveSize = 20;
@@ -501,10 +551,10 @@ void OptionBoxMenu::resized()
         addAndMakeVisible(qLabel);
     }
 
-    // Calculate the position for the text buttons under the customComboBox
+    // M/S/L/R under the filter-type row (or under Sat when slope pushed Sat down).
     int buttonWidth = 15;  // Width for each of M, S, L, R buttons
     int buttonHeight = 20; // Height for each of M, S, L, R buttons
-    int comboBoxBottom = customComboBox.getBottom();
+    int comboBoxBottom = showSlope ? satButton.getBottom() : customComboBox.getBottom();
     int spacing = 5;  // Spacing between the buttons
 
     // Calculate x-positions for M, S, L, R buttons
@@ -578,10 +628,13 @@ void OptionBoxMenu::resized()
     const int sliderH = 44;
     const int packBtnH = 14;
     const int packBtnW = sliderColW; // narrow — under one slider column
-    const int sliderTop = dynRowY;
-    const int sliderTrackY = sliderTop + sliderLabelH;
     const int resX = dynamicButton.getRight() + 4;
     const int amountX = resX + sliderColW + sliderGap;
+    // PB sits above Res (same size as Pack); Res/Amt shift down to make room.
+    const int pbY = dynRowY;
+    spectralPerBandLatticeButton.setBounds (resX, pbY, packBtnW, packBtnH);
+    const int sliderTop = pbY + packBtnH + 2;
+    const int sliderTrackY = sliderTop + sliderLabelH;
 
     spectralResLabel.setBounds (resX - 2, sliderTop, sliderColW + 4, sliderLabelH);
     spectralBandwidthSlider.setBounds (resX, sliderTrackY, sliderColW, sliderH);
@@ -1010,6 +1063,17 @@ void OptionBoxMenu::parameterChanged (const juce::String& parameterID, float new
                 safe->syncSpectralPackButton();
         });
     }
+    else if (parameterID == SpectralPerBandLattice::enabledParamId())
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
+        {
+            if (safe == nullptr)
+                return;
+            // PB on/off switches Res between per-band and linked global.
+            safe->bindSpectralResSlider (safe->currentBandIndex);
+            safe->updateDynamicControlsVisibility();
+        });
+    }
 }
 
 void OptionBoxMenu::sliderDragStarted (juce::Slider* slider)
@@ -1048,6 +1112,7 @@ void OptionBoxMenu::clearAttachments()
     dynamicButtonAttachment.reset();
     spectralButtonAttachment.reset();
     spectralExpandButtonAttachment.reset();
+    spectralPerBandLatticeAttachment.reset();
     satButtonAttachment.reset();
     satPostButtonAttachment.reset();
     satDriveAttachment.reset();
@@ -1056,6 +1121,12 @@ void OptionBoxMenu::clearAttachments()
     spectralSatButtonAttachment.reset();
     spectralSatDriveAttachment.reset();
     filterModelAttachment.reset();
+    filterSlopeAttachment.reset();
+}
+
+bool OptionBoxMenu::currentBandShowsFilterSlope() const
+{
+    return FilterType::isHpLp (customComboBox.getSelectedItemIndex());
 }
 
 bool OptionBoxMenu::currentBandSupportsDynamic() const
@@ -1113,19 +1184,21 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
     attackLabel.setVisible (showAR);
     releaseLabel.setVisible (showAR);
 
-    // S exposes Res + Amount + Expand + Pack (FL/LP/HP). Keep these hidden until S is on.
+    // S exposes Res + Amount + Expand + Pack + PB. Keep these hidden until S is on.
     spectralBandwidthSlider.setVisible (sOn);
     spectralResLabel.setVisible (sOn);
     spectralAmountSlider.setVisible (sOn);
     spectralAmountLabel.setVisible (sOn);
     spectralExpandButton.setVisible (sOn);
     spectralPackButton.setVisible (sOn);
+    spectralPerBandLatticeButton.setVisible (sOn);
     if (! sOn)
     {
         // Belt-and-suspenders: never leave Stage-2 / pack chrome up when S is off.
         spectralSatButton.setVisible (false);
         spectralSatDriveKnob.setVisible (false);
         spectralPackButton.setBounds ({});
+        spectralPerBandLatticeButton.setBounds ({});
         spectralBandwidthSlider.setBounds ({});
         spectralAmountSlider.setBounds ({});
         spectralResLabel.setBounds ({});
@@ -1139,6 +1212,9 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
         spectralAmountSlider.setTooltip (spectralExpandButton.getToggleState()
             ? "Amount - pull down for more spectral resonance expansion"
             : "Amount - pull down for more spectral resonance attenuation");
+        spectralBandwidthSlider.setTooltip (spectralPerBandLatticeButton.getToggleState()
+            ? "Res (this band) - independent per-band density: ~4 BPs coarse (broad) up to 128 fine (surgical) inside this band's Q"
+            : "Res (global / linked) - one density for every S band on the shared lattice. Turn PB on for per-band Res");
     }
 
     syncSatControls();
@@ -1170,7 +1246,6 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     const auto threshID = DynamicEq::thresholdParamIDForBandIndex (bandIndex);
     const auto attackID = DynamicEq::attackMsParamIDForBandIndex (bandIndex);
     const auto releaseID = DynamicEq::releaseMsParamIDForBandIndex (bandIndex);
-    const auto resHzID = juce::String (SpectralDynamics::spectralResHzParamId());
     const auto amountID = SpectralDynamics::spectralAmountParamIDForBandIndex (bandIndex);
     const auto expandID = SpectralDynamics::spectralExpandParamIDForBandIndex (bandIndex);
     const auto satID = BandSaturation::satParamIDForBandIndex (bandIndex);
@@ -1201,6 +1276,11 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     if (expandID.isNotEmpty())
         spectralExpandButtonAttachment = std::make_unique<ButtonAttachment> (
             treeState, expandID, spectralExpandButton);
+
+    // Global PB toggle — keep attachment across band switches.
+    if (spectralPerBandLatticeAttachment == nullptr)
+        spectralPerBandLatticeAttachment = std::make_unique<ButtonAttachment> (
+            treeState, SpectralPerBandLattice::enabledParamId(), spectralPerBandLatticeButton);
 
     if (satID.isNotEmpty())
         satButtonAttachment = std::make_unique<ButtonAttachment> (treeState, satID, satButton);
@@ -1294,21 +1374,7 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     bindTimeKnob (attackID, attackKnob, attackMsAttachment);
     bindTimeKnob (releaseID, releaseKnob, releaseMsAttachment);
 
-    if (resHzID.isNotEmpty())
-    {
-        if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (treeState.getParameter (resHzID)))
-        {
-            const auto range = param->getNormalisableRange();
-            spectralBandwidthSlider.setNormalisableRange (juce::NormalisableRange<double> (
-                (double) range.start,
-                (double) range.end,
-                (double) range.interval,
-                (double) range.skew,
-                range.symmetricSkew));
-            spectralBandwidthAttachment = std::make_unique<SliderAttachment> (
-                treeState, resHzID, spectralBandwidthSlider);
-        }
-    }
+    bindSpectralResSlider (bandIndex);
 
     if (amountID.isNotEmpty())
     {
@@ -1352,6 +1418,38 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     updateDynamicControlsVisibility();
 }
 
+bool OptionBoxMenu::isPerBandLatticeEnabled() const
+{
+    if (auto* v = treeState.getRawParameterValue (SpectralPerBandLattice::enabledParamId()))
+        return v->load() > 0.5f;
+    return true; // matches parameter default
+}
+
+void OptionBoxMenu::bindSpectralResSlider (int bandIndex)
+{
+    spectralBandwidthAttachment.reset();
+
+    const auto resHzID = isPerBandLatticeEnabled()
+        ? SpectralDynamics::spectralResHzParamIDForBandIndex (bandIndex)
+        : juce::String (SpectralDynamics::spectralResHzParamId());
+
+    if (resHzID.isEmpty())
+        return;
+
+    if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (treeState.getParameter (resHzID)))
+    {
+        const auto range = param->getNormalisableRange();
+        spectralBandwidthSlider.setNormalisableRange (juce::NormalisableRange<double> (
+            (double) range.start,
+            (double) range.end,
+            (double) range.interval,
+            (double) range.skew,
+            range.symmetricSkew));
+        spectralBandwidthAttachment = std::make_unique<SliderAttachment> (
+            treeState, resHzID, spectralBandwidthSlider);
+    }
+}
+
 void OptionBoxMenu::setupFilterModelMenu (int bandIndex)
 {
     filterModelAttachment.reset();
@@ -1369,8 +1467,44 @@ void OptionBoxMenu::setupFilterModelMenu (int bandIndex)
     customComboBox.setEnabled (typeID.isNotEmpty());
 }
 
+void OptionBoxMenu::setupFilterSlopeMenu (int bandIndex)
+{
+    filterSlopeAttachment.reset();
+    filterSlopeComboBox.clear (juce::dontSendNotification);
+
+    const auto slopeID = FilterSlope::paramIDForBandIndex (bandIndex);
+    if (slopeID.isEmpty())
+    {
+        filterSlopeComboBox.setVisible (false);
+        return;
+    }
+
+    const auto names = FilterSlope::getChoiceNames();
+    for (int i = 0; i < names.size(); ++i)
+        filterSlopeComboBox.addItem (names[i], i + 1);
+
+    filterSlopeAttachment = std::make_unique<ComboBoxAttachment> (
+        treeState, slopeID, filterSlopeComboBox);
+    updateFilterSlopeVisibility();
+}
+
+void OptionBoxMenu::updateFilterSlopeVisibility()
+{
+    const bool show = currentBandShowsFilterSlope();
+    filterSlopeComboBox.setVisible (show);
+    if (! show)
+        filterSlopeComboBox.setBounds ({});
+}
+
 void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
 {
+    if (comboBoxThatHasChanged == &filterSlopeComboBox)
+    {
+        if (undoManager != nullptr)
+            undoManager->beginNewTransaction ("Filter slope");
+        return;
+    }
+
     if (comboBoxThatHasChanged != &customComboBox)
         return;
 
@@ -1384,6 +1518,7 @@ void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
     gainLabel.setVisible (showGain);
     rotaryImageKnobForOptionBox3.setVisible (true);
     qLabel.setVisible (true);
+    updateFilterSlopeVisibility();
     updateDynamicControlsVisibility();
     resized();
 }
@@ -1392,6 +1527,7 @@ void OptionBoxMenu::bindKnobsToBand (int index)
 {
     clearAttachments();
     setupFilterModelMenu (index);
+    setupFilterSlopeMenu (index);
 
     auto attachFloat = [this] (std::unique_ptr<SliderAttachment>& attachment,
                                const juce::String& paramID,

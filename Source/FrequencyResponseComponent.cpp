@@ -82,10 +82,16 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     parameters.addParameterListener("highShelfFrequency", this);
     parameters.addParameterListener("highShelfQ", this);
     parameters.addParameterListener("highShelfType", this);
+    parameters.addParameterListener("highShelfSlope", this);
     parameters.addParameterListener("lowShelfGain", this);
     parameters.addParameterListener("lowShelfFrequency", this);
     parameters.addParameterListener("lowShelfQ", this);
     parameters.addParameterListener("lowShelfType", this);
+    parameters.addParameterListener("lowShelfSlope", this);
+    parameters.addParameterListener("band1Slope", this);
+    parameters.addParameterListener("band2Slope", this);
+    parameters.addParameterListener("band3Slope", this);
+    parameters.addParameterListener("band4Slope", this);
     parameters.addParameterListener("band1OnOff", this);
     parameters.addParameterListener("band2OnOff", this);
     parameters.addParameterListener("band3OnOff", this);
@@ -299,10 +305,16 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener("highShelfFrequency", this);
     parameters.removeParameterListener("highShelfQ", this);
     parameters.removeParameterListener("highShelfType", this);
+    parameters.removeParameterListener("highShelfSlope", this);
     parameters.removeParameterListener("lowShelfGain", this);
     parameters.removeParameterListener("lowShelfFrequency", this);
     parameters.removeParameterListener("lowShelfQ", this);
     parameters.removeParameterListener("lowShelfType", this);
+    parameters.removeParameterListener("lowShelfSlope", this);
+    parameters.removeParameterListener("band1Slope", this);
+    parameters.removeParameterListener("band2Slope", this);
+    parameters.removeParameterListener("band3Slope", this);
+    parameters.removeParameterListener("band4Slope", this);
     parameters.removeParameterListener("band1OnOff", this);
     parameters.removeParameterListener("band2OnOff", this);
     parameters.removeParameterListener("band3OnOff", this);
@@ -697,16 +709,33 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
 
     // Rebuild only dirty bands. needsUpdateCombined alone (e.g. band on/off / spectral GR)
     // just re-sums the cached per-band magnitude buffers below.
+    auto fillBandResponse = [&] (int type, float freq, float qBase, float gain,
+                                 const juce::String& slopeId, std::vector<float>& dest)
+    {
+        const float q = FilterType::effectiveBellQ (type, clampQ (qBase), gain, proportionalQOn);
+        const float f = clampFreq (freq);
+        if (FilterType::isHpLp (type))
+        {
+            const int slope = BandChannel::readChoiceIndex (parameters, slopeId);
+            auto stages = (type == FilterType::highpass)
+                ? FilterSlope::makeHighpassCoeffs (sampleRate, f, q, slope)
+                : FilterSlope::makeLowpassCoeffs (sampleRate, f, q, slope);
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
+        }
+        else
+        {
+            auto coeffs = FilterType::makeCoefficients (type, sampleRate, f, q, gain);
+            fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, dest, responseSampleStep);
+        }
+    };
+
     if (needsUpdateBand1)
     {
         const int type = (int) raw ("band1Type");
         const float gain = displayGain (live1 && FilterType::usesGain (type), raw ("band1Gain"), eg1);
         const float freq = live1 ? processor.getPublishedBand1Freq() : raw ("band1Frequency");
         const float qBase = live1 ? processor.getPublishedBand1Q() : raw ("band1Q");
-        const float q = FilterType::effectiveBellQ (type, clampQ (qBase), gain, proportionalQOn);
-        auto coeffs = FilterType::makeCoefficients (
-            type, sampleRate, clampFreq (freq), q, gain);
-        fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseBand1, responseSampleStep);
+        fillBandResponse (type, freq, qBase, gain, "band1Slope", responseBand1);
         lastDynCurveGain1 = gain;
     }
 
@@ -716,10 +745,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const float gain = displayGain (live2 && FilterType::usesGain (type), raw ("band2Gain"), eg2);
         const float freq = live2 ? processor.getPublishedBand2Freq() : raw ("band2Frequency");
         const float qBase = live2 ? processor.getPublishedBand2Q() : raw ("band2Q");
-        const float q = FilterType::effectiveBellQ (type, clampQ (qBase), gain, proportionalQOn);
-        auto coeffs = FilterType::makeCoefficients (
-            type, sampleRate, clampFreq (freq), q, gain);
-        fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseBand2, responseSampleStep);
+        fillBandResponse (type, freq, qBase, gain, "band2Slope", responseBand2);
         lastDynCurveGain2 = gain;
     }
 
@@ -729,10 +755,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const float gain = displayGain (live3 && FilterType::usesGain (type), raw ("band3Gain"), eg3);
         const float freq = live3 ? processor.getPublishedBand3Freq() : raw ("band3Frequency");
         const float qBase = live3 ? processor.getPublishedBand3Q() : raw ("band3Q");
-        const float q = FilterType::effectiveBellQ (type, clampQ (qBase), gain, proportionalQOn);
-        auto coeffs = FilterType::makeCoefficients (
-            type, sampleRate, clampFreq (freq), q, gain);
-        fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseBand3, responseSampleStep);
+        fillBandResponse (type, freq, qBase, gain, "band3Slope", responseBand3);
         lastDynCurveGain3 = gain;
     }
 
@@ -742,10 +765,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const float gain = displayGain (live4 && FilterType::usesGain (type), raw ("band4Gain"), eg4);
         const float freq = live4 ? processor.getPublishedBand4Freq() : raw ("band4Frequency");
         const float qBase = live4 ? processor.getPublishedBand4Q() : raw ("band4Q");
-        const float q = FilterType::effectiveBellQ (type, clampQ (qBase), gain, proportionalQOn);
-        auto coeffs = FilterType::makeCoefficients (
-            type, sampleRate, clampFreq (freq), q, gain);
-        fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseBand4, responseSampleStep);
+        fillBandResponse (type, freq, qBase, gain, "band4Slope", responseBand4);
         lastDynCurveGain4 = gain;
     }
 
@@ -754,20 +774,8 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const int type = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
         const float freq = clampFreq (raw ("highpassCutoff"));
         const float q = clampQ (raw ("highpassQ"));
-
-        // Match DSP: multi-slope cascade only for Highpass; other types = single biquad.
-        if (type == FilterType::highpass)
-        {
-            const int slope = BandChannel::readChoiceIndex (parameters, "highpassSlope");
-            auto stages = FilterSlope::makeHighpassCoeffs (sampleRate, freq, q, slope);
-            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, responseHighpass, responseSampleStep);
-        }
-        else
-        {
-            const float gain = FilterType::usesGain (type) ? raw ("highpassGain") : 0.0f;
-            auto coeffs = FilterType::makeCoefficients (type, sampleRate, freq, q, gain);
-            fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseHighpass, responseSampleStep);
-        }
+        const float gain = FilterType::usesGain (type) ? raw ("highpassGain") : 0.0f;
+        fillBandResponse (type, freq, q, gain, "highpassSlope", responseHighpass);
     }
 
     if (needsUpdateLowpass)
@@ -775,19 +783,8 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const int type = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
         const float freq = clampFreq (raw ("lowpassCutoff"));
         const float q = clampQ (raw ("lowpassQ"));
-
-        if (type == FilterType::lowpass)
-        {
-            const int slope = BandChannel::readChoiceIndex (parameters, "lowpassSlope");
-            auto stages = FilterSlope::makeLowpassCoeffs (sampleRate, freq, q, slope);
-            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, responseLowpass, responseSampleStep);
-        }
-        else
-        {
-            const float gain = FilterType::usesGain (type) ? raw ("lowpassGain") : 0.0f;
-            auto coeffs = FilterType::makeCoefficients (type, sampleRate, freq, q, gain);
-            fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseLowpass, responseSampleStep);
-        }
+        const float gain = FilterType::usesGain (type) ? raw ("lowpassGain") : 0.0f;
+        fillBandResponse (type, freq, q, gain, "lowpassSlope", responseLowpass);
     }
 
     if (needsUpdateHighShelf)
@@ -796,9 +793,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const float gain = displayGain (liveHS && FilterType::usesGain (type), raw ("highShelfGain"), egHS);
         const float freq = liveHS ? processor.getPublishedHighShelfFreq() : raw ("highShelfFrequency");
         const float q = clampQ (liveHS ? processor.getPublishedHighShelfQ() : raw ("highShelfQ"));
-        auto coeffs = FilterType::makeCoefficients (
-            type, sampleRate, clampFreq (freq), q, gain);
-        fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseHighShelf, responseSampleStep);
+        fillBandResponse (type, freq, q, gain, "highShelfSlope", responseHighShelf);
         lastDynCurveGainHS = gain;
     }
 
@@ -808,9 +803,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const float gain = displayGain (liveLS && FilterType::usesGain (type), raw ("lowShelfGain"), egLS);
         const float freq = liveLS ? processor.getPublishedLowShelfFreq() : raw ("lowShelfFrequency");
         const float q = clampQ (liveLS ? processor.getPublishedLowShelfQ() : raw ("lowShelfQ"));
-        auto coeffs = FilterType::makeCoefficients (
-            type, sampleRate, clampFreq (freq), q, gain);
-        fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseLowShelf, responseSampleStep);
+        fillBandResponse (type, freq, q, gain, "lowShelfSlope", responseLowShelf);
         lastDynCurveGainLS = gain;
     }
 
@@ -2361,6 +2354,36 @@ void FrequencyResponseComponent::showOptionBoxForHandle (int bandIndex, float ha
     lastHandlePopupWasOptionBox = true;
 }
 
+void FrequencyResponseComponent::showOptionBoxForBand (int bandIndex)
+{
+    if (bandIndex < 0 || bandIndex > 7)
+        return;
+
+    float hx = (float) getWidth() * 0.5f;
+    float hy = (float) getHeight() * 0.4f;
+
+    switch (bandIndex)
+    {
+        case 0: hx = handleX;  hy = handleY;  break;
+        case 1: hx = handleX2; hy = handleY2; break;
+        case 2: hx = handleX3; hy = handleY3; break;
+        case 3: hx = handleX4; hy = handleY4; break;
+        case 4: hx = handleX5; hy = handleY5; break;
+        case 5: hx = handleX6; hy = handleY6; break;
+        case 6: hx = handleX7; hy = handleY7; break;
+        case 7: hx = handleX8; hy = handleY8; break;
+        default: break;
+    }
+
+    if (hx < 0.0f || hy < 0.0f)
+    {
+        hx = (float) getWidth() * 0.5f;
+        hy = (float) getHeight() * 0.4f;
+    }
+
+    showOptionBoxForHandle (bandIndex, hx, hy);
+}
+
 //=======================================================================================================//
 void FrequencyResponseComponent::showHandleModMenu (int bandIndex)
 {
@@ -2960,12 +2983,9 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     if (event.getNumberOfClicks() >= 2)
         return;
 
-    const bool optionBoxAlreadyVisible = optionBoxMenu != nullptr && optionBoxMenu->isVisible();
-
     if (clickedHandle1 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (0, handleX, handleY);
+        showOptionBoxForHandle (0, handleX, handleY);
 
         isHandle1Dragging = true;
         anyHandleDragging = true;
@@ -2981,8 +3001,7 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     }
     else if (clickedHandle2 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (1, handleX2, handleY2);
+        showOptionBoxForHandle (1, handleX2, handleY2);
 
         isHandle2Dragging = true;
         anyHandleDragging = true;
@@ -2998,8 +3017,7 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     }
     else if (clickedHandle3 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (2, handleX3, handleY3);
+        showOptionBoxForHandle (2, handleX3, handleY3);
 
         isHandle3Dragging = true;
         anyHandleDragging = true;
@@ -3015,8 +3033,7 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     }
     else if (clickedHandle4 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (3, handleX4, handleY4);
+        showOptionBoxForHandle (3, handleX4, handleY4);
 
         isHandle4Dragging = true;
         anyHandleDragging = true;
@@ -3032,8 +3049,7 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     }
     else if (clickedHandle5 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (4, handleX5, handleY5);
+        showOptionBoxForHandle (4, handleX5, handleY5);
 
         isHandle5Dragging = true;
         anyHandleDragging = true;
@@ -3048,8 +3064,7 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     }
     else if (clickedHandle6 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (5, handleX6, handleY6);
+        showOptionBoxForHandle (5, handleX6, handleY6);
 
         isHandle6Dragging = true;
         anyHandleDragging = true;
@@ -3064,8 +3079,7 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     }
     else if (clickedHandle7 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (6, handleX7, handleY7);
+        showOptionBoxForHandle (6, handleX7, handleY7);
 
         isHandle7Dragging = true;
         anyHandleDragging = true;
@@ -3081,8 +3095,7 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     }
     else if (clickedHandle8 && ! anyHandleDragging)
     {
-        if (optionBoxAlreadyVisible)
-            showOptionBoxForHandle (7, handleX8, handleY8);
+        showOptionBoxForHandle (7, handleX8, handleY8);
 
         isHandle8Dragging = true;
         anyHandleDragging = true;
@@ -3797,280 +3810,58 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
 
         // Define a threshold for the distance check
         float clickThreshold = 10.0f;
+        if (wheel.deltaY == 0.0f)
+            return;
 
-        if (distanceToHandle <= clickThreshold)
+        // Any band typed HP/LP: wheel cycles that band's slope. Otherwise adjust Q.
+        auto wheelOnBand = [&] (bool overHandle, int bandIndex, const juce::String& typeId,
+                                int typeFallback, const juce::String& qId, int qArrayIndex,
+                                bool& needsUpdateFlag)
         {
-            if (wheel.deltaY != 0)
+            if (! overHandle)
+                return;
+
+            const int type = BandChannel::readChoiceIndex (parameters, typeId, typeFallback);
+            needsUpdateFlag = true;
+            needsUpdateCombined = true;
+
+            if (FilterType::isHpLp (type))
             {
-
-                needsUpdateBand1 = true;
-                needsUpdateCombined = true;
-
-                // Fetch the current value of band1Q from the tree state
-                float currentQ = processor.treeState.getParameter("band1Q")->getValue();
-
-                // Adjust the change rate to control the sensitivity of the parameter change
-                const float sensitivity = 0.1f;
-
-                // Calculate the new value for band1Q based on the mouse wheel movement
-                float deltaQ = wheel.deltaY * sensitivity; // Calculate the change in Q
-                float newQ = currentQ + deltaQ; // Update the Q value
-
-                // Get the range of the parameter (0.15 to 10.0)
-                juce::NormalisableRange<float> range(0.15f, 10.0f, 0.01f, 0.25f);
-
-                // Ensure the value stays within a valid range
-                newQ = range.snapToLegalValue(newQ);
-
-                // Set the new band1Q value back to the tree state
-                processor.treeState.getParameter("band1Q")->setValueNotifyingHost(newQ);
-
-                // Update the currentBandQ[0] with the new Q value
-                arrayCurrentBandQ[0] = newQ;  
-
-            }
-        }
-
-
-        if (distanceToHandle2 <= clickThreshold)
-        {
-            if (wheel.deltaY != 0)
-            {
-
-                needsUpdateBand2 = true;
-                needsUpdateCombined = true;
-
-                // Fetch the current value of band1Q from the tree state
-                float currentQ = processor.treeState.getParameter("band2Q")->getValue();
-
-                // Adjust the change rate to control the sensitivity of the parameter change
-                const float sensitivity = 0.1f;
-
-                // Calculate the new value for band1Q based on the mouse wheel movement
-                float deltaQ = wheel.deltaY * sensitivity; // Calculate the change in Q
-                float newQ = currentQ + deltaQ; // Update the Q value
-
-                // Get the range of the parameter (0.15 to 10.0)
-                juce::NormalisableRange<float> range(0.15f, 10.0f, 0.01f, 0.25f);
-
-                // Ensure the value stays within a valid range
-                newQ = range.snapToLegalValue(newQ);
-
-                // Set the new band1Q value back to the tree state
-                processor.treeState.getParameter("band2Q")->setValueNotifyingHost(newQ);
-
-                // Update the currentBandQ[0] with the new Q value
-                arrayCurrentBandQ[1] = newQ;
-          
-            }
-        }
-
-
-        if (distanceToHandle3 <= clickThreshold)
-        {
-            if (wheel.deltaY != 0)
-            {
-
-                needsUpdateBand3 = true;
-                needsUpdateCombined = true;
-
-                // Fetch the current value of band1Q from the tree state
-                float currentQ = processor.treeState.getParameter("band3Q")->getValue();
-
-                // Adjust the change rate to control the sensitivity of the parameter change
-                const float sensitivity = 0.1f;
-
-                // Calculate the new value for band1Q based on the mouse wheel movement
-                float deltaQ = wheel.deltaY * sensitivity; // Calculate the change in Q
-                float newQ = currentQ + deltaQ; // Update the Q value
-
-                // Get the range of the parameter (0.15 to 10.0)
-                juce::NormalisableRange<float> range(0.15f, 10.0f, 0.01f, 0.25f);
-
-                // Ensure the value stays within a valid range
-                newQ = range.snapToLegalValue(newQ);
-
-                // Set the new band1Q value back to the tree state
-                processor.treeState.getParameter("band3Q")->setValueNotifyingHost(newQ);
-
-                // Update the currentBandQ[0] with the new Q value
-                arrayCurrentBandQ[2] = newQ;
-
-            }
-        }
-
-        if (distanceToHandle4 <= clickThreshold)
-        {
-            if (wheel.deltaY != 0)
-            {
-
-                needsUpdateBand4 = true;
-                needsUpdateCombined = true;
-
-                // Fetch the current value of band1Q from the tree state
-                float currentQ = processor.treeState.getParameter("band4Q")->getValue();
-
-                // Adjust the change rate to control the sensitivity of the parameter change
-                const float sensitivity = 0.1f;
-
-                // Calculate the new value for band1Q based on the mouse wheel movement
-                float deltaQ = wheel.deltaY * sensitivity; // Calculate the change in Q
-                float newQ = currentQ + deltaQ; // Update the Q value
-
-                // Get the range of the parameter (0.15 to 10.0)
-                juce::NormalisableRange<float> range(0.15f, 10.0f, 0.01f, 0.25f);
-
-                // Ensure the value stays within a valid range
-                newQ = range.snapToLegalValue(newQ);
-
-                // Set the new band1Q value back to the tree state
-                processor.treeState.getParameter("band4Q")->setValueNotifyingHost(newQ);
-
-                // Update the currentBandQ[0] with the new Q value
-                arrayCurrentBandQ[3] = newQ;
-
-            }
-        }
-
-        if (distanceToHandle5 <= clickThreshold)
-        {
-            if (wheel.deltaY != 0)
-            {
-                const int hpType = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
-                if (FilterType::isHpLp (hpType))
+                const auto slopeId = FilterSlope::paramIDForBandIndex (bandIndex);
+                if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                        parameters.getParameter (slopeId)))
                 {
-                    // HP/LP: wheel cycles slope (6→12→24→48→96), not Q
-                    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
-                            parameters.getParameter ("highpassSlope")))
+                    const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
+                    const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
+                                                       choice->getIndex() + delta);
+                    if (newIndex != choice->getIndex())
                     {
-                        const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
-                        const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
-                                                           choice->getIndex() + delta);
-                        if (newIndex != choice->getIndex())
-                        {
-                            needsUpdateHighpass = true;
-                            needsUpdateCombined = true;
-                            choice->beginChangeGesture();
-                            choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
-                            choice->endChangeGesture();
-                        }
+                        choice->beginChangeGesture();
+                        choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
+                        choice->endChangeGesture();
                     }
                 }
-                else
-                {
-                    needsUpdateHighpass = true;
-                    needsUpdateCombined = true;
-                    float currentQ = processor.treeState.getParameter ("highpassQ")->getValue();
-                    const float sensitivity = 0.1f;
-                    float newQ = juce::NormalisableRange<float> (0.15f, 10.0f, 0.01f, 0.25f)
-                                     .snapToLegalValue (currentQ + wheel.deltaY * sensitivity);
-                    processor.treeState.getParameter ("highpassQ")->setValueNotifyingHost (newQ);
-                    arrayCurrentBandQ[4] = newQ;
-                }
+                return;
             }
-        }
 
-        if (distanceToHandle6 <= clickThreshold)
-        {
-            if (wheel.deltaY != 0)
+            if (auto* qParam = processor.treeState.getParameter (qId))
             {
-                const int lpType = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
-                if (FilterType::isHpLp (lpType))
-                {
-                    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
-                            parameters.getParameter ("lowpassSlope")))
-                    {
-                        const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
-                        const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
-                                                           choice->getIndex() + delta);
-                        if (newIndex != choice->getIndex())
-                        {
-                            needsUpdateLowpass = true;
-                            needsUpdateCombined = true;
-                            choice->beginChangeGesture();
-                            choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
-                            choice->endChangeGesture();
-                        }
-                    }
-                }
-                else
-                {
-                    needsUpdateLowpass = true;
-                    needsUpdateCombined = true;
-                    float currentQ = processor.treeState.getParameter ("lowpassQ")->getValue();
-                    const float sensitivity = 0.1f;
-                    float newQ = juce::NormalisableRange<float> (0.15f, 10.0f, 0.01f, 0.25f)
-                                     .snapToLegalValue (currentQ + wheel.deltaY * sensitivity);
-                    processor.treeState.getParameter ("lowpassQ")->setValueNotifyingHost (newQ);
-                    arrayCurrentBandQ[5] = newQ;
-                }
-            }
-        }
-
-        if (distanceToHandle7 <= clickThreshold)
-        {
-            if (wheel.deltaY != 0)
-            {
-
-                needsUpdateHighShelf = true;
-                needsUpdateCombined = true;
-
-                // Fetch the current value of band1Q from the tree state
-                float currentQ = processor.treeState.getParameter("highShelfQ")->getValue();
-
-                // Adjust the change rate to control the sensitivity of the parameter change
                 const float sensitivity = 0.1f;
-
-                // Calculate the new value for band1Q based on the mouse wheel movement
-                float deltaQ = wheel.deltaY * sensitivity; // Calculate the change in Q
-                float newQ = currentQ + deltaQ; // Update the Q value
-
-                // Get the range of the parameter (0.15 to 10.0)
-                juce::NormalisableRange<float> range(0.15f, 10.0f, 0.01f, 0.25f);
-
-                // Ensure the value stays within a valid range
-                newQ = range.snapToLegalValue(newQ);
-
-                // Set the new band1Q value back to the tree state
-                processor.treeState.getParameter("highShelfQ")->setValueNotifyingHost(newQ);
-
-                // Update the currentBandQ[0] with the new Q value
-                arrayCurrentBandQ[6] = newQ;
+                const float newQ = juce::NormalisableRange<float> (0.15f, 10.0f, 0.01f, 0.25f)
+                                       .snapToLegalValue (qParam->getValue() + wheel.deltaY * sensitivity);
+                qParam->setValueNotifyingHost (newQ);
+                arrayCurrentBandQ[(size_t) qArrayIndex] = newQ;
             }
-        }
+        };
 
-        if (distanceToHandle8 <= clickThreshold)
-        {
-            if (wheel.deltaY != 0)
-            {
-
-                needsUpdateLowShelf = true;
-                needsUpdateCombined = true;
-
-                // Fetch the current value of band1Q from the tree state
-                float currentQ = processor.treeState.getParameter("lowShelfQ")->getValue();
-
-                // Adjust the change rate to control the sensitivity of the parameter change
-                const float sensitivity = 0.1f;
-
-                // Calculate the new value for band1Q based on the mouse wheel movement
-                float deltaQ = wheel.deltaY * sensitivity; // Calculate the change in Q
-                float newQ = currentQ + deltaQ; // Update the Q value
-
-                // Get the range of the parameter (0.15 to 10.0)
-                juce::NormalisableRange<float> range(0.15f, 10.0f, 0.01f, 0.25f);
-
-                // Ensure the value stays within a valid range
-                newQ = range.snapToLegalValue(newQ);
-
-                // Set the new band1Q value back to the tree state
-                processor.treeState.getParameter("lowShelfQ")->setValueNotifyingHost(newQ);
-
-                // Update the currentBandQ[0] with the new Q value
-                arrayCurrentBandQ[7] = newQ;
-
-            }
-        }
+        wheelOnBand (distanceToHandle  <= clickThreshold, 0, "band1Type",     FilterType::bell,      "band1Q",     0, needsUpdateBand1);
+        wheelOnBand (distanceToHandle2 <= clickThreshold, 1, "band2Type",     FilterType::bell,      "band2Q",     1, needsUpdateBand2);
+        wheelOnBand (distanceToHandle3 <= clickThreshold, 2, "band3Type",     FilterType::bell,      "band3Q",     2, needsUpdateBand3);
+        wheelOnBand (distanceToHandle4 <= clickThreshold, 3, "band4Type",     FilterType::bell,      "band4Q",     3, needsUpdateBand4);
+        wheelOnBand (distanceToHandle5 <= clickThreshold, 4, "highpassType",  FilterType::highpass,  "highpassQ",  4, needsUpdateHighpass);
+        wheelOnBand (distanceToHandle6 <= clickThreshold, 5, "lowpassType",   FilterType::lowpass,   "lowpassQ",   5, needsUpdateLowpass);
+        wheelOnBand (distanceToHandle7 <= clickThreshold, 6, "highShelfType", FilterType::highShelf, "highShelfQ", 6, needsUpdateHighShelf);
+        wheelOnBand (distanceToHandle8 <= clickThreshold, 7, "lowShelfType",  FilterType::lowShelf,  "lowShelfQ",  7, needsUpdateLowShelf);
     }
 
 
@@ -4417,20 +4208,20 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
                                       || parameterID == SideCheck::modeParamId();
 
     if (parameterID == "band1Gain" || parameterID == "band1Frequency" || parameterID == "band1Q"
-        || parameterID == "band1OnOff" || parameterID == "band1Type" || parameterID == "band1Dynamic"
-        || parameterID == "band1DynThreshold")
+        || parameterID == "band1OnOff" || parameterID == "band1Type" || parameterID == "band1Slope"
+        || parameterID == "band1Dynamic" || parameterID == "band1DynThreshold")
         needsUpdateBand1 = true;
     else if (parameterID == "band2Gain" || parameterID == "band2Frequency" || parameterID == "band2Q"
-             || parameterID == "band2OnOff" || parameterID == "band2Type" || parameterID == "band2Dynamic"
-             || parameterID == "band2DynThreshold")
+             || parameterID == "band2OnOff" || parameterID == "band2Type" || parameterID == "band2Slope"
+             || parameterID == "band2Dynamic" || parameterID == "band2DynThreshold")
         needsUpdateBand2 = true;
     else if (parameterID == "band3Gain" || parameterID == "band3Frequency" || parameterID == "band3Q"
-             || parameterID == "band3OnOff" || parameterID == "band3Type" || parameterID == "band3Dynamic"
-             || parameterID == "band3DynThreshold")
+             || parameterID == "band3OnOff" || parameterID == "band3Type" || parameterID == "band3Slope"
+             || parameterID == "band3Dynamic" || parameterID == "band3DynThreshold")
         needsUpdateBand3 = true;
     else if (parameterID == "band4Gain" || parameterID == "band4Frequency" || parameterID == "band4Q"
-             || parameterID == "band4OnOff" || parameterID == "band4Type" || parameterID == "band4Dynamic"
-             || parameterID == "band4DynThreshold")
+             || parameterID == "band4OnOff" || parameterID == "band4Type" || parameterID == "band4Slope"
+             || parameterID == "band4Dynamic" || parameterID == "band4DynThreshold")
         needsUpdateBand4 = true;
     else if (parameterID == "highpassCutoff" || parameterID == "highpassQ" || parameterID == "highpassGain"
              || parameterID == "highpassOnOff" || parameterID == "highpassType" || parameterID == "highpassSlope")
@@ -4439,12 +4230,12 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
              || parameterID == "lowpassOnOff" || parameterID == "lowpassType" || parameterID == "lowpassSlope")
         needsUpdateLowpass = true;
     else if (parameterID == "highShelfGain" || parameterID == "highShelfFrequency" || parameterID == "highShelfQ"
-             || parameterID == "highShelfOnOff" || parameterID == "highShelfType" || parameterID == "highShelfDynamic"
-             || parameterID == "highShelfDynThreshold")
+             || parameterID == "highShelfOnOff" || parameterID == "highShelfType" || parameterID == "highShelfSlope"
+             || parameterID == "highShelfDynamic" || parameterID == "highShelfDynThreshold")
         needsUpdateHighShelf = true;
     else if (parameterID == "lowShelfGain" || parameterID == "lowShelfFrequency" || parameterID == "lowShelfQ"
-             || parameterID == "lowShelfOnOff" || parameterID == "lowShelfType" || parameterID == "lowShelfDynamic"
-             || parameterID == "lowShelfDynThreshold")
+             || parameterID == "lowShelfOnOff" || parameterID == "lowShelfType" || parameterID == "lowShelfSlope"
+             || parameterID == "lowShelfDynamic" || parameterID == "lowShelfDynThreshold")
         needsUpdateLowShelf = true;
     else if (! isSpectralDisplayParam && ! isSideCheckDisplayParam)
         return;

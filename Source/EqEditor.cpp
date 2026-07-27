@@ -14,6 +14,9 @@
 #include "KnobBandHighlight.h"
 #include "ComboBoxLookAndFeel.h"
 #include "FilterType.h"
+#include "FilterSlope.h"
+#include "EqBand.h"
+#include "BandChannel.h"
 
 
 
@@ -315,6 +318,21 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     addAndMakeVisible(knob22);
     knob22.addListener(this);
     band4QAttachment = std::make_unique<SliderAttachment>(audioProcessor.treeState, "band4Q", knob22);
+
+    // Faceplate: click opens/focuses OptionBox; wheel cycles HP/LP slope when applicable.
+    juce::Slider* faceplateKnobs[] = {
+        &knob1, &knobHpGain, &knob2,
+        &knob3, &knobLpGain, &knob4,
+        &knob5, &knob6, &knob7,
+        &knob8, &knob9, &knob10,
+        &knob11, &knob12, &knob13,
+        &knob14, &knob15, &knob16,
+        &knob17, &knob18, &knob19,
+        &knob20, &knob21, &knob22
+    };
+    for (auto* k : faceplateKnobs)
+        wireFaceplateKnobInteraction (*k);
+    updateFaceplateSlopeWheelMode();
 
     // Output gain — bottom faceplate trim strip (expanded UI; laid out in resized)
     outputGainKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
@@ -681,36 +699,21 @@ EqEditor::~EqEditor()
 
 
 
-    knob1.removeListener(this);
-    knob2.removeListener(this); 
-    knob3.removeListener(this);
-    knob4.removeListener(this);
-    
-
-   
-    knob5.removeListener(this);
-    knob6.removeListener(this);
-    knob7.removeListener(this);
-   
-    knob8.removeListener(this);
-    knob9.removeListener(this);
-    knob10.removeListener(this);
-   
-    knob11.removeListener(this);
-    knob12.removeListener(this);
-    knob13.removeListener(this);
-    
-    knob14.removeListener(this);
-    knob15.removeListener(this);
-    knob16.removeListener(this);
-   
-    knob17.removeListener(this);
-    knob18.removeListener(this);
-    knob19.removeListener(this);
-    
-    knob20.removeListener(this);
-    knob21.removeListener(this);
-    knob22.removeListener(this);
+    juce::Slider* faceplateKnobs[] = {
+        &knob1, &knobHpGain, &knob2,
+        &knob3, &knobLpGain, &knob4,
+        &knob5, &knob6, &knob7,
+        &knob8, &knob9, &knob10,
+        &knob11, &knob12, &knob13,
+        &knob14, &knob15, &knob16,
+        &knob17, &knob18, &knob19,
+        &knob20, &knob21, &knob22
+    };
+    for (auto* k : faceplateKnobs)
+    {
+        k->removeListener (this);
+        k->removeMouseListener (static_cast<juce::Component*> (this));
+    }
     outputGainKnob.removeListener(this);
 
 
@@ -853,6 +856,22 @@ void EqEditor::resized()
             }
         }
 
+        // Graph-only: hide + park faceplate controls so none can paint over the spectrum.
+        setFaceplateVisible (false);
+        juce::Slider* faceplateKnobs[] = {
+            &knob1, &knobHpGain, &knob2,
+            &knob3, &knobLpGain, &knob4,
+            &knob5, &knob6, &knob7,
+            &knob8, &knob9, &knob10,
+            &knob11, &knob12, &knob13,
+            &knob14, &knob15, &knob16,
+            &knob17, &knob18, &knob19,
+            &knob20, &knob21, &knob22,
+            &outputGainKnob
+        };
+        for (auto* k : faceplateKnobs)
+            k->setBounds ({});
+
         layoutBrandWordmark (-1);
         layoutHelpTooltipsButton();
         layoutPhaseModeCombo();
@@ -978,6 +997,12 @@ void EqEditor::resized()
     };
 
     const bool band1HpLp = typeIsHpLp ("highpassType", FilterType::highpass);
+    const bool band2HpLp = typeIsHpLp ("lowShelfType", FilterType::lowShelf);
+    const bool band3HpLp = typeIsHpLp ("band1Type", FilterType::bell);
+    const bool band4HpLp = typeIsHpLp ("band2Type", FilterType::bell);
+    const bool band5HpLp = typeIsHpLp ("band3Type", FilterType::bell);
+    const bool band6HpLp = typeIsHpLp ("band4Type", FilterType::bell);
+    const bool band7HpLp = typeIsHpLp ("highShelfType", FilterType::highShelf);
     const bool band8HpLp = typeIsHpLp ("lowpassType", FilterType::lowpass);
 
     // Place shelf/band Freq (left) and Q (right) equally spaced about the gain centre.
@@ -1014,6 +1039,17 @@ void EqEditor::resized()
         freqKnob.setBounds (stackX, hpLpBottomY, largeSide, largeSide);
     };
 
+    auto placeBandColumn = [&] (int colX, bool hpLp,
+                                juce::Component& freqKnob,
+                                juce::Component& qKnob,
+                                juce::Component& gainKnob)
+    {
+        if (hpLp)
+            placeHpLpVerticalAt (colX, freqKnob, qKnob, gainKnob);
+        else
+            placeBandFreqQAroundGainAt (colX, freqKnob, qKnob, gainKnob);
+    };
+
     const int colPitch = groupWidth + padding;
     // Even pitch grid, centred in the editor (see faceplateOriginX above).
     const int colX1 = faceplateOriginX;
@@ -1025,25 +1061,15 @@ void EqEditor::resized()
     const int colX7 = faceplateOriginX + colPitch * 6;
     const int colX8 = faceplateOriginX + colPitch * 7;
 
-    // Band 1 — HP/LP: old vertical 2-knob; otherwise middle-band 3-knob setup.
-    if (band1HpLp)
-        placeHpLpVerticalAt (colX1, knob1, knob2, knobHpGain);
-    else
-        placeBandFreqQAroundGainAt (colX1, knob1, knob2, knobHpGain);
-
-    // Bands 2–7 — unchanged 3-knob arrangement / positions.
-    placeBandFreqQAroundGainAt (colX2, knob8,  knob10, knob9);
-    placeBandFreqQAroundGainAt (colX3, knob11, knob13, knob12);
-    placeBandFreqQAroundGainAt (colX4, knob14, knob16, knob15);
-    placeBandFreqQAroundGainAt (colX5, knob17, knob19, knob18);
-    placeBandFreqQAroundGainAt (colX6, knob20, knob22, knob21);
-    placeBandFreqQAroundGainAt (colX7, knob5,  knob7,  knob6);
-
-    // Band 8 — LP/HP: old vertical 2-knob; otherwise 3-knob.
-    if (band8HpLp)
-        placeHpLpVerticalAt (colX8, knob3, knob4, knobLpGain);
-    else
-        placeBandFreqQAroundGainAt (colX8, knob3, knob4, knobLpGain);
+    // All 8 columns: HP/LP → vertical 2-knob; otherwise 3-knob with gain.
+    placeBandColumn (colX1, band1HpLp, knob1,  knob2,  knobHpGain);
+    placeBandColumn (colX2, band2HpLp, knob8,  knob10, knob9);
+    placeBandColumn (colX3, band3HpLp, knob11, knob13, knob12);
+    placeBandColumn (colX4, band4HpLp, knob14, knob16, knob15);
+    placeBandColumn (colX5, band5HpLp, knob17, knob19, knob18);
+    placeBandColumn (colX6, band6HpLp, knob20, knob22, knob21);
+    placeBandColumn (colX7, band7HpLp, knob5,  knob7,  knob6);
+    placeBandColumn (colX8, band8HpLp, knob3,  knob4,  knobLpGain);
 
     updateBandFaceplateGainVisibility();
 
@@ -1169,13 +1195,20 @@ void EqEditor::resized()
     placeLabelUnderKnob (border15, knob7, 0.45f, qLabelMinW);
     placeLabelUnderKnob (border16, knob4, 0.45f, qLabelMinW);
 
-    // Gain labels (upper row) — middle 6 unchanged; Band 1/8 only in 3-knob mode.
-    placeLabelUnderKnob (border17, knob9, 0.45f, gainLabelMinW);
-    placeLabelUnderKnob (border18, knob12, 0.45f, gainLabelMinW);
-    placeLabelUnderKnob (border19, knob15, 0.45f, gainLabelMinW);
-    placeLabelUnderKnob (border20, knob18, 0.45f, gainLabelMinW);
-    placeLabelUnderKnob (border21, knob21, 0.45f, gainLabelMinW);
-    placeLabelUnderKnob (border22, knob6, 0.45f, gainLabelMinW);
+    // Gain labels — only when that column is in 3-knob (gain) mode.
+    auto placeGainLabel = [&] (juce::GroupComponent& label, juce::Component& gainKnob, bool hpLp)
+    {
+        if (hpLp)
+            label.setBounds ({});
+        else
+            placeLabelUnderKnob (label, gainKnob, 0.45f, gainLabelMinW);
+    };
+    placeGainLabel (border17, knob9, band2HpLp);
+    placeGainLabel (border18, knob12, band3HpLp);
+    placeGainLabel (border19, knob15, band4HpLp);
+    placeGainLabel (border20, knob18, band5HpLp);
+    placeGainLabel (border21, knob21, band6HpLp);
+    placeGainLabel (border22, knob6, band7HpLp);
 
     // Power buttons: evenly spaced on the same centres as Gain (3-knob) or top Q (HP/LP stack).
     auto placeOnOffCentered = [onOffY, onOffButtonSize] (juce::Component& btn, const juce::Component& anchor)
@@ -1186,18 +1219,25 @@ void EqEditor::resized()
                        onOffButtonSize);
     };
 
-    placeOnOffCentered (*onOffButton1, band1HpLp ? static_cast<juce::Component&> (knob2) : knobHpGain);
-    placeOnOffCentered (*onOffButton4, knob9);
-    placeOnOffCentered (*onOffButton5, knob12);
-    placeOnOffCentered (*onOffButton6, knob15);
-    placeOnOffCentered (*onOffButton7, knob18);
-    placeOnOffCentered (*onOffButton8, knob21);
-    placeOnOffCentered (*onOffButton3, knob6);
-    placeOnOffCentered (*onOffButton2, band8HpLp ? static_cast<juce::Component&> (knob4) : knobLpGain);
+    placeOnOffCentered (*onOffButton1, band1HpLp ? static_cast<juce::Component&> (knob2)  : knobHpGain);
+    placeOnOffCentered (*onOffButton4, band2HpLp ? static_cast<juce::Component&> (knob10) : knob9);
+    placeOnOffCentered (*onOffButton5, band3HpLp ? static_cast<juce::Component&> (knob13) : knob12);
+    placeOnOffCentered (*onOffButton6, band4HpLp ? static_cast<juce::Component&> (knob16) : knob15);
+    placeOnOffCentered (*onOffButton7, band5HpLp ? static_cast<juce::Component&> (knob19) : knob18);
+    placeOnOffCentered (*onOffButton8, band6HpLp ? static_cast<juce::Component&> (knob22) : knob21);
+    placeOnOffCentered (*onOffButton3, band7HpLp ? static_cast<juce::Component&> (knob7)  : knob6);
+    placeOnOffCentered (*onOffButton2, band8HpLp ? static_cast<juce::Component&> (knob4)  : knobLpGain);
 }
 
 void EqEditor::updateBandFaceplateGainVisibility()
 {
+    // Compact: setFaceplateVisible(false) already hid everything — don't fight it here.
+    if (uiCompact)
+    {
+        updateFaceplateSlopeWheelMode();
+        return;
+    }
+
     auto typeUsesGain = [this] (const char* typeId, int fallbackType) -> bool
     {
         if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
@@ -1206,17 +1246,17 @@ void EqEditor::updateBandFaceplateGainVisibility()
         return FilterType::usesGain (fallbackType);
     };
 
-    // Band 1 / 8 gain only when not in classic HP/LP 2-knob mode.
+    // Same rule for all 8 columns: show gain only when the filter type uses gain.
     knobHpGain.setVisible (typeUsesGain ("highpassType", FilterType::highpass));
-    knobLpGain.setVisible (typeUsesGain ("lowpassType", FilterType::lowpass));
-
-    // Middle 6 always use gain knobs for their default gain-using types; still honor type.
     knob9.setVisible (typeUsesGain ("lowShelfType", FilterType::lowShelf));
     knob12.setVisible (typeUsesGain ("band1Type", FilterType::bell));
     knob15.setVisible (typeUsesGain ("band2Type", FilterType::bell));
     knob18.setVisible (typeUsesGain ("band3Type", FilterType::bell));
     knob21.setVisible (typeUsesGain ("band4Type", FilterType::bell));
     knob6.setVisible (typeUsesGain ("highShelfType", FilterType::highShelf));
+    knobLpGain.setVisible (typeUsesGain ("lowpassType", FilterType::lowpass));
+
+    updateFaceplateSlopeWheelMode();
 }
 
 
@@ -1542,10 +1582,109 @@ void EqEditor::saveUiPrefs() const
         xml->writeTo (file);
 }
 
+void EqEditor::wireFaceplateKnobInteraction (juce::Slider& knob)
+{
+    // Component already is a MouseListener; avoid ambiguous EqEditor::MouseListener*.
+    knob.addMouseListener (static_cast<juce::Component*> (this), false);
+}
+
+int EqEditor::faceplateBandIndexForSlider (const juce::Slider* slider) const noexcept
+{
+    if (slider == &knob1 || slider == &knobHpGain || slider == &knob2) return 4; // Band 1
+    if (slider == &knob3 || slider == &knobLpGain || slider == &knob4) return 5; // Band 8
+    if (slider == &knob5 || slider == &knob6 || slider == &knob7) return 6;     // Band 7
+    if (slider == &knob8 || slider == &knob9 || slider == &knob10) return 7;    // Band 2
+    if (slider == &knob11 || slider == &knob12 || slider == &knob13) return 0;  // Band 3
+    if (slider == &knob14 || slider == &knob15 || slider == &knob16) return 1;  // Band 4
+    if (slider == &knob17 || slider == &knob18 || slider == &knob19) return 2;  // Band 5
+    if (slider == &knob20 || slider == &knob21 || slider == &knob22) return 3;  // Band 6
+    return -1;
+}
+
+void EqEditor::openOptionBoxForFaceplateBand (int bandIndex)
+{
+    if (bandIndex < 0 || mainComponent == nullptr)
+        return;
+    mainComponent->getFrequencyResponseComponent().showOptionBoxForBand (bandIndex);
+}
+
+bool EqEditor::cycleFilterSlopeForBand (int bandIndex, int delta)
+{
+    const auto slopeID = FilterSlope::paramIDForBandIndex (bandIndex);
+    if (slopeID.isEmpty())
+        return false;
+
+    const auto typeID = FilterType::paramIDForBandIndex (bandIndex);
+    const int type = BandChannel::readChoiceIndex (
+        audioProcessor.treeState, typeID, FilterType::defaultTypeForBandIndex (bandIndex));
+    if (! FilterType::isHpLp (type))
+        return false;
+
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+            audioProcessor.treeState.getParameter (slopeID)))
+    {
+        const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
+                                           choice->getIndex() + delta);
+        if (newIndex == choice->getIndex())
+            return true;
+
+        choice->beginChangeGesture();
+        choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
+        choice->endChangeGesture();
+        return true;
+    }
+    return false;
+}
+
+void EqEditor::updateFaceplateSlopeWheelMode()
+{
+    auto typeIsHpLp = [this] (const juce::String& typeId, int fallback) -> bool
+    {
+        return FilterType::isHpLp (
+            BandChannel::readChoiceIndex (audioProcessor.treeState, typeId, fallback));
+    };
+
+    auto setWheel = [] (juce::Slider& s, bool enable) { s.setScrollWheelEnabled (enable); };
+
+    // When HP/LP, disable knob-value wheel so mouseWheelMove can cycle slope instead.
+    const bool b1 = typeIsHpLp ("highpassType", FilterType::highpass);
+    const bool b8 = typeIsHpLp ("lowpassType", FilterType::lowpass);
+    const bool hs = typeIsHpLp ("highShelfType", FilterType::highShelf);
+    const bool ls = typeIsHpLp ("lowShelfType", FilterType::lowShelf);
+    const bool p1 = typeIsHpLp ("band1Type", FilterType::bell);
+    const bool p2 = typeIsHpLp ("band2Type", FilterType::bell);
+    const bool p3 = typeIsHpLp ("band3Type", FilterType::bell);
+    const bool p4 = typeIsHpLp ("band4Type", FilterType::bell);
+
+    setWheel (knob1, ! b1); setWheel (knobHpGain, ! b1); setWheel (knob2, ! b1);
+    setWheel (knob3, ! b8); setWheel (knobLpGain, ! b8); setWheel (knob4, ! b8);
+    setWheel (knob5, ! hs); setWheel (knob6, ! hs); setWheel (knob7, ! hs);
+    setWheel (knob8, ! ls); setWheel (knob9, ! ls); setWheel (knob10, ! ls);
+    setWheel (knob11, ! p1); setWheel (knob12, ! p1); setWheel (knob13, ! p1);
+    setWheel (knob14, ! p2); setWheel (knob15, ! p2); setWheel (knob16, ! p2);
+    setWheel (knob17, ! p3); setWheel (knob18, ! p3); setWheel (knob19, ! p3);
+    setWheel (knob20, ! p4); setWheel (knob21, ! p4); setWheel (knob22, ! p4);
+}
+
+void EqEditor::mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+{
+    auto* slider = dynamic_cast<juce::Slider*> (event.eventComponent);
+    const int band = faceplateBandIndexForSlider (slider);
+    if (band < 0 || wheel.deltaY == 0.0f)
+        return;
+
+    const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
+    if (cycleFilterSlopeForBand (band, delta))
+        return;
+}
+
 void EqEditor::sliderDragStarted (juce::Slider* slider)
 {
-    juce::ignoreUnused (slider);
     audioProcessor.getUndoManager().beginNewTransaction ("Parameter change");
+
+    const int band = faceplateBandIndexForSlider (slider);
+    if (band >= 0)
+        openOptionBoxForFaceplateBand (band);
 
     if (mainComponent != nullptr)
         mainComponent->setOptionBoxInteractionFaded (true);
@@ -1989,6 +2128,7 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
     auto setVis = [shouldShow] (juce::Component& c) { c.setVisible (shouldShow); };
 
     setVis (knob1);  setVis (knob2);  setVis (knob3);  setVis (knob4);
+    setVis (knobHpGain); setVis (knobLpGain); // were missing — leaked onto graph in compact UI
     setVis (knob5);  setVis (knob6);  setVis (knob7);  setVis (knob8);
     setVis (knob9);  setVis (knob10); setVis (knob11); setVis (knob12);
     setVis (knob13); setVis (knob14); setVis (knob15); setVis (knob16);
@@ -2033,6 +2173,8 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
 void EqEditor::applyCompactUi()
 {
     setFaceplateVisible (! uiCompact);
+    if (! uiCompact)
+        updateBandFaceplateGainVisibility(); // restore per-type gain knobs after unhide
 
     if (mainComponent != nullptr)
         mainComponent->getFrequencyResponseComponent().syncUiModeButton (uiCompact);

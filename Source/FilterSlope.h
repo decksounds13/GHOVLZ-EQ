@@ -21,6 +21,29 @@ namespace FilterSlope
         return { "6 dB/oct", "12 dB/oct", "24 dB/oct", "48 dB/oct", "96 dB/oct" };
     }
 
+    /** Compact labels for narrow OptionBox combo (popup can still use full names via choices). */
+    inline juce::StringArray getShortChoiceNames()
+    {
+        return { "6 dB", "12 dB", "24 dB", "48 dB", "96 dB" };
+    }
+
+    /** Per-band slope APVTS IDs (internal band index 0–7). */
+    inline juce::String paramIDForBandIndex (int bandIndex)
+    {
+        switch (bandIndex)
+        {
+            case 0: return "band1Slope";
+            case 1: return "band2Slope";
+            case 2: return "band3Slope";
+            case 3: return "band4Slope";
+            case 4: return "highpassSlope";
+            case 5: return "lowpassSlope";
+            case 6: return "highShelfSlope";
+            case 7: return "lowShelfSlope";
+            default: return {};
+        }
+    }
+
     inline constexpr int maxBiquadStages = 8;
 
     /** Butterworth Q factors for cascaded 2nd-order sections (orders 2, 4, 8, 16). */

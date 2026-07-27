@@ -8,14 +8,17 @@
 /**
     Per-band controls for spectral dynamic processing (Pro-Q-style spectral).
 
-    User-facing (S mode): Amount + Res + Expand + Attack/Release + Pack.
+    User-facing (S mode): Amount + Res + Expand + Attack/Release + Pack + optional PB.
     - Amount (0–1): how aggressively resonances inside the Q aperture are
       processed. UI: vertical slider, pull down = more (inverted LinearVertical).
-    - Res / spectralResHz (0.5–2.0, default 1.0): GLOBAL — BP count on the shared
-      hearing-range lattice (finer = more filters). Per-band Res params are
-      kept for session compatibility and stay linked to the global value.
+    - Res: with PB on (default) each band's *SpectralResHz is independent
+      (~4–128 BPs in that band's Q). With PB off, global spectralResHz is
+      linked across all S bands on the shared lattice.
+    - Amount (*SpectralDepth): always per-band.
     - Expand (bool): invert GR sign → boost/exaggerate resonances instead of cut.
     - Pack (global Flat/LF/HF): warps where Res budget sits on the lattice for all S bands.
+    - PB / spectralPerBandLattice (default on): local lattices via
+      SpectralPerBandLattice. Off = legacy global grid (Side Check-style).
     - Attack / release: shared per-band params with D mode (defaults 20 / 200 ms).
 
     Internal:
@@ -79,10 +82,10 @@ namespace SpectralDynamics
         }
     }
 
-    /** Global spectral resolution (Hz) — one lattice density for all S bands. */
+    /** Global spectral resolution (Hz) — used when PB is off (linked mode). */
     inline constexpr const char* spectralResHzParamId() noexcept { return "spectralResHz"; }
 
-    /** Legacy per-band Res IDs (mirrored to/from spectralResHz for old presets). */
+    /** Per-band Res IDs — live when PB is on; mirrored from global only when PB is off. */
     inline juce::String spectralResHzParamIDForBandIndex (int bandIndex)
     {
         switch (bandIndex)

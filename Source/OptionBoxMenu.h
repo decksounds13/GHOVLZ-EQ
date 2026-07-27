@@ -9,6 +9,7 @@
 #include "BandChannel.h"
 #include "DynamicEq.h"
 #include "Spectral/SpectralBandSettings.h"
+#include "Spectral/SpectralPerBandLattice.h"
 #include "BandSaturation.h"
 #include "BandSidechain.h"
 
@@ -47,7 +48,8 @@ public:
     void updateUiScaleFromParent();
     int getCurrentBandIndex() const { return currentBandIndex; }
 
-    static constexpr int designWidth = 150;
+    /** Wide enough for filter-type + slope side-by-side without clipping. */
+    static constexpr int designWidth = 178;
     /** Spectral + A/R room; shorter header/Q share a row (see topCrop in resized). */
     static constexpr int designHeight = 302;
     /** Pixels removed from the old 340 layout so the box top can sit lower on screen. */
@@ -83,6 +85,12 @@ private:
     void updateDisplayAlpha();
     void updateDynamicControlsVisibility();
     void bindDynamicControls (int bandIndex);
+    /** Bind Res to per-band *SpectralResHz when PB on, else global spectralResHz. */
+    void bindSpectralResSlider (int bandIndex);
+    bool isPerBandLatticeEnabled() const;
+    void setupFilterSlopeMenu (int bandIndex);
+    void updateFilterSlopeVisibility();
+    bool currentBandShowsFilterSlope() const;
     bool isCurrentBandEnabled() const;
     bool currentBandSupportsDynamic() const;
     bool currentBandSupportsSpectral() const;
@@ -116,6 +124,8 @@ private:
     juce::String currentSpectralPackParamID;
 
     juce::ComboBox customComboBox;
+    /** HP/LP slope — visible whenever the band's filter model is Highpass/Lowpass. */
+    juce::ComboBox filterSlopeComboBox;
     juce::Label bandNameLabel;
     juce::TextButton prevBandButton { "<" };
     juce::TextButton nextBandButton { ">" };
@@ -146,9 +156,11 @@ private:
     /** Inverted vertical Amount: slider 0 at bottom = max Amount. */
     std::unique_ptr<juce::ParameterAttachment> spectralAmountAttachment;
     std::unique_ptr<ComboBoxAttachment> filterModelAttachment;
+    std::unique_ptr<ComboBoxAttachment> filterSlopeAttachment;
     std::unique_ptr<ButtonAttachment> dynamicButtonAttachment;
     std::unique_ptr<ButtonAttachment> spectralButtonAttachment;
     std::unique_ptr<ButtonAttachment> spectralExpandButtonAttachment;
+    std::unique_ptr<ButtonAttachment> spectralPerBandLatticeAttachment;
     std::unique_ptr<ButtonAttachment> satButtonAttachment;
     std::unique_ptr<ButtonAttachment> satPostButtonAttachment;
     std::unique_ptr<SliderAttachment> satDriveAttachment;
@@ -186,6 +198,11 @@ private:
         Click cycles Flat → LF → HF → Flat.
     */
     juce::TextButton spectralPackButton { "FL" };
+    /**
+        Optional per-band local lattice (sandboxed). Off = legacy global grid.
+        Visible only while S is on; sits above the Res slider.
+    */
+    juce::TextButton spectralPerBandLatticeButton { "PB" };
     /**
         Per-band sat enable (right of filter model). Orange glow when on.
         Right-click: model + oversample menu. Pre/Post appears when enabled.

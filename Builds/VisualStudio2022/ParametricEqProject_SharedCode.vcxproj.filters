@@ -4818,6 +4818,9 @@
     <ClInclude Include="..\..\Source\Spectral\SpectralBinning.h">
       <Filter>ParametricEqProject\Source\Spectral</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\Spectral\SpectralPerBandLattice.h">
+      <Filter>ParametricEqProject\Source\Spectral</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralBandSettings.h">
       <Filter>ParametricEqProject\Source\Spectral</Filter>
     </ClInclude>

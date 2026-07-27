@@ -208,6 +208,19 @@ public:
     int highpassActiveStages = 1;
     int lowpassActiveStages = 1;
 
+    /**
+        Cascade banks for mid/shelf slots when typed HP/LP.
+        Index: 0–3 = band1–4, 4 = highShelf, 5 = lowShelf.
+    */
+    static constexpr int kFlexibleCascadeSlots = 6;
+    std::array<std::array<StereoIIR, FilterSlope::maxBiquadStages>, kFlexibleCascadeSlots> flexibleHpLpStages {};
+    std::array<int, kFlexibleCascadeSlots> flexibleHpLpActiveStages { 1, 1, 1, 1, 1, 1 };
+
+    /** Load HP or LP cascade into Band 1/8 stage banks (type selects HP vs LP coeffs). */
+    void updateSlotHpLpCascade (bool isHighpassSlot, float cutoff, float q, int slopeChoice, int filterType);
+    /** Load HP/LP cascade into a flexible mid/shelf bank. */
+    void updateFlexibleHpLpCascade (int flexIndex, float cutoff, float q, int slopeChoice, int filterType);
+
     void updateHighShelf(float frequency, float q, float gain);
     StereoIIR highShelf;
 

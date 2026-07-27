@@ -32,6 +32,7 @@ class FrequencyResponseComponent;
 
 class EqEditor : public juce::AudioProcessorEditor,
     public juce::Slider::Listener,
+    public juce::MouseListener,
     public juce::ComponentListener,
     public juce::AudioProcessorValueTreeState::Listener,
     public juce::Button::Listener,
@@ -46,6 +47,7 @@ public:
     void sliderValueChanged(juce::Slider* slider) override;
     void sliderDragStarted (juce::Slider* slider) override;
     void sliderDragEnded (juce::Slider* slider) override;
+    void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
 
     void buttonClicked(juce::Button* button) override;
 
@@ -87,6 +89,12 @@ private:
     void setFaceplateVisible (bool shouldShow);
     /** Show faceplate Gain knobs only when that band's filter type uses gain. */
     void updateBandFaceplateGainVisibility();
+    /** Internal band index 0–7 for a faceplate knob, or -1. */
+    int faceplateBandIndexForSlider (const juce::Slider* slider) const noexcept;
+    void wireFaceplateKnobInteraction (juce::Slider& knob);
+    void openOptionBoxForFaceplateBand (int bandIndex);
+    bool cycleFilterSlopeForBand (int bandIndex, int delta);
+    void updateFaceplateSlopeWheelMode();
     void layoutBrandWordmark (int outClusterLeftX);
     void layoutHelpTooltipsButton();
     void layoutPhaseModeCombo();

@@ -108,9 +108,9 @@ float SpectralDynamicsProcessor::safeMaxCenterHz() const noexcept
 
 void SpectralDynamicsProcessor::computeInfluenceRange (BandSlot& slot) const noexcept
 {
-    // Q-derived soft-mask footprint in log-f (for diagnostics). Placement in
-    // rebuildBank always uses the global 20 Hz–maxHz lattice; freq + Q only
-    // soft-mask GR and drive active-set gating.
+    // Q-derived soft-mask footprint in log-f. Global lattice mode uses this for
+    // diagnostics / gating only; SpectralPerBandLattice mode also uses it as the
+    // local placement span. Freq + Q still soft-mask GR either way.
     const auto& s = slot.settings;
     const float maxHz = safeMaxCenterHz();
     const float fc = juce::jlimit (20.0f, maxHz, s.frequencyHz);
@@ -159,6 +159,14 @@ void SpectralDynamicsProcessor::computeInfluenceRange (BandSlot& slot) const noe
     slot.fHi = fHi;
 }
 
+void SpectralDynamicsProcessor::setPerBandLatticeEnabled (bool enabled) noexcept
+{
+    if (perBandLatticeEnabled == enabled)
+        return;
+    perBandLatticeEnabled = enabled;
+    bankDirty = true;
+}
+
 void SpectralDynamicsProcessor::setBand (int slot, const SpectralDynamics::BandSettings& settings) noexcept
 {
     if (slot < 0 || slot >= SpectralDynamics::kNumSlots)
@@ -177,20 +185,20 @@ void SpectralDynamicsProcessor::setBand (int slot, const SpectralDynamics::BandS
 
     // Always persist incoming settings (incl. frequency) so nothing stays at the
     // BandSettings default (1000 Hz) or a stale handle position.
-    // Lattice rebuilds only when Res / pack changes or the slot arms — placement is
-    // always the global 20…maxHz grid (optionally LF/HF warped). Freq / Q / shape
-    // only remask; gating drops idle slices.
+    // Default lattice: rebuild on Res / pack / arm only (global 20…maxHz grid).
+    // Per-band lattice mode: freq / Q / shape also retile the local aperture.
     constexpr float freqEps = 1.0e-3f;
     constexpr float eps = 1.0e-3f;
 
     const bool justArmed = ! band.wasActive;
-    const bool latticeChanged = justArmed
-        || std::abs (band.settings.bandwidthHz - settings.bandwidthHz) >= eps
-        || band.settings.pack != settings.pack;
     const bool maskParamsChanged = justArmed
         || std::abs (band.settings.q - settings.q) >= eps
         || std::abs (band.settings.frequencyHz - settings.frequencyHz) >= freqEps
         || band.settings.shape != settings.shape;
+    const bool latticeChanged = justArmed
+        || std::abs (band.settings.bandwidthHz - settings.bandwidthHz) >= eps
+        || band.settings.pack != settings.pack
+        || (perBandLatticeEnabled && maskParamsChanged);
     const bool amountChanged = std::abs (band.settings.amount - settings.amount) >= eps;
     const bool expandChanged = band.settings.expand != settings.expand;
     const bool detectSrcChanged = band.settings.detectFromSidechain != settings.detectFromSidechain;
@@ -210,7 +218,7 @@ void SpectralDynamicsProcessor::setBand (int slot, const SpectralDynamics::BandS
 
     if (maskParamsChanged || amountChanged || expandChanged || detectSrcChanged)
     {
-        // Soft-mask / signed max only — centres stay on the global lattice.
+        // Soft-mask / signed max only — centres stay on the (global or local) lattice.
         const float signedMax = (settings.expand ? 1.0f : -1.0f)
                               * settings.amount * SpectralDynamics::kMaxCutDb;
         for (auto& unit : bank)
@@ -432,95 +440,141 @@ void SpectralDynamicsProcessor::rebuildBank() noexcept
     if (activeBandCount <= 0)
         return;
 
-    // Ideal count: SpectralResHz budget tiles the global hearing-range lattice
-    // (constant-Q). Same res → same slice count; Q only gates which run.
-    std::array<int, SpectralDynamics::kNumSlots> idealCounts {};
     std::array<int, SpectralDynamics::kNumSlots> activeSlots {};
-    std::array<float, SpectralDynamics::kNumSlots> targetBwHz {};
     int numActiveSlots = 0;
-    int totalIdeal = 0;
-
     for (int s = 0; s < SpectralDynamics::kNumSlots; ++s)
     {
         if (! bands[(size_t) s].active)
             continue;
-
-        const float targetBw = SpectralBinning::clampBandwidthHz (bands[(size_t) s].settings.bandwidthHz);
-        targetBwHz[(size_t) s] = targetBw;
-        const int ideal = juce::jmax (1, SpectralBinning::bandpassBudgetForBandwidth (targetBw));
-        idealCounts[(size_t) s] = ideal;
         activeSlots[(size_t) numActiveSlots++] = s;
-        totalIdeal += ideal;
     }
 
     if (numActiveSlots == 0)
         return;
 
-    // Resolution-scaled budget: finest SpectralResHz among active S bands
-    // sets the total (48 @ 2.0 Hz … 128 @ 0.5 Hz).
-    float finestBw = SpectralBinning::kTargetBandwidthHz;
-    for (int i = 0; i < numActiveSlots; ++i)
-    {
-        const int s = activeSlots[(size_t) i];
-        finestBw = juce::jmin (finestBw, targetBwHz[(size_t) s]);
-    }
-    const int effectiveCap = juce::jmin (SpectralBinning::kMaxBandpasses,
-                                         SpectralBinning::bandpassBudgetForBandwidth (finestBw));
-
+    const float maxHz = safeMaxCenterHz();
     std::array<int, SpectralDynamics::kNumSlots> allocated {};
-    if (totalIdeal <= effectiveCap)
+    std::array<float, SpectralDynamics::kNumSlots> placeLoHz {};
+    std::array<float, SpectralDynamics::kNumSlots> placeHiHz {};
+    int effectiveCap = SpectralBinning::kMaxBandpasses;
+
+    if (perBandLatticeEnabled)
     {
+        // Sandboxed local lattices — each S band tiles its Q influence range.
+        // Global path below is untouched when this flag is off.
+        std::array<SpectralPerBandLattice::SlotRequest, SpectralDynamics::kNumSlots> requests {};
         for (int i = 0; i < numActiveSlots; ++i)
         {
             const int s = activeSlots[(size_t) i];
-            allocated[(size_t) s] = idealCounts[(size_t) s];
+            auto& band = bands[(size_t) s];
+            computeInfluenceRange (band);
+            auto& req = requests[(size_t) s];
+            req.active = true;
+            req.fLoHz = band.fLo;
+            req.fHiHz = band.fHi;
+            req.bandwidthHz = band.settings.bandwidthHz;
+        }
+
+        std::array<SpectralPerBandLattice::SlotPlan, SpectralDynamics::kNumSlots> plans {};
+        effectiveCap = SpectralPerBandLattice::plan (requests, maxHz, plans);
+        effectiveCap = juce::jlimit (0, SpectralBinning::kMaxBandpasses, effectiveCap);
+
+        for (int i = 0; i < numActiveSlots; ++i)
+        {
+            const int s = activeSlots[(size_t) i];
+            allocated[(size_t) s] = plans[(size_t) s].count;
+            placeLoHz[(size_t) s] = plans[(size_t) s].placeLoHz;
+            placeHiHz[(size_t) s] = plans[(size_t) s].placeHiHz;
         }
     }
     else
     {
-        // Proportional share of the resolution budget; every active S band gets ≥ 1.
-        int remaining = effectiveCap;
+        // Ideal count: SpectralResHz budget tiles the global hearing-range lattice
+        // (constant-Q). Same res → same slice count; Q only gates which run.
+        std::array<int, SpectralDynamics::kNumSlots> idealCounts {};
+        std::array<float, SpectralDynamics::kNumSlots> targetBwHz {};
+        int totalIdeal = 0;
+
         for (int i = 0; i < numActiveSlots; ++i)
         {
             const int s = activeSlots[(size_t) i];
-            allocated[(size_t) s] = 1;
-            --remaining;
+            const float targetBw = SpectralBinning::clampBandwidthHz (bands[(size_t) s].settings.bandwidthHz);
+            targetBwHz[(size_t) s] = targetBw;
+            const int ideal = juce::jmax (1, SpectralBinning::bandpassBudgetForBandwidth (targetBw));
+            idealCounts[(size_t) s] = ideal;
+            totalIdeal += ideal;
         }
 
-        if (remaining > 0 && totalIdeal > numActiveSlots)
+        // Resolution-scaled budget: finest SpectralResHz among active S bands
+        // sets the total (48 @ 2.0 Hz … 128 @ 0.5 Hz).
+        float finestBw = SpectralBinning::kTargetBandwidthHz;
+        for (int i = 0; i < numActiveSlots; ++i)
         {
-            const int extraIdeal = totalIdeal - numActiveSlots;
-            int assignedExtra = 0;
+            const int s = activeSlots[(size_t) i];
+            finestBw = juce::jmin (finestBw, targetBwHz[(size_t) s]);
+        }
+        effectiveCap = juce::jmin (SpectralBinning::kMaxBandpasses,
+                                   SpectralBinning::bandpassBudgetForBandwidth (finestBw));
+
+        if (totalIdeal <= effectiveCap)
+        {
             for (int i = 0; i < numActiveSlots; ++i)
             {
                 const int s = activeSlots[(size_t) i];
-                const int shareIdeal = idealCounts[(size_t) s] - 1;
-                const int extra = (i == numActiveSlots - 1)
-                    ? (remaining - assignedExtra)
-                    : (int) std::floor ((double) remaining * (double) shareIdeal / (double) extraIdeal + 0.5);
-                const int clamped = juce::jmax (0, juce::jmin (remaining - assignedExtra, extra));
-                allocated[(size_t) s] += clamped;
-                assignedExtra += clamped;
+                allocated[(size_t) s] = idealCounts[(size_t) s];
             }
         }
-    }
+        else
+        {
+            // Proportional share of the resolution budget; every active S band gets ≥ 1.
+            int remaining = effectiveCap;
+            for (int i = 0; i < numActiveSlots; ++i)
+            {
+                const int s = activeSlots[(size_t) i];
+                allocated[(size_t) s] = 1;
+                --remaining;
+            }
 
-    const float maxHz = safeMaxCenterHz();
+            if (remaining > 0 && totalIdeal > numActiveSlots)
+            {
+                const int extraIdeal = totalIdeal - numActiveSlots;
+                int assignedExtra = 0;
+                for (int i = 0; i < numActiveSlots; ++i)
+                {
+                    const int s = activeSlots[(size_t) i];
+                    const int shareIdeal = idealCounts[(size_t) s] - 1;
+                    const int extra = (i == numActiveSlots - 1)
+                        ? (remaining - assignedExtra)
+                        : (int) std::floor ((double) remaining * (double) shareIdeal / (double) extraIdeal + 0.5);
+                    const int clamped = juce::jmax (0, juce::jmin (remaining - assignedExtra, extra));
+                    allocated[(size_t) s] += clamped;
+                    assignedExtra += clamped;
+                }
+            }
+        }
+
+        for (int i = 0; i < numActiveSlots; ++i)
+        {
+            const int s = activeSlots[(size_t) i];
+            placeLoHz[(size_t) s] = 20.0f;
+            placeHiHz[(size_t) s] = maxHz;
+        }
+    }
 
     int bpIndex = 0;
     for (int i = 0; i < numActiveSlots && bpIndex < effectiveCap; ++i)
     {
         const int s = activeSlots[(size_t) i];
         auto& band = bands[(size_t) s];
-        computeInfluenceRange (band);
+        if (! perBandLatticeEnabled)
+            computeInfluenceRange (band);
 
         const int count = juce::jmax (1, allocated[(size_t) s]);
 
-        // Always place on the global hearing-range log lattice. Soft mask +
-        // active-set gating select which slices apply GR / burn CPU. Narrow Q
-        // leaves most gateActive=false; wide Q keeps nearly all running.
-        const float placeLo = 20.0f;
-        const float placeHi = maxHz;
+        // Global mode: hearing-range log lattice (20…maxHz). Per-band mode: local
+        // Q aperture from SpectralPerBandLattice. Soft mask + gating still apply.
+        const float placeLo = placeLoHz[(size_t) s];
+        const float placeHi = placeHiHz[(size_t) s];
         if (placeHi <= placeLo)
             continue;
 

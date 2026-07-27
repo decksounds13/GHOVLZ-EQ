@@ -27,7 +27,7 @@ namespace PluginMenuTheme
 }
 
 /**
-    Colours only — same approach as Spectrum / Level Meters ComboBoxes.
+    Colours + slightly tighter combo text so OptionBox labels fit without "...".
 */
 class ComboBoxLookAndFeel : public juce::LookAndFeel_V4
 {
@@ -41,6 +41,45 @@ public:
     {
         static ComboBoxLookAndFeel instance;
         return instance;
+    }
+
+    void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
+                       int buttonX, int buttonY, int buttonW, int buttonH,
+                       juce::ComboBox& box) override
+    {
+        juce::ignoreUnused (isButtonDown, buttonX, buttonY, buttonW, buttonH);
+
+        auto cornerSize = box.findParentComponentOfClass<juce::ChoicePropertyComponent>() != nullptr
+                              ? 0.0f : 2.0f;
+        auto bounds = juce::Rectangle<int> (0, 0, width, height).toFloat();
+
+        g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
+        g.fillRoundedRectangle (bounds, cornerSize);
+        g.setColour (box.findColour (juce::ComboBox::outlineColourId));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), cornerSize, 1.0f);
+
+        juce::Rectangle<int> arrowZone (width - 14, 0, 12, height);
+        juce::Path path;
+        path.startNewSubPath ((float) arrowZone.getX() + 2.0f, (float) arrowZone.getCentreY() - 2.0f);
+        path.lineTo ((float) arrowZone.getCentreX(), (float) arrowZone.getCentreY() + 2.5f);
+        path.lineTo ((float) arrowZone.getRight() - 2.0f, (float) arrowZone.getCentreY() - 2.0f);
+        g.setColour (box.findColour (juce::ComboBox::arrowColourId)
+                         .withAlpha (box.isEnabled() ? 0.95f : 0.35f));
+        g.strokePath (path, juce::PathStrokeType (1.4f));
+    }
+
+    juce::Font getComboBoxFont (juce::ComboBox& box) override
+    {
+        juce::ignoreUnused (box);
+        return juce::Font ("Lato Black", 11.0f, juce::Font::plain);
+    }
+
+    void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
+    {
+        label.setBounds (3, 1, juce::jmax (1, box.getWidth() - 16), box.getHeight() - 2);
+        label.setFont (getComboBoxFont (box));
+        label.setJustificationType (juce::Justification::centredLeft);
+        label.setMinimumHorizontalScale (0.75f); // prefer slight squeeze over "..."
     }
 };
 

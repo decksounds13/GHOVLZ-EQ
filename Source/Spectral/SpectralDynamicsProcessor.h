@@ -6,6 +6,7 @@
 #include <array>
 #include "SpectralBandSettings.h"
 #include "SpectralBinning.h"
+#include "SpectralPerBandLattice.h"
 
 /**
     Shared spectral dynamics engine (Pro-Q-style Spectral).
@@ -66,6 +67,14 @@ public:
         slot: 0..kNumSlots-1 (see SpectralDynamics::slotForBandIndex).
     */
     void setBand (int slot, const SpectralDynamics::BandSettings& settings) noexcept;
+
+    /**
+        Optional sandboxed local lattices (SpectralPerBandLattice).
+        Off (default) = existing global 20 Hz…maxHz shared budget — unchanged.
+        On = each S band tiles only its Q influence range.
+        Side Check is unaffected.
+    */
+    void setPerBandLatticeEnabled (bool enabled) noexcept;
 
     /** True if at least one S band is armed for the next process() call. */
     bool hasActiveBands() const noexcept { return activeBandCount > 0; }
@@ -205,6 +214,9 @@ private:
 
     std::array<BandpassUnit, SpectralBinning::kMaxBandpasses> bank {};
     int activeBandpassCount = 0;
+
+    /** Off = legacy global lattice; on = SpectralPerBandLattice local placement. */
+    bool perBandLatticeEnabled = false;
 
     int publishBlockCounter = 0;
     bool wasActive = false;

@@ -20,7 +20,8 @@ namespace FilterType
 
     inline juce::StringArray getChoiceNames()
     {
-        return { "Bell", "Low Shelf", "High Shelf", "Notch", "Band Pass", "Highpass", "Lowpass" };
+        // Slightly compact so the OptionBox closed combo can show the full label.
+        return { "Bell", "Lo Shelf", "Hi Shelf", "Notch", "Band Pass", "Highpass", "Lowpass" };
     }
 
     inline bool usesGain (int type)
