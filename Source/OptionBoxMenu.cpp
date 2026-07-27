@@ -1,6 +1,7 @@
 #include "OptionBoxMenu.h"
 #include "OnOffButton1.h"
 #include "FilterType.h"
+#include "EqBand.h"
 
 OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     : treeState(state) // Initialize treeState with the passed state parameter
@@ -57,6 +58,15 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     satPrePostButton.setLookAndFeel (&myTextButtonLookAndFeel);
     satPrePostButton.addListener (this);
     addChildComponent (satPrePostButton);
+
+    // Post-mode drive — compact face matching Side Check HP/LP knobs (~chrome btnSize).
+    satDriveKnob.setCompactNoValueBox (true);
+    satDriveKnob.setTooltip (
+        "Drive - pre-gain into post saturation (−12…+12 dB). Center = 0 dB. "
+        "Use this to push Post harder when band gain is not emphasizing the EQ difference.");
+    satDriveKnob.setTextValueSuffix (" dB");
+    satDriveKnob.addListener (this);
+    addChildComponent (satDriveKnob);
 
     // Stage 2 - post-Spectral sat (global). Plain ">" so UI fonts don't show missing-glyph boxes.
     spectralSatButton.setButtonText (">");
@@ -209,7 +219,8 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     // Res: vertical (same param mapping as horizontal — value is orientation-agnostic).
     spectralBandwidthSlider.setSliderStyle (juce::Slider::LinearVertical);
     spectralBandwidthSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-    spectralBandwidthSlider.setTooltip ("Res - how narrow the spectral slices are (finer = more selective, more CPU)");
+    spectralBandwidthSlider.setTooltip (
+        "Res (global) - sets how many bandpass filters tile the shared spectral lattice for all S bands. Finer = more filters / more CPU. Linked across every band.");
     spectralBandwidthSlider.setColour (juce::Slider::backgroundColourId, juce::Colour::fromRGBA (40, 35, 28, 255));
     spectralBandwidthSlider.setColour (juce::Slider::trackColourId, juce::Colour::fromRGBA (180, 150, 55, 220));
     spectralBandwidthSlider.setColour (juce::Slider::thumbColourId, juce::Colour::fromRGBA (220, 200, 120, 255));
@@ -305,6 +316,7 @@ OptionBoxMenu::~OptionBoxMenu()
     satButton.removeListener (this);
     satButton.removeMouseListener (this);
     satPrePostButton.removeListener (this);
+    satDriveKnob.removeListener (this);
     spectralSatButton.removeListener (this);
     spectralSatButton.removeMouseListener (this);
     spectralSatDriveKnob.removeListener (this);
@@ -439,6 +451,13 @@ void OptionBoxMenu::resized()
     customComboBox.setBounds(padding * 3, bandNameLabel.getBottom() + elementYSpacing, comboW, comboBoxHeight);
     satButton.setBounds (customComboBox.getRight() + satGap, customComboBox.getY(), satBtnW, comboBoxHeight);
     satPrePostButton.setBounds (satButton.getRight() + satGap, customComboBox.getY(), prePostW, comboBoxHeight);
+
+    // Post drive under Pre/Post — same compact footprint as Side Check HP/LP (~btnSize).
+    constexpr int satDriveSize = 20;
+    satDriveKnob.setBounds (satPrePostButton.getX() + (prePostW - satDriveSize) / 2,
+                            satPrePostButton.getBottom() + 3,
+                            satDriveSize,
+                            satDriveSize);
 
     // Former getHeight()/2 layout at height 340, shifted up by designTopCrop so MSLR (kept at top)
     // sits level with the Q label; box height/top crop move the chrome down on screen.
@@ -897,7 +916,10 @@ void OptionBoxMenu::cycleBand (int delta)
     // Switching bands should only reload that band's settings — clear any drag-fade.
     interactionFaded = false;
 
-    const int next = (currentBandIndex + delta + 8 * 8) % 8;
+    // Cycle in Band 1→8 display order (not raw internal indices).
+    const int display = EqBand::displayFromInternal (currentBandIndex);
+    const int nextDisplay = (display + delta + EqBand::kCount * 8) % EqBand::kCount;
+    const int next = EqBand::internalFromDisplay (nextDisplay);
     setCurrentBandIndex (next, cachedBandNames.data());
 
     // Stay put — do not call setInitialPosition.
@@ -1028,6 +1050,7 @@ void OptionBoxMenu::clearAttachments()
     spectralExpandButtonAttachment.reset();
     satButtonAttachment.reset();
     satPostButtonAttachment.reset();
+    satDriveAttachment.reset();
     sidechainButtonAttachment.reset();
     sidechainMidiButtonAttachment.reset();
     spectralSatButtonAttachment.reset();
@@ -1040,10 +1063,7 @@ bool OptionBoxMenu::currentBandSupportsDynamic() const
     if (! DynamicEq::supportsDynamic (currentBandIndex))
         return false;
 
-    // Notch / band-pass have no gain — dynamic EQ does not apply.
-    if (currentBandIndex == 4 || currentBandIndex == 5)
-        return false;
-
+    // D / S / Sat only when the selected filter type has a gain control.
     const int type = customComboBox.getSelectedItemIndex();
     return FilterType::usesGain (type);
 }
@@ -1051,9 +1071,6 @@ bool OptionBoxMenu::currentBandSupportsDynamic() const
 bool OptionBoxMenu::currentBandSupportsSpectral() const
 {
     if (! SpectralDynamics::supportsSpectral (currentBandIndex))
-        return false;
-
-    if (currentBandIndex == 4 || currentBandIndex == 5)
         return false;
 
     const int type = customComboBox.getSelectedItemIndex();
@@ -1096,13 +1113,25 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
     attackLabel.setVisible (showAR);
     releaseLabel.setVisible (showAR);
 
-    // S exposes Res + Amount + Expand invert.
+    // S exposes Res + Amount + Expand + Pack (FL/LP/HP). Keep these hidden until S is on.
     spectralBandwidthSlider.setVisible (sOn);
     spectralResLabel.setVisible (sOn);
     spectralAmountSlider.setVisible (sOn);
     spectralAmountLabel.setVisible (sOn);
     spectralExpandButton.setVisible (sOn);
     spectralPackButton.setVisible (sOn);
+    if (! sOn)
+    {
+        // Belt-and-suspenders: never leave Stage-2 / pack chrome up when S is off.
+        spectralSatButton.setVisible (false);
+        spectralSatDriveKnob.setVisible (false);
+        spectralPackButton.setBounds ({});
+        spectralBandwidthSlider.setBounds ({});
+        spectralAmountSlider.setBounds ({});
+        spectralResLabel.setBounds ({});
+        spectralAmountLabel.setBounds ({});
+        spectralExpandButton.setBounds ({});
+    }
 
     if (sOn)
     {
@@ -1123,6 +1152,7 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     spectralExpandButtonAttachment.reset();
     satButtonAttachment.reset();
     satPostButtonAttachment.reset();
+    satDriveAttachment.reset();
     sidechainButtonAttachment.reset();
     sidechainMidiButtonAttachment.reset();
     // Stage 2 is global — keep attachments alive across band switches; rebind if missing.
@@ -1140,11 +1170,12 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     const auto threshID = DynamicEq::thresholdParamIDForBandIndex (bandIndex);
     const auto attackID = DynamicEq::attackMsParamIDForBandIndex (bandIndex);
     const auto releaseID = DynamicEq::releaseMsParamIDForBandIndex (bandIndex);
-    const auto resHzID = SpectralDynamics::spectralResHzParamIDForBandIndex (bandIndex);
+    const auto resHzID = juce::String (SpectralDynamics::spectralResHzParamId());
     const auto amountID = SpectralDynamics::spectralAmountParamIDForBandIndex (bandIndex);
     const auto expandID = SpectralDynamics::spectralExpandParamIDForBandIndex (bandIndex);
     const auto satID = BandSaturation::satParamIDForBandIndex (bandIndex);
     const auto satPostID = BandSaturation::satPostParamIDForBandIndex (bandIndex);
+    const auto satDriveID = BandSaturation::satDriveDbParamIDForBandIndex (bandIndex);
     const auto scID = BandSidechain::sidechainParamIDForBandIndex (bandIndex);
     const auto scMidiID = BandSidechain::midiParamIDForBandIndex (bandIndex);
 
@@ -1177,6 +1208,33 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     if (satPostID.isNotEmpty())
         satPostButtonAttachment = std::make_unique<ButtonAttachment> (
             treeState, satPostID, satPrePostButton);
+
+    if (satDriveID.isNotEmpty())
+    {
+        if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (
+                treeState.getParameter (satDriveID)))
+        {
+            const auto range = param->getNormalisableRange();
+            satDriveKnob.setNormalisableRange (juce::NormalisableRange<double> (
+                (double) range.start,
+                (double) range.end,
+                (double) range.interval,
+                (double) range.skew,
+                range.symmetricSkew));
+        }
+        else
+        {
+            satDriveKnob.setNormalisableRange (juce::NormalisableRange<double> (
+                (double) BandSaturation::kMinSatDriveDb,
+                (double) BandSaturation::kMaxSatDriveDb,
+                0.01,
+                1.0,
+                true));
+        }
+
+        satDriveAttachment = std::make_unique<SliderAttachment> (
+            treeState, satDriveID, satDriveKnob);
+    }
 
     if (spectralSatButtonAttachment == nullptr)
         spectralSatButtonAttachment = std::make_unique<ButtonAttachment> (
@@ -1247,9 +1305,9 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
                 (double) range.interval,
                 (double) range.skew,
                 range.symmetricSkew));
+            spectralBandwidthAttachment = std::make_unique<SliderAttachment> (
+                treeState, resHzID, spectralBandwidthSlider);
         }
-
-        spectralBandwidthAttachment = std::make_unique<SliderAttachment> (treeState, resHzID, spectralBandwidthSlider);
     }
 
     if (amountID.isNotEmpty())
@@ -1299,28 +1357,16 @@ void OptionBoxMenu::setupFilterModelMenu (int bandIndex)
     filterModelAttachment.reset();
     customComboBox.clear (juce::dontSendNotification);
 
-    if (bandIndex == 4 || bandIndex == 5)
-    {
-        const auto names = FilterSlope::getChoiceNames();
-        for (int i = 0; i < names.size(); ++i)
-            customComboBox.addItem (names[i], i + 1); // ComboBox IDs are 1-based
+    // All eight bands share the same type menu (Bell / shelves / notch / BP / HP / LP).
+    const auto names = FilterType::getChoiceNames();
+    for (int i = 0; i < names.size(); ++i)
+        customComboBox.addItem (names[i], i + 1);
 
-        const juce::String slopeID = (bandIndex == 4) ? "highpassSlope" : "lowpassSlope";
-        filterModelAttachment = std::make_unique<ComboBoxAttachment> (treeState, slopeID, customComboBox);
-        customComboBox.setEnabled (true);
-    }
-    else
-    {
-        const auto names = FilterType::getChoiceNames();
-        for (int i = 0; i < names.size(); ++i)
-            customComboBox.addItem (names[i], i + 1);
+    const auto typeID = FilterType::paramIDForBandIndex (bandIndex);
+    if (typeID.isNotEmpty())
+        filterModelAttachment = std::make_unique<ComboBoxAttachment> (treeState, typeID, customComboBox);
 
-        const auto typeID = FilterType::paramIDForBandIndex (bandIndex);
-        if (typeID.isNotEmpty())
-            filterModelAttachment = std::make_unique<ComboBoxAttachment> (treeState, typeID, customComboBox);
-
-        customComboBox.setEnabled (typeID.isNotEmpty());
-    }
+    customComboBox.setEnabled (typeID.isNotEmpty());
 }
 
 void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
@@ -1331,16 +1377,7 @@ void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
     if (undoManager != nullptr)
         undoManager->beginNewTransaction ("Filter type");
 
-    if (currentBandIndex == 4 || currentBandIndex == 5)
-    {
-        // Hide Q for 6 dB/oct (1st-order has no Q).
-        const bool showQ = customComboBox.getSelectedItemIndex() != FilterSlope::db6;
-        rotaryImageKnobForOptionBox3.setVisible (showQ);
-        qLabel.setVisible (showQ);
-        return;
-    }
-
-    // Notch / band-pass have no gain control.
+    // HP / LP / notch / band-pass: Freq + Q only. Gain types: Freq + Gain + Q.
     const int type = customComboBox.getSelectedItemIndex();
     const bool showGain = FilterType::usesGain (type);
     rotaryImageKnobForOptionBox2.setVisible (showGain);
@@ -1348,6 +1385,7 @@ void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
     rotaryImageKnobForOptionBox3.setVisible (true);
     qLabel.setVisible (true);
     updateDynamicControlsVisibility();
+    resized();
 }
 
 void OptionBoxMenu::bindKnobsToBand (int index)
@@ -1401,11 +1439,13 @@ void OptionBoxMenu::bindKnobsToBand (int index)
             break;
         case 4:
             attachFloat (frequencyAttachment, "highpassCutoff", rotaryImageKnobForOptionBox1);
+            attachFloat (gainAttachment, "highpassGain", rotaryImageKnobForOptionBox2);
             attachFloat (qAttachment, "highpassQ", rotaryImageKnobForOptionBox3);
             onOffButton1->setParameterID ("highpassOnOff");
             break;
         case 5:
             attachFloat (frequencyAttachment, "lowpassCutoff", rotaryImageKnobForOptionBox1);
+            attachFloat (gainAttachment, "lowpassGain", rotaryImageKnobForOptionBox2);
             attachFloat (qAttachment, "lowpassQ", rotaryImageKnobForOptionBox3);
             onOffButton1->setParameterID ("lowpassOnOff");
             break;
@@ -1425,18 +1465,7 @@ void OptionBoxMenu::bindKnobsToBand (int index)
             break;
     }
 
-    // HP/LP: no gain. Other bands: gain depends on selected filter model.
-    if (index == 4 || index == 5)
-    {
-        rotaryImageKnobForOptionBox2.setVisible (false);
-        gainLabel.setVisible (false);
-        comboBoxChanged (&customComboBox);
-    }
-    else
-    {
-        comboBoxChanged (&customComboBox);
-    }
-
+    comboBoxChanged (&customComboBox);
     bindDynamicControls (index);
 }
 
@@ -1521,7 +1550,10 @@ void OptionBoxMenu::syncSatControls()
 
     const bool satOn = show && satButton.getToggleState();
     satPrePostButton.setVisible (satOn);
-    satPrePostButton.setButtonText (satPrePostButton.getToggleState() ? "Post" : "Pre");
+    const bool satPost = satOn && satPrePostButton.getToggleState();
+    satPrePostButton.setButtonText (satPost ? "Post" : "Pre");
+    // Drive only in Post — Pre uses band gain as emphasis into the shaper.
+    satDriveKnob.setVisible (satPost);
 }
 
 void OptionBoxMenu::syncSpectralSatControls()

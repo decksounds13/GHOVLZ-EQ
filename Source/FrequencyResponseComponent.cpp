@@ -70,9 +70,13 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     parameters.addParameterListener("band4Type", this);
     parameters.addParameterListener("highpassCutoff", this);
     parameters.addParameterListener("highpassQ", this);
+    parameters.addParameterListener("highpassGain", this);
+    parameters.addParameterListener("highpassType", this);
     parameters.addParameterListener("highpassSlope", this);
     parameters.addParameterListener("lowpassCutoff", this);
     parameters.addParameterListener("lowpassQ", this);
+    parameters.addParameterListener("lowpassGain", this);
+    parameters.addParameterListener("lowpassType", this);
     parameters.addParameterListener("lowpassSlope", this);
     parameters.addParameterListener("highShelfGain", this);
     parameters.addParameterListener("highShelfFrequency", this);
@@ -131,6 +135,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     parameters.addParameterListener("band4SpectralDepth", this);
     parameters.addParameterListener("highShelfSpectralDepth", this);
     parameters.addParameterListener("lowShelfSpectralDepth", this);
+    parameters.addParameterListener (SpectralDynamics::spectralResHzParamId(), this);
     parameters.addParameterListener("band1SpectralResHz", this);
     parameters.addParameterListener("band2SpectralResHz", this);
     parameters.addParameterListener("band3SpectralResHz", this);
@@ -282,9 +287,13 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener("band4Type", this);
     parameters.removeParameterListener("highpassCutoff", this);
     parameters.removeParameterListener("highpassQ", this);
+    parameters.removeParameterListener("highpassGain", this);
+    parameters.removeParameterListener("highpassType", this);
     parameters.removeParameterListener("highpassSlope", this);
     parameters.removeParameterListener("lowpassCutoff", this);
     parameters.removeParameterListener("lowpassQ", this);
+    parameters.removeParameterListener("lowpassGain", this);
+    parameters.removeParameterListener("lowpassType", this);
     parameters.removeParameterListener("lowpassSlope", this);
     parameters.removeParameterListener("highShelfGain", this);
     parameters.removeParameterListener("highShelfFrequency", this);
@@ -343,6 +352,7 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener("band4SpectralDepth", this);
     parameters.removeParameterListener("highShelfSpectralDepth", this);
     parameters.removeParameterListener("lowShelfSpectralDepth", this);
+    parameters.removeParameterListener (SpectralDynamics::spectralResHzParamId(), this);
     parameters.removeParameterListener("band1SpectralResHz", this);
     parameters.removeParameterListener("band2SpectralResHz", this);
     parameters.removeParameterListener("band3SpectralResHz", this);
@@ -584,6 +594,8 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     const bool spec2 = raw ("band2Spectral") > 0.5f;
     const bool spec3 = raw ("band3Spectral") > 0.5f;
     const bool spec4 = raw ("band4Spectral") > 0.5f;
+    const bool specHP = raw ("highpassSpectral") > 0.5f;
+    const bool specLP = raw ("lowpassSpectral") > 0.5f;
     const bool specHS = raw ("highShelfSpectral") > 0.5f;
     const bool specLS = raw ("lowShelfSpectral") > 0.5f;
 
@@ -739,18 +751,43 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
 
     if (needsUpdateHighpass)
     {
-        auto stages = FilterSlope::makeHighpassCoeffs (
-            sampleRate, clampFreq (raw ("highpassCutoff")), clampQ (raw ("highpassQ")),
-            (int) raw ("highpassSlope"));
-        FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, responseHighpass, responseSampleStep);
+        const int type = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
+        const float freq = clampFreq (raw ("highpassCutoff"));
+        const float q = clampQ (raw ("highpassQ"));
+
+        // Match DSP: multi-slope cascade only for Highpass; other types = single biquad.
+        if (type == FilterType::highpass)
+        {
+            const int slope = BandChannel::readChoiceIndex (parameters, "highpassSlope");
+            auto stages = FilterSlope::makeHighpassCoeffs (sampleRate, freq, q, slope);
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, responseHighpass, responseSampleStep);
+        }
+        else
+        {
+            const float gain = FilterType::usesGain (type) ? raw ("highpassGain") : 0.0f;
+            auto coeffs = FilterType::makeCoefficients (type, sampleRate, freq, q, gain);
+            fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseHighpass, responseSampleStep);
+        }
     }
 
     if (needsUpdateLowpass)
     {
-        auto stages = FilterSlope::makeLowpassCoeffs (
-            sampleRate, clampFreq (raw ("lowpassCutoff")), clampQ (raw ("lowpassQ")),
-            (int) raw ("lowpassSlope"));
-        FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, responseLowpass, responseSampleStep);
+        const int type = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
+        const float freq = clampFreq (raw ("lowpassCutoff"));
+        const float q = clampQ (raw ("lowpassQ"));
+
+        if (type == FilterType::lowpass)
+        {
+            const int slope = BandChannel::readChoiceIndex (parameters, "lowpassSlope");
+            auto stages = FilterSlope::makeLowpassCoeffs (sampleRate, freq, q, slope);
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, responseLowpass, responseSampleStep);
+        }
+        else
+        {
+            const float gain = FilterType::usesGain (type) ? raw ("lowpassGain") : 0.0f;
+            auto coeffs = FilterType::makeCoefficients (type, sampleRate, freq, q, gain);
+            fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, responseLowpass, responseSampleStep);
+        }
     }
 
     if (needsUpdateHighShelf)
@@ -792,18 +829,31 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     }
 
     // Spectral processing shapes only the cumulative display curve.
+    // usesGain + current type must match DSP arming (S only on bell / shelves).
     if (processor.getIsBand1On())
-        applySpectralGrToCombined (0, spec1 && FilterType::usesGain ((int) raw ("band1Type")));
+        applySpectralGrToCombined (0, spec1 && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "band1Type", FilterType::bell)));
     if (processor.getIsBand2On())
-        applySpectralGrToCombined (1, spec2 && FilterType::usesGain ((int) raw ("band2Type")));
+        applySpectralGrToCombined (1, spec2 && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "band2Type", FilterType::bell)));
     if (processor.getIsBand3On())
-        applySpectralGrToCombined (2, spec3 && FilterType::usesGain ((int) raw ("band3Type")));
+        applySpectralGrToCombined (2, spec3 && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "band3Type", FilterType::bell)));
     if (processor.getIsBand4On())
-        applySpectralGrToCombined (3, spec4 && FilterType::usesGain ((int) raw ("band4Type")));
+        applySpectralGrToCombined (3, spec4 && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "band4Type", FilterType::bell)));
+    if (processor.getIsHighpassOn())
+        applySpectralGrToCombined (4, specHP && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass)));
+    if (processor.getIsLowpassOn())
+        applySpectralGrToCombined (5, specLP && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass)));
     if (processor.getIsHighShelfOn())
-        applySpectralGrToCombined (6, specHS && FilterType::usesGain ((int) raw ("highShelfType")));
+        applySpectralGrToCombined (6, specHS && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "highShelfType", FilterType::highShelf)));
     if (processor.getIsLowShelfOn())
-        applySpectralGrToCombined (7, specLS && FilterType::usesGain ((int) raw ("lowShelfType")));
+        applySpectralGrToCombined (7, specLS && FilterType::usesGain (
+            BandChannel::readChoiceIndex (parameters, "lowShelfType", FilterType::lowShelf)));
 
     // Side Check GR after spectral — sum curve only (per-band curves stay static).
     applySideCheckGrToCombined (raw (SideCheck::enabledParamId()) > 0.5f);
@@ -1052,7 +1102,17 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     {
         highpassResponsePath.clear();
         if (processor.getIsHighpassOn() && ! compositeResponse6.empty())
-            highpassResponsePath = intelligentDownsampleHighpass(highpassResponsePath, compositeResponse6, w, h);
+        {
+            // Corner-tether paths are only for real HP/LP slopes; bells/shelves use the
+            // same mid-line close as the other bands (avoids Q→bottom corner glitches).
+            const int hpType = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
+            if (hpType == FilterType::highpass)
+                highpassResponsePath = intelligentDownsampleHighpass (highpassResponsePath, compositeResponse6, w, h);
+            else if (hpType == FilterType::lowpass)
+                highpassResponsePath = intelligentDownsampleLowpass (highpassResponsePath, compositeResponse6, w, h);
+            else
+                highpassResponsePath = intelligentDownsample (highpassResponsePath, compositeResponse6, w, h);
+        }
         needsUpdateHighpass = false;
     }
 
@@ -1060,7 +1120,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     {
         juce::Colour customHighpassColor = resolveBandFillColour (
             juce::Colours::green.withAlpha (0.35f),
-            false); // HP is attenuating
+            bandGainIsBoost ("highpassGain", "highpassType"));
         g.setColour(customHighpassColor);
         g.fillPath(highpassResponsePath);
 
@@ -1077,7 +1137,15 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     {
         lowpassResponsePath.clear();
         if (processor.getIsLowpassOn() && ! compositeResponse7.empty())
-            lowpassResponsePath = intelligentDownsampleLowpass(lowpassResponsePath, compositeResponse7, w, h);
+        {
+            const int lpType = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
+            if (lpType == FilterType::lowpass)
+                lowpassResponsePath = intelligentDownsampleLowpass (lowpassResponsePath, compositeResponse7, w, h);
+            else if (lpType == FilterType::highpass)
+                lowpassResponsePath = intelligentDownsampleHighpass (lowpassResponsePath, compositeResponse7, w, h);
+            else
+                lowpassResponsePath = intelligentDownsample (lowpassResponsePath, compositeResponse7, w, h);
+        }
         needsUpdateLowpass = false;
     }
 
@@ -1085,7 +1153,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     {
         juce::Colour customLowpassColor = resolveBandFillColour (
             juce::Colours::red.withAlpha (0.45f),
-            false); // LP is attenuating
+            bandGainIsBoost ("lowpassGain", "lowpassType"));
         g.setColour(customLowpassColor);
         g.fillPath(lowpassResponsePath);
 
@@ -1508,21 +1576,22 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float scaleFactor5 = (isMouseHoveringOverHandle5 ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (4);
 
-        // Get the values from the tree state
         float highpassCutoff = processor.treeState.getRawParameterValue("highpassCutoff")->load();
+        const int hpType = BandChannel::readChoiceIndex (processor.treeState, "highpassType", FilterType::highpass);
+        const float hpGain = FilterType::usesGain (hpType)
+                               ? processor.treeState.getRawParameterValue ("highpassGain")->load()
+                               : 0.0f;
 
-        // Calculate the x coordinate for the circle
         float highpassX = (getWidth() - 1) * (std::log10(highpassCutoff) - logMin) / (logMax - logMin);
+        float highpassY = dbToY (hpGain, static_cast<float> (getHeight()));
 
-        // Apply scale factor to handle
         float handleSize5 = 12.0f * scaleFactor5;
 
-        // Limit handle position by the edge of the window, taking full diameter into account
         highpassX = std::min(std::max(highpassX, handleSize5), static_cast<float>(getWidth()) - handleSize5);
+        highpassY = std::min(std::max(highpassY, handleSize5), static_cast<float>(getHeight()) - handleSize5);
 
-        // Update handle positions to reflect these constraints
         handleX5 = highpassX;
-        handleY5 = getHeight() / 2;  // Assuming the handle is centered vertically
+        handleY5 = highpassY;
 
         // More graphical attributes
         float handleOutlineSize5 = 12.5f * scaleFactor5;
@@ -1544,7 +1613,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setColour(juce::Colours::black);
         g.setFont(11.0f * scaleFactor5);  // Apply scale factor to font size
         float textOffset5 = 3.5f * scaleFactor5;  // Apply scale factor to text position
-        g.drawText("HP", highpassX - textOffset5, handleY5 - textOffset5, 7.0f * scaleFactor5, 7.0f * scaleFactor5, juce::Justification::centred, false);
+        const char* hpLabel = (hpType == FilterType::highpass) ? "HP"
+                            : (hpType == FilterType::lowpass)  ? "LP" : "1";
+        g.drawText(hpLabel, highpassX - textOffset5, handleY5 - textOffset5, 7.0f * scaleFactor5, 7.0f * scaleFactor5, juce::Justification::centred, false);
     }
     else
     {
@@ -1563,21 +1634,22 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float scaleFactor6 = (isMouseHoveringOverHandle6 ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (5);
 
-        // Get the values from the tree state
         float lowpassCutoff = processor.treeState.getRawParameterValue("lowpassCutoff")->load();
+        const int lpType = BandChannel::readChoiceIndex (processor.treeState, "lowpassType", FilterType::lowpass);
+        const float lpGain = FilterType::usesGain (lpType)
+                               ? processor.treeState.getRawParameterValue ("lowpassGain")->load()
+                               : 0.0f;
 
-        // Calculate the x coordinate for the circle
         float lowpassX = (getWidth() - 1) * (std::log10(lowpassCutoff) - logMin) / (logMax - logMin);
+        float lowpassY = dbToY (lpGain, static_cast<float> (getHeight()));
 
-        // Apply scale factor to handle
         float handleSize6 = 12.0f * scaleFactor6;
 
-        // Limit handle position by the edge of the window, taking full diameter into account
         lowpassX = std::min(std::max(lowpassX, handleSize6), static_cast<float>(getWidth()) - handleSize6);
+        lowpassY = std::min(std::max(lowpassY, handleSize6), static_cast<float>(getHeight()) - handleSize6);
 
-        // Update handle positions to reflect these constraints
         handleX6 = lowpassX;
-        handleY6 = getHeight() / 2;  // Assuming the handle is centered vertically
+        handleY6 = lowpassY;
 
         // More graphical attributes
         float handleOutlineSize6 = 12.5f * scaleFactor6;
@@ -1599,7 +1671,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setColour(juce::Colours::black);
         g.setFont(11.0f * scaleFactor6);  // Apply scale factor to font size
         float textOffset6 = 3.5f * scaleFactor6;  // Apply scale factor to text position
-        g.drawText("LP", lowpassX - textOffset6, handleY6 - textOffset6, 7.0f * scaleFactor6, 7.0f * scaleFactor6, juce::Justification::centred, false);
+        const char* lpLabel = (lpType == FilterType::lowpass)  ? "LP"
+                            : (lpType == FilterType::highpass) ? "HP" : "8";
+        g.drawText(lpLabel, lowpassX - textOffset6, handleY6 - textOffset6, 7.0f * scaleFactor6, 7.0f * scaleFactor6, juce::Justification::centred, false);
     }
     else
     {
@@ -2103,7 +2177,12 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
         currentBandName = arrayBandName[4];  // Highpass is at index 4
         activeBand = 4;
 
-        arrayCurrentBandGain[4] = 0.0f;  // Gain is always 0 dB for highpass filters
+        {
+            const int hpType = BandChannel::readChoiceIndex (processor.treeState, "highpassType", FilterType::highpass);
+            arrayCurrentBandGain[4] = FilterType::usesGain (hpType)
+                                         ? processor.treeState.getRawParameterValue ("highpassGain")->load()
+                                         : 0.0f;
+        }
 
         auto* paramFrequency = dynamic_cast<juce::RangedAudioParameter*>(processor.treeState.getParameter("highpassCutoff"));
         if (paramFrequency) {
@@ -2135,7 +2214,13 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
         currentBandName = arrayBandName[5];  // Lowpass is at index 5
         activeBand = 5;
 
-        arrayCurrentBandGain[5] = 0.0f;  // Gain is always 0 dB for lowpass filters
+        {
+            const int lpType = BandChannel::readChoiceIndex (processor.treeState, "lowpassType", FilterType::lowpass);
+            arrayCurrentBandGain[5] = FilterType::usesGain (lpType)
+                                         ? processor.treeState.getRawParameterValue ("lowpassGain")->load()
+                                         : 0.0f;
+            currentLowpassGain = arrayCurrentBandGain[5];
+        }
 
         auto* paramFrequency = dynamic_cast<juce::RangedAudioParameter*>(processor.treeState.getParameter("lowpassCutoff"));
         if (paramFrequency) {
@@ -2565,20 +2650,21 @@ float FrequencyResponseComponent::xToFrequency (float x) const
 
 int FrequencyResponseComponent::bandIndexForFrequencyZone (float frequencyHz) const
 {
-    // Zones: HP <50 | LS 50–300 | 4 peaking (log) 300–12k | HS 12–15k | LP 15–20k
+    // Zones: HP <50 | LS 50–150 | 4 bells (log) 150–8k | HS 8–12k | LP 12–20k
+    // Internal indices: 4=HP(Band1), 7=LS(Band2), 0–3=Bells(Band3–6), 6=HS(Band7), 5=LP(Band8)
     constexpr float kHpMaxHz = 50.0f;
-    constexpr float kLsMaxHz = 300.0f;
-    constexpr float kPeakMinHz = 300.0f;
-    constexpr float kPeakMaxHz = 12000.0f;
-    constexpr float kHsMaxHz = 15000.0f;
+    constexpr float kLsMaxHz = 150.0f;
+    constexpr float kPeakMinHz = 150.0f;
+    constexpr float kPeakMaxHz = 8000.0f;
+    constexpr float kHsMaxHz = 12000.0f;
 
     const float f = juce::jlimit (20.0f, 20000.0f, frequencyHz);
 
     if (f < kHpMaxHz)
-        return 4; // Highpass
+        return 4; // Band 1 — Highpass
 
     if (f < kLsMaxHz)
-        return 7; // Low shelf
+        return 7; // Band 2 — Low shelf
 
     if (f < kPeakMaxHz)
     {
@@ -2589,9 +2675,9 @@ int FrequencyResponseComponent::bandIndexForFrequencyZone (float frequencyHz) co
     }
 
     if (f < kHsMaxHz)
-        return 6; // High shelf
+        return 6; // Band 7 — High shelf
 
-    return 5; // Lowpass
+    return 5; // Band 8 — Lowpass
 }
 
 void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequencyHz)
@@ -2708,52 +2794,71 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
         }
     }
 
-    // Activate an unused band at click Hz / 0 dB (never relocate an already-on band).
+    // Activate an unused band at click Hz / 0 dB; set type from frequency zone.
+    const int zoneType = FilterType::typeForFrequencyZone (freq);
+
+    auto setTypeParam = [this] (const juce::String& paramID, int typeIndex)
+    {
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                processor.treeState.getParameter (paramID)))
+            *choice = typeIndex;
+    };
+
     switch (bandIndex)
     {
         case 0:
             setFloatParam ("band1Frequency", freq);
             setFloatParam ("band1Gain", 0.0f);
+            setTypeParam ("band1Type", zoneType);
             setBoolParam ("band1OnOff", true);
             needsUpdateBand1 = true;
             break;
         case 1:
             setFloatParam ("band2Frequency", freq);
             setFloatParam ("band2Gain", 0.0f);
+            setTypeParam ("band2Type", zoneType);
             setBoolParam ("band2OnOff", true);
             needsUpdateBand2 = true;
             break;
         case 2:
             setFloatParam ("band3Frequency", freq);
             setFloatParam ("band3Gain", 0.0f);
+            setTypeParam ("band3Type", zoneType);
             setBoolParam ("band3OnOff", true);
             needsUpdateBand3 = true;
             break;
         case 3:
             setFloatParam ("band4Frequency", freq);
             setFloatParam ("band4Gain", 0.0f);
+            setTypeParam ("band4Type", zoneType);
             setBoolParam ("band4OnOff", true);
             needsUpdateBand4 = true;
             break;
         case 4:
             setFloatParam ("highpassCutoff", freq);
+            setFloatParam ("highpassGain", 0.0f);
+            setTypeParam ("highpassType", zoneType);
             setBoolParam ("highpassOnOff", true);
             needsUpdateHighpass = true;
             break;
         case 5:
             setFloatParam ("lowpassCutoff", freq);
+            setFloatParam ("lowpassGain", 0.0f);
+            setTypeParam ("lowpassType", zoneType);
             setBoolParam ("lowpassOnOff", true);
             needsUpdateLowpass = true;
             break;
         case 6:
             setFloatParam ("highShelfFrequency", freq);
             setFloatParam ("highShelfGain", 0.0f);
+            setTypeParam ("highShelfType", zoneType);
             setBoolParam ("highShelfOnOff", true);
             needsUpdateHighShelf = true;
             break;
         case 7:
             setFloatParam ("lowShelfFrequency", freq);
             setFloatParam ("lowShelfGain", 0.0f);
+            setTypeParam ("lowShelfType", zoneType);
             setBoolParam ("lowShelfOnOff", true);
             needsUpdateLowShelf = true;
             break;
@@ -3324,7 +3429,6 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 
     else if (isHandle5Dragging)  // Check if handle 5 is dragging
     {
-        // Reset other handles' dragging status
         isHandle1Dragging = false;
         isHandle2Dragging = false;
         isHandle3Dragging = false;
@@ -3335,40 +3439,47 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         anyHandleDragging = true;
         needsUpdateHighpass = true;
         needsUpdateCombined = true;
-        currentBandName = arrayBandName[4];  // Assuming highpass is at index 5 in arrayBandName
+        currentBandName = arrayBandName[4];
         activeBand = 4;
 
-        // Calculate the new position of handle 5 considering the drag offset
-        float newXValue5 = event.position.x - dragOffsetXHandle5;
+        float newXValue5 = juce::jlimit (0.0f, static_cast<float> (w), event.position.x - dragOffsetXHandle5);
+        float newYValue5 = juce::jlimit (0.0f, static_cast<float> (h), event.position.y - dragOffsetYHandle5);
+        handleX5 = newXValue5;
 
-        // Clamp the handle's X-coordinate so it doesn't go outside the window.
-        float clampedXValue5 = juce::jlimit(0.0f, static_cast<float>(w), newXValue5);
+        const int hpType = BandChannel::readChoiceIndex (processor.treeState, "highpassType", FilterType::highpass);
+        if (FilterType::usesGain (hpType))
+            handleY5 = newYValue5;
+        else
+            handleY5 = dbToY (0.0f, static_cast<float> (h));
 
-        // Update handleX5 with the new, clamped position
-        handleX5 = clampedXValue5;
+        double logMin = std::log10 (20);
+        double logMax = std::log10 (20000);
+        float newHighpassCutoff = std::pow (10.0f, logMin + (logMax - logMin) * handleX5 / static_cast<float> (w - 1));
 
-        // Constants for logarithmic mapping
-        double logMin = std::log10(20);  // 20 Hz
-        double logMax = std::log10(20000);  // 20000 Hz
-
-        // Calculate newHighpassCutoff based on the X position
-        float newHighpassCutoff = std::pow(10.0f, logMin + (logMax - logMin) * handleX5 / static_cast<float>(w - 1));
-
-        // Set the new highpassCutoff value
-        auto* paramFrequency5 = dynamic_cast<juce::RangedAudioParameter*>(processor.treeState.getParameter("highpassCutoff"));
-        if (paramFrequency5)
+        if (auto* paramFrequency5 = dynamic_cast<juce::RangedAudioParameter*> (
+                processor.treeState.getParameter ("highpassCutoff")))
         {
-            float normalizedHighpassCutoff = paramFrequency5->convertTo0to1(newHighpassCutoff);
-            processor.treeState.getParameter("highpassCutoff")->setValueNotifyingHost(normalizedHighpassCutoff);
-
+            processor.treeState.getParameter ("highpassCutoff")->setValueNotifyingHost (
+                paramFrequency5->convertTo0to1 (newHighpassCutoff));
             arrayCurrentBandFrequency[4] = newHighpassCutoff;
         }
 
-        float currentHighpassQ = processor.treeState.getParameter("highpassQ")->getValue();
-        float fullScaleHighpassQ = juce::jmap(currentHighpassQ, 0.0f, 1.0f, 0.15f, 10.0f);  // The full-scale range
+        if (FilterType::usesGain (hpType))
+        {
+            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue5, static_cast<float> (h)));
+            if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (
+                    processor.treeState.getParameter ("highpassGain")))
+                processor.treeState.getParameter ("highpassGain")->setValueNotifyingHost (
+                    paramGain->convertTo0to1 (gainDb));
+            arrayCurrentBandGain[4] = gainDb;
+        }
+        else
+        {
+            arrayCurrentBandGain[4] = 0.0f;
+        }
 
-        // Update the array with the full-scale Q value
-        arrayCurrentBandQ[4] = fullScaleHighpassQ;
+        float currentHighpassQ = processor.treeState.getParameter ("highpassQ")->getValue();
+        arrayCurrentBandQ[4] = juce::jmap (currentHighpassQ, 0.0f, 1.0f, 0.15f, 10.0f);
 
         needsUpdateHighpass = true;
         needsUpdateCombined = true;
@@ -3391,30 +3502,40 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         currentBandName = arrayBandName[5];
         activeBand = 5;
 
-        // Calculate the new position of handle 6 considering the drag offset
-        float newXValue6 = event.position.x - dragOffsetXHandle6;
+        float newXValue6 = juce::jlimit (0.0f, static_cast<float> (w), event.position.x - dragOffsetXHandle6);
+        float newYValue6 = juce::jlimit (0.0f, static_cast<float> (h), event.position.y - dragOffsetYHandle6);
+        handleX6 = newXValue6;
 
-        // Clamp the handle's X-coordinate so it doesn't go outside the window.
-        float clampedXValue6 = juce::jlimit(0.0f, static_cast<float>(w), newXValue6);
+        const int lpType = BandChannel::readChoiceIndex (processor.treeState, "lowpassType", FilterType::lowpass);
+        if (FilterType::usesGain (lpType))
+            handleY6 = newYValue6;
+        else
+            handleY6 = dbToY (0.0f, static_cast<float> (h));
 
-        // Update handleX6 with the new, clamped position
-        handleX6 = clampedXValue6;
+        double logMin = std::log10 (20);
+        double logMax = std::log10 (20000);
+        float newLowpassCutoff = std::pow (10.0f, logMin + (logMax - logMin) * handleX6 / static_cast<float> (w - 1));
 
-        // Constants for logarithmic mapping
-        double logMin = std::log10(20);  // 20 Hz
-        double logMax = std::log10(20000);  // 20000 Hz
-
-        // Calculate newLowpassCutoff based on the X position
-        float newLowpassCutoff = std::pow(10.0f, logMin + (logMax - logMin) * handleX6 / static_cast<float>(w - 1));
-
-        // Set the new lowpassCutoff value
-        auto* paramFrequency6 = dynamic_cast<juce::RangedAudioParameter*>(processor.treeState.getParameter("lowpassCutoff"));
-        if (paramFrequency6)
+        if (auto* paramFrequency6 = dynamic_cast<juce::RangedAudioParameter*> (
+                processor.treeState.getParameter ("lowpassCutoff")))
         {
-            float normalizedLowpassCutoff = paramFrequency6->convertTo0to1(newLowpassCutoff);
-            processor.treeState.getParameter("lowpassCutoff")->setValueNotifyingHost(normalizedLowpassCutoff);
-
+            processor.treeState.getParameter ("lowpassCutoff")->setValueNotifyingHost (
+                paramFrequency6->convertTo0to1 (newLowpassCutoff));
             arrayCurrentBandFrequency[5] = newLowpassCutoff;
+        }
+
+        if (FilterType::usesGain (lpType))
+        {
+            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue6, static_cast<float> (h)));
+            if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (
+                    processor.treeState.getParameter ("lowpassGain")))
+                processor.treeState.getParameter ("lowpassGain")->setValueNotifyingHost (
+                    paramGain->convertTo0to1 (gainDb));
+            arrayCurrentBandGain[5] = gainDb;
+        }
+        else
+        {
+            arrayCurrentBandGain[5] = 0.0f;
         }
 
         float currentLowpassQ = processor.treeState.getParameter("lowpassQ")->getValue();
@@ -3815,21 +3936,36 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
         {
             if (wheel.deltaY != 0)
             {
-                // HP/LP: wheel cycles slope (6→12→24→48→96), not Q
-                if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
-                        parameters.getParameter ("highpassSlope")))
+                const int hpType = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
+                if (FilterType::isHpLp (hpType))
                 {
-                    const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
-                    const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
-                                                       choice->getIndex() + delta);
-                    if (newIndex != choice->getIndex())
+                    // HP/LP: wheel cycles slope (6→12→24→48→96), not Q
+                    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                            parameters.getParameter ("highpassSlope")))
                     {
-                        needsUpdateHighpass = true;
-                        needsUpdateCombined = true;
-                        choice->beginChangeGesture();
-                        choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
-                        choice->endChangeGesture();
+                        const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
+                        const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
+                                                           choice->getIndex() + delta);
+                        if (newIndex != choice->getIndex())
+                        {
+                            needsUpdateHighpass = true;
+                            needsUpdateCombined = true;
+                            choice->beginChangeGesture();
+                            choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
+                            choice->endChangeGesture();
+                        }
                     }
+                }
+                else
+                {
+                    needsUpdateHighpass = true;
+                    needsUpdateCombined = true;
+                    float currentQ = processor.treeState.getParameter ("highpassQ")->getValue();
+                    const float sensitivity = 0.1f;
+                    float newQ = juce::NormalisableRange<float> (0.15f, 10.0f, 0.01f, 0.25f)
+                                     .snapToLegalValue (currentQ + wheel.deltaY * sensitivity);
+                    processor.treeState.getParameter ("highpassQ")->setValueNotifyingHost (newQ);
+                    arrayCurrentBandQ[4] = newQ;
                 }
             }
         }
@@ -3838,21 +3974,35 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
         {
             if (wheel.deltaY != 0)
             {
-                // HP/LP: wheel cycles slope (6→12→24→48→96), not Q
-                if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
-                        parameters.getParameter ("lowpassSlope")))
+                const int lpType = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
+                if (FilterType::isHpLp (lpType))
                 {
-                    const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
-                    const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
-                                                       choice->getIndex() + delta);
-                    if (newIndex != choice->getIndex())
+                    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                            parameters.getParameter ("lowpassSlope")))
                     {
-                        needsUpdateLowpass = true;
-                        needsUpdateCombined = true;
-                        choice->beginChangeGesture();
-                        choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
-                        choice->endChangeGesture();
+                        const int delta = (wheel.deltaY > 0.0f) ? 1 : -1;
+                        const int newIndex = juce::jlimit (0, FilterSlope::numChoices - 1,
+                                                           choice->getIndex() + delta);
+                        if (newIndex != choice->getIndex())
+                        {
+                            needsUpdateLowpass = true;
+                            needsUpdateCombined = true;
+                            choice->beginChangeGesture();
+                            choice->setValueNotifyingHost (choice->convertTo0to1 ((float) newIndex));
+                            choice->endChangeGesture();
+                        }
                     }
+                }
+                else
+                {
+                    needsUpdateLowpass = true;
+                    needsUpdateCombined = true;
+                    float currentQ = processor.treeState.getParameter ("lowpassQ")->getValue();
+                    const float sensitivity = 0.1f;
+                    float newQ = juce::NormalisableRange<float> (0.15f, 10.0f, 0.01f, 0.25f)
+                                     .snapToLegalValue (currentQ + wheel.deltaY * sensitivity);
+                    processor.treeState.getParameter ("lowpassQ")->setValueNotifyingHost (newQ);
+                    arrayCurrentBandQ[5] = newQ;
                 }
             }
         }
@@ -4258,6 +4408,7 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
                                      || parameterID.endsWith ("SpectralDepth")
                                      || parameterID.endsWith ("SpectralResHz")
                                      || parameterID.endsWith ("SpectralExpand")
+                                     || parameterID == SpectralDynamics::spectralResHzParamId()
                                      || parameterID == SpectralDynamics::spectralPackParamId();
     const bool isSideCheckDisplayParam = parameterID == SideCheck::enabledParamId()
                                       || parameterID == SideCheck::amountParamId()
@@ -4281,9 +4432,11 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
              || parameterID == "band4OnOff" || parameterID == "band4Type" || parameterID == "band4Dynamic"
              || parameterID == "band4DynThreshold")
         needsUpdateBand4 = true;
-    else if (parameterID == "highpassCutoff" || parameterID == "highpassQ" || parameterID == "highpassOnOff" || parameterID == "highpassSlope")
+    else if (parameterID == "highpassCutoff" || parameterID == "highpassQ" || parameterID == "highpassGain"
+             || parameterID == "highpassOnOff" || parameterID == "highpassType" || parameterID == "highpassSlope")
         needsUpdateHighpass = true;
-    else if (parameterID == "lowpassCutoff" || parameterID == "lowpassQ" || parameterID == "lowpassOnOff" || parameterID == "lowpassSlope")
+    else if (parameterID == "lowpassCutoff" || parameterID == "lowpassQ" || parameterID == "lowpassGain"
+             || parameterID == "lowpassOnOff" || parameterID == "lowpassType" || parameterID == "lowpassSlope")
         needsUpdateLowpass = true;
     else if (parameterID == "highShelfGain" || parameterID == "highShelfFrequency" || parameterID == "highShelfQ"
              || parameterID == "highShelfOnOff" || parameterID == "highShelfType" || parameterID == "highShelfDynamic"

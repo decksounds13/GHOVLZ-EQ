@@ -212,16 +212,16 @@ void AnalyserDefaults::stampBlockIdInState (juce::ValueTree& state, int blockInd
     state.setProperty ("deckStateSchema", 2, nullptr);
     state.setProperty ("blockSizeName", names[idx], nullptr);
 
-    const float norm = names.size() > 1
-        ? (float) idx / (float) (names.size() - 1)
-        : 0.0f;
+    // APVTS PARAM values are unnormalised (choice index), same as highShelfType=2.0 etc.
+    // Writing a 0–1 norm here made 8192 (index 2 → 0.666) reload as index 0/1.
+    const float unnorm = (float) idx;
 
     for (int i = 0; i < state.getNumChildren(); ++i)
     {
         auto child = state.getChild (i);
         if (child.hasType ("PARAM") && child["id"].toString() == "BLOCK_ID")
         {
-            child.setProperty ("value", norm, nullptr);
+            child.setProperty ("value", unnorm, nullptr);
             return;
         }
     }
@@ -231,6 +231,7 @@ void AnalyserDefaults::migrateBlockIdInState (juce::ValueTree& state)
 {
     const auto names = getBlockSizeNames();
 
+    // Prefer stable size name whenever present (repairs bad normalised BLOCK_ID dumps).
     if (state.hasProperty ("blockSizeName"))
     {
         const int idx = names.indexOf (state.getProperty ("blockSizeName").toString());
@@ -239,27 +240,43 @@ void AnalyserDefaults::migrateBlockIdInState (juce::ValueTree& state)
         return;
     }
 
-    if ((int) state.getProperty ("deckStateSchema", 0) >= 2)
-        return;
-
-    // Legacy 5-choice list used norms k/4. The old default 2048 was index 2
-    // (0.5). On the current 4-choice list that same 0.5 becomes index 2 = 8192.
     for (int i = 0; i < state.getNumChildren(); ++i)
     {
         auto child = state.getChild (i);
         if (! child.hasType ("PARAM") || child["id"].toString() != "BLOCK_ID")
             continue;
 
-        const float norm = (float) child.getProperty ("value");
-        const int oldIndex = juce::jlimit (0, 4, (int) std::lround ((double) norm * 4.0));
-        const float expected = oldIndex / 4.0f;
+        const float stored = (float) child.getProperty ("value");
 
-        // Only remap clear 5-step mid values (skip 0.0 / 1.0 — ambiguous with new list).
-        if (std::abs (norm - expected) < 0.02f && oldIndex >= 1 && oldIndex <= 3)
+        // Already a clean choice index for the current 4-item list.
+        if (stored >= 0.0f && stored <= 3.0f && std::abs (stored - std::round (stored)) < 0.01f)
+        {
+            stampBlockIdInState (state, (int) std::lround (stored));
+            return;
+        }
+
+        // Buggy normalised dumps: 0, 1/3, 2/3, 1 → indices 0–3.
+        static constexpr float kNorms[] = { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f };
+        for (int n = 0; n < 4; ++n)
+        {
+            if (std::abs (stored - kNorms[n]) < 0.02f)
+            {
+                stampBlockIdInState (state, n);
+                return;
+            }
+        }
+
+        if ((int) state.getProperty ("deckStateSchema", 0) >= 2)
+            return;
+
+        // Legacy 5-choice list used norms k/4. Old default 2048 was index 2 (0.5).
+        const int oldIndex = juce::jlimit (0, 4, (int) std::lround ((double) stored * 4.0));
+        const float expected = oldIndex / 4.0f;
+        if (std::abs (stored - expected) < 0.02f && oldIndex >= 1 && oldIndex <= 3)
         {
             static constexpr int oldFiveToNewFour[] = { 0, 0, 0, 1, 2 };
             stampBlockIdInState (state, oldFiveToNewFour[oldIndex]);
         }
-        break;
+        return;
     }
 }

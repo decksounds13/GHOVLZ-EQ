@@ -13,6 +13,7 @@
 #include "EqEditor.h"
 #include "KnobBandHighlight.h"
 #include "ComboBoxLookAndFeel.h"
+#include "FilterType.h"
 
 
 
@@ -140,30 +141,38 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
 
 
-    // Highpass
-    // Configure highpassCutoffSlider
+    // Band 1 (default HP) — Freq / Gain / Q
     knob1.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     addAndMakeVisible(knob1);
     knob1.setBounds(100,100, 40, 40);
     knob1.addListener(this);
     highpassCutoffAttachment = std::make_unique<SliderAttachment>(audioProcessor.treeState, "highpassCutoff", knob1);
 
-    // Configure highpassQSlider
+    knobHpGain.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    addAndMakeVisible (knobHpGain);
+    knobHpGain.setBounds (100, 100, 40, 40);
+    knobHpGain.addListener (this);
+    highpassGainAttachment = std::make_unique<SliderAttachment> (audioProcessor.treeState, "highpassGain", knobHpGain);
+
     knob2.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     addAndMakeVisible(knob2);
     knob2.setBounds(100, 100, 40, 40);
     knob2.addListener(this);
     highpassQAttachment = std::make_unique<SliderAttachment>(audioProcessor.treeState, "highpassQ", knob2);
 
-    // Lowpass
-    // Configure lowpassCutoffSlider
+    // Band 8 (default LP) — Freq / Gain / Q
     knob3.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     addAndMakeVisible(knob3);
     knob3.setBounds(100, 100, 40, 40);
     knob3.addListener(this);
     lowpassCutoffAttachment = std::make_unique<SliderAttachment>(audioProcessor.treeState, "lowpassCutoff", knob3);
 
-    // Configure lowpassQSlider
+    knobLpGain.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    addAndMakeVisible (knobLpGain);
+    knobLpGain.setBounds (100, 100, 40, 40);
+    knobLpGain.addListener (this);
+    lowpassGainAttachment = std::make_unique<SliderAttachment> (audioProcessor.treeState, "lowpassGain", knobLpGain);
+
     knob4.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     addAndMakeVisible(knob4);
     knob4.setBounds(100, 100, 40, 40);
@@ -423,7 +432,11 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
     audioProcessor.treeState.addParameterListener (SideCheck::enabledParamId(), this);
     audioProcessor.treeState.addParameterListener (SideCheck::modeParamId(), this);
+    for (const char* typeId : { "highpassType", "lowpassType", "band1Type", "band2Type",
+                                "band3Type", "band4Type", "highShelfType", "lowShelfType" })
+        audioProcessor.treeState.addParameterListener (typeId, this);
     updateSideCheckAmountVisibility();
+    updateBandFaceplateGainVisibility();
 
     // Bottom chrome: ? toggles tooltips for the whole plugin (default on; prefs next to analyser_defaults).
     helpTooltipsButton.setClickingTogglesState (true);
@@ -653,6 +666,9 @@ EqEditor::~EqEditor()
 
     audioProcessor.treeState.removeParameterListener (SideCheck::enabledParamId(), this);
     audioProcessor.treeState.removeParameterListener (SideCheck::modeParamId(), this);
+    for (const char* typeId : { "highpassType", "lowpassType", "band1Type", "band2Type",
+                                "band3Type", "band4Type", "highShelfType", "lowShelfType" })
+        audioProcessor.treeState.removeParameterListener (typeId, this);
     sideCheckHpKnob.removeListener (this);
     sideCheckLpKnob.removeListener (this);
     sideCheckHpAttachment.reset();
@@ -878,8 +894,14 @@ void EqEditor::resized()
     const int faceplateBottom = faceplateMinTop + faceplateH;
 
     const int totalWidth = getWidth();
-    int availableWidth = totalWidth - (7 * padding); // 8 groups - 1
+    // Integer groupWidth leaves a remainder that used to sit entirely on the right
+    // (colX1 = 0), so the faceplate looked left-heavy / Band 1 clipped. Reserve a
+    // small side margin, then centre the used block so left/right padding match.
+    const int sideMargin = px (5.0f);
+    int availableWidth = juce::jmax (1, totalWidth - (7 * padding) - 2 * sideMargin);
     int groupWidth = availableWidth / 8;
+    const int usedWidth = 8 * groupWidth + 7 * padding;
+    int faceplateOriginX = juce::jmax (sideMargin, (totalWidth - usedWidth) / 2);
 
     // Power buttons sit 10px below the faceplate top trim; knobs 5px below power.
     const int onOffButtonSize = juce::jmax (12, groupWidth / 3);
@@ -895,18 +917,17 @@ void EqEditor::resized()
     int contentBelowTopKnob = juce::jmax (1, faceplateBottom - topKnobY);
     int rowHeight = juce::jmax (1, contentBelowTopKnob / 2);
 
-    int startX = 0;
-
     // Faceplate image knobs must stay 1:1 — never stretch W/H independently.
     int largeSide = juce::jmin ((int) (groupWidth * 0.7f), (int) (rowHeight * 0.85f));
     int smallSide = juce::jmin (groupWidth / 2, (int) (rowHeight * 0.55f));
-    int gainSide = juce::jmax (1, juce::roundToInt ((float) largeSide * 1.2f)); // 6 gain knobs +20%
+    int gainSide = juce::jmax (1, juce::roundToInt ((float) largeSide * 1.2f)); // gain knobs +20%
+
+    // Visual centre sits a bit left; shift the whole cluster right by ~½ Freq/Q knob.
+    faceplateOriginX += juce::jlimit (5, 10, smallSide / 2);
 
     // Shelf/band Freq+Q: under Gain label + 2.5px.
-    // HP/LP Freq: under Q label + 2.5px.
+    // HP/LP stack centres on the same gain column as the middle bands.
     int bandLargeXOff = px (23.0f);
-    int edgeLargeXOff = px (25.0f);
-    int lpLargeXOff = px (17.0f);
     int gainLabelH = juce::jmax (10, juce::roundToInt ((float) gainSide * 0.45f));
     int qLabelH = juce::jmax (10, juce::roundToInt ((float) largeSide * 0.45f));
     // Middle 6 bands: Freq/Q under Gain label + 2.5px, then nudged up 2.5px.
@@ -944,41 +965,87 @@ void EqEditor::resized()
         }
     }
 
-    // Place shelf/band Freq (left) and Q (right) equally spaced about the gain centre.
-    auto placeBandFreqQAroundGain = [&] (juce::Component& freqKnob,
-                                         juce::Component& qKnob,
-                                         juce::Component& gainKnob)
+    auto typeIsHpLp = [this] (const char* typeId, int fallbackType) -> bool
     {
-        const int gainX = startX + bandLargeXOff;
+        const int t = [&]() -> int
+        {
+            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                    audioProcessor.treeState.getParameter (typeId)))
+                return choice->getIndex();
+            return fallbackType;
+        }();
+        return FilterType::isHpLp (t);
+    };
+
+    const bool band1HpLp = typeIsHpLp ("highpassType", FilterType::highpass);
+    const bool band8HpLp = typeIsHpLp ("lowpassType", FilterType::lowpass);
+
+    // Place shelf/band Freq (left) and Q (right) equally spaced about the gain centre.
+    // Does not advance startX — caller controls column X (keeps bands 2–7 fixed).
+    auto placeBandFreqQAroundGainAt = [&] (int colX,
+                                           juce::Component& freqKnob,
+                                           juce::Component& qKnob,
+                                           juce::Component& gainKnob)
+    {
+        const int gainX = colX + bandLargeXOff;
         gainKnob.setBounds (gainX, topKnobY, gainSide, gainSide);
 
         const int gainCentreX = gainX + gainSide / 2;
         const int preferredHalfPitch = gainSide / 2 + smallSide / 2 + px (4.0f);
-        const int maxLeft = gainCentreX - (startX + smallSide / 2);
-        const int maxRight = (startX + groupWidth - smallSide / 2) - gainCentreX;
+        const int maxLeft = gainCentreX - (colX + smallSide / 2);
+        const int maxRight = (colX + groupWidth - smallSide / 2) - gainCentreX;
         const int halfPitch = juce::jmax (1, juce::jmin (preferredHalfPitch, maxLeft, maxRight));
 
         freqKnob.setBounds (gainCentreX - halfPitch - smallSide / 2, bandSmallY, smallSide, smallSide);
         qKnob.setBounds (gainCentreX + halfPitch - smallSide / 2, bandSmallY, smallSide, smallSide);
-        startX += groupWidth + padding;
     };
 
-    // Highpass — Q under power; Freq under Q label + 2.5px
-    knob1.setBounds (startX + edgeLargeXOff, hpLpBottomY, largeSide, largeSide);
-    knob2.setBounds (startX + edgeLargeXOff, topKnobY, largeSide, largeSide);
-    startX += groupWidth + padding;
+    // Classic HP/LP: large Q on top, large Freq under Q label — same size/orientation as before.
+    // Column X uses the same gain-centre alignment as the middle bands (brings 1 & 8 in a bit).
+    auto placeHpLpVerticalAt = [&] (int colX,
+                                    juce::Component& freqKnob,
+                                    juce::Component& qKnob,
+                                    juce::Component& gainKnob)
+    {
+        gainKnob.setBounds ({}); // parked — not used in 2-knob mode
+        const int stackX = colX + bandLargeXOff
+                           + (gainSide - largeSide) / 2; // centre stack on gain column
+        qKnob.setBounds (stackX, topKnobY, largeSide, largeSide);
+        freqKnob.setBounds (stackX, hpLpBottomY, largeSide, largeSide);
+    };
 
-    // LowShelf + bands 1–4 + HighShelf — Freq/Q mirrored about gain / power centre
-    placeBandFreqQAroundGain (knob8,  knob10, knob9);
-    placeBandFreqQAroundGain (knob11, knob13, knob12);
-    placeBandFreqQAroundGain (knob14, knob16, knob15);
-    placeBandFreqQAroundGain (knob17, knob19, knob18);
-    placeBandFreqQAroundGain (knob20, knob22, knob21);
-    placeBandFreqQAroundGain (knob5,  knob7,  knob6);
+    const int colPitch = groupWidth + padding;
+    // Even pitch grid, centred in the editor (see faceplateOriginX above).
+    const int colX1 = faceplateOriginX;
+    const int colX2 = faceplateOriginX + colPitch;
+    const int colX3 = faceplateOriginX + colPitch * 2;
+    const int colX4 = faceplateOriginX + colPitch * 3;
+    const int colX5 = faceplateOriginX + colPitch * 4;
+    const int colX6 = faceplateOriginX + colPitch * 5;
+    const int colX7 = faceplateOriginX + colPitch * 6;
+    const int colX8 = faceplateOriginX + colPitch * 7;
 
-    // Lowpass — Q under power; Freq under Q label + 2.5px
-    knob3.setBounds (startX + lpLargeXOff, hpLpBottomY, largeSide, largeSide);
-    knob4.setBounds (startX + lpLargeXOff, topKnobY, largeSide, largeSide);
+    // Band 1 — HP/LP: old vertical 2-knob; otherwise middle-band 3-knob setup.
+    if (band1HpLp)
+        placeHpLpVerticalAt (colX1, knob1, knob2, knobHpGain);
+    else
+        placeBandFreqQAroundGainAt (colX1, knob1, knob2, knobHpGain);
+
+    // Bands 2–7 — unchanged 3-knob arrangement / positions.
+    placeBandFreqQAroundGainAt (colX2, knob8,  knob10, knob9);
+    placeBandFreqQAroundGainAt (colX3, knob11, knob13, knob12);
+    placeBandFreqQAroundGainAt (colX4, knob14, knob16, knob15);
+    placeBandFreqQAroundGainAt (colX5, knob17, knob19, knob18);
+    placeBandFreqQAroundGainAt (colX6, knob20, knob22, knob21);
+    placeBandFreqQAroundGainAt (colX7, knob5,  knob7,  knob6);
+
+    // Band 8 — LP/HP: old vertical 2-knob; otherwise 3-knob.
+    if (band8HpLp)
+        placeHpLpVerticalAt (colX8, knob3, knob4, knobLpGain);
+    else
+        placeBandFreqQAroundGainAt (colX8, knob3, knob4, knobLpGain);
+
+    updateBandFaceplateGainVisibility();
 
     // Output gain — small knob centered in the lighter bottom faceplate trim strip
     int outClusterLeftX = getWidth();
@@ -1102,7 +1169,7 @@ void EqEditor::resized()
     placeLabelUnderKnob (border15, knob7, 0.45f, qLabelMinW);
     placeLabelUnderKnob (border16, knob4, 0.45f, qLabelMinW);
 
-    // Gain labels (upper row)
+    // Gain labels (upper row) — middle 6 unchanged; Band 1/8 only in 3-knob mode.
     placeLabelUnderKnob (border17, knob9, 0.45f, gainLabelMinW);
     placeLabelUnderKnob (border18, knob12, 0.45f, gainLabelMinW);
     placeLabelUnderKnob (border19, knob15, 0.45f, gainLabelMinW);
@@ -1110,7 +1177,7 @@ void EqEditor::resized()
     placeLabelUnderKnob (border21, knob21, 0.45f, gainLabelMinW);
     placeLabelUnderKnob (border22, knob6, 0.45f, gainLabelMinW);
 
-    // Power buttons: 10px under top trim; centered on gain (bands) or stacked knobs (HP/LP).
+    // Power buttons: evenly spaced on the same centres as Gain (3-knob) or top Q (HP/LP stack).
     auto placeOnOffCentered = [onOffY, onOffButtonSize] (juce::Component& btn, const juce::Component& anchor)
     {
         btn.setBounds (anchor.getBounds().getCentreX() - onOffButtonSize / 2,
@@ -1119,14 +1186,37 @@ void EqEditor::resized()
                        onOffButtonSize);
     };
 
-    placeOnOffCentered (*onOffButton1, knob2); // highpass — above stacked HP knobs
-    placeOnOffCentered (*onOffButton4, knob9); // low shelf — above gain
-    placeOnOffCentered (*onOffButton5, knob12); // band 1
-    placeOnOffCentered (*onOffButton6, knob15); // band 2
-    placeOnOffCentered (*onOffButton7, knob18); // band 3
-    placeOnOffCentered (*onOffButton8, knob21); // band 4
-    placeOnOffCentered (*onOffButton3, knob6);  // high shelf
-    placeOnOffCentered (*onOffButton2, knob4);  // lowpass — above stacked LP knobs
+    placeOnOffCentered (*onOffButton1, band1HpLp ? static_cast<juce::Component&> (knob2) : knobHpGain);
+    placeOnOffCentered (*onOffButton4, knob9);
+    placeOnOffCentered (*onOffButton5, knob12);
+    placeOnOffCentered (*onOffButton6, knob15);
+    placeOnOffCentered (*onOffButton7, knob18);
+    placeOnOffCentered (*onOffButton8, knob21);
+    placeOnOffCentered (*onOffButton3, knob6);
+    placeOnOffCentered (*onOffButton2, band8HpLp ? static_cast<juce::Component&> (knob4) : knobLpGain);
+}
+
+void EqEditor::updateBandFaceplateGainVisibility()
+{
+    auto typeUsesGain = [this] (const char* typeId, int fallbackType) -> bool
+    {
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                audioProcessor.treeState.getParameter (typeId)))
+            return FilterType::usesGain (choice->getIndex());
+        return FilterType::usesGain (fallbackType);
+    };
+
+    // Band 1 / 8 gain only when not in classic HP/LP 2-knob mode.
+    knobHpGain.setVisible (typeUsesGain ("highpassType", FilterType::highpass));
+    knobLpGain.setVisible (typeUsesGain ("lowpassType", FilterType::lowpass));
+
+    // Middle 6 always use gain knobs for their default gain-using types; still honor type.
+    knob9.setVisible (typeUsesGain ("lowShelfType", FilterType::lowShelf));
+    knob12.setVisible (typeUsesGain ("band1Type", FilterType::bell));
+    knob15.setVisible (typeUsesGain ("band2Type", FilterType::bell));
+    knob18.setVisible (typeUsesGain ("band3Type", FilterType::bell));
+    knob21.setVisible (typeUsesGain ("band4Type", FilterType::bell));
+    knob6.setVisible (typeUsesGain ("highShelfType", FilterType::highShelf));
 }
 
 
@@ -1280,7 +1370,9 @@ void EqEditor::layoutSideCheckButton()
     sideCheckButton.toFront (false);
 
     // Amount + Speed + HQ + HP/LP appear beside SideCheck only while enabled.
-    const bool scOn = sideCheckButton.getToggleState();
+    const bool scOn = sideCheckButton.getToggleState()
+        || (audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId()) != nullptr
+            && audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId())->load() > 0.5f);
     sideCheckAmountSlider.setVisible (scOn);
     sideCheckSpeedButton.setVisible (scOn);
     sideCheckHqButton.setVisible (scOn);
@@ -1322,6 +1414,17 @@ void EqEditor::layoutSideCheckButton()
         sideCheckHpKnob.toFront (false);
         sideCheckLpLabel.toFront (false);
         sideCheckLpKnob.toFront (false);
+    }
+    else
+    {
+        // Park off-layout so a stale visible flag can never flash knobs at (0,0).
+        sideCheckAmountSlider.setBounds ({});
+        sideCheckSpeedButton.setBounds ({});
+        sideCheckHqButton.setBounds ({});
+        sideCheckHpKnob.setBounds ({});
+        sideCheckLpKnob.setBounds ({});
+        sideCheckHpLabel.setBounds ({});
+        sideCheckLpLabel.setBounds ({});
     }
 }
 
@@ -1762,6 +1865,8 @@ void EqEditor::parameterChanged(const juce::String& parameterID, float newValue)
         updateSideCheckAmountVisibility();
     else if (parameterID == SideCheck::modeParamId())
         updateSideCheckSpeedButtonText();
+    else if (parameterID.endsWithIgnoreCase ("Type"))
+        resized(); // swap Band 1/8 between vertical HP/LP and 3-knob layouts
 }
 
 void EqEditor::initializeSharedImages()

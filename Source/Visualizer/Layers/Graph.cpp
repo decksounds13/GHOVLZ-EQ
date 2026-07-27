@@ -22,7 +22,7 @@ Graph::Graph(
     // REFRESH_ID drives UI paint polling; analysis thread uses the same interval
     // to FFT the latest Block window (Ableton-style overlapping refresh).
     {
-        int refreshMs = 60;
+        int refreshMs = 33; // ~30 Hz default
         if (auto* p = mr_audioProcessorValueTreeState.getRawParameterValue ("REFRESH_ID"))
             refreshMs = juce::jlimit (16, 200, (int) std::lround (p->load()));
         startTimer (refreshMs);

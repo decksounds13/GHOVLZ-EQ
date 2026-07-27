@@ -30,8 +30,8 @@ public:
     /** Write stable blockSizeName + schema onto an APVTS state tree before save. */
     static void stampBlockIdInState (juce::ValueTree& state, int blockIndex);
 
-    /** Remap legacy {512,1024,2048,4096,8192} BLOCK_ID norms so old "2048"
-        (index 2 / 0.5) does not become 8192 on the current 4-choice list. */
+    /** Repair BLOCK_ID from blockSizeName, and remap legacy/normalised dumps
+        so APVTS unnormalised choice indices stay correct (8192 = index 2). */
     static void migrateBlockIdInState (juce::ValueTree& state);
 
 private:

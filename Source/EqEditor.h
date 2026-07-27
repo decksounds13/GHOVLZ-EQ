@@ -85,6 +85,8 @@ public:
 private:
     void applyCompactUi();
     void setFaceplateVisible (bool shouldShow);
+    /** Show faceplate Gain knobs only when that band's filter type uses gain. */
+    void updateBandFaceplateGainVisibility();
     void layoutBrandWordmark (int outClusterLeftX);
     void layoutHelpTooltipsButton();
     void layoutPhaseModeCombo();
@@ -110,13 +112,15 @@ private:
 
     EqProcessor& audioProcessor;
 
-    //Highpass
-    RotaryImageKnob1 knob1;
-    RotaryImageKnob2 knob2;
+    // Band 1 (default HP) — Freq / Gain / Q (Gain hidden while type is HP/LP)
+    RotaryImageKnob1 knob1;      // Freq
+    RotaryImageKnob3 knobHpGain; // Gain
+    RotaryImageKnob2 knob2;      // Q
    
-    //Lowpass
-    RotaryImageKnob1 knob3;
-    RotaryImageKnob2 knob4;
+    // Band 8 (default LP)
+    RotaryImageKnob1 knob3;      // Freq
+    RotaryImageKnob3 knobLpGain; // Gain
+    RotaryImageKnob2 knob4;      // Q
    
     //High Shelf — same knob classes as Band 1
     RotaryImageKnob1 knob5; // Freq
@@ -169,7 +173,9 @@ private:
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
   
     std::unique_ptr<SliderAttachment> highpassCutoffAttachment;
+    std::unique_ptr<SliderAttachment> highpassGainAttachment;
     std::unique_ptr<SliderAttachment> highpassQAttachment;
+    std::unique_ptr<SliderAttachment> lowpassGainAttachment;
   
     std::unique_ptr<SliderAttachment> lowpassCutoffAttachment;
     std::unique_ptr<SliderAttachment> lowpassQAttachment;

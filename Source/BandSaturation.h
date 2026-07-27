@@ -72,6 +72,8 @@ namespace BandSaturation
             case 1: return "band2Sat";
             case 2: return "band3Sat";
             case 3: return "band4Sat";
+            case 4: return "highpassSat";
+            case 5: return "lowpassSat";
             case 6: return "highShelfSat";
             case 7: return "lowShelfSat";
             default: return {};
@@ -86,6 +88,8 @@ namespace BandSaturation
             case 1: return "band2SatModel";
             case 2: return "band3SatModel";
             case 3: return "band4SatModel";
+            case 4: return "highpassSatModel";
+            case 5: return "lowpassSatModel";
             case 6: return "highShelfSatModel";
             case 7: return "lowShelfSatModel";
             default: return {};
@@ -101,17 +105,42 @@ namespace BandSaturation
             case 1: return "band2SatPost";
             case 2: return "band3SatPost";
             case 3: return "band4SatPost";
+            case 4: return "highpassSatPost";
+            case 5: return "lowpassSatPost";
             case 6: return "highShelfSatPost";
             case 7: return "lowShelfSatPost";
             default: return {};
         }
     }
 
-    /** Same bands as Dynamic / Spectral (gain-using types only at runtime). */
-    inline bool supportsSat (int bandIndex)
+    /**
+        Post-mode drive (dB): pre-gain into the shaper on the EQ−dry difference.
+        Pre mode ignores this — band gain is the emphasis into saturation.
+    */
+    inline juce::String satDriveDbParamIDForBandIndex (int bandIndex)
     {
-        return bandIndex == 0 || bandIndex == 1 || bandIndex == 2 || bandIndex == 3
-            || bandIndex == 6 || bandIndex == 7;
+        switch (bandIndex)
+        {
+            case 0: return "band1SatDriveDb";
+            case 1: return "band2SatDriveDb";
+            case 2: return "band3SatDriveDb";
+            case 3: return "band4SatDriveDb";
+            case 4: return "highpassSatDriveDb";
+            case 5: return "lowpassSatDriveDb";
+            case 6: return "highShelfSatDriveDb";
+            case 7: return "lowShelfSatDriveDb";
+            default: return {};
+        }
+    }
+
+    constexpr float kMinSatDriveDb = -12.0f;
+    constexpr float kMaxSatDriveDb = 12.0f;
+    constexpr float kDefaultSatDriveDb = 0.0f;
+
+    /** All eight Band 1–8 slots (Sat only engages when filter type uses gain). */
+    inline bool supportsSat (int bandIndex) noexcept
+    {
+        return bandIndex >= 0 && bandIndex <= 7;
     }
 
     inline float shapeSample (float x, int model) noexcept
@@ -274,10 +303,12 @@ namespace BandSaturation
         }
 
         /**
-            Post mode: block is post-EQ. Replaces with dry + sat(EQ − dry).
+            Post mode: block is post-EQ. Replaces with dry + sat((EQ − dry) * drive).
             Requires captureDry() from the pre-EQ block first.
+            driveDb (−12…+12, 0 = unity) pushes the difference into the shaper
+            when there is little EQ boost to emphasize.
         */
-        void processPost (juce::dsp::AudioBlock<float>& eqBlock)
+        void processPost (juce::dsp::AudioBlock<float>& eqBlock, float driveDb = 0.0f)
         {
             const int n = (int) eqBlock.getNumSamples();
             const int chans = (int) eqBlock.getNumChannels();
@@ -291,6 +322,9 @@ namespace BandSaturation
                 return;
             }
 
+            const float preGain = juce::Decibels::decibelsToGain (
+                juce::jlimit (kMinSatDriveDb, kMaxSatDriveDb, driveDb));
+
             ensureCapacity (chans, n);
             for (int ch = 0; ch < chans; ++ch)
             {
@@ -298,7 +332,7 @@ namespace BandSaturation
                 const float* dry = dryBuffer.getReadPointer (ch);
                 float* diff = diffBuffer.getWritePointer (ch);
                 for (int i = 0; i < n; ++i)
-                    diff[i] = sanitizeDriveSample (eq[i] - dry[i]);
+                    diff[i] = sanitizeDriveSample ((eq[i] - dry[i]) * preGain);
             }
 
             {

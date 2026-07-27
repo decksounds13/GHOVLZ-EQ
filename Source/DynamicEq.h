@@ -91,6 +91,8 @@ namespace DynamicEq
             case 1: return "band2Dynamic";
             case 2: return "band3Dynamic";
             case 3: return "band4Dynamic";
+            case 4: return "highpassDynamic";
+            case 5: return "lowpassDynamic";
             case 6: return "highShelfDynamic";
             case 7: return "lowShelfDynamic";
             default: return {};
@@ -105,6 +107,8 @@ namespace DynamicEq
             case 1: return "band2DynThreshold";
             case 2: return "band3DynThreshold";
             case 3: return "band4DynThreshold";
+            case 4: return "highpassDynThreshold";
+            case 5: return "lowpassDynThreshold";
             case 6: return "highShelfDynThreshold";
             case 7: return "lowShelfDynThreshold";
             default: return {};
@@ -119,6 +123,8 @@ namespace DynamicEq
             case 1: return "band2AttackMs";
             case 2: return "band3AttackMs";
             case 3: return "band4AttackMs";
+            case 4: return "highpassAttackMs";
+            case 5: return "lowpassAttackMs";
             case 6: return "highShelfAttackMs";
             case 7: return "lowShelfAttackMs";
             default: return {};
@@ -133,16 +139,18 @@ namespace DynamicEq
             case 1: return "band2ReleaseMs";
             case 2: return "band3ReleaseMs";
             case 3: return "band4ReleaseMs";
+            case 4: return "highpassReleaseMs";
+            case 5: return "lowpassReleaseMs";
             case 6: return "highShelfReleaseMs";
             case 7: return "lowShelfReleaseMs";
             default: return {};
         }
     }
 
-    /** True for peaking bands 1–4 and dedicated shelves (gain + freq + Q). */
+    /** All eight Band 1–8 slots (D only engages when filter type uses gain). */
     inline bool supportsDynamic (int bandIndex)
     {
-        return (bandIndex >= 0 && bandIndex <= 3) || bandIndex == 6 || bandIndex == 7;
+        return bandIndex >= 0 && bandIndex <= 7;
     }
 
     struct BandState

@@ -2,16 +2,18 @@
 
 #include <JuceHeader.h>
 #include "../DynamicEq.h"
+#include "../FilterType.h"
 #include "SpectralBinning.h"
 
 /**
     Per-band controls for spectral dynamic processing (Pro-Q-style spectral).
 
-    User-facing (S mode): Amount + SpectralResHz + Expand + Attack/Release + Pack.
+    User-facing (S mode): Amount + Res + Expand + Attack/Release + Pack.
     - Amount (0–1): how aggressively resonances inside the Q aperture are
       processed. UI: vertical slider, pull down = more (inverted LinearVertical).
-    - SpectralResHz (0.5–2.0, default 1.0): denser log-spaced bandpasses
-      across the global hearing-range lattice (Q soft-masks / gates which run).
+    - Res / spectralResHz (0.5–2.0, default 1.0): GLOBAL — BP count on the shared
+      hearing-range lattice (finer = more filters). Per-band Res params are
+      kept for session compatibility and stay linked to the global value.
     - Expand (bool): invert GR sign → boost/exaggerate resonances instead of cut.
     - Pack (global Flat/LF/HF): warps where Res budget sits on the lattice for all S bands.
     - Attack / release: shared per-band params with D mode (defaults 20 / 200 ms).
@@ -59,7 +61,7 @@ namespace SpectralDynamics
     constexpr float kDefaultSpectralDepth = kDefaultSpectralAmount;
 
     /** Slots in the shared SpectralDynamicsProcessor (one bandpass bank for all). */
-    constexpr int kNumSlots = 6;
+    constexpr int kNumSlots = 8;
 
     inline juce::String spectralParamIDForBandIndex (int bandIndex)
     {
@@ -69,13 +71,18 @@ namespace SpectralDynamics
             case 1: return "band2Spectral";
             case 2: return "band3Spectral";
             case 3: return "band4Spectral";
+            case 4: return "highpassSpectral";
+            case 5: return "lowpassSpectral";
             case 6: return "highShelfSpectral";
             case 7: return "lowShelfSpectral";
             default: return {};
         }
     }
 
-    /** Per-band spectral resolution / target bandpass width (Hz). */
+    /** Global spectral resolution (Hz) — one lattice density for all S bands. */
+    inline constexpr const char* spectralResHzParamId() noexcept { return "spectralResHz"; }
+
+    /** Legacy per-band Res IDs (mirrored to/from spectralResHz for old presets). */
     inline juce::String spectralResHzParamIDForBandIndex (int bandIndex)
     {
         switch (bandIndex)
@@ -84,10 +91,19 @@ namespace SpectralDynamics
             case 1: return "band2SpectralResHz";
             case 2: return "band3SpectralResHz";
             case 3: return "band4SpectralResHz";
+            case 4: return "highpassSpectralResHz";
+            case 5: return "lowpassSpectralResHz";
             case 6: return "highShelfSpectralResHz";
             case 7: return "lowShelfSpectralResHz";
             default: return {};
         }
+    }
+
+    inline juce::StringArray allLegacySpectralResHzParamIds()
+    {
+        return { "band1SpectralResHz", "band2SpectralResHz", "band3SpectralResHz",
+                 "band4SpectralResHz", "highpassSpectralResHz", "lowpassSpectralResHz",
+                 "highShelfSpectralResHz", "lowShelfSpectralResHz" };
     }
 
     /**
@@ -102,6 +118,8 @@ namespace SpectralDynamics
             case 1: return "band2SpectralDepth";
             case 2: return "band3SpectralDepth";
             case 3: return "band4SpectralDepth";
+            case 4: return "highpassSpectralDepth";
+            case 5: return "lowpassSpectralDepth";
             case 6: return "highShelfSpectralDepth";
             case 7: return "lowShelfSpectralDepth";
             default: return {};
@@ -123,6 +141,8 @@ namespace SpectralDynamics
             case 1: return "band2SpectralExpand";
             case 2: return "band3SpectralExpand";
             case 3: return "band4SpectralExpand";
+            case 4: return "highpassSpectralExpand";
+            case 5: return "lowpassSpectralExpand";
             case 6: return "highShelfSpectralExpand";
             case 7: return "lowShelfSpectralExpand";
             default: return {};
@@ -164,7 +184,7 @@ namespace SpectralDynamics
         return (juce::jlimit (0, 2, current) + 1) % 3;
     }
 
-    /** Same bands as DynamicEq (peaking 1–4 + shelves). */
+    /** Same bands as DynamicEq (all eight Band 1–8 slots). */
     inline bool supportsSpectral (int bandIndex)
     {
         return DynamicEq::supportsDynamic (bandIndex);
@@ -173,16 +193,9 @@ namespace SpectralDynamics
     /** Map UI bandIndex → engine slot, or -1 if unsupported. */
     inline int slotForBandIndex (int bandIndex) noexcept
     {
-        switch (bandIndex)
-        {
-            case 0: return 0;
-            case 1: return 1;
-            case 2: return 2;
-            case 3: return 3;
-            case 6: return 4;
-            case 7: return 5;
-            default: return -1;
-        }
+        if (bandIndex >= 0 && bandIndex < kNumSlots)
+            return bandIndex;
+        return -1;
     }
 
     enum class BandShape
@@ -191,6 +204,17 @@ namespace SpectralDynamics
         highShelf,
         lowShelf
     };
+
+    /** Spectral soft-mask follows the band's current EQ type (not the slot default). */
+    inline BandShape shapeFromFilterType (int filterType) noexcept
+    {
+        switch (filterType)
+        {
+            case FilterType::highShelf: return BandShape::highShelf;
+            case FilterType::lowShelf:  return BandShape::lowShelf;
+            default:                    return BandShape::bell;
+        }
+    }
 
     struct BandSettings
     {

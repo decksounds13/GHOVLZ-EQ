@@ -940,12 +940,9 @@ void MainComponent::relayoutPresetChrome()
 void MainComponent::raiseMenuSystemAboveWordmark()
 {
     // Z-order (bottom → top):
-    //   graph → expanded osc/dimmer (not always-on-top) → chrome / zoom buttons
+    //   graph → expanded osc/dimmer → brand wordmark → chrome / meters / zoom
     //   → OptionBox → Settings menu → Settings button
     const bool expanded = oscExpanded && oscButton.getToggleState() && oscilloscope.isVisible();
-
-    if (hostedWordmark != nullptr && hostedWordmark->getParentComponent() == this)
-        hostedWordmark->toFront (false);
 
     // Graph peers first (under an expanded scope).
     m_visualizer.toFront (false);
@@ -956,6 +953,10 @@ void MainComponent::raiseMenuSystemAboveWordmark()
         oscDimmer.toFront (false);
         oscilloscope.toFront (false);
     }
+
+    // Compact logo sits above the opaque graph, below Bypass / presets / Settings.
+    if (hostedWordmark != nullptr && hostedWordmark->getParentComponent() == this)
+        hostedWordmark->toFront (false);
 
     presetPrevButton.toFront (false);
     presetNameEditor.toFront (false);

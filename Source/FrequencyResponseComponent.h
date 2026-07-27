@@ -363,7 +363,9 @@ private:
         int downsampleFactor
     );
 
-    std::string arrayBandName[8] = { "Band 1", "Band 2", "Band 3", "Band 4", "Highpass", "Lowpass", "HighShelf", "LowShelf" };
+    // Internal indices → Band 1–8 display names (see EqBand.h).
+    // 0–3 peaking = Band 3–6; 4 HP = Band 1; 5 LP = Band 8; 6 HS = Band 7; 7 LS = Band 2.
+    std::string arrayBandName[8] = { "Band 3", "Band 4", "Band 5", "Band 6", "Band 1", "Band 8", "Band 7", "Band 2" };
     std::string currentBandName;
 
     

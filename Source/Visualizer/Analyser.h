@@ -136,7 +136,7 @@ private:
     std::atomic<bool> m_frequencyIsLogarithmic { true };
     std::atomic<bool> ecoMode { false };
     std::atomic<bool> m_dynamicRangeNeedsHostUpdate { false };
-    std::atomic<int> m_refreshMs { 60 };
+    std::atomic<int> m_refreshMs { 33 }; // ~30 Hz
 
     std::array<float, kRingCapacity> m_ring {};
     std::atomic<size_t> m_ringWritePos { 0 };

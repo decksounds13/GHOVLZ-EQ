@@ -32,7 +32,7 @@
       gateGain (0..1) fades each slice's GR contribution. Hard-skip only after
       fade-out; IIR/envelope cleared on cold re-arm (not mid-stream).
       Narrow Q → few warm slices → real CPU savings; wide Q → most run.
-    - SpectralResHz (0.5–2.0) sets BP count on that global lattice
+    - Global SpectralResHz (0.5–2.0) sets BP count on that lattice for all S bands
       (48 @ 2.0 Hz → 128 @ 0.5 Hz). Constant-Q packing per centre.
     - Mid (L+R)/2 level detect per BP on the dry sidechain → envelope
       (per-slot attack/release from shared A/R params, default 20 / 200 ms).

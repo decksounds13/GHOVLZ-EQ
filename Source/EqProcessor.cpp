@@ -91,7 +91,14 @@ EqProcessor::EqProcessor()
 {
     // Hard-coded factory state from user preset "new default" (host may overwrite later).
     if (auto factoryState = FactoryDefaults::createPluginState(); factoryState.isValid())
+    {
+        AnalyserDefaults::migrateBlockIdInState (factoryState); // force BLOCK from blockSizeName
         treeState.replaceState (factoryState);
+    }
+
+    // Keep analyser FFT size in sync after factory replace (ctor ran before replaceState).
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter ("BLOCK_ID")))
+        m_analyser.setFFTBlockSize (choice->getIndex());
 
     initializeSharedImages();
 
@@ -154,6 +161,7 @@ EqProcessor::EqProcessor()
     treeState.addParameterListener("MINIMUM_ID", this);
 
     bypassParam = dynamic_cast<juce::AudioParameterBool*> (treeState.getParameter ("bypass"));
+    migrateSpectralResHzFromLegacyParams();
     initialiseAbSnapshotsFromCurrentState();
 }
 
@@ -253,19 +261,79 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
     const auto analyserDefaults = AnalyserDefaults::load();
 
-    //Highpass
-    auto pHighpassCutoff = std::make_unique<juce::AudioParameterFloat>("highpassCutoff", "HighpassCutoff", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 20.0f);
-    auto pHighpassQ = std::make_unique<juce::AudioParameterFloat>("highpassQ", "HighpassQ", juce::NormalisableRange < float>(0.15f, 10.0f, 0.01f, 0.1f), 0.5f);
-    auto pHighpassOnOff = std::make_unique<juce::AudioParameterBool>("highpassOnOff", "HighpassOnOff", false);
-    auto pHighpassSlope = std::make_unique<juce::AudioParameterChoice>("highpassSlope", "HighpassSlope", FilterSlope::getChoiceNames(), FilterSlope::db12);
-    auto pHighpassChannel = std::make_unique<juce::AudioParameterChoice>("highpassChannel", "HighpassChannel", BandChannel::getChoiceNames(), BandChannel::stereo);
+    // Band 1 slot (legacy highpass* IDs) — defaults to Highpass; full type menu.
+    auto pHighpassCutoff = std::make_unique<juce::AudioParameterFloat>("highpassCutoff", "Band1Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 20.0f);
+    auto pHighpassQ = std::make_unique<juce::AudioParameterFloat>("highpassQ", "Band1Q", juce::NormalisableRange < float>(0.15f, 10.0f, 0.01f, 0.1f), 0.5f);
+    auto pHighpassGain = std::make_unique<juce::AudioParameterFloat>("highpassGain", "Band1Gain", -24.0f, 24.0f, 0.0f);
+    auto pHighpassOnOff = std::make_unique<juce::AudioParameterBool>("highpassOnOff", "Band1OnOff", false);
+    auto pHighpassType = std::make_unique<juce::AudioParameterChoice>("highpassType", "Band1Type", FilterType::getChoiceNames(), FilterType::highpass);
+    auto pHighpassSlope = std::make_unique<juce::AudioParameterChoice>("highpassSlope", "Band1Slope", FilterSlope::getChoiceNames(), FilterSlope::db12);
+    auto pHighpassChannel = std::make_unique<juce::AudioParameterChoice>("highpassChannel", "Band1Channel", BandChannel::getChoiceNames(), BandChannel::stereo);
+    auto pHighpassDynamic = std::make_unique<juce::AudioParameterBool>("highpassDynamic", "Band1Dynamic", false);
+    auto pHighpassSidechain = std::make_unique<juce::AudioParameterBool>("highpassSidechain", "Band1Sidechain", false);
+    auto pHighpassSidechainMidi = std::make_unique<juce::AudioParameterBool>("highpassSidechainMidi", "Band1SidechainMidi", false);
+    auto pHighpassSpectral = std::make_unique<juce::AudioParameterBool>("highpassSpectral", "Band1Spectral", false);
+    auto pHighpassDynThreshold = std::make_unique<juce::AudioParameterFloat>(
+        "highpassDynThreshold", "Band1DynThreshold",
+        juce::NormalisableRange<float> (-120.0f, 0.0f, 0.1f), -24.0f);
+    auto pHighpassAttackMs = std::make_unique<juce::AudioParameterFloat>(
+        "highpassAttackMs", "Band1AttackMs", DynamicEq::attackMsRange(), DynamicEq::attackMs);
+    auto pHighpassReleaseMs = std::make_unique<juce::AudioParameterFloat>(
+        "highpassReleaseMs", "Band1ReleaseMs", DynamicEq::releaseMsRange(), DynamicEq::releaseMs);
+    auto pHighpassSpectralResHz = std::make_unique<juce::AudioParameterFloat>(
+        "highpassSpectralResHz", "Band1SpectralResHz",
+        juce::NormalisableRange<float> (SpectralBinning::kMinBandwidthHz, SpectralBinning::kTargetBandwidthHz, 0.05f),
+        SpectralBinning::kDefaultBandwidthHz);
+    auto pHighpassSpectralDepth = std::make_unique<juce::AudioParameterFloat>(
+        "highpassSpectralDepth", "Band1SpectralAmount",
+        juce::NormalisableRange<float> (SpectralDynamics::kMinSpectralAmount, SpectralDynamics::kMaxSpectralAmount, 0.01f),
+        SpectralDynamics::kDefaultSpectralAmount);
+    auto pHighpassSpectralExpand = std::make_unique<juce::AudioParameterBool>("highpassSpectralExpand", "Band1SpectralExpand", false);
+    auto pHighpassSat = std::make_unique<juce::AudioParameterBool>("highpassSat", "Band1Sat", false);
+    auto pHighpassSatModel = std::make_unique<juce::AudioParameterChoice>(
+        "highpassSatModel", "Band1SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
+    auto pHighpassSatPost = std::make_unique<juce::AudioParameterBool>("highpassSatPost", "Band1SatPost", false);
+    auto pHighpassSatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "highpassSatDriveDb", "Band1SatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb, BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
-    //Lowpass
-    auto pLowpassCutoff = std::make_unique<juce::AudioParameterFloat>("lowpassCutoff", "LowpassCutoff", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 20000.0f);
-    auto pLowpassQ = std::make_unique<juce::AudioParameterFloat>("lowpassQ", "LowpassQ", juce::NormalisableRange < float>(0.15f, 10.0f, 0.01f, 0.1f), 0.5f);
-    auto pLowpassOnOff = std::make_unique<juce::AudioParameterBool>("lowpassOnOff", "LowpassOnOff", false);
-    auto pLowpassSlope = std::make_unique<juce::AudioParameterChoice>("lowpassSlope", "LowpassSlope", FilterSlope::getChoiceNames(), FilterSlope::db12);
-    auto pLowpassChannel = std::make_unique<juce::AudioParameterChoice>("lowpassChannel", "LowpassChannel", BandChannel::getChoiceNames(), BandChannel::stereo);
+    // Band 8 slot (legacy lowpass* IDs) — defaults to Lowpass; full type menu.
+    auto pLowpassCutoff = std::make_unique<juce::AudioParameterFloat>("lowpassCutoff", "Band8Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 20000.0f);
+    auto pLowpassQ = std::make_unique<juce::AudioParameterFloat>("lowpassQ", "Band8Q", juce::NormalisableRange < float>(0.15f, 10.0f, 0.01f, 0.1f), 0.5f);
+    auto pLowpassGain = std::make_unique<juce::AudioParameterFloat>("lowpassGain", "Band8Gain", -24.0f, 24.0f, 0.0f);
+    auto pLowpassOnOff = std::make_unique<juce::AudioParameterBool>("lowpassOnOff", "Band8OnOff", false);
+    auto pLowpassType = std::make_unique<juce::AudioParameterChoice>("lowpassType", "Band8Type", FilterType::getChoiceNames(), FilterType::lowpass);
+    auto pLowpassSlope = std::make_unique<juce::AudioParameterChoice>("lowpassSlope", "Band8Slope", FilterSlope::getChoiceNames(), FilterSlope::db12);
+    auto pLowpassChannel = std::make_unique<juce::AudioParameterChoice>("lowpassChannel", "Band8Channel", BandChannel::getChoiceNames(), BandChannel::stereo);
+    auto pLowpassDynamic = std::make_unique<juce::AudioParameterBool>("lowpassDynamic", "Band8Dynamic", false);
+    auto pLowpassSidechain = std::make_unique<juce::AudioParameterBool>("lowpassSidechain", "Band8Sidechain", false);
+    auto pLowpassSidechainMidi = std::make_unique<juce::AudioParameterBool>("lowpassSidechainMidi", "Band8SidechainMidi", false);
+    auto pLowpassSpectral = std::make_unique<juce::AudioParameterBool>("lowpassSpectral", "Band8Spectral", false);
+    auto pLowpassDynThreshold = std::make_unique<juce::AudioParameterFloat>(
+        "lowpassDynThreshold", "Band8DynThreshold",
+        juce::NormalisableRange<float> (-120.0f, 0.0f, 0.1f), -24.0f);
+    auto pLowpassAttackMs = std::make_unique<juce::AudioParameterFloat>(
+        "lowpassAttackMs", "Band8AttackMs", DynamicEq::attackMsRange(), DynamicEq::attackMs);
+    auto pLowpassReleaseMs = std::make_unique<juce::AudioParameterFloat>(
+        "lowpassReleaseMs", "Band8ReleaseMs", DynamicEq::releaseMsRange(), DynamicEq::releaseMs);
+    auto pLowpassSpectralResHz = std::make_unique<juce::AudioParameterFloat>(
+        "lowpassSpectralResHz", "Band8SpectralResHz",
+        juce::NormalisableRange<float> (SpectralBinning::kMinBandwidthHz, SpectralBinning::kTargetBandwidthHz, 0.05f),
+        SpectralBinning::kDefaultBandwidthHz);
+    auto pLowpassSpectralDepth = std::make_unique<juce::AudioParameterFloat>(
+        "lowpassSpectralDepth", "Band8SpectralAmount",
+        juce::NormalisableRange<float> (SpectralDynamics::kMinSpectralAmount, SpectralDynamics::kMaxSpectralAmount, 0.01f),
+        SpectralDynamics::kDefaultSpectralAmount);
+    auto pLowpassSpectralExpand = std::make_unique<juce::AudioParameterBool>("lowpassSpectralExpand", "Band8SpectralExpand", false);
+    auto pLowpassSat = std::make_unique<juce::AudioParameterBool>("lowpassSat", "Band8Sat", false);
+    auto pLowpassSatModel = std::make_unique<juce::AudioParameterChoice>(
+        "lowpassSatModel", "Band8SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
+    auto pLowpassSatPost = std::make_unique<juce::AudioParameterBool>("lowpassSatPost", "Band8SatPost", false);
+    auto pLowpassSatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "lowpassSatDriveDb", "Band8SatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb, BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
     //LowShelf
     auto pLowShelfFrequency = std::make_unique<juce::AudioParameterFloat>("lowShelfFrequency", "LowShelfFrequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 100.0f);
@@ -303,9 +371,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "lowShelfSatModel", "LowShelfSatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
     auto pLowShelfSatPost = std::make_unique<juce::AudioParameterBool>(
         "lowShelfSatPost", "LowShelfSatPost", false);
+    auto pLowShelfSatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "lowShelfSatDriveDb", "LowShelfSatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb,
+                                        BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
     //HighShelf
-    auto pHighShelfFrequency = std::make_unique<juce::AudioParameterFloat>("highShelfFrequency", "HighShelfFrequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 5500.0f);
+    auto pHighShelfFrequency = std::make_unique<juce::AudioParameterFloat>("highShelfFrequency", "Band7Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 10000.0f);
     auto pHighShelfQ = std::make_unique<juce::AudioParameterFloat>("highShelfQ", "HighShelfQ", juce::NormalisableRange<float>(0.15f, 10.0f, 0.01f, 0.25f), 0.5f);
     auto pHighShelfGain = std::make_unique<juce::AudioParameterFloat>("highShelfGain", "HighShelfGain", -24.0f, 24.0f, 0.0f);
     auto pHighShelfOnOff = std::make_unique<juce::AudioParameterBool>("highShelfOnOff", "HighShelfOnOff", false);
@@ -340,9 +413,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "highShelfSatModel", "HighShelfSatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
     auto pHighShelfSatPost = std::make_unique<juce::AudioParameterBool>(
         "highShelfSatPost", "HighShelfSatPost", false);
+    auto pHighShelfSatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "highShelfSatDriveDb", "HighShelfSatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb,
+                                        BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
     //Band1
-    auto pBand1Frequency = std::make_unique<juce::AudioParameterFloat>("band1Frequency", "Band1Frequency", juce::NormalisableRange<float>( 20.0f, 20000.0f, 1.0f, 0.2f), 300.0f);
+    auto pBand1Frequency = std::make_unique<juce::AudioParameterFloat>("band1Frequency", "Band3Frequency", juce::NormalisableRange<float>( 20.0f, 20000.0f, 1.0f, 0.2f), 300.0f);
     auto pBand1Gain = std::make_unique<juce::AudioParameterFloat>("band1Gain", "Band1Gain", -24.0f, 24.0f, 0.0f);
     // Default bell Q ~1/3 tighter than 0.5 (×4/3 → narrower bandwidth).
     constexpr float defaultBellQ = 0.67f;
@@ -379,9 +457,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "band1SatModel", "Band1SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
     auto pBand1SatPost = std::make_unique<juce::AudioParameterBool>(
         "band1SatPost", "Band1SatPost", true);
+    auto pBand1SatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "band1SatDriveDb", "Band1SatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb,
+                                        BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
     //Band2
-    auto pBand2Frequency = std::make_unique<juce::AudioParameterFloat>("band2Frequency", "Band2Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 1000.0f);
+    auto pBand2Frequency = std::make_unique<juce::AudioParameterFloat>("band2Frequency", "Band4Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 800.0f);
     auto pBand2Gain = std::make_unique<juce::AudioParameterFloat>("band2Gain", "band2Gain", -24.0f, 24.0f , 0.0f);
     auto pBand2Q = std::make_unique<juce::AudioParameterFloat>("band2Q", "Band2Q", juce::NormalisableRange < float>(0.15f, 10.0f, 0.01f, 0.25f), defaultBellQ);
     auto pBand2OnOff = std::make_unique<juce::AudioParameterBool>("band2OnOff", "Band2OnOff", false);
@@ -416,9 +499,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "band2SatModel", "Band2SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
     auto pBand2SatPost = std::make_unique<juce::AudioParameterBool>(
         "band2SatPost", "Band2SatPost", false);
+    auto pBand2SatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "band2SatDriveDb", "Band2SatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb,
+                                        BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
     //Band3
-    auto pBand3Frequency = std::make_unique<juce::AudioParameterFloat>("band3Frequency", "Band3Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 4000.0f);
+    auto pBand3Frequency = std::make_unique<juce::AudioParameterFloat>("band3Frequency", "Band5Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 2000.0f);
     auto pBand3Gain = std::make_unique<juce::AudioParameterFloat>("band3Gain", "Band3Gain", -24.0f, 24.0f, 0.0f);
     auto pBand3Q = std::make_unique<juce::AudioParameterFloat>("band3Q", "Band3Q", juce::NormalisableRange < float>(0.15f, 10.0f, 0.01f, 0.25f), defaultBellQ);
     auto pBand3OnOff = std::make_unique<juce::AudioParameterBool>("band3OnOff", "Band3OnOff", false);
@@ -453,9 +541,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "band3SatModel", "Band3SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
     auto pBand3SatPost = std::make_unique<juce::AudioParameterBool>(
         "band3SatPost", "Band3SatPost", false);
+    auto pBand3SatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "band3SatDriveDb", "Band3SatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb,
+                                        BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
     //Band4
-    auto pBand4Frequency = std::make_unique<juce::AudioParameterFloat>("band4Frequency", "Band4Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 8000.0f);
+    auto pBand4Frequency = std::make_unique<juce::AudioParameterFloat>("band4Frequency", "Band6Frequency", juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.2f), 5000.0f);
     auto pBand4Gain = std::make_unique<juce::AudioParameterFloat>("band4Gain", "Band4Gain", -24.0f, 24.0f, 0.0f);
     auto pBand4Q = std::make_unique<juce::AudioParameterFloat>("band4Q", "Band4Q", juce::NormalisableRange < float>(0.15f, 10.0f, 0.01f, 0.25f), defaultBellQ);
     auto pBand4OnOff = std::make_unique<juce::AudioParameterBool>("band4OnOff", "Band4OnOff", false);
@@ -490,6 +583,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "band4SatModel", "Band4SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube);
     auto pBand4SatPost = std::make_unique<juce::AudioParameterBool>(
         "band4SatPost", "Band4SatPost", false);
+    auto pBand4SatDriveDb = std::make_unique<juce::AudioParameterFloat>(
+        "band4SatDriveDb", "Band4SatDriveDb",
+        juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb,
+                                        BandSaturation::kMaxSatDriveDb, 0.01f),
+        BandSaturation::kDefaultSatDriveDb);
 
     // Global sat oversampling for Stage 1 per-band (juce::dsp::Oversampling).
     auto pSatOversample = std::make_unique<juce::AudioParameterChoice>(
@@ -511,7 +609,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         BandSaturation::spectralSatOversampleParamId(), "SpectralSatOversample",
         BandSaturation::getOversampleChoiceNames(), BandSaturation::osOff);
 
-    // Global spectral lattice pack (shared by all S bands).
+    // Global spectral lattice density + pack (shared by all S bands).
+    auto pSpectralResHz = std::make_unique<juce::AudioParameterFloat>(
+        SpectralDynamics::spectralResHzParamId(), "SpectralResHz",
+        juce::NormalisableRange<float> (SpectralBinning::kMinBandwidthHz,
+                                        SpectralBinning::kTargetBandwidthHz, 0.05f),
+        SpectralBinning::kDefaultBandwidthHz);
     auto pSpectralPack = std::make_unique<juce::AudioParameterChoice>(
         SpectralDynamics::spectralPackParamId(), "SpectralPack",
         SpectralDynamics::getPackModeChoiceNames(), 0);
@@ -519,8 +622,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     // Built-in analyser defaults match factory "new default";
     // AnalyserDefaults::load() still overrides when that file is present.
     juce::StringArray choices = AnalyserDefaults::getBlockSizeNames();
+    // Index: 0=2048, 1=4096, 2=8192, 3=16384 — always default to 8192.
+    constexpr int kDefaultBlockIndex = 2; // 8192
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
-        "BLOCK_ID", "Block", choices, analyserDefaults.getBlockIndex (2))); // 8192
+        "BLOCK_ID", "Block", choices, kDefaultBlockIndex));
 
     // Boolean parameters
     params.push_back(std::make_unique<juce::AudioParameterBool>("LEFT_ID", "Left", false));
@@ -534,9 +639,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::make_unique<juce::AudioParameterBool>("RANGE_ID", "Range", true));
 
     // Integer parameters
-    // Analysis + UI refresh interval in ms (Ableton Spectrum default ~60 ms).
+    // Analysis + UI refresh interval in ms. Default 33 ms ≈ 30 Hz.
     // Analysis thread FFTs the latest Block samples on this cadence (overlapping).
-    params.push_back(std::make_unique<juce::AudioParameterInt>("REFRESH_ID", "Refresh", 16, 200, 30));
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        "REFRESH_ID", "Refresh", 16, 200, analyserDefaults.getInt ("REFRESH_ID", 33)));
     params.push_back(std::make_unique<juce::AudioParameterInt>("AVG_ID", "Avg", 1, 8, 1));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MAXIMUM_ID", "Maximum", -200, 40, 12));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MINIMUM_ID", "Minimum", -380, 30, -120));
@@ -810,7 +916,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         PhaseMode::paramId(), "Phase Mode",
         PhaseMode::getChoiceNames(),
-        PhaseMode::linearPhase));
+        PhaseMode::minimumPhase));
 
     // LFO + Shape + mod matrix (3 voices + custom curve → band freq/gain/Q).
     LfoMod::addParameters (params);
@@ -823,13 +929,47 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     
     params.push_back(std::move(pHighpassCutoff));
     params.push_back(std::move(pHighpassQ));
+    params.push_back(std::move(pHighpassGain));
+    params.push_back(std::move(pHighpassOnOff));
+    params.push_back(std::move(pHighpassType));
     params.push_back(std::move(pHighpassSlope));
     params.push_back(std::move(pHighpassChannel));
+    params.push_back(std::move(pHighpassDynamic));
+    params.push_back(std::move(pHighpassSidechain));
+    params.push_back(std::move(pHighpassSidechainMidi));
+    params.push_back(std::move(pHighpassSpectral));
+    params.push_back(std::move(pHighpassDynThreshold));
+    params.push_back(std::move(pHighpassAttackMs));
+    params.push_back(std::move(pHighpassReleaseMs));
+    params.push_back(std::move(pHighpassSpectralResHz));
+    params.push_back(std::move(pHighpassSpectralDepth));
+    params.push_back(std::move(pHighpassSpectralExpand));
+    params.push_back(std::move(pHighpassSat));
+    params.push_back(std::move(pHighpassSatModel));
+    params.push_back(std::move(pHighpassSatPost));
+    params.push_back(std::move(pHighpassSatDriveDb));
     
     params.push_back(std::move(pLowpassCutoff));
     params.push_back(std::move(pLowpassQ));
+    params.push_back(std::move(pLowpassGain));
+    params.push_back(std::move(pLowpassOnOff));
+    params.push_back(std::move(pLowpassType));
     params.push_back(std::move(pLowpassSlope));
     params.push_back(std::move(pLowpassChannel));
+    params.push_back(std::move(pLowpassDynamic));
+    params.push_back(std::move(pLowpassSidechain));
+    params.push_back(std::move(pLowpassSidechainMidi));
+    params.push_back(std::move(pLowpassSpectral));
+    params.push_back(std::move(pLowpassDynThreshold));
+    params.push_back(std::move(pLowpassAttackMs));
+    params.push_back(std::move(pLowpassReleaseMs));
+    params.push_back(std::move(pLowpassSpectralResHz));
+    params.push_back(std::move(pLowpassSpectralDepth));
+    params.push_back(std::move(pLowpassSpectralExpand));
+    params.push_back(std::move(pLowpassSat));
+    params.push_back(std::move(pLowpassSatModel));
+    params.push_back(std::move(pLowpassSatPost));
+    params.push_back(std::move(pLowpassSatDriveDb));
     
     params.push_back(std::move(pHighShelfGain));
     params.push_back(std::move(pHighShelfFrequency));
@@ -849,6 +989,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pHighShelfSat));
     params.push_back(std::move(pHighShelfSatModel));
     params.push_back(std::move(pHighShelfSatPost));
+    params.push_back(std::move(pHighShelfSatDriveDb));
    
     params.push_back(std::move(pLowShelfGain));
     params.push_back(std::move(pLowShelfFrequency));
@@ -868,6 +1009,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pLowShelfSat));
     params.push_back(std::move(pLowShelfSatModel));
     params.push_back(std::move(pLowShelfSatPost));
+    params.push_back(std::move(pLowShelfSatDriveDb));
 
     params.push_back(std::move(pBand1Gain));
     params.push_back(std::move(pBand1Frequency));
@@ -887,6 +1029,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pBand1Sat));
     params.push_back(std::move(pBand1SatModel));
     params.push_back(std::move(pBand1SatPost));
+    params.push_back(std::move(pBand1SatDriveDb));
 
     params.push_back(std::move(pBand2Gain));
     params.push_back(std::move(pBand2Frequency));
@@ -906,6 +1049,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pBand2Sat));
     params.push_back(std::move(pBand2SatModel));
     params.push_back(std::move(pBand2SatPost));
+    params.push_back(std::move(pBand2SatDriveDb));
 
     params.push_back(std::move(pBand3Gain));
     params.push_back(std::move(pBand3Frequency));
@@ -925,6 +1069,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pBand3Sat));
     params.push_back(std::move(pBand3SatModel));
     params.push_back(std::move(pBand3SatPost));
+    params.push_back(std::move(pBand3SatDriveDb));
 
     params.push_back(std::move(pBand4Gain));
     params.push_back(std::move(pBand4Frequency));
@@ -944,16 +1089,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pBand4Sat));
     params.push_back(std::move(pBand4SatModel));
     params.push_back(std::move(pBand4SatPost));
+    params.push_back(std::move(pBand4SatDriveDb));
 
     params.push_back(std::move(pSatOversample));
     params.push_back(std::move(pSpectralSat));
     params.push_back(std::move(pSpectralSatModel));
     params.push_back(std::move(pSpectralSatDrive));
     params.push_back(std::move(pSpectralSatOversample));
+    params.push_back(std::move(pSpectralResHz));
     params.push_back(std::move(pSpectralPack));
 
-    params.push_back(std::move(pHighpassOnOff));
-    params.push_back(std::move(pLowpassOnOff));
     params.push_back(std::move(pHighShelfOnOff));
     params.push_back(std::move(pLowShelfOnOff));
     params.push_back(std::move(pBand1OnOff));
@@ -966,6 +1111,50 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
 }
 
 
+
+void EqProcessor::stampLegacySpectralResHzInState (juce::ValueTree& state, float hzValue) const
+{
+    const float hz = SpectralBinning::clampBandwidthHz (hzValue);
+    const auto legacyIds = SpectralDynamics::allLegacySpectralResHzParamIds();
+
+    for (int i = 0; i < state.getNumChildren(); ++i)
+    {
+        auto child = state.getChild (i);
+        if (! child.hasType ("PARAM"))
+            continue;
+
+        const auto id = child.getProperty ("id").toString();
+        if (legacyIds.contains (id))
+            child.setProperty ("value", hz, nullptr);
+    }
+}
+
+void EqProcessor::migrateSpectralResHzFromLegacyParams()
+{
+    // Old presets only had per-band Res; take the finest (lowest Hz) as the global.
+    // Do not call setValueNotifyingHost here — Ableton can crash on host param spam.
+    float finest = SpectralBinning::kTargetBandwidthHz;
+    bool anyLegacy = false;
+
+    for (const auto& id : SpectralDynamics::allLegacySpectralResHzParamIds())
+    {
+        if (auto* raw = treeState.getRawParameterValue (id))
+        {
+            finest = juce::jmin (finest, SpectralBinning::clampBandwidthHz (raw->load()));
+            anyLegacy = true;
+        }
+    }
+
+    if (! anyLegacy)
+        return;
+
+    if (auto* global = dynamic_cast<juce::AudioParameterFloat*> (
+            treeState.getParameter (SpectralDynamics::spectralResHzParamId())))
+    {
+        if (std::abs ((float) *global - finest) > 1.0e-4f)
+            *global = finest;
+    }
+}
 
 void EqProcessor::parameterChanged(const juce::String& parameterID, float newValue)
 {
@@ -1242,10 +1431,12 @@ void EqProcessor::updateParameters()
         smoothOutputGain.setCurrentAndTargetValue (v->load());
 
     smoothAutoGainOffset.setCurrentAndTargetValue (0.0f);
+    autoGainPreDbSmooth = -100.0f;
+    autoGainPostDbSmooth = -100.0f;
 
     // Update the filters
-    const int hpSlope = (int) treeState.getRawParameterValue ("highpassSlope")->load();
-    const int lpSlope = (int) treeState.getRawParameterValue ("lowpassSlope")->load();
+    const int hpSlope = BandChannel::readChoiceIndex (treeState, "highpassSlope");
+    const int lpSlope = BandChannel::readChoiceIndex (treeState, "lowpassSlope");
     updateHighpass(restoredHighpassCutoff, restoredHighpassQ, hpSlope);
     updateLowpass(restoredLowpassCutoff, restoredLowpassQ, lpSlope);
     updateHighShelf(restoredHighShelfFrequency, restoredHighShelfQ, restoredHighShelfGain);
@@ -1354,6 +1545,8 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         stage.prepare(spec);
     for (auto& stage : lowpassStages)
         stage.prepare(spec);
+    highpassBandFilter.prepare (spec);
+    lowpassBandFilter.prepare (spec);
     highShelf.prepare(spec);
     lowShelf.prepare(spec);
     band1.prepare(spec);
@@ -1368,6 +1561,8 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     dynBand2.prepare (monoSpec, samplesPerBlock);
     dynBand3.prepare (monoSpec, samplesPerBlock);
     dynBand4.prepare (monoSpec, samplesPerBlock);
+    dynHighpass.prepare (monoSpec, samplesPerBlock);
+    dynLowpass.prepare (monoSpec, samplesPerBlock);
     dynHighShelf.prepare (monoSpec, samplesPerBlock);
     dynLowShelf.prepare (monoSpec, samplesPerBlock);
 
@@ -1375,12 +1570,16 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     scDetectBand2.prepare (monoSpec, samplesPerBlock);
     scDetectBand3.prepare (monoSpec, samplesPerBlock);
     scDetectBand4.prepare (monoSpec, samplesPerBlock);
+    scDetectHighpass.prepare (monoSpec, samplesPerBlock);
+    scDetectLowpass.prepare (monoSpec, samplesPerBlock);
     scDetectHighShelf.prepare (monoSpec, samplesPerBlock);
     scDetectLowShelf.prepare (monoSpec, samplesPerBlock);
     scGateBand1.prepare (sampleRate, samplesPerBlock);
     scGateBand2.prepare (sampleRate, samplesPerBlock);
     scGateBand3.prepare (sampleRate, samplesPerBlock);
     scGateBand4.prepare (sampleRate, samplesPerBlock);
+    scGateHighpass.prepare (sampleRate, samplesPerBlock);
+    scGateLowpass.prepare (sampleRate, samplesPerBlock);
     scGateHighShelf.prepare (sampleRate, samplesPerBlock);
     scGateLowShelf.prepare (sampleRate, samplesPerBlock);
     for (auto& v : lfoVoices)
@@ -1395,8 +1594,16 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         sat.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
     spectralSatEngine.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
     linearPhaseEngine.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
-    spectralDetectBuffer.setSize (juce::jmax (1, (int) spec.numChannels), samplesPerBlock, false, false, true);
-    updateReportedLatency (false);
+    // Headroom for hosts that occasionally exceed the prepare block size.
+    spectralDetectBuffer.setSize (juce::jmax (1, (int) spec.numChannels),
+                                  juce::jmax (samplesPerBlock * 2, 8192),
+                                  false, false, false);
+
+    bypassCompBuffer.setSize (2, kMaxBypassCompDelay, false, true, false);
+    bypassCompBuffer.clear();
+    bypassCompWritePos = 0;
+    bypassCompDelaySamples = -1;
+    updateReportedLatency();
 
 
     // Reset smoothed values with appropriate time constants
@@ -1444,9 +1651,11 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     if (auto* v = treeState.getRawParameterValue ("outputGain"))
         smoothOutputGain.setCurrentAndTargetValue (v->load());
 
-    // Autogain offset slews slowly to avoid pumping (~250 ms).
-    smoothAutoGainOffset.reset (sampleRate, 0.25);
+    // Autogain offset slews slowly; applied per-sample with Out gain (no block steps).
+    smoothAutoGainOffset.reset (sampleRate, 0.50);
     smoothAutoGainOffset.setCurrentAndTargetValue (0.0f);
+    autoGainPreDbSmooth = -100.0f;
+    autoGainPostDbSmooth = -100.0f;
 
     inputPeakDbLeft.store (-100.0f);
     inputPeakDbRight.store (-100.0f);
@@ -1576,7 +1785,12 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         take (smoothknob17); take (smoothknob18); take (smoothknob19); take (smoothknob20);
         take (smoothknob21); take (smoothknob22);
 
-        // Bypass: input == output. Measure sample-peak + RMS on the buffer leaving the plugin.
+        // Keep host PDC unchanged vs active processing (Linear Phase ~512 samples).
+        // Zeroing latency on bypass forces Ableton/etc. to rebuffer → skip/stutter.
+        updateReportedLatency();
+        applyBypassLatencyCompensation (mainBuffer, getLatencySamples());
+
+        // Bypass: dry delayed to match reported latency. Meter what leaves the plugin.
         auto storeChannelMeters = [&] (int channel,
                                        std::atomic<float>& peakOut,
                                        std::atomic<float>& rmsOut,
@@ -1642,7 +1856,6 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             }
         }
 
-        updateReportedLatency (true);
         return;
     }
 
@@ -1886,15 +2099,20 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         || (isBand2On && rawBool ("band2Spectral"))
         || (isBand3On && rawBool ("band3Spectral"))
         || (isBand4On && rawBool ("band4Spectral"))
+        || (isHighpassOn && rawBool ("highpassSpectral"))
+        || (isLowpassOn && rawBool ("lowpassSpectral"))
         || (isHighShelfOn && rawBool ("highShelfSpectral"))
         || (isLowShelfOn && rawBool ("lowShelfSpectral"));
 
     if (anySpectralArmed)
     {
+        // Never allocate here (Ableton crash). prepareToPlay sizes this buffer;
+        // if a host block is larger, skip the detect copy for this block.
         const int nCh = juce::jmin (2, mainBuffer.getNumChannels());
-        if (nCh > 0 && numSamples > 0)
+        if (nCh > 0 && numSamples > 0
+            && spectralDetectBuffer.getNumChannels() >= nCh
+            && spectralDetectBuffer.getNumSamples() >= numSamples)
         {
-            spectralDetectBuffer.setSize (nCh, numSamples, false, false, true);
             for (int ch = 0; ch < nCh; ++ch)
                 spectralDetectBuffer.copyFrom (ch, 0, mainBuffer, ch, 0, numSamples);
         }
@@ -1967,7 +2185,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         return eg;
     };
 
-    const int hsType = (int) rawFloat ("highShelfType");
+    const int hsType = BandChannel::readChoiceIndex (treeState, "highShelfType", FilterType::highShelf);
     const float effHighShelfGain = resolveDynamicGain (
         isHighShelfOn, FilterType::usesGain (hsType), rawBool ("highShelfDynamic"),
         rawBool ("highShelfSidechain"), rawBool ("highShelfSidechainMidi"),
@@ -1977,7 +2195,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         rawFloat ("highShelfAttackMs", DynamicEq::attackMs),
         rawFloat ("highShelfReleaseMs", DynamicEq::releaseMs));
 
-    const int lsType = (int) rawFloat ("lowShelfType");
+    const int lsType = BandChannel::readChoiceIndex (treeState, "lowShelfType", FilterType::lowShelf);
     const float effLowShelfGain = resolveDynamicGain (
         isLowShelfOn, FilterType::usesGain (lsType), rawBool ("lowShelfDynamic"),
         rawBool ("lowShelfSidechain"), rawBool ("lowShelfSidechainMidi"),
@@ -1987,7 +2205,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         rawFloat ("lowShelfAttackMs", DynamicEq::attackMs),
         rawFloat ("lowShelfReleaseMs", DynamicEq::releaseMs));
 
-    const int b1Type = (int) rawFloat ("band1Type");
+    const int b1Type = BandChannel::readChoiceIndex (treeState, "band1Type", FilterType::bell);
     const float effBand1Gain = resolveDynamicGain (
         isBand1On, FilterType::usesGain (b1Type), rawBool ("band1Dynamic"),
         rawBool ("band1Sidechain"), rawBool ("band1SidechainMidi"),
@@ -1997,7 +2215,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         rawFloat ("band1AttackMs", DynamicEq::attackMs),
         rawFloat ("band1ReleaseMs", DynamicEq::releaseMs));
 
-    const int b2Type = (int) rawFloat ("band2Type");
+    const int b2Type = BandChannel::readChoiceIndex (treeState, "band2Type", FilterType::bell);
     const float effBand2Gain = resolveDynamicGain (
         isBand2On, FilterType::usesGain (b2Type), rawBool ("band2Dynamic"),
         rawBool ("band2Sidechain"), rawBool ("band2SidechainMidi"),
@@ -2007,7 +2225,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         rawFloat ("band2AttackMs", DynamicEq::attackMs),
         rawFloat ("band2ReleaseMs", DynamicEq::releaseMs));
 
-    const int b3Type = (int) rawFloat ("band3Type");
+    const int b3Type = BandChannel::readChoiceIndex (treeState, "band3Type", FilterType::bell);
     const float effBand3Gain = resolveDynamicGain (
         isBand3On, FilterType::usesGain (b3Type), rawBool ("band3Dynamic"),
         rawBool ("band3Sidechain"), rawBool ("band3SidechainMidi"),
@@ -2017,7 +2235,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         rawFloat ("band3AttackMs", DynamicEq::attackMs),
         rawFloat ("band3ReleaseMs", DynamicEq::releaseMs));
 
-    const int b4Type = (int) rawFloat ("band4Type");
+    const int b4Type = BandChannel::readChoiceIndex (treeState, "band4Type", FilterType::bell);
     const float effBand4Gain = resolveDynamicGain (
         isBand4On, FilterType::usesGain (b4Type), rawBool ("band4Dynamic"),
         rawBool ("band4Sidechain"), rawBool ("band4SidechainMidi"),
@@ -2026,6 +2244,9 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         rawFloat ("band4DynThreshold", -24.0f),
         rawFloat ("band4AttackMs", DynamicEq::attackMs),
         rawFloat ("band4ReleaseMs", DynamicEq::releaseMs));
+
+    const int hpType = BandChannel::readChoiceIndex (treeState, "highpassType", FilterType::highpass);
+    const int lpType = BandChannel::readChoiceIndex (treeState, "lowpassType", FilterType::lowpass);
 
     const bool proportionalQOn = treeState.getRawParameterValue ("PROPORTIONAL_Q_ID") != nullptr
                                  && treeState.getRawParameterValue ("PROPORTIONAL_Q_ID")->load() > 0.5f;
@@ -2036,16 +2257,23 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     {
         LinearPhaseEqEngine::BandSpec specs[8] {};
 
+        // Cascade flags only for each slot's native type (matches min-phase DSP).
         specs[0].enabled = isHighpassOn;
-        specs[0].isHighpass = true;
+        specs[0].isHighpass = (hpType == FilterType::highpass);
+        specs[0].isLowpass = false;
+        specs[0].type = hpType;
         specs[0].frequency = smoothedHighpassCutoff;
         specs[0].q = smoothedHighpassQ;
+        specs[0].gainDb = rawFloat ("highpassGain");
         specs[0].slope = BandChannel::readChoiceIndex (treeState, "highpassSlope");
 
         specs[1].enabled = isLowpassOn;
-        specs[1].isLowpass = true;
+        specs[1].isLowpass = (lpType == FilterType::lowpass);
+        specs[1].isHighpass = false;
+        specs[1].type = lpType;
         specs[1].frequency = smoothedLowpassCutoff;
         specs[1].q = smoothedLowpassQ;
+        specs[1].gainDb = rawFloat ("lowpassGain");
         specs[1].slope = BandChannel::readChoiceIndex (treeState, "lowpassSlope");
 
         specs[2].enabled = isHighShelfOn;
@@ -2089,37 +2317,81 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     }
     else
     {
-        // Apply the filters conditionally based on the boolean flags
+        // Band 1 / Band 8: cascade only for default HP / LP types; other types = single IIR.
         if (isHighpassOn)
         {
+            const int hpType = BandChannel::readChoiceIndex (treeState, "highpassType", FilterType::highpass);
             const int hpSlope = BandChannel::readChoiceIndex (treeState, "highpassSlope");
             const int hpChannel = BandChannel::readChoiceIndex (treeState, "highpassChannel");
-            if (coeffsNeedUpdate (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, 0.0f, hpSlope))
+            const float hpGain = rawFloat ("highpassGain");
+            const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+
+            if (hpType == FilterType::highpass)
             {
-                updateHighpass (smoothedHighpassCutoff, smoothedHighpassQ, hpSlope);
-                storeCoeffs (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, 0.0f, hpSlope);
+                if (coeffsNeedUpdate (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, 0.0f, hpSlope))
+                {
+                    updateHighpass (smoothedHighpassCutoff, smoothedHighpassQ, hpSlope);
+                    storeCoeffs (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, 0.0f, hpSlope);
+                }
+                BandChannel::process (audioBlock, hpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+                {
+                    for (int i = 0; i < highpassActiveStages; ++i)
+                        highpassStages[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
+                });
             }
-            BandChannel::process (audioBlock, hpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+            else if (sr > 0.0 && highpassBandFilter.state != nullptr)
             {
-                for (int i = 0; i < highpassActiveStages; ++i)
-                    highpassStages[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
-            });
+                const int cacheKey = hpType + 1000;
+                if (coeffsNeedUpdate (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, hpGain, cacheKey))
+                {
+                    if (auto coeffs = FilterType::makeCoefficients (
+                            hpType, sr, smoothedHighpassCutoff, smoothedHighpassQ, hpGain))
+                        *highpassBandFilter.state = *coeffs;
+                    storeCoeffs (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, hpGain, cacheKey);
+                }
+                BandChannel::process (audioBlock, hpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+                {
+                    highpassBandFilter.process (juce::dsp::ProcessContextReplacing<float> (block));
+                });
+            }
         }
 
         if (isLowpassOn)
         {
+            const int lpType = BandChannel::readChoiceIndex (treeState, "lowpassType", FilterType::lowpass);
             const int lpSlope = BandChannel::readChoiceIndex (treeState, "lowpassSlope");
             const int lpChannel = BandChannel::readChoiceIndex (treeState, "lowpassChannel");
-            if (coeffsNeedUpdate (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, 0.0f, lpSlope))
+            const float lpGain = rawFloat ("lowpassGain");
+            const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+
+            if (lpType == FilterType::lowpass)
             {
-                updateLowpass (smoothedLowpassCutoff, smoothedLowpassQ, lpSlope);
-                storeCoeffs (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, 0.0f, lpSlope);
+                if (coeffsNeedUpdate (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, 0.0f, lpSlope))
+                {
+                    updateLowpass (smoothedLowpassCutoff, smoothedLowpassQ, lpSlope);
+                    storeCoeffs (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, 0.0f, lpSlope);
+                }
+                BandChannel::process (audioBlock, lpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+                {
+                    for (int i = 0; i < lowpassActiveStages; ++i)
+                        lowpassStages[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
+                });
             }
-            BandChannel::process (audioBlock, lpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+            else if (sr > 0.0 && lowpassBandFilter.state != nullptr)
             {
-                for (int i = 0; i < lowpassActiveStages; ++i)
-                    lowpassStages[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
-            });
+                const int cacheKey = lpType + 1000;
+                if (coeffsNeedUpdate (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, lpGain, cacheKey))
+                {
+                    if (auto coeffs = FilterType::makeCoefficients (
+                            lpType, sr, smoothedLowpassCutoff, smoothedLowpassQ, lpGain))
+                        *lowpassBandFilter.state = *coeffs;
+                    storeCoeffs (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, lpGain, cacheKey);
+                }
+                BandChannel::process (audioBlock, lpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+                {
+                    lowpassBandFilter.process (juce::dsp::ProcessContextReplacing<float> (block));
+                });
+            }
         }
 
         // Sync juce oversampling factor on all sat engines (min-phase path).
@@ -2134,7 +2406,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                                          bool satOn,
                                          bool satPost,
                                          int satModel,
-                                         int bandIndex)
+                                         int bandIndex,
+                                         float satDriveDb)
         {
             auto& sat = satEngineForBandIndex (bandIndex);
             if (! satOn)
@@ -2148,7 +2421,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             {
                 sat.captureDry (block);
                 filter.process (juce::dsp::ProcessContextReplacing<float> (block));
-                sat.processPost (block);
+                sat.processPost (block, satDriveDb);
             }
             else
             {
@@ -2175,9 +2448,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const bool satOn = FilterType::usesGain (hsType) && rawBool ("highShelfSat") && effHighShelfGain > 0.05f;
             const bool satPost = rawBool ("highShelfSatPost");
             const int satModel = rawSatModel ("highShelfSatModel");
+            const float satDriveDb = rawFloat ("highShelfSatDriveDb", BandSaturation::kDefaultSatDriveDb);
             BandChannel::process (audioBlock, channelMode, [&] (juce::dsp::AudioBlock<float>& block)
             {
-                applyBandEqAndSat (highShelf, block, satOn, satPost, satModel, 6);
+                applyBandEqAndSat (highShelf, block, satOn, satPost, satModel, 6, satDriveDb);
             });
         }
 
@@ -2192,9 +2466,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const bool satOn = FilterType::usesGain (lsType) && rawBool ("lowShelfSat") && effLowShelfGain > 0.05f;
             const bool satPost = rawBool ("lowShelfSatPost");
             const int satModel = rawSatModel ("lowShelfSatModel");
+            const float satDriveDb = rawFloat ("lowShelfSatDriveDb", BandSaturation::kDefaultSatDriveDb);
             BandChannel::process (audioBlock, channelMode, [&] (juce::dsp::AudioBlock<float>& block)
             {
-                applyBandEqAndSat (lowShelf, block, satOn, satPost, satModel, 7);
+                applyBandEqAndSat (lowShelf, block, satOn, satPost, satModel, 7, satDriveDb);
             });
         }
 
@@ -2211,9 +2486,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const bool satOn = FilterType::usesGain (b1Type) && rawBool ("band1Sat") && effBand1Gain > 0.05f;
             const bool satPost = rawBool ("band1SatPost");
             const int satModel = rawSatModel ("band1SatModel");
+            const float satDriveDb = rawFloat ("band1SatDriveDb", BandSaturation::kDefaultSatDriveDb);
             BandChannel::process (audioBlock, channelMode, [&] (juce::dsp::AudioBlock<float>& block)
             {
-                applyBandEqAndSat (band1, block, satOn, satPost, satModel, 0);
+                applyBandEqAndSat (band1, block, satOn, satPost, satModel, 0, satDriveDb);
             });
         }
 
@@ -2230,9 +2506,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const bool satOn = FilterType::usesGain (b2Type) && rawBool ("band2Sat") && effBand2Gain > 0.05f;
             const bool satPost = rawBool ("band2SatPost");
             const int satModel = rawSatModel ("band2SatModel");
+            const float satDriveDb = rawFloat ("band2SatDriveDb", BandSaturation::kDefaultSatDriveDb);
             BandChannel::process (audioBlock, channelMode, [&] (juce::dsp::AudioBlock<float>& block)
             {
-                applyBandEqAndSat (band2, block, satOn, satPost, satModel, 1);
+                applyBandEqAndSat (band2, block, satOn, satPost, satModel, 1, satDriveDb);
             });
         }
 
@@ -2249,9 +2526,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const bool satOn = FilterType::usesGain (b3Type) && rawBool ("band3Sat") && effBand3Gain > 0.05f;
             const bool satPost = rawBool ("band3SatPost");
             const int satModel = rawSatModel ("band3SatModel");
+            const float satDriveDb = rawFloat ("band3SatDriveDb", BandSaturation::kDefaultSatDriveDb);
             BandChannel::process (audioBlock, channelMode, [&] (juce::dsp::AudioBlock<float>& block)
             {
-                applyBandEqAndSat (band3, block, satOn, satPost, satModel, 2);
+                applyBandEqAndSat (band3, block, satOn, satPost, satModel, 2, satDriveDb);
             });
         }
 
@@ -2268,9 +2546,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const bool satOn = FilterType::usesGain (b4Type) && rawBool ("band4Sat") && effBand4Gain > 0.05f;
             const bool satPost = rawBool ("band4SatPost");
             const int satModel = rawSatModel ("band4SatModel");
+            const float satDriveDb = rawFloat ("band4SatDriveDb", BandSaturation::kDefaultSatDriveDb);
             BandChannel::process (audioBlock, channelMode, [&] (juce::dsp::AudioBlock<float>& block)
             {
-                applyBandEqAndSat (band4, block, satOn, satPost, satModel, 3);
+                applyBandEqAndSat (band4, block, satOn, satPost, satModel, 3, satDriveDb);
             });
         }
     }
@@ -2326,74 +2605,99 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         return 0;
     };
     const int spectralPackChoice = rawPack();
+    // Global Res — one lattice density for every S band (legacy per-band params stay linked).
+    const float spectralResHz = rawFloat (SpectralDynamics::spectralResHzParamId(),
+                                          SpectralBinning::kDefaultBandwidthHz);
 
     spectralEngine.clearBands();
     armSpectral (isHighShelfOn, FilterType::usesGain (hsType), rawBool ("highShelfSpectral"),
                  rawBool ("highShelfSidechain"),
                  SpectralDynamics::slotForBandIndex (6),
                  smoothedHighShelfFrequency, smoothedHighShelfQ,
-                 rawFloat ("highShelfSpectralResHz", SpectralBinning::kDefaultBandwidthHz),
+                 spectralResHz,
                  rawFloat ("highShelfSpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
                  rawBool ("highShelfSpectralExpand"),
                  spectralPackChoice,
                  rawFloat ("highShelfAttackMs", DynamicEq::attackMs),
                  rawFloat ("highShelfReleaseMs", DynamicEq::releaseMs),
-                 SpectralDynamics::BandShape::highShelf);
+                 SpectralDynamics::shapeFromFilterType (hsType));
     armSpectral (isLowShelfOn, FilterType::usesGain (lsType), rawBool ("lowShelfSpectral"),
                  rawBool ("lowShelfSidechain"),
                  SpectralDynamics::slotForBandIndex (7),
                  smoothedLowShelfFrequency, smoothedLowShelfQ,
-                 rawFloat ("lowShelfSpectralResHz", SpectralBinning::kDefaultBandwidthHz),
+                 spectralResHz,
                  rawFloat ("lowShelfSpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
                  rawBool ("lowShelfSpectralExpand"),
                  spectralPackChoice,
                  rawFloat ("lowShelfAttackMs", DynamicEq::attackMs),
                  rawFloat ("lowShelfReleaseMs", DynamicEq::releaseMs),
-                 SpectralDynamics::BandShape::lowShelf);
+                 SpectralDynamics::shapeFromFilterType (lsType));
     armSpectral (isBand1On, FilterType::usesGain (b1Type), rawBool ("band1Spectral"),
                  rawBool ("band1Sidechain"),
                  SpectralDynamics::slotForBandIndex (0),
                  smoothedBand1Frequency, smoothedBand1Q,
-                 rawFloat ("band1SpectralResHz", SpectralBinning::kDefaultBandwidthHz),
+                 spectralResHz,
                  rawFloat ("band1SpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
                  rawBool ("band1SpectralExpand"),
                  spectralPackChoice,
                  rawFloat ("band1AttackMs", DynamicEq::attackMs),
                  rawFloat ("band1ReleaseMs", DynamicEq::releaseMs),
-                 SpectralDynamics::BandShape::bell);
+                 SpectralDynamics::shapeFromFilterType (b1Type));
     armSpectral (isBand2On, FilterType::usesGain (b2Type), rawBool ("band2Spectral"),
                  rawBool ("band2Sidechain"),
                  SpectralDynamics::slotForBandIndex (1),
                  smoothedBand2Frequency, smoothedBand2Q,
-                 rawFloat ("band2SpectralResHz", SpectralBinning::kDefaultBandwidthHz),
+                 spectralResHz,
                  rawFloat ("band2SpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
                  rawBool ("band2SpectralExpand"),
                  spectralPackChoice,
                  rawFloat ("band2AttackMs", DynamicEq::attackMs),
                  rawFloat ("band2ReleaseMs", DynamicEq::releaseMs),
-                 SpectralDynamics::BandShape::bell);
+                 SpectralDynamics::shapeFromFilterType (b2Type));
     armSpectral (isBand3On, FilterType::usesGain (b3Type), rawBool ("band3Spectral"),
                  rawBool ("band3Sidechain"),
                  SpectralDynamics::slotForBandIndex (2),
                  smoothedBand3Frequency, smoothedBand3Q,
-                 rawFloat ("band3SpectralResHz", SpectralBinning::kDefaultBandwidthHz),
+                 spectralResHz,
                  rawFloat ("band3SpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
                  rawBool ("band3SpectralExpand"),
                  spectralPackChoice,
                  rawFloat ("band3AttackMs", DynamicEq::attackMs),
                  rawFloat ("band3ReleaseMs", DynamicEq::releaseMs),
-                 SpectralDynamics::BandShape::bell);
+                 SpectralDynamics::shapeFromFilterType (b3Type));
     armSpectral (isBand4On, FilterType::usesGain (b4Type), rawBool ("band4Spectral"),
                  rawBool ("band4Sidechain"),
                  SpectralDynamics::slotForBandIndex (3),
                  smoothedBand4Frequency, smoothedBand4Q,
-                 rawFloat ("band4SpectralResHz", SpectralBinning::kDefaultBandwidthHz),
+                 spectralResHz,
                  rawFloat ("band4SpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
                  rawBool ("band4SpectralExpand"),
                  spectralPackChoice,
                  rawFloat ("band4AttackMs", DynamicEq::attackMs),
                  rawFloat ("band4ReleaseMs", DynamicEq::releaseMs),
-                 SpectralDynamics::BandShape::bell);
+                 SpectralDynamics::shapeFromFilterType (b4Type));
+    armSpectral (isHighpassOn, FilterType::usesGain (hpType), rawBool ("highpassSpectral"),
+                 rawBool ("highpassSidechain"),
+                 SpectralDynamics::slotForBandIndex (4),
+                 smoothedHighpassCutoff, smoothedHighpassQ,
+                 spectralResHz,
+                 rawFloat ("highpassSpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
+                 rawBool ("highpassSpectralExpand"),
+                 spectralPackChoice,
+                 rawFloat ("highpassAttackMs", DynamicEq::attackMs),
+                 rawFloat ("highpassReleaseMs", DynamicEq::releaseMs),
+                 SpectralDynamics::shapeFromFilterType (hpType));
+    armSpectral (isLowpassOn, FilterType::usesGain (lpType), rawBool ("lowpassSpectral"),
+                 rawBool ("lowpassSidechain"),
+                 SpectralDynamics::slotForBandIndex (5),
+                 smoothedLowpassCutoff, smoothedLowpassQ,
+                 spectralResHz,
+                 rawFloat ("lowpassSpectralDepth", SpectralDynamics::kDefaultSpectralAmount),
+                 rawBool ("lowpassSpectralExpand"),
+                 spectralPackChoice,
+                 rawFloat ("lowpassAttackMs", DynamicEq::attackMs),
+                 rawFloat ("lowpassReleaseMs", DynamicEq::releaseMs),
+                 SpectralDynamics::shapeFromFilterType (lpType));
 
     // Always call process: hard-bypasses (no filters) when idle, and clears UI GR on S→off.
     {
@@ -2430,7 +2734,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         }
     }
 
-    updateReportedLatency (false);
+    updateReportedLatency();
 
     // Global Side Check (S<=M): after EQ + Spectral (+ optional Stage 2 sat), before AutoGain/Out.
     // Own BP lattice (never mutates spectralEngine). Needs stereo.
@@ -2464,9 +2768,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             return juce::Decibels::gainToDecibels (mainBuffer.getRMSLevel (channel, 0, numSamples), -100.0f);
         };
 
-        const float preDb = juce::jmax (preLeftDb, preRightDb);
-        const float postEqDb = juce::jmax (blockRmsDb (0),
-                                           mainBuffer.getNumChannels() > 1 ? blockRmsDb (1) : blockRmsDb (0));
+        const float blockPreDb = juce::jmax (preLeftDb, preRightDb);
+        const float blockPostDb = juce::jmax (blockRmsDb (0),
+                                              mainBuffer.getNumChannels() > 1 ? blockRmsDb (1) : blockRmsDb (0));
+
+        // ~450 ms ballistics on the detector so block RMS noise doesn't yank the target.
+        constexpr float detectorTauSec = 0.45f;
+        const float detectorAlpha = 1.0f - std::exp (
+            -(float) juce::jmax (1, numSamples) / (detectorTauSec * (float) juce::jmax (1.0, sampleRate)));
+        autoGainPreDbSmooth += detectorAlpha * (blockPreDb - autoGainPreDbSmooth);
+        autoGainPostDbSmooth += detectorAlpha * (blockPostDb - autoGainPostDbSmooth);
 
         constexpr float silenceFloorDb = -60.0f;
 
@@ -2474,15 +2785,40 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         {
             smoothAutoGainOffset.setTargetValue (0.0f);
         }
-        else if (preDb > silenceFloorDb && postEqDb > silenceFloorDb)
+        else if (autoGainPreDbSmooth > silenceFloorDb && autoGainPostDbSmooth > silenceFloorDb)
         {
             // Hold last target during silence so the offset doesn't pump out/in.
-            smoothAutoGainOffset.setTargetValue (juce::jlimit (-24.0f, 24.0f, preDb - postEqDb));
+            smoothAutoGainOffset.setTargetValue (
+                juce::jlimit (-24.0f, 24.0f, autoGainPreDbSmooth - autoGainPostDbSmooth));
         }
 
-        const float autoOffsetDb = take (smoothAutoGainOffset);
-        const float gainDb = take (smoothOutputGain) + autoOffsetDb;
-        mainBuffer.applyGain (juce::Decibels::decibelsToGain (gainDb));
+        // Per-sample Out + autogain — avoids zipper steps at block boundaries.
+        const int nCh = mainBuffer.getNumChannels();
+        if (nCh > 0 && numSamples > 0)
+        {
+            float* chans[2] {};
+            const int useCh = juce::jmin (2, nCh);
+            for (int ch = 0; ch < useCh; ++ch)
+                chans[ch] = mainBuffer.getWritePointer (ch);
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float g = juce::Decibels::decibelsToGain (
+                    smoothOutputGain.getNextValue() + smoothAutoGainOffset.getNextValue());
+
+                for (int ch = 0; ch < useCh; ++ch)
+                    chans[ch][i] *= g;
+            }
+
+            // Mirror mono → stereo spare channel if present.
+            if (useCh == 1 && nCh > 1)
+                mainBuffer.copyFrom (1, 0, mainBuffer, 0, 0, numSamples);
+        }
+        else
+        {
+            take (smoothOutputGain);
+            take (smoothAutoGainOffset);
+        }
     }
 
     // Post-EQ meters: final stereo output after EQ + output gain + autogain
@@ -2767,6 +3103,8 @@ juce::ValueTree EqProcessor::captureStateForSnapshot()
 {
     auto state = treeState.copyState();
     stripBypassParamFromState (state);
+    if (auto* raw = treeState.getRawParameterValue (SpectralDynamics::spectralResHzParamId()))
+        stampLegacySpectralResHzInState (state, raw->load());
     attachShapeCurveToState (state, shapeEngine);
     return state;
 }
@@ -2923,6 +3261,9 @@ void EqProcessor::getStateInformation(juce::MemoryBlock& destData)
     else
         state.setProperty ("deckStateSchema", 2, nullptr);
 
+    if (auto* raw = treeState.getRawParameterValue (SpectralDynamics::spectralResHzParamId()))
+        stampLegacySpectralResHzInState (state, raw->load());
+
     storeAbSnapshotsInState (state);
     attachShapeCurveToState (state, shapeEngine);
 
@@ -2953,6 +3294,7 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
 
     treeState.replaceState (state);
     updateParameters();
+    migrateSpectralResHzFromLegacyParams();
 
     // Restore after replaceState so a missing snapshot set seeds from the new live state.
     restoreAbSnapshotsFromState (abProps);
@@ -2970,14 +3312,8 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 }
 
 
-void EqProcessor::updateReportedLatency (bool bypassed) noexcept
+int EqProcessor::computeProcessingLatencySamples() noexcept
 {
-    if (bypassed)
-    {
-        setLatencySamples (0);
-        return;
-    }
-
     int latency = spectralEngine.getLatencySamples();
     if (PhaseMode::readChoiceIndex (treeState) == PhaseMode::linearPhase)
         latency += linearPhaseEngine.getLatencySamples();
@@ -2989,7 +3325,57 @@ void EqProcessor::updateReportedLatency (bool bypassed) noexcept
     satLatency = juce::jmax (satLatency, spectralSatEngine.getLatencySamples());
     latency += satLatency;
 
-    setLatencySamples (latency);
+    return juce::jlimit (0, kMaxBypassCompDelay, latency);
+}
+
+void EqProcessor::updateReportedLatency() noexcept
+{
+    setLatencySamples (computeProcessingLatencySamples());
+}
+
+void EqProcessor::applyBypassLatencyCompensation (juce::AudioBuffer<float>& buffer, int delaySamples) noexcept
+{
+    delaySamples = juce::jlimit (0, kMaxBypassCompDelay, delaySamples);
+
+    if (bypassCompBuffer.getNumSamples() < kMaxBypassCompDelay
+        || bypassCompBuffer.getNumChannels() < 2)
+        return;
+
+    if (delaySamples != bypassCompDelaySamples)
+    {
+        bypassCompDelaySamples = delaySamples;
+        bypassCompBuffer.clear();
+        bypassCompWritePos = 0;
+    }
+
+    if (delaySamples <= 0)
+        return;
+
+    const int n = buffer.getNumSamples();
+    const int chans = juce::jmin (2, buffer.getNumChannels());
+    const int cap = bypassCompBuffer.getNumSamples();
+    int writePos = bypassCompWritePos;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const int readPos = (writePos - delaySamples + cap) % cap;
+
+        for (int ch = 0; ch < chans; ++ch)
+        {
+            auto* delay = bypassCompBuffer.getWritePointer (ch);
+            auto* data = buffer.getWritePointer (ch);
+            const float in = data[i];
+            data[i] = delay[readPos];
+            delay[writePos] = in;
+        }
+
+        writePos = (writePos + 1) % cap;
+    }
+
+    bypassCompWritePos = writePos;
+
+    if (chans == 1 && buffer.getNumChannels() > 1)
+        buffer.copyFrom (1, 0, buffer, 0, 0, n);
 }
 
 void EqProcessor::releaseResources()

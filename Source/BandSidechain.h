@@ -20,6 +20,8 @@ namespace BandSidechain
             case 1: return "band2Sidechain";
             case 2: return "band3Sidechain";
             case 3: return "band4Sidechain";
+            case 4: return "highpassSidechain";
+            case 5: return "lowpassSidechain";
             case 6: return "highShelfSidechain";
             case 7: return "lowShelfSidechain";
             default: return {};
@@ -34,6 +36,8 @@ namespace BandSidechain
             case 1: return "band2SidechainMidi";
             case 2: return "band3SidechainMidi";
             case 3: return "band4SidechainMidi";
+            case 4: return "highpassSidechainMidi";
+            case 5: return "lowpassSidechainMidi";
             case 6: return "highShelfSidechainMidi";
             case 7: return "lowShelfSidechainMidi";
             default: return {};

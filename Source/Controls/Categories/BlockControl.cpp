@@ -40,11 +40,9 @@ BlockControl::BlockControl(
 
     m_blockComboBox.addItem("16384", 4);
 
-    m_blockComboBox.setSelectedId(1, juce::dontSendNotification);
-
+    // Do not pre-select 2048 here — that can write index 0 into BLOCK_ID when the
+    // attachment connects. Sync from the parameter (default / host state = 8192).
     m_blockComboBox.setColour(juce::Slider::textBoxTextColourId, juce::Colours::whitesmoke.withAlpha(0.8f));
-
-
 
     m_blockComboBoxAttachment =
 

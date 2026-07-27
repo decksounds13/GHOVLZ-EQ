@@ -198,6 +198,10 @@ public:
     void updateHighpass(float frequency, float q, int slopeChoice);
     void updateLowpass(float frequency, float q, int slopeChoice);
 
+    /** Global Res is source of truth; stamp legacy per-band Res into saved state. */
+    void stampLegacySpectralResHzInState (juce::ValueTree& state, float hzValue) const;
+    void migrateSpectralResHzFromLegacyParams();
+
     using StereoIIR = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>>;
     std::array<StereoIIR, FilterSlope::maxBiquadStages> highpassStages;
     std::array<StereoIIR, FilterSlope::maxBiquadStages> lowpassStages;
@@ -353,6 +357,9 @@ private:
     juce::LinearSmoothedValue<float> smoothknob22{ 0.0f };
     juce::LinearSmoothedValue<float> smoothOutputGain{ 0.0f };
     juce::LinearSmoothedValue<float> smoothAutoGainOffset{ 0.0f };
+    /** Slow ballistics on the RMS levels that drive autogain (not the UI meters). */
+    float autoGainPreDbSmooth = -100.0f;
+    float autoGainPostDbSmooth = -100.0f;
 
     float highpassCutoffValue;
     float highpassQValue;
@@ -412,6 +419,7 @@ private:
     CoeffCache lastBand1, lastBand2, lastBand3, lastBand4;
 
     DynamicEq::BandState dynBand1, dynBand2, dynBand3, dynBand4;
+    DynamicEq::BandState dynHighpass, dynLowpass;
     DynamicEq::BandState dynHighShelf, dynLowShelf;
 
     /** Curve-display snapshot of post-LFO freq/Q (gain via dyn publishedEffectiveGain). */
@@ -426,8 +434,10 @@ private:
 
     /** External sidechain audio detectors (separate from internal Dynamic EQ). */
     DynamicEq::BandState scDetectBand1, scDetectBand2, scDetectBand3, scDetectBand4;
+    DynamicEq::BandState scDetectHighpass, scDetectLowpass;
     DynamicEq::BandState scDetectHighShelf, scDetectLowShelf;
     BandSidechain::GateState scGateBand1, scGateBand2, scGateBand3, scGateBand4;
+    BandSidechain::GateState scGateHighpass, scGateLowpass;
     BandSidechain::GateState scGateHighShelf, scGateLowShelf;
 
     std::array<LfoMod::Voice, LfoMod::kNumLfos> lfoVoices;
@@ -445,33 +455,38 @@ private:
     SideCheck::Processor sideCheck;
 
     /** Per-band sat engines (own juce::dsp::Oversampling state each). */
-    std::array<BandSaturation::Engine, 6> bandSatEngines;
+    std::array<BandSaturation::Engine, 8> bandSatEngines;
 
     /** Stage 2 — post-Spectral bus sat. */
     BandSaturation::Engine spectralSatEngine;
 
+    /** Single-biquad path when Band 1 / Band 8 slots are not in HP/LP cascade mode. */
+    StereoIIR highpassBandFilter;
+    StereoIIR lowpassBandFilter;
+
     BandSaturation::Engine& satEngineForBandIndex (int bandIndex) noexcept
     {
-        switch (bandIndex)
-        {
-            case 0: return bandSatEngines[0];
-            case 1: return bandSatEngines[1];
-            case 2: return bandSatEngines[2];
-            case 3: return bandSatEngines[3];
-            case 6: return bandSatEngines[4];
-            case 7: return bandSatEngines[5];
-            default: return bandSatEngines[0];
-        }
+        if (bandIndex >= 0 && bandIndex < (int) bandSatEngines.size())
+            return bandSatEngines[(size_t) bandIndex];
+        return bandSatEngines[0];
     }
 
     /** Linear-phase FIR EQ path (used when phaseMode == Linear Phase). */
     LinearPhaseEqEngine linearPhaseEngine;
-    int lastPhaseMode = PhaseMode::linearPhase;
+    int lastPhaseMode = PhaseMode::minimumPhase;
 
     /** Pre-EQ copy for spectral sidechain detect (threshold must not track cut/boost). */
     juce::AudioBuffer<float> spectralDetectBuffer;
 
-    void updateReportedLatency (bool bypassed) noexcept;
+    /** Keep host PDC stable when Bypass is on (delay dry by reported latency). */
+    static constexpr int kMaxBypassCompDelay = 8192;
+    juce::AudioBuffer<float> bypassCompBuffer; // circular, sized in prepareToPlay
+    int bypassCompWritePos = 0;
+    int bypassCompDelaySamples = -1;
+
+    void updateReportedLatency() noexcept;
+    int computeProcessingLatencySamples() noexcept;
+    void applyBypassLatencyCompensation (juce::AudioBuffer<float>& buffer, int delaySamples) noexcept;
 
     static bool coeffsNeedUpdate (const CoeffCache& cache, float a, float b, float c = 0.0f, int i = 0)
     {

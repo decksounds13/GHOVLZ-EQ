@@ -151,6 +151,7 @@ private:
     std::unique_ptr<ButtonAttachment> spectralExpandButtonAttachment;
     std::unique_ptr<ButtonAttachment> satButtonAttachment;
     std::unique_ptr<ButtonAttachment> satPostButtonAttachment;
+    std::unique_ptr<SliderAttachment> satDriveAttachment;
     std::unique_ptr<ButtonAttachment> spectralSatButtonAttachment;
     std::unique_ptr<ButtonAttachment> sidechainButtonAttachment;
     std::unique_ptr<ButtonAttachment> sidechainMidiButtonAttachment;
@@ -191,6 +192,11 @@ private:
     */
     juce::TextButton satButton { "Sat" };
     juce::TextButton satPrePostButton { "Pre" };
+    /**
+        Post-mode drive (−12…+12 dB into the shaper on EQ−dry).
+        Same compact size as Side Check HP/LP; only when Sat + Post.
+    */
+    RotaryImageKnobForOptionBox satDriveKnob;
     /**
         Stage 2 — global post-Spectral sat. Visible when S is on.
         Right-click: model + oversample. Drive knob (½ A/R) only when → is on.

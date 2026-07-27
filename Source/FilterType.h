@@ -1,8 +1,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "FilterSlope.h"
 
-/** Filter models for the six tunable bands (not HP/LP). */
+/** Filter models for all eight Band 1–8 slots (HP/LP inclusive). */
 namespace FilterType
 {
     enum Choice : int
@@ -12,12 +13,14 @@ namespace FilterType
         highShelf,
         notch,
         bandPass,
+        highpass,
+        lowpass,
         numChoices
     };
 
     inline juce::StringArray getChoiceNames()
     {
-        return { "Bell", "Low Shelf", "High Shelf", "Notch", "Band Pass" };
+        return { "Bell", "Low Shelf", "High Shelf", "Notch", "Band Pass", "Highpass", "Lowpass" };
     }
 
     inline bool usesGain (int type)
@@ -25,12 +28,12 @@ namespace FilterType
         return type == bell || type == lowShelf || type == highShelf;
     }
 
-    /** Ableton-style proportional Q for peaking (bell) bands only.
-     *  Stored Q is the base Q (independent of gain). When proportional mode is on:
-     *    Qeff = baseQ * (1 + |gainDb| / 24)
-     *  → 0 dB: ≈1×; ±12 dB: 1.5×; ±24 dB: 2× (tighter as |gain| rises).
-     *  Non-bell types always return baseQ unchanged.
-     */
+    inline bool isHpLp (int type) noexcept
+    {
+        return type == highpass || type == lowpass;
+    }
+
+    /** Ableton-style proportional Q for peaking (bell) bands only. */
     inline float effectiveBellQ (int type, float baseQ, float gainDb, bool proportionalOn)
     {
         if (! proportionalOn || type != bell)
@@ -39,6 +42,7 @@ namespace FilterType
         return baseQ * (1.0f + std::abs (gainDb) / 24.0f);
     }
 
+    /** Single-biquad types (not cascaded HP/LP slopes). */
     inline juce::dsp::IIR::Coefficients<float>::Ptr makeCoefficients (int type,
                                                                       double sampleRate,
                                                                       float frequency,
@@ -59,6 +63,11 @@ namespace FilterType
                 return juce::dsp::IIR::Coefficients<float>::makeNotch (sampleRate, f, safeQ);
             case bandPass:
                 return juce::dsp::IIR::Coefficients<float>::makeBandPass (sampleRate, f, safeQ);
+            case highpass:
+                // 12 dB single-biquad fallback; cascaded slopes use FilterSlope.
+                return juce::dsp::IIR::Coefficients<float>::makeHighPass (sampleRate, f, safeQ);
+            case lowpass:
+                return juce::dsp::IIR::Coefficients<float>::makeLowPass (sampleRate, f, safeQ);
             case bell:
             default:
                 return juce::dsp::IIR::Coefficients<float>::makePeakFilter (sampleRate, f, safeQ, gainLin);
@@ -73,20 +82,38 @@ namespace FilterType
             case 1: return "band2Type";
             case 2: return "band3Type";
             case 3: return "band4Type";
+            case 4: return "highpassType";
+            case 5: return "lowpassType";
             case 6: return "highShelfType";
             case 7: return "lowShelfType";
             default: return {};
         }
     }
 
-    /** Defaults match current plugin behavior: peaks are Bell; shelves stay shelves. */
+    /**
+        Defaults: Band1 HP, Band2 LS, Band3–6 Bell, Band7 HS, Band8 LP
+        (internal indices 4,7,0–3,6,5).
+    */
     inline int defaultTypeForBandIndex (int bandIndex)
     {
         switch (bandIndex)
         {
-            case 6: return highShelf;
+            case 4: return highpass;
             case 7: return lowShelf;
+            case 6: return highShelf;
+            case 5: return lowpass;
             default: return bell;
         }
+    }
+
+    /** Preferred type when creating a band by graph-click frequency zone. */
+    inline int typeForFrequencyZone (float frequencyHz) noexcept
+    {
+        const float f = juce::jlimit (20.0f, 20000.0f, frequencyHz);
+        if (f < 50.0f)   return highpass;
+        if (f < 150.0f)  return lowShelf;
+        if (f < 8000.0f) return bell;
+        if (f < 12000.0f) return highShelf;
+        return lowpass;
     }
 }
