@@ -1,6 +1,7 @@
 #include "RotaryImageKnobLookAndFeel4.h"
 #include "EqEditor.h"
 #include "KnobBandHighlight.h"
+#include "KnobThemeHelpers.h"
 #include <JuceHeader.h> 
 #include "BinaryData.h"
 
@@ -56,8 +57,9 @@ void RotaryImageKnobLookAndFeel4::drawRotarySlider(juce::Graphics& g, int x, int
         //     0, 0, knobFaceImage.getWidth(), knobFaceImage.getHeight(), false);
 
         // Draw the knob image
-        g.drawImage(knobImage, x, y, width, height,
-            0, frameId * frameHeight, frameWidth, frameHeight, false);
+        const auto& theme = KnobTheme::colors (themeColors);
+        KnobTheme::drawArtwork (g, knobImage, x, y, width, height,
+            0, frameId * frameHeight, frameWidth, frameHeight, theme);
 
         g.setImageResamplingQuality(juce::Graphics::ResamplingQuality::highResamplingQuality);
 
@@ -83,8 +85,8 @@ void RotaryImageKnobLookAndFeel4::drawRotarySlider(juce::Graphics& g, int x, int
 
         // Create colour gradient
         const bool bandHighlight = KnobBandHighlight::isActive (slider);
-        juce::Colour brightOrange = KnobBandHighlight::intensify (juce::Colour(200, 165, 66), bandHighlight);
-        juce::Colour darkOrange = KnobBandHighlight::intensify (juce::Colour(120, 66, 21), bandHighlight);
+        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight);
+        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight);
         juce::ColourGradient gradient(darkOrange, x, y,
             brightOrange, x + width, y + height, false);
 

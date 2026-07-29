@@ -38,6 +38,7 @@ public:
     // ========================================================================
     void setGraphColour( juce::Colour );
     void setGraphMaximumsColour( juce::Colour );
+    void setBinOverlayColour (juce::Colour);
     
 
 

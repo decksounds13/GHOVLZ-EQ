@@ -1,4 +1,5 @@
 #include "GraphLine.h"
+#include "Menu/SharedResources.h"
 
 namespace
 {
@@ -400,7 +401,8 @@ void GraphLine::drawFrame (juce::Graphics& g)
             return mr_valueTree->getRawParameterValue (id)->load();
         };
 
-        const bool glowEnabled = loadGlow ("SPECTRUM_GLOW_ENABLE_ID", 1.0f) > 0.5f;
+        const bool glowEnabled = SharedResources::glowShadowEffectsEnabled()
+                                 && loadGlow ("SPECTRUM_GLOW_ENABLE_ID", 1.0f) > 0.5f;
         if (glowEnabled)
         {
             const float glowOpacityPct = loadGlow ("SPECTRUM_GLOW_OPACITY_ID", 70.0f);

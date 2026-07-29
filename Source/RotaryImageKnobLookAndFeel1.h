@@ -1,6 +1,6 @@
-
 #pragma once
 #include <JuceHeader.h>
+#include "Menu/SharedResources.h"
 
 class EqEditor;
 
@@ -21,6 +21,8 @@ public:
     void setMinValue(float newMinValue) { minValue = newMinValue; }
     void setMaxValue(float newMaxValue) { maxValue = newMaxValue; }
 
+    void setThemeColors (SharedResources* r) noexcept { themeColors = r; }
+
     bool isImageValid() const;
 
 
@@ -36,5 +38,5 @@ private:
 
     juce::Image segmentedArcImage;
 
-
+    SharedResources* themeColors = nullptr;
 };

@@ -10,6 +10,8 @@ class SpectrumBinOverlay
 public:
     SpectrumBinOverlay();
 
+    void setBaseColour (juce::Colour colour) noexcept { baseColour = colour; }
+
     void paint (juce::Graphics& g,
                 Analyser& analyser,
                 juce::Rectangle<float> bounds,
@@ -57,4 +59,5 @@ private:
     std::vector<BinSample> activeBins;
     std::vector<Bar> bars;
     std::vector<float> glowColumnPeaks;
+    juce::Colour baseColour { juce::Colour::fromRGBA (255, 90, 40, 160) };
 };

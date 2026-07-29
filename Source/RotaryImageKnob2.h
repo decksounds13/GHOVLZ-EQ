@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "RotaryImageKnobLookAndFeel2.h"
+#include "Menu/SharedResources.h"
 
 class RotaryImageKnob2 : public juce::Slider
 {
@@ -16,12 +17,13 @@ public:
     void mouseEnter(const juce::MouseEvent& event) override;
     void mouseExit(const juce::MouseEvent& event) override;
 
+    void setThemeColors (SharedResources* r) noexcept;
+
 private:
+    void refreshValuePopup (bool show);
 
+    SharedResources* themeColors = nullptr;
     RotaryImageKnobLookAndFeel2 rotaryImageKnobLookAndFeel2;
-
-    
-
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RotaryImageKnob2)
 };

@@ -1,9 +1,10 @@
 #include "SpectrumBinOverlay.h"
+#include "Menu/SharedResources.h"
 
 SpectrumBinOverlay::SpectrumBinOverlay()
     : glowShadow ({
-          { juce::Colour::fromRGBA (255, 35, 110, 160), 28, { 0, 0 }, 8 },
-          { juce::Colour::fromRGBA (255, 90, 40, 200), 10, { 0, 0 }, 3 }
+          { juce::Colour::fromRGBA (255, 90, 40, 160), 28, { 0, 0 }, 8 },
+          { juce::Colour::fromRGBA (255, 140, 40, 200), 10, { 0, 0 }, 3 }
       })
 {
     // Path changes every audio frame — skip melatonin path-equality cache work.
@@ -73,9 +74,10 @@ juce::Colour SpectrumBinOverlay::colourForIntensity (float peak, float opacity, 
 {
     const float shaped = shapePresence (peak, intensityScale, threshold);
 
-    const auto cool = juce::Colour::fromRGB (160, 20, 120);
-    const auto warm = juce::Colour::fromRGB (255, 45, 95);
-    const auto hot  = juce::Colour::fromRGB (255, 140, 40);
+    // Orange intensity ramp (independent of osc/gon path colours), tinted by Spectrum Fill.
+    const auto cool = baseColour.withRotatedHue (-0.08f).darker (0.25f);
+    const auto warm = baseColour;
+    const auto hot  = baseColour.brighter (0.55f).withMultipliedSaturation (1.05f);
 
     juce::Colour colour;
     if (shaped < 0.45f)
@@ -83,8 +85,8 @@ juce::Colour SpectrumBinOverlay::colourForIntensity (float peak, float opacity, 
     else
         colour = warm.interpolatedWith (hot, (shaped - 0.45f) / 0.55f);
 
-    // Quieter shaped values also lose alpha harder (not a linear fade).
-    const float alpha = juce::jmap (shaped * shaped, 0.0f, 1.0f, 0.08f, 1.0f) * opacity;
+    const float themeAlpha = baseColour.getFloatAlpha();
+    const float alpha = juce::jmap (shaped * shaped, 0.0f, 1.0f, 0.08f, 1.0f) * opacity * themeAlpha;
     return colour.withMultipliedBrightness (0.85f + 0.45f * shaped).withAlpha (alpha);
 }
 
@@ -231,7 +233,8 @@ void SpectrumBinOverlay::paint (juce::Graphics& g,
     // Glow always uses a column silhouette (keeps Melatonin cheaper at high radius).
     // Soft-cap matches param max (250) so the slider is honest; column density still
     // eases off as radius grows to keep large blurs workable.
-    if (settings.glowEnabled && settings.glowRadius > 0.5f && settings.glowOpacity > 0.01f)
+    if (settings.glowEnabled && SharedResources::glowShadowEffectsEnabled()
+        && settings.glowRadius > 0.5f && settings.glowOpacity > 0.01f)
     {
         const float glowRadius = juce::jmin (settings.glowRadius, 250.0f);
         const double columnScale = glowRadius > 80.0f ? 0.45
@@ -285,11 +288,11 @@ void SpectrumBinOverlay::paint (juce::Graphics& g,
                 0.0f, 1.0f,
                 settings.glowOpacity * settings.opacity * (0.65f + 0.35f * settings.intensity));
 
-            const auto bloomColour = juce::Colour::fromRGB (255, 35, 110)
+            const auto bloomColour = baseColour.brighter (0.35f)
                                          .withMultipliedBrightness (1.05f + 0.25f * juce::jmin (1.0f, settings.intensity))
                                          .withAlpha (glowAlpha * 0.55f);
 
-            const auto coreColour = juce::Colour::fromRGB (255, 90, 40)
+            const auto coreColour = baseColour.brighter (0.55f)
                                         .withAlpha (glowAlpha * 0.85f);
 
             const int offsetX = juce::roundToInt (settings.glowOffsetX);

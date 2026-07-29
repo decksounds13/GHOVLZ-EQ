@@ -9,6 +9,7 @@
 #include "RotaryImageKnobForOptionBox.h"
 #include "RetrigButton.h"
 #include "LfoMod.h"
+#include "Menu/SharedResources.h"
 
 /**
     Floating, resizable Shape editor (OptionBox-style child of the plugin editor).
@@ -29,7 +30,6 @@ public:
 
         title.setText ("Shape Editor", juce::dontSendNotification);
         title.setJustificationType (juce::Justification::centredLeft);
-        title.setColour (juce::Label::textColourId, juce::Colour::fromRGB (210, 190, 150));
         title.setFont (juce::FontOptions (13.0f).withStyle ("Bold"));
         title.setInterceptsMouseClicks (false, false);
         addAndMakeVisible (title);
@@ -88,6 +88,7 @@ public:
         resizer = std::make_unique<juce::ResizableCornerComponent> (this, &constrainer);
         addAndMakeVisible (*resizer);
 
+        applyThemeColours();
         syncRateModeUi();
         syncAllFromParams();
         syncSmoothToCurve();
@@ -110,6 +111,13 @@ public:
 
     std::function<void()> onClosed;
 
+    void setThemeColors (SharedResources* r) noexcept
+    {
+        themeColors = r;
+        applyThemeColours();
+        repaint();
+    }
+
     void showCenteredIn (juce::Component& parent)
     {
         if (getParentComponent() != &parent)
@@ -126,14 +134,15 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const auto& c = colors();
         auto bounds = getLocalBounds().toFloat();
-        g.setColour (juce::Colour::fromRGBA (22, 16, 12, 245));
+        g.setColour (c.modBackground.withAlpha (245.0f / 255.0f));
         g.fillRoundedRectangle (bounds, 6.0f);
-        g.setColour (juce::Colour::fromRGBA (160, 130, 70, 220));
+        g.setColour (c.modAccent.withAlpha (220.0f / 255.0f));
         g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.5f);
 
         auto chrome = bounds.removeFromTop (28.0f).reduced (1.0f, 1.0f);
-        g.setColour (juce::Colour::fromRGBA (40, 30, 20, 255));
+        g.setColour (c.modBorder);
         g.fillRoundedRectangle (chrome, 5.0f);
     }
 
@@ -229,10 +238,11 @@ private:
 
     void styleSmallButton (juce::TextButton& b)
     {
+        const auto& c = colors();
         b.setLookAndFeel (&buttonLf);
-        b.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
-        b.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
-        b.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
+        b.setColour (juce::TextButton::buttonColourId, c.modBorder.brighter (0.05f));
+        b.setColour (juce::TextButton::buttonOnColourId, c.modAccent);
+        b.setColour (juce::TextButton::textColourOffId, c.modText.withAlpha (0.9f));
         b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     }
 
@@ -242,8 +252,31 @@ private:
     {
         lab.setText (text, juce::dontSendNotification);
         lab.setJustificationType (juce::Justification::centred);
-        lab.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.65f));
+        lab.setColour (juce::Label::textColourId, colors().modText.withAlpha (0.65f));
         lab.setFont (juce::FontOptions (10.8f));
+    }
+
+    void applyThemeColours()
+    {
+        const auto& c = colors();
+        title.setColour (juce::Label::textColourId, c.modText);
+        rateLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        phaseLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        smoothLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        styleSmallButton (closeButton);
+        styleSmallButton (retrigButton);
+        editor.setThemeColors (themeColors);
+        rateSlider.setThemeColors (themeColors);
+        phaseSlider.setThemeColors (themeColors);
+        smoothSlider.setThemeColors (themeColors);
+        closeButton.repaint();
+        retrigButton.repaint();
+    }
+
+    const SharedColors& colors() const noexcept
+    {
+        static const SharedColors defaults;
+        return themeColors != nullptr ? themeColors->sharedColors : defaults;
     }
 
     void constrainToParent()
@@ -385,6 +418,7 @@ private:
     EqProcessor& processor;
     juce::AudioProcessorValueTreeState& treeState;
     ShapeCurveEditor editor;
+    SharedResources* themeColors = nullptr;
 
     juce::Label title;
     juce::TextButton closeButton;

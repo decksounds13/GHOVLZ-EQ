@@ -1,6 +1,7 @@
 #include "RotaryImageKnobLookAndFeel3.h"
 #include "EqEditor.h"
 #include "KnobBandHighlight.h"
+#include "KnobThemeHelpers.h"
 #include <JuceHeader.h> 
 #include "BinaryData.h"
 
@@ -35,8 +36,9 @@ void RotaryImageKnobLookAndFeel3::drawRotarySlider(juce::Graphics& g, int x, int
         const int frameHeight = knobImage.getHeight() / frames;
 
         // Draw the knob image
-        g.drawImage(knobImage, x, y, width, height,
-            0, frameId * frameHeight, frameWidth, frameHeight, false);
+        const auto& theme = KnobTheme::colors (themeColors);
+        KnobTheme::drawArtwork (g, knobImage, x, y, width, height,
+            0, frameId * frameHeight, frameWidth, frameHeight, theme);
 
         // Existing code for resampling quality and other settings...
 
@@ -71,9 +73,9 @@ void RotaryImageKnobLookAndFeel3::drawRotarySlider(juce::Graphics& g, int x, int
 
         // Define colors
         const bool bandHighlight = KnobBandHighlight::isActive (slider);
-        juce::Colour brightOrange = KnobBandHighlight::intensify (juce::Colour(255, 165, 0), bandHighlight);
-        juce::Colour darkOrange = KnobBandHighlight::intensify (juce::Colour(140, 50, 20), bandHighlight);
-        juce::Colour brightGreen = KnobBandHighlight::intensify (juce::Colour(140, 50, 20), bandHighlight); // Bright green
+        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight);
+        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight);
+        juce::Colour brightGreen = KnobBandHighlight::intensify (juce::Colour(140, 50, 20), bandHighlight);
 
         // Normalize the parameter value to a 0-1 range
         float normalizedValuePositive = (parameterValue - 0) / (maxValue - 0);

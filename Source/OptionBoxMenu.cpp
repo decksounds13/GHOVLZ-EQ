@@ -8,20 +8,6 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
 {
     onOffButton1 = std::make_unique<OnOffButton1>(treeState, "highpassOnOff");
 
-    // Initialize custom colors
-    backgroundColor = juce::Colour::fromRGBA(46, 44, 40, 245.0f);
-    borderColor = juce::Colour::fromRGBA(30, 25, 25, 255.0f);  
-    titleColor = juce::Colours::whitesmoke.withAlpha(0.8f);
-    labelTextColor = juce::Colours::whitesmoke.withAlpha(0.8f);
-    separatorColor = juce::Colours::whitesmoke.withAlpha(0.5f);
-    juce::Colour comboBoxBackgroundColor = juce::Colour::fromRGBA(97, 96, 44, 255.0f);
-    juce::Colour popupMenuBackgroundColor = juce::Colour::fromRGBA(22, 22, 22, 245.0f);
-    juce::Colour arrowColor = juce::Colour::fromRGBA(10, 10, 10, 255.0);
-    juce::Colour comboBoxOutlineColor = juce::Colour::fromRGBA(10, 10, 10, 255.0);
-    juce::Colour popupMenuTextColor = juce::Colours::whitesmoke.withAlpha(0.8f);
-    juce::Colour popupMenuSelectionColor = juce::Colour::fromRGBA(85, 77, 22, 255.0f);
-    juce::Colour comboBoxTextColor = juce::Colour::fromRGBA(10, 10, 10, 255.0);;
- 
     juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
 
     setSize (designWidth, designHeight);
@@ -31,21 +17,11 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     customComboBox.setLookAndFeel (&customLookAndFeel);
     customComboBox.addListener (this);
     addAndMakeVisible(customComboBox);
-    customComboBox.setColour(juce::ComboBox::backgroundColourId, comboBoxBackgroundColor);
-    customComboBox.setColour(juce::ComboBox::textColourId, PluginMenuTheme::text());
-    customComboBox.setColour(juce::ComboBox::outlineColourId, comboBoxOutlineColor);
-    customComboBox.setColour(juce::ComboBox::arrowColourId, PluginMenuTheme::text());
-    customComboBox.setColour(juce::ComboBox::buttonColourId, comboBoxBackgroundColor);
     customComboBox.setTooltip ("Filter model");
 
     filterSlopeComboBox.setLookAndFeel (&customLookAndFeel);
     filterSlopeComboBox.addListener (this);
     addChildComponent (filterSlopeComboBox);
-    filterSlopeComboBox.setColour (juce::ComboBox::backgroundColourId, comboBoxBackgroundColor);
-    filterSlopeComboBox.setColour (juce::ComboBox::textColourId, PluginMenuTheme::text());
-    filterSlopeComboBox.setColour (juce::ComboBox::outlineColourId, comboBoxOutlineColor);
-    filterSlopeComboBox.setColour (juce::ComboBox::arrowColourId, PluginMenuTheme::text());
-    filterSlopeComboBox.setColour (juce::ComboBox::buttonColourId, comboBoxBackgroundColor);
     filterSlopeComboBox.setTooltip ("Slope - highpass / lowpass steepness");
 
     // Per-band saturation — right of filter model / slope dropdowns.
@@ -101,7 +77,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     // Initialize the label for the current band name
     bandNameLabel.setFont(juce::Font("Lato Black", 18.0f, juce::Font::plain));
     bandNameLabel.setJustificationType(juce::Justification::centredLeft);
-    bandNameLabel.setColour(juce::Label::textColourId, titleColor);  // Set the label color
+    bandNameLabel.setColour(juce::Label::textColourId, colors().optionText);
     bandNameLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible(bandNameLabel);
 
@@ -266,7 +242,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
         label.setText (text, juce::NotificationType::dontSendNotification);
         label.setFont (juce::Font ("Lato Black", 10.0f, juce::Font::plain));
         label.setJustificationType (juce::Justification::centred);
-        label.setColour (juce::Label::textColourId, titleColor);
+        label.setColour (juce::Label::textColourId, colors().optionText);
         label.setInterceptsMouseClicks (false, false);
         addChildComponent (label);
     };
@@ -292,7 +268,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     {
         label->setFont (juce::Font ("Lato Black", 12.0f, juce::Font::plain));
         label->setJustificationType (juce::Justification::centred);
-        label->setColour (juce::Label::textColourId, titleColor);
+        label->setColour (juce::Label::textColourId, colors().optionText);
         label->setInterceptsMouseClicks (false, false);
         addChildComponent (*label);
     }
@@ -307,6 +283,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
 
     treeState.addParameterListener (SpectralPerBandLattice::enabledParamId(), this);
 
+    applyThemeToChildControls();
     resized();
 }
 
@@ -370,73 +347,166 @@ OptionBoxMenu::~OptionBoxMenu()
 }
 
 
+const SharedColors& OptionBoxMenu::colors() const noexcept
+{
+    static const SharedColors defaultColors;
+    return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+}
+
+void OptionBoxMenu::setThemeColors (SharedResources* r) noexcept
+{
+    themeColors = r;
+    applyThemeToChildControls();
+    repaint();
+}
+
+void OptionBoxMenu::applyThemeToChildControls()
+{
+    const auto& c = colors();
+
+    customLookAndFeel.setThemeColors (themeColors);
+
+    // Match faceplate / mod chrome family.
+    myTextButtonLookAndFeel.setGradientColor1 (c.optionComboBackground.brighter (0.12f));
+    myTextButtonLookAndFeel.setGradientColor2 (c.optionComboBackground.darker (0.35f));
+    myTextButtonLookAndFeel.setButtonTextColor (c.optionText.withAlpha (0.9f));
+    myTextButtonLookAndFeel.setButtonOutlineColor (c.optionBorder);
+    myTextButtonLookAndFeel.setButtonBackgroundColor (c.optionComboBackground);
+
+    sidechainButtonLookAndFeel.setGradientColor1 (c.optionComboBackground.brighter (0.08f));
+    sidechainButtonLookAndFeel.setGradientColor2 (c.optionComboBackground.darker (0.4f));
+    sidechainButtonLookAndFeel.setButtonTextColor (c.optionText.withAlpha (0.55f));
+    sidechainButtonLookAndFeel.setButtonOutlineColor (c.optionBorder);
+    sidechainButtonLookAndFeel.setButtonBackgroundColor (c.optionComboBackground);
+
+    auto styleCombo = [&c] (juce::ComboBox& box)
+    {
+        box.setColour (juce::ComboBox::backgroundColourId, c.optionComboBackground);
+        box.setColour (juce::ComboBox::textColourId, c.optionComboText);
+        box.setColour (juce::ComboBox::outlineColourId, c.optionBorder);
+        box.setColour (juce::ComboBox::arrowColourId, c.optionComboText);
+        box.setColour (juce::ComboBox::buttonColourId, c.optionComboBackground);
+    };
+
+    styleCombo (customComboBox);
+    styleCombo (filterSlopeComboBox);
+
+    auto styleLabel = [&c] (juce::Label& lab)
+    {
+        lab.setColour (juce::Label::textColourId, c.optionText);
+    };
+    styleLabel (bandNameLabel);
+    styleLabel (frequencyLabel);
+    styleLabel (gainLabel);
+    styleLabel (qLabel);
+    styleLabel (attackLabel);
+    styleLabel (releaseLabel);
+    styleLabel (spectralResLabel);
+    styleLabel (spectralAmountLabel);
+
+    auto styleChrome = [&c] (juce::TextButton& b)
+    {
+        b.setColour (juce::TextButton::buttonColourId, c.optionComboBackground);
+        b.setColour (juce::TextButton::buttonOnColourId, c.optionComboHighlight);
+        b.setColour (juce::TextButton::textColourOffId, c.optionText.withAlpha (0.9f));
+        b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b.repaint();
+    };
+
+    styleChrome (prevBandButton);
+    styleChrome (nextBandButton);
+    styleChrome (midSelectorButton);
+    styleChrome (sideSelectorButton);
+    styleChrome (leftSelectorButton);
+    styleChrome (rightSelectorButton);
+    styleChrome (sidechainButton);
+    styleChrome (sidechainMidiButton);
+    styleChrome (dynamicButton);
+    styleChrome (spectralButton);
+    styleChrome (spectralExpandButton);
+    styleChrome (spectralPackButton);
+    styleChrome (spectralPerBandLatticeButton);
+    styleChrome (satButton);
+    styleChrome (satPrePostButton);
+    styleChrome (spectralSatButton);
+
+    // Sidechain idle stays quieter than other chrome.
+    sidechainButton.setColour (juce::TextButton::buttonColourId,
+                               c.optionComboBackground.withAlpha (160.0f / 255.0f));
+    sidechainButton.setColour (juce::TextButton::textColourOffId, c.optionText.withAlpha (0.38f));
+
+    auto styleSlider = [&c] (juce::Slider& s)
+    {
+        s.setColour (juce::Slider::backgroundColourId, c.optionBackground.darker (0.25f));
+        s.setColour (juce::Slider::trackColourId, c.optionComboHighlight.withAlpha (220.0f / 255.0f));
+        s.setColour (juce::Slider::thumbColourId, c.optionComboHighlight.brighter (0.25f));
+        s.repaint();
+    };
+    styleSlider (dynThresholdSlider);
+    styleSlider (spectralBandwidthSlider);
+    styleSlider (spectralAmountSlider);
+
+    auto applyKnobTheme = [this] (RotaryImageKnobForOptionBox& knob)
+    {
+        knob.setThemeColors (themeColors);
+    };
+
+    applyKnobTheme (rotaryImageKnobForOptionBox1);
+    applyKnobTheme (rotaryImageKnobForOptionBox2);
+    applyKnobTheme (rotaryImageKnobForOptionBox3);
+    applyKnobTheme (satDriveKnob);
+    applyKnobTheme (spectralSatDriveKnob);
+    applyKnobTheme (attackKnob);
+    applyKnobTheme (releaseKnob);
+
+    if (onOffButton1 != nullptr)
+    {
+        onOffButton1->setBaseColor (c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f));
+        onOffButton1->repaint();
+    }
+
+    repaint();
+}
+
+
 void OptionBoxMenu::paint(juce::Graphics& g)
 {
+    const auto& c = colors();
 
+    // Same body wash as EqEditor faceplate (radial Plugin Background 2 → Plugin Background).
+    const float width = (float) designWidth;
+    const float height = (float) designHeight;
+    juce::ColourGradient bodyGrad (c.pluginBackground2,
+                                   juce::Point<float> (width * 0.5f, 0.0f),
+                                   c.pluginBackground,
+                                   juce::Point<float> (width, height),
+                                   true);
 
-    // Define custom RGB colors
-    juce::Colour color1 = juce::Colour::fromRGB(55, 35, 25);  // Inner color
-    juce::Colour color2 = juce::Colour::fromRGB(0, 0, 0);      // Outer color
-    juce::Colour color3 = juce::Colour::fromRGB(135, 90, 40);  // Inner color
-    juce::Colour color4 = juce::Colour::fromRGB(0, 0, 0);      // Outer color
-    juce::Colour thinOutlineColor = juce::Colour::fromRGB(0, 0, 0); // Thin outline color
+    const float cornerRadius = 20.0f;
+    const float borderWidth = 8.0f;
+    const float thinOutlineWidth = 2.0f;
 
-    // Create a ColourGradient object for the background
-    juce::ColourGradient optionBoxGradient(color1,                           // Inner color
-        juce::Point<float>(getWidth() / 2, 0.0f),                                      // Start position (top-left corner)
-        color2,                                                              // Outer color
-        juce::Point<float>(static_cast<float>(getWidth() / 2), static_cast<float>(getHeight() * 3)), // End position (bottom-right corner)
-        true);                                // Radial gradient
+    g.setGradientFill (bodyGrad);
+    g.fillRoundedRectangle (0.0f, 0.0f, width, height, cornerRadius);
 
-    juce::ColourGradient optionBoxGradient2(color3,                           // Inner color
-        juce::Point<float>(getWidth() / 2, 0.0f),                                      // Start position (top-left corner)
-        color4,                                                              // Outer color
-        juce::Point<float>(static_cast<float>(getWidth() / 2), static_cast<float>(getHeight() * 2)), // End position (bottom-right corner)
-        true);                                // Radial gradient
-
-    // Define the dimensions and corner radius
-    float x = 0.0f, y = 0.0f, width = (float) designWidth, height = (float) designHeight;
-    float cornerRadius = 20.0f;
-    float borderWidth = 8.0f;
-    float thinOutlineWidth = 2.0f;
-
-
-    // Draw the background as a rounded rectangle filled with gradient
-    g.setGradientFill(optionBoxGradient);
-    g.fillRoundedRectangle(x, y, width, height, cornerRadius);
-
-    // Create a Path object for the main border outline
     juce::Path borderPath;
-    float offset = borderWidth / 2.0f; // Center the border on the edge
-    borderPath.addRoundedRectangle(x + offset, y + offset, width - borderWidth, height - borderWidth, cornerRadius - offset);
+    const float offset = borderWidth * 0.5f;
+    borderPath.addRoundedRectangle (offset, offset, width - borderWidth, height - borderWidth, cornerRadius - offset);
+    g.setColour (c.pluginButtonBackground);
+    g.strokePath (borderPath, juce::PathStrokeType (borderWidth));
 
-    // Set the color for the main border outline
-    g.setColour(borderColor);
-
-    // Use strokePath to draw only the outline of the border
-    g.strokePath(borderPath, juce::PathStrokeType(borderWidth));
-
-    // Create a Path object for the first thin inner outline
     juce::Path innerThinOutlinePath;
-    float innerOffset = borderWidth - thinOutlineWidth / 2.0f; // Position it inside the main border
-    innerThinOutlinePath.addRoundedRectangle(x + innerOffset, y + innerOffset, width - 2 * innerOffset, height - 2 * innerOffset, cornerRadius - innerOffset);
+    const float innerOffset = borderWidth - thinOutlineWidth * 0.5f;
+    innerThinOutlinePath.addRoundedRectangle (innerOffset, innerOffset,
+                                              width - 2.0f * innerOffset, height - 2.0f * innerOffset,
+                                              cornerRadius - innerOffset);
+    g.setColour (c.pluginBackground.darker (0.35f));
+    g.strokePath (innerThinOutlinePath, juce::PathStrokeType (thinOutlineWidth));
 
-    // Set the gradient fill for the first thin inner outline
-    g.setColour(juce::Colours::black);
-
-    // Use strokePath to draw only the outline of the first thin inner border
-    g.strokePath(innerThinOutlinePath, juce::PathStrokeType(thinOutlineWidth));
-
-    // Create a Path object for the second thin outer outline
     juce::Path outerThinOutlinePath;
-    outerThinOutlinePath.addRoundedRectangle(0, 0, getWidth(), getHeight(), cornerRadius);
-
-    // Temporarily set a distinct color to debug the outline
-    g.setGradientFill(optionBoxGradient2); // Debugging color
-
-    // Use strokePath to draw only the outline of the second thin outer border
-    g.strokePath(outerThinOutlinePath, juce::PathStrokeType(thinOutlineWidth));
-
+    outerThinOutlinePath.addRoundedRectangle (0.0f, 0.0f, (float) getWidth(), (float) getHeight(), cornerRadius);
+    g.setColour (c.pluginButtonAccent.withAlpha (0.45f));
+    g.strokePath (outerThinOutlinePath, juce::PathStrokeType (thinOutlineWidth));
 }
 
 void OptionBoxMenu::resized()
@@ -476,8 +546,9 @@ void OptionBoxMenu::resized()
     const int satBtnW = 28;
     const int prePostW = 32;
     const int satGap = 3;
-    const int slopeGap = 3; // ~2.5px padding between type and slope
-    const int slopeW = 64; // "12 dB/oct" with compact combo LAF
+    const int slopeGap = 3;
+    // Keep designWidth 150 (pre-widen proportions); short slope labels fit beside type.
+    const int slopeW = 52;
     const bool showSlope = currentBandShowsFilterSlope();
     const int rowY = bandNameLabel.getBottom() + elementYSpacing;
     const int rowLeft = padding * 3;
@@ -485,8 +556,8 @@ void OptionBoxMenu::resized()
 
     if (showSlope)
     {
-        // Type + slope on one row (no clip); Sat/Pre drop under so the right edge stays clear.
-        const int comboW = juce::jmax (72, rowRightLimit - rowLeft - slopeGap - slopeW);
+        // Type + slope on one row; Sat/Pre drop under so the right edge stays clear.
+        const int comboW = juce::jmax (56, rowRightLimit - rowLeft - slopeGap - slopeW);
         customComboBox.setBounds (rowLeft, rowY, comboW, comboBoxHeight);
         filterSlopeComboBox.setBounds (customComboBox.getRight() + slopeGap, rowY, slopeW, comboBoxHeight);
         satButton.setBounds (rowLeft, customComboBox.getBottom() + 3, satBtnW, comboBoxHeight);
@@ -495,8 +566,8 @@ void OptionBoxMenu::resized()
     else
     {
         filterSlopeComboBox.setBounds ({});
-        const int satBlockW = satBtnW + satGap + prePostW;
-        const int comboW = juce::jmax (72, rowRightLimit - rowLeft - satGap - satBlockW);
+        // Match prior 150-wide layout: type ~42% width, Sat/Pre on the same row.
+        const int comboW = juce::roundToInt (getWidth() * 0.42f);
         customComboBox.setBounds (rowLeft, rowY, comboW, comboBoxHeight);
         satButton.setBounds (customComboBox.getRight() + satGap, rowY, satBtnW, comboBoxHeight);
         satPrePostButton.setBounds (satButton.getRight() + satGap, rowY, prePostW, comboBoxHeight);
@@ -511,8 +582,15 @@ void OptionBoxMenu::resized()
 
     // Former getHeight()/2 layout at height 340, shifted up by designTopCrop so MSLR (kept at top)
     // sits level with the Q label; box height/top crop move the chrome down on screen.
-    rotaryImageKnobForOptionBox1.setBounds (padding * 2, 170 - designTopCrop, rotaryImageKnobLargeSize, rotaryImageKnobLargeSize);
-    rotaryImageKnobForOptionBox2.setBounds (getWidth() * .55, 170 + 55 - designTopCrop, rotaryImageKnobSmallSize, rotaryImageKnobSmallSize);
+    // Gain (+ bottom D/S/Res/A/R stack) nudged up so they clear the box bottom edge.
+    constexpr int bottomStackLift = 10;
+    const int gainKnobSize = juce::roundToInt ((float) rotaryImageKnobSmallSize * 1.2f * 1.1f); // +20% then +10%
+    const int gainKnobX = juce::roundToInt (getWidth() * 0.55f) - 7;
+    // Keep prior bottom edge; grow upward into the Q↔Gain gap.
+    const int gainKnobBottom = 170 + 55 - designTopCrop - bottomStackLift + rotaryImageKnobSmallSize;
+    const int gainKnobY = gainKnobBottom - gainKnobSize;
+    rotaryImageKnobForOptionBox1.setBounds (padding * 2, 170 - designTopCrop + 3, rotaryImageKnobLargeSize, rotaryImageKnobLargeSize);
+    rotaryImageKnobForOptionBox2.setBounds (gainKnobX, gainKnobY, gainKnobSize, gainKnobSize);
     rotaryImageKnobForOptionBox3.setBounds (getWidth() * .55, 170 - 30 - designTopCrop, rotaryImageKnobSmallSize, rotaryImageKnobSmallSize);
 
     juce::Rectangle<int> knob1Bounds = rotaryImageKnobForOptionBox1.getBounds();
@@ -526,19 +604,19 @@ void OptionBoxMenu::resized()
   // Set the bounds for the "Frequency" label (keep it as it was)
     frequencyLabel.setBounds(knob1Bounds.getX(), knob1Bounds.getY() - labelHeight, labelWidth, labelHeight);
 
-  // Set the bounds for the "Gain" and "Q" labels (centered above the knobs)
+  // Gain label tracks the taller knob top (sits just above the enlarged control).
     gainLabel.setBounds(gainLabelX, knob2Bounds.getY() - labelHeight, labelWidth, labelHeight);
     qLabel.setBounds(qLabelX, knob3Bounds.getY() - labelHeight, labelWidth, labelHeight);
 
     // Set the font and color for the labels
     frequencyLabel.setFont(myFont);
-    frequencyLabel.setColour(juce::Label::textColourId, titleColor);
+    frequencyLabel.setColour(juce::Label::textColourId, colors().optionText);
 
     gainLabel.setFont(myFont);
-    gainLabel.setColour(juce::Label::textColourId, titleColor);
+    gainLabel.setColour(juce::Label::textColourId, colors().optionText);
 
     qLabel.setFont(myFont);
-    qLabel.setColour(juce::Label::textColourId, titleColor);
+    qLabel.setColour(juce::Label::textColourId, colors().optionText);
 
     // Add the labels to the view, if they haven't been added yet
     if (frequencyLabel.getParentComponent() == nullptr) {
@@ -599,7 +677,7 @@ void OptionBoxMenu::resized()
     // D on (no S): horizontal threshold beside D. D+S: threshold below Expand.
     const int dynBtnW = 15;
     const int dynBtnH = 18;
-    const int dynRowY = knob1Bounds.getBottom() + 2;
+    const int dynRowY = knob1Bounds.getBottom() + 2 - bottomStackLift;
     const int optionBoxRight = getWidth() - padding * 2;
     const int dynRowX = knob1Bounds.getX() + 2;
     const bool sOn = spectralButton.isVisible() && spectralButton.getToggleState();
@@ -619,7 +697,8 @@ void OptionBoxMenu::resized()
                                  spectralExpandButton.getWidth(),
                                  spectralExpandButton.getHeight());
 
-    const int arSize = juce::roundToInt (32.0f * 0.8f); // 26 — same as A/R below
+    // Base 26px face, then +20% then +10%.
+    const int arSize = juce::roundToInt (32.0f * 0.8f * 1.2f * 1.1f); // ~34
     const int ssDriveSize = juce::jmax (1, arSize / 2);
 
     const int sliderColW = 18;
@@ -644,7 +723,7 @@ void OptionBoxMenu::resized()
 
     // Pack FL/LP/HP under Res by default; when → sat on, pack shifts under Amt
     // and Drive knob takes the Res slot.
-    const int packY = sliderTrackY + sliderH + 2;
+    const int packY = sliderTrackY + sliderH; // 2px higher than prior (+2)
     const bool ssOn = spectralSatButton.isVisible() && spectralSatButton.getToggleState();
     if (ssOn)
     {
@@ -680,9 +759,11 @@ void OptionBoxMenu::resized()
         dynThresholdSlider.setBounds (threshX, threshY, threshW, threshH);
     }
 
-    // A / R — face is arSize; extra height reserved for ms value readout under the knob.
+    // A / R — face is arSize; ms readout sits in a short band under the face (hover).
+    // A/R letter labels use a tight gap under the face (not under the readout band).
     const int arLabelH = 12;
     const int arValueH = 14;
+    const int arLabelGap = 2; // standard padding under knob face
     const int arPairGap = 4;
     const int arPairW = arSize * 2 + arPairGap;
     const int amountRight = amountX + sliderColW;
@@ -692,10 +773,13 @@ void OptionBoxMenu::resized()
     const int arXIdeal = knob2Bounds.getCentreX() - arPairW / 2;
     const int arX = juce::jlimit (arXMin, juce::jmax (arXMin, optionBoxRight - arPairW), arXIdeal);
     const int arY = knob2Bounds.getBottom() + 2;
-    attackKnob.setBounds (arX, arY, arSize, arSize + arValueH);
-    releaseKnob.setBounds (arX + arSize + arPairGap, arY, arSize, arSize + arValueH);
-    attackLabel.setBounds (arX, arY + arSize + arValueH, arSize, arLabelH);
-    releaseLabel.setBounds (releaseKnob.getX(), arY + arSize + arValueH, arSize, arLabelH);
+    const int attackY = arY - 13;
+    const int releaseY = arY + 8;
+    const int releaseX = arX + arSize + arPairGap - 6;
+    attackKnob.setBounds (arX, attackY, arSize, arSize + arValueH);
+    releaseKnob.setBounds (releaseX, releaseY, arSize, arSize + arValueH);
+    attackLabel.setBounds (arX, attackY + arSize + arLabelGap, arSize, arLabelH);
+    releaseLabel.setBounds (releaseX, releaseY + arSize + arLabelGap, arSize, arLabelH);
 
     updateDynamicControlsVisibility();
 }
@@ -1479,7 +1563,8 @@ void OptionBoxMenu::setupFilterSlopeMenu (int bandIndex)
         return;
     }
 
-    const auto names = FilterSlope::getChoiceNames();
+    // Short labels so the closed combo fits designWidth 150 beside the type menu.
+    const auto names = FilterSlope::getShortChoiceNames();
     for (int i = 0; i < names.size(); ++i)
         filterSlopeComboBox.addItem (names[i], i + 1);
 

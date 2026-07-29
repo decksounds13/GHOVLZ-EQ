@@ -3,10 +3,143 @@
 <JUCERPROJECT id="zglKbV" name="ParametricEqProject" projectType="audioplug"
               useAppConfig="0" addUsingNamespaceToJuceHeader="0" displaySplashScreen="1"
               jucerFormatVersion="1" pluginFormats="buildVST3" cppLanguageStandard="20"
-              headerPath="Source/Effects Source" companyName="Decksounds" companyWebsite="www.decksounds.com"
+              headerPath="Source/Effects&#10;Source" companyName="Decksounds" companyWebsite="www.decksounds.com"
               pluginName="Decksounds - GHOVLZ! EQ" pluginDesc="Decksounds - GHOVLZ! EQ">
   <MAINGROUP id="TFwMAc" name="ParametricEqProject">
     <GROUP id="{B7F6F1A6-BAE5-93A9-99C8-E0858B1F883A}" name="Source">
+      <GROUP id="{322DB6F1-EAB1-BE0E-B6B2-652D203120C1}" name="Controls">
+        <GROUP id="{E70C237F-3677-A219-AD0F-E59A5F96ED42}" name="Categories"/>
+      </GROUP>
+      <GROUP id="{70104563-B5BA-8846-DC6E-4847857E540B}" name="Effects">
+        <GROUP id="{E5ABF791-3AE1-3CE2-41E0-90F9A46EC6A0}" name="MelatoninBlur">
+          <GROUP id="{0B705D2E-2E76-4CFD-1923-155395492638}" name="melatonin">
+            <GROUP id="{91893962-1495-D915-6FD5-1D39DD414AB3}" name="implementations"/>
+            <GROUP id="{07B0D338-05E0-60ED-0991-B7C072701081}" name="internal"/>
+            <GROUP id="{D31046B4-F2BE-5FFB-2E99-E089CC86B569}" name="support"/>
+          </GROUP>
+        </GROUP>
+        <GROUP id="{F52001EE-282D-72A8-0071-864FE8D4236F}" name="shadows-main">
+          <GROUP id="{92732644-A419-FF10-A29F-958504E30917}" name="source"/>
+        </GROUP>
+      </GROUP>
+      <GROUP id="{000C7695-CAF2-1AC2-BDE1-B6A3C0B9872F}" name="Menu">
+        <GROUP id="{34011062-3B75-41D2-483D-D24FD70C5A35}" name="Gui">
+          <FILE id="VOYPdk" name="GoniometerSettingsComponent.cpp" compile="1"
+                resource="0" file="Source/Menu/Gui/GoniometerSettingsComponent.cpp"/>
+          <FILE id="UyuIph" name="GoniometerSettingsComponent.h" compile="0"
+                resource="0" file="Source/Menu/Gui/GoniometerSettingsComponent.h"/>
+        </GROUP>
+        <GROUP id="{3A6E8CAB-E493-DB48-C58B-A9E8BF1A1503}" name="ScreenCaptureLite">
+          <GROUP id="{AD79FC31-B391-8F0F-9DB1-35DB05D6996B}" name="internal"/>
+          <GROUP id="{7BF8B6E3-5C85-09D7-C5CB-1C24806253B0}" name="ios"/>
+          <GROUP id="{22330C0E-91AA-81AD-44E7-CA4E9F1B1695}" name="linux"/>
+          <GROUP id="{D7D39E88-12E2-D96A-8CA3-990E9C8DD397}" name="windows"/>
+        </GROUP>
+      </GROUP>
+      <GROUP id="{56BFCA47-BC8E-7AC1-A498-FD3723C934DB}" name="Spectral"/>
+      <GROUP id="{254F3C51-30DC-DE0C-0516-BAC05083B3D2}" name="Visualizer">
+        <GROUP id="{A5DEB07D-60E2-D246-3DE5-745824E2EB88}" name="Layers">
+          <GROUP id="{DABFC0C7-D864-3738-B439-464F0AEE0263}" name="GraphElements"/>
+          <GROUP id="{B48494FC-7D88-4574-4E7D-7330F29880BA}" name="GridElements"/>
+        </GROUP>
+      </GROUP>
+      <FILE id="l2LMV1" name="GoniometerComponent.cpp" compile="1" resource="0"
+            file="Source/GoniometerComponent.cpp"/>
+      <FILE id="eEkl4d" name="GoniometerComponent.h" compile="0" resource="0"
+            file="Source/GoniometerComponent.h"/>
+      <GROUP id="{9EC25483-0AAE-0C15-44BA-C86660009C38}" name="Controls">
+        <GROUP id="{C9343919-A1D1-42E4-67D1-DA11C771B79F}" name="Categories"/>
+      </GROUP>
+      <GROUP id="{F683520C-5702-7E9B-941A-DAA789CEB0D2}" name="Effects">
+        <GROUP id="{7A3A68E5-D283-BACE-233A-FBE0E0908B6F}" name="MelatoninBlur">
+          <GROUP id="{E3D0A6B5-C0F0-ACED-E4FF-ECA53BF91FAB}" name="melatonin">
+            <GROUP id="{B0CF1F04-1B35-D04F-CA06-481A507D3B3A}" name="implementations">
+              <FILE id="lqyQHu" name="direct2d.cpp" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/direct2d.cpp"/>
+              <FILE id="DP8U8V" name="direct2d.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/implementations/direct2d.h"/>
+            </GROUP>
+            <GROUP id="{F182CC53-BC87-356D-DDC5-14E7BAD0BE7F}" name="internal">
+              <FILE id="DMaeKt" name="cached_shadows.cpp" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/internal/cached_shadows.cpp"/>
+              <FILE id="lOPTiw" name="cached_shadows.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/internal/cached_shadows.h"/>
+              <FILE id="Q1E2kp" name="implementations.h" compile="0" resource="0"
+                    file="Source/Effects/MelatoninBlur/melatonin/internal/implementations.h"/>
+              <FILE id="hFVU3t" name="rendered_single_channel_shadow.cpp" compile="0"
+                    resource="0" file="Source/Effects/MelatoninBlur/melatonin/internal/rendered_single_channel_shadow.cpp"/>
+              <FILE id="gleGHu" name="rendered_single_channel_shadow.h" compile="0"
+                    resource="0" file="Source/Effects/MelatoninBlur/melatonin/internal/rendered_single_channel_shadow.h"/>
+            </GROUP>
+            <GROUP id="{495D5653-DB6B-C430-C8F6-43724A6C275A}" name="support"/>
+            <FILE id="y1ohBe" name="blur_demo_component.h" compile="0" resource="0"
+                  file="Source/Effects/MelatoninBlur/melatonin/blur_demo_component.h"/>
+            <FILE id="l5LSWD" name="blur_options.h" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/blur_options.h"/>
+            <FILE id="QDXwqp" name="cached_blur.cpp" compile="0" resource="0" file="Source/Effects/MelatoninBlur/melatonin/cached_blur.cpp"/>
+          </GROUP>
+          <FILE id="jToEvj" name="README.md" compile="0" resource="1" file="Source/Effects/MelatoninBlur/README.md"/>
+        </GROUP>
+        <GROUP id="{05113541-906C-D73B-1519-AD01C02C120F}" name="shadows-main">
+          <GROUP id="{80B8549E-4C48-18C0-B55D-DABA1A6BB004}" name="source"/>
+        </GROUP>
+      </GROUP>
+      <GROUP id="{AD05FA42-884A-6C57-1394-B418EB1599D0}" name="Menu">
+        <GROUP id="{9EE8CA17-4C41-7ECC-AF0F-3D3DB6347BF9}" name="Gui">
+          <FILE id="m1lvtT" name="OscilloscopeSettingsComponent.cpp" compile="1"
+                resource="0" file="Source/Menu/Gui/OscilloscopeSettingsComponent.cpp"/>
+          <FILE id="vLSx0Q" name="OscilloscopeSettingsComponent.h" compile="0"
+                resource="0" file="Source/Menu/Gui/OscilloscopeSettingsComponent.h"/>
+        </GROUP>
+        <GROUP id="{9294B361-A883-66CC-8350-200EC77A50F4}" name="ScreenCaptureLite">
+          <GROUP id="{C22E93A3-46DD-CC53-5184-573872C8475D}" name="internal"/>
+          <GROUP id="{969285C4-F8CD-DBAA-6E1D-8E5634F08A2B}" name="ios"/>
+          <GROUP id="{69C23FBB-8B0B-D69F-8390-53CCEBDD63D3}" name="linux"/>
+          <GROUP id="{552ABA47-26BB-49E2-B9ED-D9EAF79DD5B2}" name="windows"/>
+        </GROUP>
+      </GROUP>
+      <GROUP id="{57A56F18-8743-E5CC-8B4D-7A356403FF61}" name="Spectral">
+        <FILE id="g4TeeD" name="SpectralPerBandLattice.h" compile="0" resource="0"
+              file="Source/Spectral/SpectralPerBandLattice.h"/>
+      </GROUP>
+      <GROUP id="{F5404092-07AA-D13D-113F-7BEC4AE0CF3B}" name="Visualizer">
+        <GROUP id="{6796F526-F950-1EBE-7193-452284803C76}" name="Layers">
+          <GROUP id="{8C568128-AD3B-085D-DF1D-4B60293B385C}" name="GraphElements"/>
+          <GROUP id="{474BC8B8-0105-1DA4-7AE5-7BA164E5AB8E}" name="GridElements"/>
+        </GROUP>
+      </GROUP>
+      <FILE id="mFqG2k" name="ApplyButton.cpp" compile="1" resource="0" file="Source/ApplyButton.cpp"/>
+      <FILE id="QpXnnM" name="ApplyButton.h" compile="0" resource="0" file="Source/ApplyButton.h"/>
+      <FILE id="XDJbtp" name="BandChannel.h" compile="0" resource="0" file="Source/BandChannel.h"/>
+      <FILE id="nIWAVj" name="BandSaturation.h" compile="0" resource="0"
+            file="Source/BandSaturation.h"/>
+      <FILE id="C6JKtx" name="ColorValuesInput.cpp" compile="1" resource="0"
+            file="Source/ColorValuesInput.cpp"/>
+      <FILE id="ICdpfL" name="ColorValuesInput.h" compile="0" resource="0"
+            file="Source/ColorValuesInput.h"/>
+      <FILE id="GcDnAZ" name="EqBand.h" compile="0" resource="0" file="Source/EqBand.h"/>
+      <FILE id="DjJklg" name="FactoryDefaultsState.h" compile="0" resource="0"
+            file="Source/FactoryDefaultsState.h"/>
+      <FILE id="BYyl4U" name="FilterSlope.h" compile="0" resource="0" file="Source/FilterSlope.h"/>
+      <FILE id="HIGaom" name="FilterType.h" compile="0" resource="0" file="Source/FilterType.h"/>
+      <FILE id="iDJovM" name="HueSelector.cpp" compile="1" resource="0" file="Source/HueSelector.cpp"/>
+      <FILE id="Ju82gp" name="HueSelector.h" compile="0" resource="0" file="Source/HueSelector.h"/>
+      <FILE id="rkNpwq" name="KnobBandHighlight.h" compile="0" resource="0"
+            file="Source/KnobBandHighlight.h"/>
+      <FILE id="cdnJNx" name="OscilloscopeComponent.cpp" compile="1" resource="0"
+            file="Source/OscilloscopeComponent.cpp"/>
+      <FILE id="Vg0Q1d" name="OscilloscopeComponent.h" compile="0" resource="0"
+            file="Source/OscilloscopeComponent.h"/>
+      <FILE id="yJxciE" name="PhaseMode.h" compile="0" resource="0" file="Source/PhaseMode.h"/>
+      <FILE id="yTH2U4" name="QuadPicker.cpp" compile="1" resource="0" file="Source/QuadPicker.cpp"/>
+      <FILE id="DKr5Fh" name="QuadPicker.h" compile="0" resource="0" file="Source/QuadPicker.h"/>
+      <FILE id="nQxT8s" name="RetrigButton.h" compile="0" resource="0" file="Source/RetrigButton.h"/>
+      <FILE id="PbaZKz" name="ShapeCurveEditor.h" compile="0" resource="0"
+            file="Source/ShapeCurveEditor.h"/>
+      <FILE id="xM7QcI" name="ShapeEditorPopup.h" compile="0" resource="0"
+            file="Source/ShapeEditorPopup.h"/>
+      <FILE id="fmpNBw" name="SideCheck.h" compile="0" resource="0" file="Source/SideCheck.h"/>
+      <FILE id="bDda7n" name="UIElementsList.cpp" compile="1" resource="0"
+            file="Source/UIElementsList.cpp"/>
+      <FILE id="JDcCFy" name="UIElementsList.h" compile="0" resource="0"
+            file="Source/UIElementsList.h"/>
       <FILE id="om7gAk" name="TextButtonLookAndFeel2.cpp" compile="1" resource="0"
             file="Source/TextButtonLookAndFeel2.cpp"/>
       <FILE id="dFa13N" name="TextButtonLookAndFeel2.h" compile="0" resource="0"
@@ -91,7 +224,7 @@
         </GROUP>
         <GROUP id="{2A81825F-D2EC-45FD-7CE0-2096C4EEBA90}" name="shadows-main">
           <GROUP id="{D94682C6-2C33-25F8-D373-8CE4188B6CF6}" name="source">
-            <FILE id="F7LOHs" name="StackShadow.cpp" compile="1" resource="0" file="Source/Effects/shadows-main/source/StackShadow.cpp"/>
+            <FILE id="F7LOHs" name="StackShadow.cpp" compile="0" resource="0" file="Source/Effects/shadows-main/source/StackShadow.cpp"/>
             <FILE id="ABB2K3" name="StackShadow.h" compile="0" resource="0" file="Source/Effects/shadows-main/source/StackShadow.h"/>
           </GROUP>
           <FILE id="y9SDmY" name="shadows.cpp" compile="1" resource="0" file="Source/Effects/shadows-main/shadows.cpp"/>
@@ -152,6 +285,8 @@
             file="Source/ComboBoxLookAndFeel.h"/>
       <FILE id="cIqw3s" name="EqEditor.cpp" compile="1" resource="0" file="Source/EqEditor.cpp"/>
       <FILE id="tpMr0Z" name="EqEditor.h" compile="0" resource="0" file="Source/EqEditor.h"/>
+      <FILE id="eqPrSt" name="EqPresetStore.cpp" compile="1" resource="0" file="Source/EqPresetStore.cpp"/>
+      <FILE id="eqPrSh" name="EqPresetStore.h" compile="0" resource="0" file="Source/EqPresetStore.h"/>
       <FILE id="mOdSc1" name="ModSectionComponent.cpp" compile="1" resource="0"
             file="Source/ModSectionComponent.cpp"/>
       <FILE id="mOdSc2" name="ModSectionComponent.h" compile="0" resource="0"
@@ -313,6 +448,7 @@
               file="Source/Menu/SharedResources.cpp"/>
         <FILE id="cLCiKA" name="SharedResources.h" compile="0" resource="0"
               file="Source/Menu/SharedResources.h"/>
+        <FILE id="thClrR" name="ThemeColorRegistry.h" compile="0" resource="0" file="Source/Menu/ThemeColorRegistry.h"/>
         <GROUP id="{F7ACC9E5-61F2-F5EE-0D03-BAD6763ADEBB}" name="Gui">
           <FILE id="GaoKLh" name="AppearanceComponent.cpp" compile="1" resource="0"
                 file="Source/Menu/Gui/AppearanceComponent.cpp"/>

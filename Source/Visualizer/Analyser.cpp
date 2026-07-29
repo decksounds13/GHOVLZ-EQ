@@ -329,7 +329,8 @@ void Analyser::pushSamplesIntoFifo (const float leftChannel, const float rightCh
 
 void Analyser::pushSamplesIntoFifo (const float* left, const float* right, int numSamples) noexcept
 {
-    if (! m_blockSizeDefined.load() || ecoMode.load() || left == nullptr || right == nullptr || numSamples <= 0)
+    if (! m_blockSizeDefined.load() || ecoMode.load()
+        || left == nullptr || right == nullptr || numSamples <= 0)
         return;
 
     pushIntoRing (m_ring, m_ringWritePos, m_ringFilled, left, right, numSamples);
@@ -337,7 +338,8 @@ void Analyser::pushSamplesIntoFifo (const float* left, const float* right, int n
 
 void Analyser::pushPreSamplesIntoFifo (const float* left, const float* right, int numSamples) noexcept
 {
-    if (! m_blockSizeDefined.load() || ecoMode.load() || left == nullptr || right == nullptr || numSamples <= 0)
+    if (! m_blockSizeDefined.load() || ecoMode.load()
+        || left == nullptr || right == nullptr || numSamples <= 0)
         return;
 
     pushIntoRing (m_preRing, m_preRingWritePos, m_preRingFilled, left, right, numSamples);

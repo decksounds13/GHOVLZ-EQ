@@ -14,6 +14,8 @@ int CustomTabBarLookAndFeel::getTabButtonBestWidth (juce::TabBarButton& button, 
         return 110;
     if (text.equalsIgnoreCase ("Oscilloscope"))
         return 140;
+    if (text.equalsIgnoreCase ("Goniometer"))
+        return 130;
     if (text.equalsIgnoreCase ("Level Meters"))
         return 130;
     if (text.containsIgnoreCase ("Appearance"))

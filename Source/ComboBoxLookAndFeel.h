@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "Menu/SharedResources.h"
 
 /** Shared popup / combo menu colours — matches Mod section LFO shape < > toggles. */
 namespace PluginMenuTheme
@@ -34,13 +35,35 @@ class ComboBoxLookAndFeel : public juce::LookAndFeel_V4
 public:
     ComboBoxLookAndFeel()
     {
-        PluginMenuTheme::applyColours (*this);
+        applyThemeColours();
+    }
+
+    void setThemeColors (SharedResources* r) noexcept
+    {
+        themeColors = r;
+        applyThemeColours();
     }
 
     static ComboBoxLookAndFeel& sharedForPopupMenus()
     {
         static ComboBoxLookAndFeel instance;
         return instance;
+    }
+
+    void applyThemeColours()
+    {
+        const auto& c = colors();
+        setColour (juce::PopupMenu::backgroundColourId, c.optionComboBackground);
+        setColour (juce::PopupMenu::textColourId, c.optionComboText);
+        setColour (juce::PopupMenu::headerTextColourId, c.optionComboText);
+        setColour (juce::PopupMenu::highlightedBackgroundColourId, c.optionComboHighlight);
+        setColour (juce::PopupMenu::highlightedTextColourId, juce::Colours::black);
+        setColour (juce::ComboBox::backgroundColourId, c.optionComboBackground);
+        setColour (juce::ComboBox::outlineColourId, c.optionBorder);
+        setColour (juce::ComboBox::buttonColourId, c.optionComboBackground);
+        setColour (juce::ComboBox::arrowColourId, c.optionComboText);
+        setColour (juce::ComboBox::textColourId, c.optionComboText);
+        setColour (juce::ComboBox::focusedOutlineColourId, c.optionComboHighlight);
     }
 
     void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
@@ -81,6 +104,15 @@ public:
         label.setJustificationType (juce::Justification::centredLeft);
         label.setMinimumHorizontalScale (0.75f); // prefer slight squeeze over "..."
     }
+
+private:
+    SharedResources* themeColors = nullptr;
+
+    const SharedColors& colors() const noexcept
+    {
+        static const SharedColors defaultColors;
+        return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+    }
 };
 
 /**
@@ -120,8 +152,9 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        auto& lf = ComboBoxLookAndFeel::sharedForPopupMenus();
         auto bounds = getLocalBounds().toFloat();
-        auto fill = PluginMenuTheme::background();
+        auto fill = lf.findColour (juce::ComboBox::backgroundColourId);
         if (isMouseButtonDown())
             fill = fill.brighter (0.18f);
         else if (isMouseOver())
@@ -129,11 +162,11 @@ public:
 
         g.setColour (fill);
         g.fillRoundedRectangle (bounds, 2.0f);
-        g.setColour (juce::Colour::fromRGBA (30, 25, 18, 255));
+        g.setColour (lf.findColour (juce::ComboBox::outlineColourId));
         g.drawRoundedRectangle (bounds.reduced (0.5f), 2.0f, 1.0f);
 
         constexpr int arrowW = 16;
-        g.setColour (PluginMenuTheme::text());
+        g.setColour (lf.findColour (juce::ComboBox::textColourId));
         g.setFont (juce::FontOptions (12.0f));
         g.drawText (currentText,
                     getLocalBounds().reduced (6, 0).withTrimmedRight (arrowW),

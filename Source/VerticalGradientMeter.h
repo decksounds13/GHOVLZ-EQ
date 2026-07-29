@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <functional>
+#include "Menu/SharedResources.h"
 
 /** Shared clip / peak-hold state for a stereo meter pair (L+R or M/S). */
 struct MeterClipState
@@ -42,6 +43,8 @@ public:
     void mouseDown (const juce::MouseEvent& event) override;
     void timerCallback() override;
 
+    void setThemeColors (SharedResources* r) noexcept { themeColors = r; repaint(); }
+
 private:
     enum class MeterMode { Peak = 0, Rms = 1, PeakAndRms = 2 };
 
@@ -55,11 +58,14 @@ private:
     juce::Rectangle<float> getReadoutBounds() const;
     juce::Rectangle<float> getChannelLabelBounds() const;
 
+    const SharedColors& colors() const noexcept;
+
     std::function<float()> peakSupplier;
     std::function<float()> rmsSupplier;
     juce::AudioProcessorValueTreeState& treeState;
     MeterClipState& clipState;
     int slot = 0;
+    SharedResources* themeColors = nullptr;
 
     juce::ColourGradient gradient2{};
 

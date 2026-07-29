@@ -16,7 +16,7 @@ public:
         return "GHOVLZ! EQ";
     }
 
-    /** Secondary product framing — temporary red tag beside the hero brand. */
+    /** Secondary product framing beside the hero brand. */
     static juce::String getSideCheckTagText()
     {
         // Prefer ™; hosts/fonts that lack the glyph still render a readable fallback via paint().
@@ -48,6 +48,12 @@ public:
             return;
 
         compactLook = shouldBeCompact;
+        repaint();
+    }
+
+    void setBrandColour (juce::Colour colour) noexcept
+    {
+        brandColour = colour;
         repaint();
     }
 
@@ -143,23 +149,23 @@ public:
         const float startX = juce::jmax (0.0f, ((float) getWidth() - totalW) * 0.5f);
 
         const float brandAlpha = compactLook ? 0.55f : 0.92f;
-        // Beta keeps the previous subdued weight; SideCheck is temporary red.
+        // Beta keeps the previous subdued weight; SideCheck tracks brand colour.
         const float betaAlpha = compactLook ? 0.30f : 0.45f;
         const float sideCheckAlpha = brandAlpha;
 
         float x = startX;
 
         g.setFont (brandFont);
-        g.setColour (juce::Colours::whitesmoke.withAlpha (brandAlpha));
+        g.setColour (brandColour.withAlpha (brandAlpha));
         g.drawText (brandText,
                     juce::Rectangle<float> (x, 0.0f, brandW + 1.0f, h),
                     juce::Justification::centredLeft,
                     false);
         x += brandW + gapBrandToTag;
 
-        // Temporary red bold "with SideCheck™" at full tag size, right of the wordmark.
+        // Temporary bold "with SideCheck™" — follows brand colour so it randomizes with the theme.
         g.setFont (tagFont);
-        g.setColour (juce::Colours::red.withAlpha (sideCheckAlpha));
+        g.setColour (brandColour.withAlpha (sideCheckAlpha));
         g.drawText (sideCheckText,
                     juce::Rectangle<float> (x, 0.0f, sideCheckW + 2.0f, h),
                     juce::Justification::centredLeft,
@@ -168,7 +174,7 @@ public:
 
         // Beta version: subdued color, 75% of SideCheck tag height (click still cycles fonts).
         g.setFont (versionFont);
-        g.setColour (juce::Colours::whitesmoke.withAlpha (betaAlpha));
+        g.setColour (brandColour.withAlpha (betaAlpha));
         g.drawText (versionText,
                     juce::Rectangle<float> (x, 0.0f, versionW + 2.0f, h),
                     juce::Justification::centredLeft,
@@ -192,6 +198,7 @@ private:
 
     int fontOptionIndex = 1; // default: Bahnschrift (option 2 / "2A")
     bool compactLook = false;
+    juce::Colour brandColour { juce::Colours::whitesmoke };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BrandWordmark)
 };

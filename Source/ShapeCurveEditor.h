@@ -3,8 +3,9 @@
 #include <JuceHeader.h>
 #include "ShapeMod.h"
 #include "ComboBoxLookAndFeel.h"
+#include "Menu/SharedResources.h"
 
-/** Display / edit canvas for the Shape modulator curve. */
+/** Display / edit canvas for the Shape modulator curve — colours match LFO previews (Mod*). */
 class ShapeCurveEditor : public juce::Component,
                          public juce::SettableTooltipClient
 {
@@ -17,18 +18,25 @@ public:
                     "(clear all for a flat line / no modulation). Right-click a point for Soft.");
     }
 
+    void setThemeColors (SharedResources* r) noexcept
+    {
+        themeColors = r;
+        repaint();
+    }
+
     void paint (juce::Graphics& g) override
     {
+        const auto& c = colors();
         auto bounds = getLocalBounds().toFloat();
-        g.setColour (juce::Colour::fromRGBA (12, 10, 8, 230));
+        g.setColour (c.modBackground.withAlpha (230.0f / 255.0f));
         g.fillRoundedRectangle (bounds, 3.0f);
 
         const auto plot = plotBounds();
-        g.setColour (juce::Colour::fromRGBA (40, 32, 24, 255));
+        g.setColour (c.modBackground.darker (0.35f));
         g.fillRoundedRectangle (plot, 2.0f);
 
         const float midY = toScreen (0.0f, 0.0f).y;
-        g.setColour (juce::Colours::whitesmoke.withAlpha (0.12f));
+        g.setColour (c.modText.withAlpha (0.12f));
         g.drawHorizontalLine ((int) midY, plot.getX(), plot.getRight());
 
         juce::Path path;
@@ -43,36 +51,38 @@ public:
             else
                 path.lineTo (p);
         }
-        g.setColour (juce::Colour::fromRGB (220, 180, 90));
+        // Same stroke colour as LFO waveform previews.
+        g.setColour (c.modAccent);
         g.strokePath (path, juce::PathStrokeType (1.6f));
 
         if (playheadActive)
         {
             const float x = toScreen (playhead, 0.0f).x;
-            g.setColour (juce::Colour::fromRGBA (255, 220, 120, 160));
+            g.setColour (c.modAccent.brighter (0.35f).withAlpha (0.65f));
             g.drawLine (x, plot.getY(), x, plot.getBottom(), 1.0f);
         }
 
         if (editing)
         {
-            g.setColour (juce::Colour::fromRGBA (180, 150, 55, 200));
+            g.setColour (c.modAccent.withAlpha (200.0f / 255.0f));
             g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, 1.2f);
 
             const auto& pts = engine.uiCurve.getPoints();
             for (int i = 0; i < (int) pts.size(); ++i)
             {
                 const auto& pt = pts[(size_t) i];
-                const auto c = toScreen (pt.x, pt.y);
-                g.setColour (pt.soft ? juce::Colour::fromRGB (120, 180, 220)
-                                     : juce::Colour::fromRGB (240, 210, 140));
-                g.fillEllipse (c.x - 4.0f, c.y - 4.0f, 8.0f, 8.0f);
+                const auto ptScreen = toScreen (pt.x, pt.y);
+                const auto hard = c.modAccent.brighter (0.35f);
+                const auto soft = c.modAccent.withRotatedHue (0.45f).brighter (0.15f);
+                g.setColour (pt.soft ? soft : hard);
+                g.fillEllipse (ptScreen.x - 4.0f, ptScreen.y - 4.0f, 8.0f, 8.0f);
                 g.setColour (juce::Colours::black.withAlpha (0.7f));
-                g.drawEllipse (c.x - 4.0f, c.y - 4.0f, 8.0f, 8.0f, 1.0f);
+                g.drawEllipse (ptScreen.x - 4.0f, ptScreen.y - 4.0f, 8.0f, 8.0f, 1.0f);
             }
         }
         else
         {
-            g.setColour (juce::Colours::whitesmoke.withAlpha (0.35f));
+            g.setColour (c.modText.withAlpha (0.35f));
             g.setFont (juce::FontOptions (9.0f));
             g.drawText ("dbl-click to edit", plot, juce::Justification::centredBottom, false);
         }
@@ -155,10 +165,17 @@ public:
 
 private:
     ShapeMod::Engine& engine;
+    SharedResources* themeColors = nullptr;
     bool editing = false;
     int dragIndex = -1;
     float playhead = 0.0f;
     bool playheadActive = false;
+
+    const SharedColors& colors() const noexcept
+    {
+        static const SharedColors defaults;
+        return themeColors != nullptr ? themeColors->sharedColors : defaults;
+    }
 
     juce::Rectangle<float> plotBounds() const
     {

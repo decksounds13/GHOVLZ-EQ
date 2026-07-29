@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <vector>
+#include "Menu/SharedResources.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 
 /** Compact beat-synced waveform strip for the graph chrome. */
@@ -51,6 +52,8 @@ public:
     void setExpanded (bool shouldExpand) noexcept;
     bool isExpanded() const noexcept { return expanded; }
 
+    void setThemeColors (SharedResources* r) noexcept { themeColors = r; repaint(); }
+
     static constexpr int kWindowHeightPx = 80; // 60 * 4/3
     static constexpr int kWavePadPx = 2;
 
@@ -91,10 +94,13 @@ private:
                          float pathWidth, float lineOpacity, bool highQuality,
                          bool glowEnabled, float glowOpacity, float glowRadius, float glowSpread);
 
+    const SharedColors& colors() const noexcept;
+
     static constexpr int kMaxZoomIndex = 5; // 1, 2, 4, 8, 16, 32 beats
     static constexpr int kMaxBufferSeconds = 16;
 
     juce::AudioProcessorValueTreeState* valueTree = nullptr;
+    SharedResources* themeColors = nullptr;
 
     melatonin::DropShadow waveGlow {
         {

@@ -47,7 +47,7 @@ public:
 
     void updateComponents(juce::Colour newColor);
 
-    void directColorUpdate(juce::Colour newColor);
+    void directColorUpdate(juce::Colour newColor, bool applyAlpha = false);
 
     void updateColorSelectors(const juce::Array<juce::Colour>& colors);
 
@@ -63,6 +63,13 @@ public:
 
     void setRangeSliderColors();
 
+    void applyColourSideEffects (const juce::String& elementName, juce::Colour newColor);
+
+    void notifyThemeLiveChanged();
+
+    void showRandomizeScopeMenu();
+    void refreshAfterRandomize();
+
     void setButtonLookAndFeels();
 
     void setSliderLookAndFeels();
@@ -74,6 +81,9 @@ public:
 
     ThemeList& getThemeList() noexcept { return themeList; }
     const ThemeList& getThemeList() const noexcept { return themeList; }
+
+    /** Fired after palette edits / randomize so the host can refresh plugin chrome. */
+    std::function<void()> onThemeLiveChanged;
 
 private:
 

@@ -2,6 +2,7 @@
 
 #include "EqProcessor.h"
 #include "OptionBoxMenu.h"
+#include "Menu/SharedResources.h"
 #include <JuceHeader.h>
 #include "BinaryData.h"
 #include "MelatoninBlur/melatonin/shadows.h"
@@ -105,6 +106,8 @@ public:
 
     void paint(juce::Graphics& g) override;
 
+    void setThemeColors (SharedResources* r) noexcept;
+
     void setEditor(EqEditor* newEditor) {
         editor = newEditor;
     }
@@ -118,6 +121,10 @@ public:
 
 private:
 
+    SharedResources* themeColors = nullptr;
+
+    const SharedColors& colors() const noexcept;
+    void applyThemeToChildControls();
 
     juce::dsp::IIR::Coefficients<float> coefficients;
 
@@ -364,6 +371,9 @@ private:
         int w, int h,
         int downsampleFactor
     );
+
+    /** Close an open magnitude curve to the 0 dB centreline for fill (stroke stays open). */
+    juce::Path closeShelfFillPath (const juce::Path& curvePath, float height) const;
 
     // Internal indices → Band 1–8 display names (see EqBand.h).
     // 0–3 peaking = Band 3–6; 4 HP = Band 1; 5 LP = Band 8; 6 HS = Band 7; 7 LS = Band 2.

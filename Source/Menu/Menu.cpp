@@ -3,6 +3,7 @@
 #include "Gui/SpectrumComponent.h"
 #include "Gui/FftComponent.h"
 #include "Gui/OscilloscopeSettingsComponent.h"
+#include "Gui/GoniometerSettingsComponent.h"
 #include "Gui/LevelMetersComponent.h"
 #include "../Effects/shadows-main/shadows.h" 
 #include "../Effects/shadows-main/source/StackShadow.h" 
@@ -20,11 +21,13 @@ Menu::Menu(SharedResources& resources, juce::AudioProcessorValueTreeState& state
     auto* spectrum = new SpectrumComponent (resources, state);
     auto* fft = new FftComponent (resources, state);
     auto* oscilloscope = new OscilloscopeSettingsComponent (resources, state);
+    auto* goniometer = new GoniometerSettingsComponent (resources, state);
     auto* levelMeters = new LevelMetersComponent (resources, state);
     tabBar.setLookAndFeel (&customTabBarLookAndFeel);
     tabBar.addTab ("Spectrum", juce::Colours::transparentBlack, spectrum, true);
     tabBar.addTab ("FFT", juce::Colours::transparentBlack, fft, true);
     tabBar.addTab ("Oscilloscope", juce::Colours::transparentBlack, oscilloscope, true);
+    tabBar.addTab ("Goniometer", juce::Colours::transparentBlack, goniometer, true);
     tabBar.addTab ("Level Meters", juce::Colours::transparentBlack, levelMeters, true);
     tabBar.addTab ("Appearance (WIP)", juce::Colours::transparentBlack, appearance, true);
     addAndMakeVisible (tabBar);
@@ -88,39 +91,21 @@ void Menu::buttonClicked(juce::Button* button)
 
 void Menu::updateColors(const juce::Array<juce::Colour>& colors)
 {
-    // Ensure the indices match the intended order
-    sharedResources.sharedColors.setMenuBackgroundGradientColor1(colors[0]); // Index 0 for "Menu Background"
-    sharedResources.sharedColors.setMenuBackgroundGradientColor2(colors[1]); // Index 1 for "Menu Background 2"
-    sharedResources.sharedColors.setMenuListBoxBackgroundGradientColor1(colors[2]); // Index 2 for "Menu ListBox Background"
-    sharedResources.sharedColors.setMenuListBoxBackgroundGradientColor2(colors[3]); // Index 3 for "Menu ListBox Background 2"
-    sharedResources.sharedColors.setMenuTabBarBorderColor(colors[4]);        // Index 4 for "Menu Border"
-    sharedResources.sharedColors.setMenuThinBorderColor(colors[5]);          // Index 5 for "Menu Thin Border"
-    sharedResources.sharedColors.setMenuButtonGradientColor1(colors[6]); // Index 6 for "Menu Button Gradient Color 1"
-    sharedResources.sharedColors.setMenuButtonGradientColor2(colors[7]); // Index 7 for "Menu Button Gradient Color 2"
-    sharedResources.sharedColors.setMenuButtonTextColor1(colors[8]); // Index 8 for "Menu Button Text Color 1"
-    sharedResources.sharedColors.setMenuLabelTextColor1(colors[9]); // Index 9 for "Menu Label Text Color 1"
-    sharedResources.sharedColors.setMenuScrollBarTrackColor1(colors[10]); // Index 10 for "Menu Scroll Bar Track Color 1"
-    sharedResources.sharedColors.setMenuScrollBarThumbColor1(colors[11]); // Index 11 for "Menu Scroll Bar Thumb Color 1"
-    sharedResources.sharedColors.setMenuScrollBarOutlineColor1(colors[12]); // Index 12 for "Menu Scroll Bar Outline Color 1"
-    sharedResources.sharedColors.setMenuListBoxTextColor1(colors[13]); // Index 13 for "Menu ListBox Text Color 1"
-    sharedResources.sharedColors.setMenuListBoxSelectionColor1(colors[14]); // Index 14 for "Menu ListBox Selection Color 1"
-    sharedResources.sharedColors.setMenuTextBoxTextColor1(colors[15]); // Index 15 for "Menu TextBox Text Color 1"
+    juce::ignoreUnused (colors);
 
-    // Update the custom LookAndFeel with the new colors
-    textButtonLookAndFeel.setButtonOutlineColor(colors[5]);
+    // Colours are already written into sharedResources; refresh LookAndFeel bindings.
+    textButtonLookAndFeel.setButtonOutlineColor(sharedResources.sharedColors.menuThinBorderColor);
+    textButtonLookAndFeel.setButtonTextColor(sharedResources.sharedColors.menuButtonTextColor1);
+    textButtonLookAndFeel.setGradientColor1(sharedResources.sharedColors.menuButtonGradientColor1);
+    textButtonLookAndFeel.setGradientColor2(sharedResources.sharedColors.menuButtonGradientColor2);
 
-    textButtonLookAndFeel.setButtonTextColor(colors[9]);
-
-    // Update tabBar colors and request a repaint
-    tabBar.setColour(juce::TabbedComponent::outlineColourId, colors[4]);
+    tabBar.setColour(juce::TabbedComponent::outlineColourId, sharedResources.sharedColors.menuTabBarBorderColor);
     tabBar.repaint();
 
-    // Trigger a repaint for the newPresetButton if appearanceComponentRef is valid
     if (appearanceComponentRef) {
         appearanceComponentRef->repaintNewPresetButton();
     }
 
-    // Trigger a repaint for this component
     repaint();
 }
 

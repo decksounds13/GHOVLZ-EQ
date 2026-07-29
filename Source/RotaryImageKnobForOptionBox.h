@@ -7,6 +7,7 @@
 #include "RotaryImageKnobLookAndFeel4.h"
 #include "RotaryImageKnobLookAndFeel5.h"
 #include "RotaryImageKnobLookAndFeel6.h"
+#include "Menu/SharedResources.h"
 
 class RotaryImageKnobForOptionBox : public juce::Slider
 {
@@ -24,8 +25,13 @@ public:
     void mouseEnter(const juce::MouseEvent& event) override;
     void mouseExit(const juce::MouseEvent& event) override;
 
+    void setThemeColors (SharedResources* r) noexcept;
+
 private:
+    void refreshValuePopup (bool show);
+
     bool compactNoValueBox = false;
+    SharedResources* themeColors = nullptr;
 
     RotaryImageKnobLookAndFeel1 rotaryImageKnobLookAndFeel1;
     RotaryImageKnobLookAndFeel2 rotaryImageKnobLookAndFeel2;

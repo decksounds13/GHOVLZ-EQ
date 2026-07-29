@@ -8,17 +8,36 @@ Visualizer::Visualizer(
     m_graph( audioProcessorValueTreeState, analyser )
 {
     addAndMakeVisible( m_grid );
-    m_grid.setGridColour( juce::Colour( 0xff464646 ) );
-    m_grid.setTextColour( juce::Colour( 0xff848484 ) );
-    
     addAndMakeVisible( m_graph );
-    m_graph.setGraphColour( juce::Colours::whitesmoke.withAlpha(0.6f) );
-    m_graph.setGraphMaximumsColour(juce::Colours::whitesmoke.withAlpha(0.6f) );
+    applyThemeColours();
 }
 
 
 
 Visualizer::~Visualizer() {}
+
+const SharedColors& Visualizer::colors() const noexcept
+{
+    static const SharedColors defaultColors;
+    return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+}
+
+void Visualizer::setThemeColors (SharedResources* r) noexcept
+{
+    themeColors = r;
+    applyThemeColours();
+    repaint();
+}
+
+void Visualizer::applyThemeColours()
+{
+    const auto& c = colors();
+    m_grid.setGridColour (c.spectrumGrid);
+    m_grid.setTextColour (c.spectrumText);
+    m_graph.setGraphColour (c.spectrumLine.withAlpha (0.6f));
+    m_graph.setGraphMaximumsColour (c.spectrumLine.withAlpha (0.6f));
+    m_graph.setBinOverlayColour (c.spectrumFill);
+}
 
 
 // ============================================================================
@@ -27,24 +46,16 @@ void Visualizer::paint( juce::Graphics &g )
     juce::Path path;
     path.addRoundedRectangle( getLocalBounds(), m_marginInPixels );
  
-    auto area = getLocalBounds();
-    auto w = area.getWidth();
-    auto h = area.getHeight();
-    
-    // Define your custom colors for the gradient
-    juce::Colour color1 = juce::Colour(10, 10, 10); // Custom color 1 (e.g., red)
-    juce::Colour color2 = juce::Colour(60, 55, 50); // Custom color 2 (e.g., blue)
+    const auto& c = colors();
 
-    // Create a horizontal linear gradient between two X coordinates
+    juce::Colour color1 = c.spectrumBackground;
+    juce::Colour color2 = c.spectrumBackground2;
+
     juce::ColourGradient gradient = juce::ColourGradient::horizontal(color1, 0.0f, color2, static_cast<float>(getWidth()));
 
-
-    // Fill the component with the gradient
     g.setGradientFill(gradient);
     g.fillAll();
    
-    
-    
     g.fillPath( path );
 }
 

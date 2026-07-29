@@ -8,6 +8,9 @@
 
 namespace BinaryData
 {
+    extern const char*   README_md;
+    const int            README_mdSize = 23752;
+
     extern const char*   DarkKnob4_Stitched_png;
     const int            DarkKnob4_Stitched_pngSize = 3207313;
 
@@ -15,7 +18,7 @@ namespace BinaryData
     const int            pirulen_ttfSize = 46184;
 
     // Number of elements in the namedResourceList and originalFileNames arrays.
-    const int namedResourceListSize = 2;
+    const int namedResourceListSize = 3;
 
     // Points to the start of a list of resource names.
     extern const char* namedResourceList[];

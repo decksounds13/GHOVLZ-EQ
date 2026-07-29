@@ -329,7 +329,7 @@ void ThemeList::listBoxItemClicked(int row, const juce::MouseEvent& e)
         // Single-click event, apply the preset if it's not already selected
         if (!isTextEditorActive && row != selectedRow)
         {
-            applyPreset(row);
+            applyPreset(row, false);
         }
     }
 
@@ -387,7 +387,8 @@ void ThemeList::addPreset (const juce::String& name, bool appendDateSuffix)
     Theme newPreset (sharedResources.sharedColors);
     newPreset.setCreated (currentTime);
     newPreset.setModified (currentTime);
-    newPreset.setPluginState (capturePluginState());
+    // UI themes are colours-only — EQ/functionality presets live in EqPresetStore.
+    newPreset.clearPluginState();
 
     juce::String uniqueName = name.trim();
     if (uniqueName.isEmpty())
@@ -601,6 +602,50 @@ void ThemeList::deletePreset(int index) {
     }
 }
 
+void ThemeList::duplicatePreset (int index)
+{
+    needsRepainting = true;
+
+    if (index < 0 || index >= presets.size() || index >= presetNames.size())
+        return;
+
+    const juce::Time currentTime = juce::Time::getCurrentTime();
+
+    Theme copy = presets[index];
+    copy.setCreated (currentTime);
+    copy.setModified (currentTime);
+    copy.clearPluginState();
+
+    juce::String base = presetNames[index].trim();
+    if (base.isEmpty())
+        base = "Theme";
+    if (base.equalsIgnoreCase ("Default"))
+        base = "Default copy";
+    else if (! base.endsWithIgnoreCase (" copy"))
+        base = base + " copy";
+
+    juce::String uniqueName = base;
+    if (presetNames.contains (uniqueName))
+    {
+        int suffix = 2;
+        while (presetNames.contains (base + " (" + juce::String (suffix) + ")"))
+            ++suffix;
+        uniqueName = base + " (" + juce::String (suffix) + ")";
+    }
+
+    presets.add (copy);
+    presetNames.add (uniqueName);
+    themeCreatedTimes.add (currentTime);
+    themeModifiedTimes.add (currentTime);
+
+    persistPresetsToXml();
+
+    listBox.updateContent();
+    listBox.repaint();
+
+    listeners.call ([] (Listener& listener) { listener.onPresetListChanged(); });
+}
+
 void ThemeList::overwritePreset (int index, const juce::String& name)
 {
     needsRepainting = true;
@@ -616,7 +661,8 @@ void ThemeList::overwritePreset (int index, const juce::String& name)
     Theme newPreset (sharedResources.sharedColors);
     newPreset.setCreated (index < themeCreatedTimes.size() ? themeCreatedTimes[index] : currentTime);
     newPreset.setModified (currentTime);
-    newPreset.setPluginState (capturePluginState());
+    // UI themes are colours-only — EQ/functionality presets live in EqPresetStore.
+    newPreset.clearPluginState();
 
     presets.set (index, newPreset);
 

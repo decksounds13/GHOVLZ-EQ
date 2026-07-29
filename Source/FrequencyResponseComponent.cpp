@@ -16,6 +16,11 @@ namespace
     // sum path (one vertex per pixel) draws as visible jaggies; band adaptive downsampling
     // skipped those flats and looked smoother on the same data.
     constexpr int responseSampleStep = 1;
+
+    juce::Colour bandCurveColour (juce::Colour fill) noexcept
+    {
+        return fill.withAlpha (0.75f);
+    }
 }
 
 FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
@@ -182,12 +187,12 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     optionBoxMenu->setVisible(false);
     optionBoxMenu->resized();
 
-    auto styleRangeButton = [] (juce::TextButton& button)
+    auto styleRangeButton = [this] (juce::TextButton& button)
     {
         button.setClickingTogglesState (false);
-        button.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
-        button.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
-        button.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
+        button.setColour (juce::TextButton::buttonColourId, colors().pluginButtonBackground);
+        button.setColour (juce::TextButton::buttonOnColourId, colors().pluginButtonAccent);
+        button.setColour (juce::TextButton::textColourOffId, colors().pluginButtonText.withAlpha (0.85f));
         button.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     };
 
@@ -240,7 +245,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     // Compact name for the +/- display-range control (avoids "A +/-24" reading next to Auto Gain).
     eqRangeLabel.setText ("Range", juce::dontSendNotification);
     eqRangeLabel.setJustificationType (juce::Justification::centredRight);
-    eqRangeLabel.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.75f));
+    eqRangeLabel.setColour (juce::Label::textColourId, colors().graphAxisText.withAlpha (0.75f));
     eqRangeLabel.setFont (juce::Font (11.0f));
     // Intercept so the Range caption can show its tooltip (same tip as - / +).
     eqRangeLabel.setInterceptsMouseClicks (true, false);
@@ -252,7 +257,46 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     outputGainScrubber.setVisible (false);
 
     syncDynamicCurveTimer();
+    applyThemeToChildControls();
     repaint();
+}
+
+const SharedColors& FrequencyResponseComponent::colors() const noexcept
+{
+    static const SharedColors defaultColors;
+    return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+}
+
+void FrequencyResponseComponent::setThemeColors (SharedResources* r) noexcept
+{
+    themeColors = r;
+    applyThemeToChildControls();
+    repaint();
+}
+
+void FrequencyResponseComponent::applyThemeToChildControls()
+{
+    const auto& c = colors();
+
+    auto styleRangeButton = [&c] (juce::TextButton& button)
+    {
+        button.setColour (juce::TextButton::buttonColourId, c.pluginButtonBackground);
+        button.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
+        button.setColour (juce::TextButton::textColourOffId, c.pluginButtonText.withAlpha (0.85f));
+        button.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    };
+
+    styleRangeButton (eqRangeMinusButton);
+    styleRangeButton (eqRangePlusButton);
+    styleRangeButton (modButton);
+    styleRangeButton (uiModeButton);
+    styleRangeButton (proportionalQButton);
+    styleRangeButton (autoGainButton);
+
+    eqRangeLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
+
+    if (optionBoxMenu != nullptr)
+        optionBoxMenu->setThemeColors (themeColors);
 }
 
 void FrequencyResponseComponent::syncUiModeButton (bool isCompact)
@@ -470,13 +514,11 @@ juce::Colour FrequencyResponseComponent::resolveBandFillColour (juce::Colour mul
     if (isMulticolorBandFill())
         return multicolorFill;
 
-    // Mono mode: darker / more neutral golden yellow (sum-curve family).
-    // Boosts are stronger; cuts stay yellowish but less intense. Semi-transparent
-    // so overlapping fills stack (additive-looking) like the multicolor mode.
+    const auto& c = colors();
     if (isBoostOrPass)
-        return juce::Colours::darkgoldenrod.darker (0.35f).withAlpha (0.34f);
+        return c.graphSumFillTop.withAlpha (0.34f);
 
-    return juce::Colours::darkgoldenrod.darker (0.60f).withAlpha (0.18f);
+    return c.graphSumFillBottom.withAlpha (0.18f);
 }
 
 void FrequencyResponseComponent::syncEqRangeControls()
@@ -875,8 +917,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     auto h = area.getHeight();
 
     // Define your custom colors for the gradient
-    juce::Colour color1 = juce::Colour(10, 10, 10); // Custom color 1 (e.g., red)
-    juce::Colour color2 = juce::Colour(60, 55, 50); // Custom color 2 (e.g., blue)
+    const auto& theme = colors();
+    juce::Colour color1 = theme.graphBackground;
+    juce::Colour color2 = theme.graphBackground2;
 
     // Create a horizontal linear gradient between two X coordinates
     juce::ColourGradient gradient = juce::ColourGradient::horizontal(color1, 0.0f, color2, static_cast<float>(getWidth()));
@@ -911,8 +954,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     std::vector<float> gridFrequencies = { 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800 };
 
     // Colors for grid lines
-    juce::Colour standardGridLineColor = juce::Colours::whitesmoke.withAlpha(0.1f); // Standard lines
-    juce::Colour specialGridLineColor = juce::Colours::whitesmoke.withAlpha(0.2f);  // Special lines
+    juce::Colour standardGridLineColor = theme.graphGrid;
+    juce::Colour specialGridLineColor = theme.graphGrid.withAlpha (0.2f);
 
     // Draw vertical grid lines and add labels
     g.setColour(specialGridLineColor);
@@ -964,7 +1007,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             //g.drawLine(0, y, getWidth(), y, 1.0f);
 
             const float labelY = juce::jlimit (0.0f, static_cast<float> (getHeight()) - 14.0f, y - 7.0f);
-            g.setColour (juce::Colours::whitesmoke.withAlpha (isSpecial ? 0.82f : 0.58f));
+            g.setColour (theme.graphAxisText.withAlpha (isSpecial ? 0.82f : 0.58f));
             g.drawText (juce::String (db) + " dB",
                         labelLeft,
                         labelY,
@@ -1002,13 +1045,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand1On())
     {
         // Draw the path (this is fast if the path hasn't changed)
-        juce::Colour customBandColor1 = resolveBandFillColour (
-            juce::Colours::cornflowerblue.withAlpha (0.4f),
+        juce::Colour customBandColor1 = resolveBandFillColour (theme.graphBand1,
             bandGainIsBoost ("band1Gain", "band1Type"));
         g.setColour(customBandColor1);
-        g.fillPath(band1ResponsePath);
+        g.fillPath (closeShelfFillPath (band1ResponsePath, (float) h));
 
-        juce::Colour band1CurveColor = juce::Colours::cornflowerblue.withAlpha(0.75f);
+        juce::Colour band1CurveColor = bandCurveColour (theme.graphBand1);
         g.setColour(band1CurveColor);
         g.strokePath(band1ResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1027,13 +1069,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     if (processor.getIsBand2On())
     {
-        juce::Colour customBandColor2 = resolveBandFillColour (
-            juce::Colours::purple.withAlpha (0.4f),
+        juce::Colour customBandColor2 = resolveBandFillColour (theme.graphBand2,
             bandGainIsBoost ("band2Gain", "band2Type"));
         g.setColour(customBandColor2);
-        g.fillPath(band2ResponsePath);
+        g.fillPath (closeShelfFillPath (band2ResponsePath, (float) h));
 
-        juce::Colour band2CurveColor = juce::Colours::purple.withAlpha(0.75f);
+        juce::Colour band2CurveColor = bandCurveColour (theme.graphBand2);
         g.setColour(band2CurveColor);
         g.strokePath(band2ResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1052,13 +1093,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     if (processor.getIsBand3On())
     {
-        juce::Colour customBandColor3 = resolveBandFillColour (
-            juce::Colours::cyan.withAlpha (0.4f),
+        juce::Colour customBandColor3 = resolveBandFillColour (theme.graphBand3,
             bandGainIsBoost ("band3Gain", "band3Type"));
         g.setColour(customBandColor3);
-        g.fillPath(band3ResponsePath);
+        g.fillPath (closeShelfFillPath (band3ResponsePath, (float) h));
 
-        juce::Colour band3CurveColor = juce::Colours::cyan.withAlpha(0.75f);
+        juce::Colour band3CurveColor = bandCurveColour (theme.graphBand3);
         g.setColour(band3CurveColor);
         g.strokePath(band3ResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1076,13 +1116,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     if (processor.getIsBand4On())
     {
-        juce::Colour customBandColor4 = resolveBandFillColour (
-            juce::Colours::blue.withAlpha (0.35f),
+        juce::Colour customBandColor4 = resolveBandFillColour (theme.graphBand4,
             bandGainIsBoost ("band4Gain", "band4Type"));
         g.setColour(customBandColor4);
-        g.fillPath(band4ResponsePath);
+        g.fillPath (closeShelfFillPath (band4ResponsePath, (float) h));
 
-        juce::Colour band4CurveColor = juce::Colours::blue.withAlpha(0.75f);
+        juce::Colour band4CurveColor = bandCurveColour (theme.graphBand4);
         g.setColour(band4CurveColor);
         g.strokePath(band4ResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1111,13 +1150,16 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     if (processor.getIsHighpassOn())
     {
-        juce::Colour customHighpassColor = resolveBandFillColour (
-            juce::Colours::green.withAlpha (0.35f),
+        juce::Colour customHighpassColor = resolveBandFillColour (theme.graphBand5,
             bandGainIsBoost ("highpassGain", "highpassType"));
         g.setColour(customHighpassColor);
-        g.fillPath(highpassResponsePath);
+        const int hpType = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
+        if (FilterType::isHpLp (hpType))
+            g.fillPath (highpassResponsePath);
+        else
+            g.fillPath (closeShelfFillPath (highpassResponsePath, (float) h));
 
-        juce::Colour highpassCurveColor = juce::Colours::green.withAlpha(0.75f);
+        juce::Colour highpassCurveColor = bandCurveColour (theme.graphBand5);
         g.setColour(highpassCurveColor);
         g.strokePath(highpassResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1144,13 +1186,16 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     if (processor.getIsLowpassOn())
     {
-        juce::Colour customLowpassColor = resolveBandFillColour (
-            juce::Colours::red.withAlpha (0.45f),
+        juce::Colour customLowpassColor = resolveBandFillColour (theme.graphBand6,
             bandGainIsBoost ("lowpassGain", "lowpassType"));
         g.setColour(customLowpassColor);
-        g.fillPath(lowpassResponsePath);
+        const int lpType = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
+        if (FilterType::isHpLp (lpType))
+            g.fillPath (lowpassResponsePath);
+        else
+            g.fillPath (closeShelfFillPath (lowpassResponsePath, (float) h));
 
-        juce::Colour lowpassCurveColor = juce::Colours::red.withAlpha(0.75f);
+        juce::Colour lowpassCurveColor = bandCurveColour (theme.graphBand6);
         g.setColour(lowpassCurveColor);
         g.strokePath(lowpassResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1170,13 +1215,13 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     if (processor.getIsHighShelfOn())
     {
-        juce::Colour customHighShelfColor = resolveBandFillColour (
-            juce::Colours::burlywood.withAlpha (0.5f),
+        juce::Colour customHighShelfColor = resolveBandFillColour (theme.graphBand7,
             bandGainIsBoost ("highShelfGain", "highShelfType"));
         g.setColour(customHighShelfColor);
-        g.fillPath(highShelfResponsePath);
+        // Fill closes to 0 dB; stroke keeps open edge asymptotes (no drop to centre).
+        g.fillPath (closeShelfFillPath (highShelfResponsePath, (float) h));
 
-        juce::Colour highShelfCurveColor = juce::Colours::burlywood.withAlpha(0.75f);
+        juce::Colour highShelfCurveColor = bandCurveColour (theme.graphBand7);
         g.setColour(highShelfCurveColor);
         g.strokePath(highShelfResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1195,13 +1240,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     if (processor.getIsLowShelfOn())
     {
-        juce::Colour customLowShelfColor = resolveBandFillColour (
-            juce::Colours::indianred.withAlpha (0.5f),
+        juce::Colour customLowShelfColor = resolveBandFillColour (theme.graphBand8,
             bandGainIsBoost ("lowShelfGain", "lowShelfType"));
         g.setColour(customLowShelfColor);
-        g.fillPath(lowShelfResponsePath);
+        g.fillPath (closeShelfFillPath (lowShelfResponsePath, (float) h));
 
-        juce::Colour lowShelfCurveColor = juce::Colours::indianred.withAlpha(0.75f);
+        juce::Colour lowShelfCurveColor = bandCurveColour (theme.graphBand8);
         g.setColour(lowShelfCurveColor);
         g.strokePath(lowShelfResponsePath, juce::PathStrokeType(getBandPathWidth()));
     }
@@ -1230,15 +1274,15 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     // Draw the path (this is fast if the path hasn't changed)
     // Create a gradient from the top to the bottom
-    juce::Colour topColor = juce::Colour::fromRGBA(255, 130, 30, 180);
-    juce::Colour bottomColor = juce::Colours::darkgoldenrod.darker(0.7f).withAlpha(0.4f);
+    juce::Colour topColor = theme.graphSumFillTop;
+    juce::Colour bottomColor = theme.graphSumFillBottom;
     juce::ColourGradient gradient12(topColor, 0, 0, bottomColor, 0, h, false);
 
     // Fill and stroke the path with the gradient
     g.setGradientFill(gradient12);
     g.fillPath(combinedResponsePath);
 
-    juce::Colour combinedCurveColor = juce::Colours::goldenrod.withAlpha(0.8f).darker(0.0f);
+    juce::Colour combinedCurveColor = theme.graphSumCurve;
     // Light corner rounding + curved/rounded stroke matches band AA look on dense polylines.
     const auto combinedStrokePath = combinedResponsePath.createPathWithRoundedCorners (4.0f);
     const float sumWidth = getSumPathWidth();
@@ -1249,8 +1293,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     // Optional Melatonin glow for the cumulative sum curve (off by default — Post Glow is the main one).
     {
         bool glowEnabled = false;
-        if (auto* p = parameters.getRawParameterValue ("EQ_SUM_GLOW_ENABLE_ID"))
-            glowEnabled = p->load() > 0.5f;
+        if (SharedResources::glowShadowEffectsEnabled())
+            if (auto* p = parameters.getRawParameterValue ("EQ_SUM_GLOW_ENABLE_ID"))
+                glowEnabled = p->load() > 0.5f;
 
         if (glowEnabled)
         {
@@ -1267,8 +1312,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             const float glowAlpha = juce::jlimit (0.0f, 1.0f, glowOpacity * 0.01f);
             if (glowAlpha > 0.05f && glowRadius > 0.5f)
             {
-                const auto bloom = juce::Colour::fromRGBA (255, 180, 60, 130).withAlpha (glowAlpha * 0.45f);
-                const auto core = juce::Colour::fromRGBA (255, 220, 120, 180).withAlpha (glowAlpha * 0.75f);
+                const auto bloom = theme.graphSumGlow.withAlpha (glowAlpha * 0.45f);
+                const auto core = theme.graphSumGlow.brighter (0.15f).withAlpha (glowAlpha * 0.75f);
 
                 sumCurveGlow.setRadius ((double) juce::jlimit (0.0f, 80.0f, glowRadius), 0);
                 sumCurveGlow.setSpread ((double) juce::jlimit (0.0f, 40.0f, glowSpread), 0);
@@ -1295,18 +1340,18 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
 
     //=======================================================================================================//
-    juce::Colour outlineColor = juce::Colour::fromRGB(1, 1, 1);  // Set your custom color here
-    juce::Colour outlineColor2 = juce::Colour::fromRGB(211, 167, 143);  // Set your custom color here
-    juce::Colour handleColor1 = juce::Colours::cornflowerblue.withAlpha(1.0f);
-    juce::Colour handleColor2 = juce::Colours::purple.withAlpha(1.0f);
-    juce::Colour handleColor3 = juce::Colours::cyan.withAlpha(0.7f);
-    juce::Colour handleColor4 = juce::Colours::mediumblue.withAlpha(0.9f);
+    juce::Colour outlineColor = theme.graphHandleOutline;
+    juce::Colour outlineColor2 = theme.graphHandleText;
+    juce::Colour handleColor1 = theme.graphBand1.withAlpha (1.0f);
+    juce::Colour handleColor2 = theme.graphBand2.withAlpha (1.0f);
+    juce::Colour handleColor3 = theme.graphBand3.withAlpha (1.0f);
+    juce::Colour handleColor4 = theme.graphBand4.withAlpha (1.0f);
    
-    juce::Colour handleColor5 = juce::Colours::green.withAlpha(1.0f);
-    juce::Colour handleColor6 = juce::Colours::red.withAlpha(1.0f);
+    juce::Colour handleColor5 = theme.graphBand5.withAlpha (1.0f);
+    juce::Colour handleColor6 = theme.graphBand6.withAlpha (1.0f);
   
-    juce::Colour handleColor7 = juce::Colours::darkgoldenrod.withAlpha(1.0f);
-    juce::Colour handleColor8 = juce::Colours::burlywood.withAlpha(1.0f);
+    juce::Colour handleColor7 = theme.graphBand7.withAlpha (1.0f);
+    juce::Colour handleColor8 = theme.graphBand8.withAlpha (1.0f);
 
     float outlineThickness2 = 1.0f;  // Half of prior 2.0f (handles at 1/2 size)
     float outlineThickness = 1.0f;  // Half of prior 2.0f (handles at 1/2 size)
@@ -1363,10 +1408,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.drawEllipse(band1X - innerOutlineSize / 2.0f, band1Y - innerOutlineSize / 2.0f, innerOutlineSize, innerOutlineSize, outlineThickness2);
 
         // Draw the label for Band 1
-        g.setColour(juce::Colours::black);
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor);  // Apply scale f   actor to font size
         float textOffset = 3.5f * scaleFactor;  // Apply scale factor to text position
-        g.drawText("1", band1X - textOffset, band1Y - textOffset, 7.0f * scaleFactor, 7.0f * scaleFactor, juce::Justification::centred, false);
+        g.drawText("3", band1X - textOffset, band1Y - textOffset, 7.0f * scaleFactor, 7.0f * scaleFactor, juce::Justification::centred, false);
     }
     else
     {
@@ -1424,10 +1469,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.drawEllipse(band2X - innerOutlineSize2 / 2.0f, band2Y - innerOutlineSize2 / 2.0f, innerOutlineSize2, innerOutlineSize2, outlineThickness2);
 
         // Draw the label for Band 2
-        g.setColour(juce::Colours::black);
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor2);  // Apply scale factor to font size
         float textOffset2 = 3.5f * scaleFactor2;  // Apply scale factor to text position
-        g.drawText("2", band2X - textOffset2, band2Y - textOffset2, 7.0f * scaleFactor2, 7.0f * scaleFactor2, juce::Justification::centred, false);
+        g.drawText("4", band2X - textOffset2, band2Y - textOffset2, 7.0f * scaleFactor2, 7.0f * scaleFactor2, juce::Justification::centred, false);
     }
     else
     {
@@ -1486,10 +1531,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.drawEllipse(band3X - innerOutlineSize3 / 2.0f, band3Y - innerOutlineSize3 / 2.0f, innerOutlineSize3, innerOutlineSize3, outlineThickness2);
 
         // Draw the label for Band 3
-        g.setColour(juce::Colours::black);
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor3);  // Apply scale factor to font size
         float textOffset3 = 3.5f * scaleFactor3;  // Apply scale factor to text position
-        g.drawText("3", band3X - textOffset3, band3Y - textOffset3, 7.0f * scaleFactor3, 7.0f * scaleFactor3, juce::Justification::centred, false);
+        g.drawText("5", band3X - textOffset3, band3Y - textOffset3, 7.0f * scaleFactor3, 7.0f * scaleFactor3, juce::Justification::centred, false);
     }
     else
     {
@@ -1547,10 +1592,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.drawEllipse(band4X - innerOutlineSize4 / 2.0f, band4Y - innerOutlineSize4 / 2.0f, innerOutlineSize4, innerOutlineSize4, outlineThickness2);
 
         // Draw the label for Band 4
-        g.setColour(juce::Colours::black);
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor4);  // Apply scale factor to font size
         float textOffset4 = 3.5f * scaleFactor4;  // Apply scale factor to text position
-        g.drawText("4", band4X - textOffset4, band4Y - textOffset4, 7.0f * scaleFactor4, 7.0f * scaleFactor4, juce::Justification::centred, false);
+        g.drawText("6", band4X - textOffset4, band4Y - textOffset4, 7.0f * scaleFactor4, 7.0f * scaleFactor4, juce::Justification::centred, false);
     }
     else
     {
@@ -1602,13 +1647,11 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setColour(outlineColor2);
         g.drawEllipse(highpassX - innerOutlineSize5 / 2.0f, handleY5 - innerOutlineSize5 / 2.0f, innerOutlineSize5, innerOutlineSize5, outlineThickness2);
 
-        // Draw the label for Highpass
-        g.setColour(juce::Colours::black);
+        // Draw the label for Band 1 (highpass slot)
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor5);  // Apply scale factor to font size
         float textOffset5 = 3.5f * scaleFactor5;  // Apply scale factor to text position
-        const char* hpLabel = (hpType == FilterType::highpass) ? "HP"
-                            : (hpType == FilterType::lowpass)  ? "LP" : "1";
-        g.drawText(hpLabel, highpassX - textOffset5, handleY5 - textOffset5, 7.0f * scaleFactor5, 7.0f * scaleFactor5, juce::Justification::centred, false);
+        g.drawText("1", highpassX - textOffset5, handleY5 - textOffset5, 7.0f * scaleFactor5, 7.0f * scaleFactor5, juce::Justification::centred, false);
     }
     else
     {
@@ -1660,13 +1703,11 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setColour(outlineColor2);
         g.drawEllipse(lowpassX - innerOutlineSize6 / 2.0f, handleY6 - innerOutlineSize6 / 2.0f, innerOutlineSize6, innerOutlineSize6, outlineThickness2);
 
-        // Draw the label for Lowpass
-        g.setColour(juce::Colours::black);
+        // Draw the label for Band 8 (lowpass slot)
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor6);  // Apply scale factor to font size
         float textOffset6 = 3.5f * scaleFactor6;  // Apply scale factor to text position
-        const char* lpLabel = (lpType == FilterType::lowpass)  ? "LP"
-                            : (lpType == FilterType::highpass) ? "HP" : "8";
-        g.drawText(lpLabel, lowpassX - textOffset6, handleY6 - textOffset6, 7.0f * scaleFactor6, 7.0f * scaleFactor6, juce::Justification::centred, false);
+        g.drawText("8", lowpassX - textOffset6, handleY6 - textOffset6, 7.0f * scaleFactor6, 7.0f * scaleFactor6, juce::Justification::centred, false);
     }
     else
     {
@@ -1724,10 +1765,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.drawEllipse(highShelfX - innerOutlineSize7 / 2.0f, highShelfY - innerOutlineSize7 / 2.0f, innerOutlineSize7, innerOutlineSize7, outlineThickness2);
 
         // Draw the label for High Shelf
-        g.setColour(juce::Colours::black);
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor7);  // Apply scale factor to font size
         float textOffset7 = 3.5f * scaleFactor7;  // Apply scale factor to text position
-        g.drawText("HS", highShelfX - textOffset7, highShelfY - textOffset7, 7.0f * scaleFactor7, 7.0f * scaleFactor7, juce::Justification::centred, false);
+        g.drawText("7", highShelfX - textOffset7, highShelfY - textOffset7, 7.0f * scaleFactor7, 7.0f * scaleFactor7, juce::Justification::centred, false);
     }
     else
     {
@@ -1785,10 +1826,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.drawEllipse(lowShelfX - innerOutlineSize8 / 2.0f, lowShelfY - innerOutlineSize8 / 2.0f, innerOutlineSize8, innerOutlineSize8, outlineThickness2);
 
         // Draw the label for Low Shelf
-        g.setColour(juce::Colours::black);
+        g.setColour(theme.graphHandleText);
         g.setFont(11.0f * scaleFactor8);  // Apply scale factor to font size
         float textOffset8 = 3.5f * scaleFactor8;  // Apply scale factor to text position
-        g.drawText("LS", lowShelfX - textOffset8, lowShelfY - textOffset8, 7.0f * scaleFactor8, 7.0f * scaleFactor8, juce::Justification::centred, false);
+        g.drawText("2", lowShelfX - textOffset8, lowShelfY - textOffset8, 7.0f * scaleFactor8, 7.0f * scaleFactor8, juce::Justification::centred, false);
     }
     else
     {
@@ -1804,7 +1845,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
 // Crosshairs
     if (isShowCrosshair() && mouseInside && !isAnyHandleMouseOver && !optionBoxMenu->isVisible()) {
-        g.setColour(juce::Colour(229, 189, 128));  // Medium/Dark grey
+        g.setColour (theme.graphHandleText);  // Medium/Dark grey
         g.drawLine(cursorX, 0, cursorX, getHeight(), 1.0f);
         g.drawLine(0, cursorY, getWidth(), cursorY, 1.0f);
     }
@@ -1863,7 +1904,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     const float fontSize = isAnyHandleMouseOver ? 9.8f : 10.5f;
     juce::Font readoutFont ("Lato Black", fontSize, juce::Font::plain);
     g.setFont (readoutFont);
-    g.setColour (juce::Colours::whitesmoke.withAlpha (0.8f));
+    g.setColour (theme.graphAxisText.withAlpha (0.8f));
 
     const juce::String readoutBandName = (activeBand >= 0 && activeBand < 8)
         ? juce::String (arrayBandName[activeBand])
@@ -1907,8 +1948,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     // Draw the rounded rectangle box only if a handle is hovered over, being dragged, or optionBoxMenu is not visible
     if (!optionBoxMenu->isVisible() && (isAnyHandleMouseOver || anyHandleDragging)) {
         // New code for rounded rectangle background
-        juce::Colour customColor = juce::Colour::fromRGBA(65, 60, 55, 160); // RGBA with alpha 0.4
-        juce::Colour borderColor = juce::Colour::fromRGBA(20, 10, 5, 150); // A bit darker and more opaque
+        juce::Colour customColor = theme.graphOverlayBackground;
+        juce::Colour borderColor = theme.graphOverlayBorder;
         float borderRadius = 2.0f; // Rounded corner radius
         float borderWidth = 2.0f; // Border width
         float padding = 5.0f; // Padding around text
@@ -1942,7 +1983,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
 
-    g.setColour (juce::Colours::whitesmoke.withAlpha (0.8f));
+    g.setColour (theme.graphAxisText.withAlpha (0.8f));
 
     // Draw band name + dB / Hz / Q without ellipses (width already measured to fit)
     if (! optionBoxMenu->isVisible() && (isAnyHandleMouseOver || anyHandleDragging) && readoutBandName.isNotEmpty())
@@ -4251,44 +4292,40 @@ juce::Path FrequencyResponseComponent::intelligentDownsample(
     const std::vector<float>& compositeResponse,
     int w, int h)
 {
-    // Hardcoded adaptiveThreshold and decimationFactor
-    float adaptiveThreshold = 0.2f;
-    int decimationFactor = 1;
+    juce::ignoreUnused (originalPath);
 
     juce::Path simplifiedPath;
-    if (compositeResponse.empty()) {
+    if (compositeResponse.empty() || w <= 0)
         return simplifiedPath;
-    }
 
-    simplifiedPath.startNewSubPath(0, h / 2);
+    const int numPoints = juce::jmin (w, (int) compositeResponse.size());
+    if (numPoints <= 0)
+        return simplifiedPath;
 
-    float lastX = 0;
-    float lastY = dbToY(compositeResponse[0], float(h));
+    // Open curve at real edge magnitudes. Starting at h/2 and skipping flat
+    // regions made shelves draw a diagonal from 0 dB to the transition.
+    simplifiedPath.startNewSubPath (0.0f, dbToY (compositeResponse[0], (float) h));
 
-    float movingAverageY = lastY;
+    float movingAverageY = dbToY (compositeResponse[0], (float) h);
+    constexpr float adaptiveThreshold = 0.2f;
 
-    for (int i = 5; i < w; i += decimationFactor) {
-        float dB = compositeResponse[i];
-        float newY = dbToY(dB, float(h));
-
-        // Use a simple moving average for this example
+    for (int i = 1; i < numPoints; ++i)
+    {
+        const float newY = dbToY (compositeResponse[(size_t) i], (float) h);
         movingAverageY = 0.8f * movingAverageY + 0.2f * newY;
+        const float error = std::abs (movingAverageY - newY);
 
-        float error = std::abs(movingAverageY - newY);
-
-        if (error > adaptiveThreshold) {
-            simplifiedPath.lineTo(i, newY);
-            lastX = i;
-            lastY = newY;
-
-            // Reset moving average
+        // Keep occasional flat-region samples so shelf asymptotes stay attached
+        // to the graph edges instead of being optimized away.
+        if (error > adaptiveThreshold || (i % 24) == 0)
+        {
+            simplifiedPath.lineTo ((float) i, newY);
             movingAverageY = newY;
         }
     }
 
-    // Complete the path to the right edge
-    simplifiedPath.lineTo(w, h / 2);
-
+    const int last = numPoints - 1;
+    simplifiedPath.lineTo ((float) last, dbToY (compositeResponse[(size_t) last], (float) h));
 
     return simplifiedPath;
 }
@@ -4434,30 +4471,43 @@ juce::Path FrequencyResponseComponent::simpleDownsample(
     int downsampleFactor
 )
 {
+    juce::ignoreUnused (originalPath);
+
     juce::Path simplifiedPath;
 
-    if (compositeResponse.empty() || downsampleFactor <= 0) {
+    if (compositeResponse.empty() || downsampleFactor <= 0 || w <= 0)
         return simplifiedPath;
-    }
 
-    // Start the path at (0, h / 2)
-    simplifiedPath.startNewSubPath(0, h / 2);
+    const int numPoints = juce::jmin (w, (int) compositeResponse.size());
+    if (numPoints <= 0)
+        return simplifiedPath;
 
-    // Add points to the path
-    for (int i = 0; i < w; i += downsampleFactor) {
-        if (i < compositeResponse.size()) {
-            float dataPoint = compositeResponse[i];
-            float newY = dbToY(dataPoint, float(h));
-            simplifiedPath.lineTo(i, newY);
-        }
-    }
+    // Open curve at real edge magnitudes so low-shelf left / high-shelf right
+    // asymptotes meet the graph sides (fill is closed separately via 0 dB).
+    simplifiedPath.startNewSubPath (0.0f, dbToY (compositeResponse[0], (float) h));
 
-    // Close the path by linking the last point to (w, h / 2) and then to the start point (0, h / 2)
-    simplifiedPath.lineTo(w, h / 2);
-    simplifiedPath.lineTo(0, h / 2);
-    simplifiedPath.closeSubPath();
+    for (int i = downsampleFactor; i < numPoints; i += downsampleFactor)
+        simplifiedPath.lineTo ((float) i, dbToY (compositeResponse[(size_t) i], (float) h));
+
+    const int last = numPoints - 1;
+    if (last > 0)
+        simplifiedPath.lineTo ((float) last, dbToY (compositeResponse[(size_t) last], (float) h));
 
     return simplifiedPath;
+}
+
+juce::Path FrequencyResponseComponent::closeShelfFillPath (const juce::Path& curvePath, float height) const
+{
+    if (curvePath.isEmpty())
+        return {};
+
+    juce::Path fillPath (curvePath);
+    const auto end = fillPath.getCurrentPosition();
+    const float midY = height * 0.5f;
+    fillPath.lineTo (end.x, midY);
+    fillPath.lineTo (0.0f, midY);
+    fillPath.closeSubPath();
+    return fillPath;
 }
 
 //==============================================================================

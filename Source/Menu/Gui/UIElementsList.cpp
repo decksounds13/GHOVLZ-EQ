@@ -1,28 +1,26 @@
 #include "UIElementsList.h"
 #include "AppearanceComponent.h"
+#include "../ThemeColorRegistry.h"
+#include <algorithm>
 
 UIElementsList::UIElementsList(SharedResources& resources)
     : sharedResources(resources), selectedRow(-1)
 {
     customHeader = std::make_unique<CustomHeader2>(sharedResources);
+    customHeader->addListener (this);
 
     addAndMakeVisible(listBox);
 
     listBox.setModel(this);
     needsRepaint = true;
 
-    // Pass the ListBox reference to the CustomScrollBar constructor
     customScrollBar = std::make_unique<CustomScrollBar>(listBox);
-
-    // Set the custom LookAndFeel for the ListBox
-    // listBox.setLookAndFeel(&customScrollBarLookAndFeel);
 
     listBox.setColour(juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
     listBox.updateContent();
     listBox.repaint();
     listBox.setVisible(true);
      listBox.setRepaintsOnMouseActivity(false);
-    //listBox.setClickingTogglesRowSelection(true);
     listBox.setMultipleSelectionEnabled(true);
 
 
@@ -34,13 +32,13 @@ UIElementsList::UIElementsList(SharedResources& resources)
     juce::Colour menuScrollBarThumbColor1 = sharedResources.sharedColors.menuScrollBarThumbColor1;
     juce::Colour menuThinBorderColor = sharedResources.sharedColors.menuThinBorderColor;
 
-    customScrollBar->setTrackBackgroundColour(menuScrollBarTrackColor1);  // Track color
-    customScrollBar->setThumbBackgroundColour(menuScrollBarThumbColor1);  // Thumb color
-    customScrollBar->setThumbOutlineColour(menuThinBorderColor);     // Thumb outline color
+    customScrollBar->setTrackBackgroundColour(menuScrollBarTrackColor1);
+    customScrollBar->setThumbBackgroundColour(menuScrollBarThumbColor1);
+    customScrollBar->setThumbOutlineColour(menuThinBorderColor);
     customScrollBar->repaint();
 
     selectedRow = 0;
-    notifyListenersOfSelection();  // Notify listeners about the initial selection
+    notifyListenersOfSelection();
 
     juce::Colour gradientColor1 = sharedResources.sharedColors.menuListBoxBackgroundGradientColor1;
     juce::Colour gradientColor2 = sharedResources.sharedColors.menuListBoxBackgroundGradientColor2;
@@ -175,71 +173,11 @@ void UIElementsList::paintListBoxItem(int rowNumber, juce::Graphics& g,
     {
         auto element = uiElements[rowNumber];  // Use a copy instead of a reference
 
-        // Fetch the color directly from SharedResources
-        if (element.name == "Menu Background")
-        {
-            element.color = sharedResources.sharedColors.menuBackgroundGradientColor1;
-        }
-        else if (element.name == "Menu Background 2")
-        {
-            element.color = sharedResources.sharedColors.menuBackgroundGradientColor2;
-        }
-        else if (element.name == "Menu ListBox Background")
-        {
-            element.color = sharedResources.sharedColors.menuListBoxBackgroundGradientColor1;
-        }
-        else if (element.name == "Menu ListBox Background 2")
-        {
-            element.color = sharedResources.sharedColors.menuListBoxBackgroundGradientColor2;
-        }
-        else if (element.name == "Menu Border")
-        {
-            element.color = sharedResources.sharedColors.menuTabBarBorderColor;
-        }
-        else if (element.name == "Menu Thin Border")
-        {
-            element.color = sharedResources.sharedColors.menuThinBorderColor;
-        }
-        else if (element.name == "Menu Button Background")
-        {
-            element.color = sharedResources.sharedColors.menuButtonGradientColor1;
-        }
-        else if (element.name == "Menu Button Background 2")
-        {
-            element.color = sharedResources.sharedColors.menuButtonGradientColor2;
-        }
-        else if (element.name == "Menu Button Text")
-        {
-            element.color = sharedResources.sharedColors.menuButtonTextColor1;
-        }
-        else if (element.name == "Menu Label Text")
-        {
-            element.color = sharedResources.sharedColors.menuLabelTextColor1;
-        }
-        else if (element.name == "Menu Scroll Track")
-        {
-            element.color = sharedResources.sharedColors.menuScrollBarTrackColor1;
-        }
-        else if (element.name == "Menu Scroll Thumb")
-        {
-            element.color = sharedResources.sharedColors.menuScrollBarThumbColor1;
-        }
-        else if (element.name == "Menu Scroll Outline")
-        {
-            element.color = sharedResources.sharedColors.menuScrollBarOutlineColor1;
-        }
-        else if (element.name == "Menu ListBox Text")
-        {
-            element.color = sharedResources.sharedColors.menuListBoxTextColor1;
-        }
-        else if (element.name == "Menu ListBox Selection")
-        {
-            element.color = sharedResources.sharedColors.menuListBoxSelectionColor1;
-        }
-        else if (element.name == "Menu TextBox Text")
-        {
-            element.color = sharedResources.sharedColors.menuTextBoxTextColor1;
-        }
+        // Fetch the live colour from SharedResources by palette index / name
+        if (element.paletteIndex >= 0 && element.paletteIndex < sharedResources.sharedColors.getNumColors())
+            element.color = sharedResources.sharedColors.colourAt (element.paletteIndex);
+        else if (auto* c = sharedResources.sharedColors.findByDisplayName (element.name))
+            element.color = *c;
 
         float cornerSize = 0.0f;
         const int innerMargin = 1;
@@ -325,79 +263,17 @@ void UIElementsList::paintListBoxItem(int rowNumber, juce::Graphics& g,
 
 juce::Colour UIElementsList::getElementColor(int row)
 {
-    if (row < uiElements.size())
+    if (row >= 0 && row < uiElements.size())
     {
-        juce::String elementName = uiElements[row].name;
-
-        if (elementName == "Menu Background")
-        {
-            return sharedResources.sharedColors.menuBackgroundGradientColor1;
-        }
-        else if (elementName == "Menu Background 2")
-        {
-            return sharedResources.sharedColors.menuBackgroundGradientColor2;
-        }
-        else if (elementName == "Menu ListBox Background")
-        {
-            return sharedResources.sharedColors.menuListBoxBackgroundGradientColor1;
-        }
-        else if (elementName == "Menu ListBox Background 2")
-        {
-            return sharedResources.sharedColors.menuListBoxBackgroundGradientColor2;
-        }
-        else if (elementName == "Menu Border")
-        {
-            return sharedResources.sharedColors.menuTabBarBorderColor;
-        }
-        else if (elementName == "Menu Thin Border")
-        {
-            return sharedResources.sharedColors.menuThinBorderColor;
-        }
-        else if (elementName == "Menu Button Background")
-        {
-            return sharedResources.sharedColors.menuButtonGradientColor1;
-        }
-        else if (elementName == "Menu Button Background 2")
-        {
-            return sharedResources.sharedColors.menuButtonGradientColor2;
-        }
-        else if (elementName == "Menu Button Text")
-        {
-            return sharedResources.sharedColors.menuButtonTextColor1;
-        }
-        else if (elementName == "Menu Label Text")
-        {
-            return sharedResources.sharedColors.menuLabelTextColor1;
-        }
-        else if (elementName == "Menu Scroll Track")
-        {
-            return sharedResources.sharedColors.menuScrollBarTrackColor1;
-        }
-        else if (elementName == "Menu Scroll Thumb")
-        {
-            return sharedResources.sharedColors.menuScrollBarThumbColor1;
-        }
-        else if (elementName == "Menu Scroll Outline")
-        {
-            return sharedResources.sharedColors.menuScrollBarOutlineColor1;
-        }
-        else if (elementName == "Menu ListBox Text")
-        {
-            return sharedResources.sharedColors.menuListBoxTextColor1;
-        }
-        else if (elementName == "Menu ListBox Selection")
-        {
-            return sharedResources.sharedColors.menuListBoxSelectionColor1;
-        }
-        else if (elementName == "Menu TextBox Text")
-        {
-            return sharedResources.sharedColors.menuTextBoxTextColor1;
-        }
-
-        // Add more conditions here if you have more elements
+        const int pi = uiElements[row].paletteIndex;
+        if (pi >= 0 && pi < sharedResources.sharedColors.getNumColors())
+            return sharedResources.sharedColors.colourAt (pi);
+        if (auto* c = sharedResources.sharedColors.findByDisplayName (uiElements[row].name))
+            return *c;
+        return uiElements[row].color;
     }
 
-    return juce::Colours::rebeccapurple; // Default color if no match is found
+    return juce::Colours::rebeccapurple;
 }
 
 void UIElementsList::listBoxItemClicked(int row, const juce::MouseEvent&)
@@ -441,18 +317,116 @@ void UIElementsList::selectAndNotify(int row, bool shouldNotifyListeners)
 
 void UIElementsList::addElement(const juce::String& name, const juce::Colour& color)
 {
+    addElement (name, color, ThemeColorRegistry::indexForDisplayName (name));
+}
+
+void UIElementsList::addElement(const juce::String& name, const juce::Colour& color, int paletteIndex)
+{
     needsRepaint = true;
-    uiElements.add({ name, color });
-    DBG("Element added: " + name + ", Color: " + color.toString());  // Debugging statement
+    uiElements.add ({ name, color, paletteIndex });
     listBox.updateContent();
 
-    // Initialize the selectedRow if it hasn't been set yet
     if (selectedRow == -1)
     {
         selectedRow = 0;
-        notifyListenersOfSelection();  // Notify listeners about the initial selection
+        notifyListenersOfSelection();
     }
     listBox.updateContent();
+}
+
+void UIElementsList::populateFromRegistry()
+{
+    uiElements.clearQuick();
+    const auto* entries = ThemeColorRegistry::getEntries();
+    const int n = ThemeColorRegistry::getNumEntries();
+    for (int i = 0; i < n; ++i)
+        uiElements.add ({ entries[i].displayName, sharedResources.sharedColors.colourAt (i), i });
+
+    nameSortActive = false;
+    nameSortAscending = true;
+    if (customHeader)
+        customHeader->setSortIndicator (false, true);
+
+    selectedRow = uiElements.isEmpty() ? -1 : 0;
+    listBox.updateContent();
+    listBox.deselectAllRows();
+    if (selectedRow >= 0)
+        listBox.selectRow (selectedRow);
+    notifyListenersOfSelection();
+}
+
+void UIElementsList::sortByElementName()
+{
+    if (uiElements.isEmpty())
+        return;
+
+    // Preserve selection by palette index across reordering.
+    juce::Array<int> selectedPalette;
+    for (auto row : getSelectedRows())
+        if (auto pi = getPaletteIndexForRow (row); pi >= 0)
+            selectedPalette.add (pi);
+
+    const int anchorPalette = getPaletteIndexForRow (selectedRow);
+
+    if (! nameSortActive)
+    {
+        nameSortActive = true;
+        nameSortAscending = true;
+    }
+    else
+    {
+        nameSortAscending = ! nameSortAscending;
+    }
+
+    std::sort (uiElements.begin(), uiElements.end(),
+               [this] (const UIElement& a, const UIElement& b)
+               {
+                   const int cmp = a.name.compareIgnoreCase (b.name);
+                   return nameSortAscending ? (cmp < 0) : (cmp > 0);
+               });
+
+    if (customHeader)
+        customHeader->setSortIndicator (true, nameSortAscending);
+
+    listBox.deselectAllRows();
+    selectedRow = -1;
+    for (int i = 0; i < uiElements.size(); ++i)
+    {
+        if (selectedPalette.contains (uiElements[i].paletteIndex))
+            listBox.selectRow (i, true, false);
+        if (uiElements[i].paletteIndex == anchorPalette)
+            selectedRow = i;
+    }
+    if (selectedRow < 0 && ! uiElements.isEmpty())
+        selectedRow = 0;
+
+    listBox.updateContent();
+    listBox.repaint();
+    notifyListenersOfSelection();
+}
+
+void UIElementsList::elementNameHeaderClicked()
+{
+    sortByElementName();
+}
+
+int UIElementsList::getPaletteIndexForRow (int row) const
+{
+    if (row >= 0 && row < uiElements.size())
+        return uiElements[row].paletteIndex;
+    return -1;
+}
+
+juce::Array<int> UIElementsList::getSelectedPaletteIndices()
+{
+    juce::Array<int> result;
+    for (auto row : getSelectedRows())
+    {
+        const int pi = getPaletteIndexForRow (row);
+        if (pi >= 0)
+            result.add (pi);
+    }
+    return result;
 }
 
 void UIElementsList::updateSelectedElementColor(const juce::Colour& newColor)

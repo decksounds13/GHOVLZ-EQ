@@ -1,6 +1,6 @@
-
 #pragma once
 #include <JuceHeader.h>
+#include "Menu/SharedResources.h"
 
 class EqEditor;
 
@@ -21,6 +21,8 @@ public:
     void setMinValue(float newMinValue) { minValue = newMinValue; }
     void setMaxValue(float newMaxValue) { maxValue = newMaxValue; }
 
+    void setThemeColors (SharedResources* r) noexcept { themeColors = r; }
+
 
 private:
     juce::Image knobImage;
@@ -30,5 +32,7 @@ private:
     int frames;
     float minValue;
     float maxValue;
+
+    SharedResources* themeColors = nullptr;
 
 };

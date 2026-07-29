@@ -31,6 +31,12 @@ VerticalGradientMeter::~VerticalGradientMeter()
     stopTimer();
 }
 
+const SharedColors& VerticalGradientMeter::colors() const noexcept
+{
+    static const SharedColors defaultColors;
+    return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+}
+
 VerticalGradientMeter::MeterMode VerticalGradientMeter::getMeterMode() const
 {
     if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter ("METER_MODE_ID")))
@@ -99,10 +105,11 @@ juce::Rectangle<float> VerticalGradientMeter::getChannelLabelBounds() const
 
 void VerticalGradientMeter::paint (juce::Graphics& g)
 {
+    const auto& theme = colors();
     const auto bounds = getMeterBodyBounds();
     const auto mode = getMeterMode();
 
-    const juce::Colour customColor = juce::Colour::fromRGBA (55, 45, 40, 100);
+    const juce::Colour customColor = theme.meterBackground.withAlpha (100.0f / 255.0f);
     g.setColour (customColor);
     g.fillRect (bounds);
 
@@ -122,7 +129,7 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
     if (showRms)
     {
         const float rmsAlpha = mode == MeterMode::PeakAndRms ? 0.55f : 1.0f;
-        g.setColour (juce::Colour::fromRGBA (250, 200, 120, static_cast<juce::uint8> (200.0f * rmsAlpha)));
+        g.setColour (theme.meterFill.withAlpha (rmsAlpha));
         const float scaledY = dbToY (displayedRmsDb, bounds.getHeight());
         const float barW = mode == MeterMode::PeakAndRms
                                ? juce::jmax (2.0f, bounds.getWidth() * 0.45f)
@@ -135,11 +142,11 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
     if (showPeak && peakHoldDb > kMeterFloorDb + 0.5f)
     {
         const float y = bounds.getBottom() - dbToY (peakHoldDb, bounds.getHeight());
-        g.setColour (juce::Colours::whitesmoke.withAlpha (0.85f));
+        g.setColour (theme.graphAxisText.withAlpha (0.85f));
         g.fillRect (bounds.getX(), y - 1.0f, bounds.getWidth(), 2.0f);
     }
 
-    g.setColour (clipState.clipping ? juce::Colour::fromRGBA (250, 100, 100, 250)
+    g.setColour (clipState.clipping ? theme.meterClip
                                     : customColor);
     g.fillRect (getClipIndicatorBounds());
 
@@ -147,12 +154,12 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
     const float textDb = std::max (readoutDb, -99.9f);
     const auto text = juce::String (textDb, 1);
     g.setFont (juce::FontOptions ("Lato Black", 10.0f, juce::Font::plain));
-    g.setColour (clipState.clipping ? juce::Colour::fromRGBA (250, 100, 100, 250)
-                                    : juce::Colours::whitesmoke.withAlpha (0.9f));
+    g.setColour (clipState.clipping ? theme.meterClip
+                                    : theme.pluginButtonText.withAlpha (0.9f));
     g.drawText (text, getReadoutBounds(), juce::Justification::centred, false);
 
     g.setFont (juce::FontOptions ("Lato Black", 11.0f, juce::Font::plain));
-    g.setColour (juce::Colours::whitesmoke.withAlpha (0.75f));
+    g.setColour (theme.graphAxisText.withAlpha (0.75f));
     g.drawText (getChannelLabel(), getChannelLabelBounds(), juce::Justification::centred, false);
 }
 
@@ -238,10 +245,11 @@ void VerticalGradientMeter::timerCallback()
 
 void VerticalGradientMeter::resized()
 {
+    const auto& theme = colors();
     const auto bounds = getLocalBounds().toFloat();
-    gradient2 = juce::ColourGradient { juce::Colour::fromRGBA (140, 120, 90, 150),
+    gradient2 = juce::ColourGradient { theme.meterFill.withAlpha (150.0f / 255.0f),
                                        bounds.getBottomLeft(),
-                                       juce::Colour::fromRGBA (250, 130, 30, 230),
+                                       theme.meterFill.brighter (0.2f).withAlpha (230.0f / 255.0f),
                                        bounds.getTopLeft(),
                                        false };
 }

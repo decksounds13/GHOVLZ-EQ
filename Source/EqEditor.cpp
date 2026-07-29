@@ -722,21 +722,21 @@ EqEditor::~EqEditor()
 
 void EqEditor::paint(juce::Graphics& g)
 {
+    const auto& pal = themePalette();
+
     if (uiCompact)
     {
-        g.fillAll (juce::Colours::black);
+        g.fillAll (pal.pluginBackground);
 
         const int titleBarHeight = getTopBandHeight();
-        juce::Colour titleBarColor = juce::Colour::fromRGB (110, 90, 80);
-        juce::Colour titleBarColor2 = juce::Colour::fromRGB (10, 10, 10);
-        juce::ColourGradient gradient2 (titleBarColor,
+        juce::ColourGradient gradient2 (pal.pluginButtonBackground,
             juce::Point<float> ((float) getWidth() * 0.5f, 0.0f),
-            titleBarColor2,
+            pal.pluginBackground,
             juce::Point<float> ((float) getWidth(), (float) getHeight()),
             true);
         g.setGradientFill (gradient2);
         g.fillRect (0, 0, getWidth(), titleBarHeight);
-        g.setColour (juce::Colours::black);
+        g.setColour (pal.pluginBackground);
         g.drawLine (0.0f, (float) titleBarHeight, (float) getWidth(), (float) titleBarHeight, 4.0f);
         return;
     }
@@ -766,61 +766,27 @@ void EqEditor::paint(juce::Graphics& g)
     }
     const int titleBarY = titleBarHeight + graphH + modHForLayout;
 
-
-    // Define custom RGB colors
-    juce::Colour color1 = juce::Colour::fromRGB(70, 50, 35);  // Inner color
-    juce::Colour color2 = juce::Colour::fromRGB(0, 0, 0); // Outer color
-
-    // Create a ColourGradient object
-    juce::ColourGradient gradient(color1,                           // Inner color
-        juce::Point<float>(static_cast<float>(getWidth()) / 2.0f, 0.0f),                          // Start position (top-left corner)
-        color2,                           // Outer color
-        juce::Point<float>(static_cast<float>(getWidth()), static_cast<float>(getHeight())), // End position (bottom-right corner)
-        true);                            // Radial gradient
-
-
-    g.setGradientFill(gradient);
-    g.fillRect(0, 0, getWidth(), getHeight());
-
-
-
-
-// Define custom RGB colors
-    juce::Colour faceplateColor1 = juce::Colour::fromRGB(20, 15, 10);  // Inner color
-    juce::Colour faceplaceColor2 = juce::Colour::fromRGB(0, 0, 0); // Outer color
-
-    // Create a ColourGradient object
-    juce::ColourGradient gradient3(faceplateColor1,                           // Inner color
-        juce::Point<float>(static_cast<float>(getWidth()) / 2.0f, 0.0f),                          // Start position (top-left corner)
-        faceplaceColor2,                           // Outer color
-        juce::Point<float>(static_cast<float>(getWidth()), static_cast<float>(getHeight())), // End position (bottom-right corner)
-        true);                            // Radial gradient
-
-
-    g.setGradientFill(gradient);
-    g.fillRect(0, 0, getWidth(), getHeight());
-    g.fillRect(0, 0, getWidth(), getHeight());
-  
-
-    // Title Bar Colors
-    juce::Colour titleBarColor = juce::Colour::fromRGB(110, 90, 80);  // Inner color
-    juce::Colour titleBarColor2 = juce::Colour::fromRGB(10, 10, 10); // Outer color
-
-    juce::ColourGradient gradient2(titleBarColor,
-        juce::Point<float>(static_cast<float>(getWidth()) / 2.0f, 0.0f),
-        titleBarColor2,
-        juce::Point<float>(static_cast<float>(getWidth()), static_cast<float>(getHeight())),
+    juce::ColourGradient bodyGrad (pal.pluginBackground2,
+        juce::Point<float> ((float) getWidth() * 0.5f, 0.0f),
+        pal.pluginBackground,
+        juce::Point<float> ((float) getWidth(), (float) getHeight()),
         true);
+    g.setGradientFill (bodyGrad);
+    g.fillRect (0, 0, getWidth(), getHeight());
 
-    g.setGradientFill(gradient2);
-    g.fillRect(0, 0, getWidth(), titleBarHeight);
-    g.fillRect(0, titleBarY, getWidth(), titleBarHeight);
-    g.fillRect(0, getHeight() - trimH, getWidth(), trimH);
+    juce::ColourGradient chromeGrad (pal.pluginButtonBackground,
+        juce::Point<float> ((float) getWidth() * 0.5f, 0.0f),
+        pal.pluginBackground,
+        juce::Point<float> ((float) getWidth(), (float) getHeight()),
+        true);
+    g.setGradientFill (chromeGrad);
+    g.fillRect (0, 0, getWidth(), titleBarHeight);
+    g.fillRect (0, titleBarY, getWidth(), titleBarHeight);
+    g.fillRect (0, getHeight() - trimH, getWidth(), trimH);
 
-    g.setColour(color2);
-
-    g.drawLine(0, titleBarHeight, getWidth(), titleBarHeight, 4);
-    g.drawLine(0, titleBarY + titleBarHeight, getWidth(), titleBarY + titleBarHeight, 2);
+    g.setColour (pal.pluginBackground);
+    g.drawLine (0.0f, (float) titleBarHeight, (float) getWidth(), (float) titleBarHeight, 4.0f);
+    g.drawLine (0.0f, (float) (titleBarY + titleBarHeight), (float) getWidth(), (float) (titleBarY + titleBarHeight), 2.0f);
 }
 
 
@@ -1551,6 +1517,7 @@ void EqEditor::loadUiPrefs()
 {
     tooltipsEnabled = true;
     bool ecoEnabled = false;
+    bool disableGlow = false;
 
     const auto file = getUiPrefsFile();
     if (file.existsAsFile())
@@ -1561,12 +1528,16 @@ void EqEditor::loadUiPrefs()
             {
                 tooltipsEnabled = xml->getBoolAttribute ("tooltipsEnabled", true);
                 ecoEnabled = xml->getBoolAttribute ("ecoEnabled", false);
+                disableGlow = xml->getBoolAttribute ("disableGlowShadowEffects", false);
             }
         }
     }
 
     if (mainComponent != nullptr)
+    {
         mainComponent->setEcoMode (ecoEnabled, false);
+        mainComponent->setDisableGlowShadowEffects (disableGlow, false);
+    }
 }
 
 void EqEditor::saveUiPrefs() const
@@ -1574,6 +1545,8 @@ void EqEditor::saveUiPrefs() const
     auto xml = std::make_unique<juce::XmlElement> ("UiPrefs");
     xml->setAttribute ("tooltipsEnabled", tooltipsEnabled);
     xml->setAttribute ("ecoEnabled", mainComponent != nullptr && mainComponent->isEcoMode());
+    xml->setAttribute ("disableGlowShadowEffects",
+                       mainComponent != nullptr && mainComponent->areGlowShadowEffectsDisabled());
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
 
     auto file = getUiPrefsFile();
@@ -2064,6 +2037,118 @@ void EqEditor::toggleCompactUi()
 {
     uiCompact = ! uiCompact;
     applyCompactUi();
+}
+
+const SharedColors& EqEditor::themePalette() const noexcept
+{
+    if (themeColors != nullptr)
+        return themeColors->sharedColors;
+    if (auto* active = SharedResources::getActive())
+        return active->sharedColors;
+    static const SharedColors defaults;
+    return defaults;
+}
+
+void EqEditor::applyFaceplateTheme()
+{
+    const auto& c = themePalette();
+    brandWordmark.setBrandColour (c.pluginBrandText);
+
+    auto styleChrome = [&c] (juce::TextButton& b)
+    {
+        b.setColour (juce::TextButton::buttonColourId, c.pluginButtonBackground);
+        b.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
+        b.setColour (juce::TextButton::textColourOffId, c.pluginButtonText.withAlpha (0.85f));
+        b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b.repaint();
+    };
+
+    styleChrome (helpTooltipsButton);
+    styleChrome (autoGainButton);
+    styleChrome (sideCheckButton);
+    styleChrome (sideCheckSpeedButton);
+    styleChrome (sideCheckHqButton);
+
+    const auto labelColour = c.pluginButtonText.withAlpha (0.85f);
+    auto themeLabel = [labelColour] (juce::Label& lab)
+    {
+        lab.setColour (juce::Label::textColourId, labelColour);
+        lab.repaint();
+    };
+
+    themeLabel (bandNumberLabel1);
+    themeLabel (bandNumberLabel2);
+    themeLabel (bandNumberLabel3);
+    themeLabel (bandNumberLabel4);
+    themeLabel (bandNumberLabel5);
+    themeLabel (bandNumberLabel6);
+    themeLabel (bandNumberLabel7);
+    themeLabel (bandNumberLabel8);
+    themeLabel (sideCheckHpLabel);
+    themeLabel (sideCheckLpLabel);
+
+    // Power buttons: off = dimmed knob arc; on = brighter (OnOffButton paint).
+    const auto powerColour = c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f);
+    auto themePower = [powerColour] (std::unique_ptr<OnOffButton1>& b)
+    {
+        if (b != nullptr)
+        {
+            b->setBaseColor (powerColour);
+            b->repaint();
+        }
+    };
+    themePower (onOffButton1);
+    themePower (onOffButton2);
+    themePower (onOffButton3);
+    themePower (onOffButton4);
+    themePower (onOffButton5);
+    themePower (onOffButton6);
+    themePower (onOffButton7);
+    themePower (onOffButton8);
+}
+
+void EqEditor::setThemeColors (SharedResources* r) noexcept
+{
+    themeColors = r;
+    auto applyKnob = [r] (auto& knob)
+    {
+        knob.setThemeColors (r);
+        knob.repaint();
+    };
+
+    applyKnob (knob1);
+    applyKnob (knobHpGain);
+    applyKnob (knob2);
+    applyKnob (knob3);
+    applyKnob (knobLpGain);
+    applyKnob (knob4);
+    applyKnob (knob5);
+    applyKnob (knob6);
+    applyKnob (knob7);
+    applyKnob (knob8);
+    applyKnob (knob9);
+    applyKnob (knob10);
+    applyKnob (knob11);
+    applyKnob (knob12);
+    applyKnob (knob13);
+    applyKnob (knob14);
+    applyKnob (knob15);
+    applyKnob (knob16);
+    applyKnob (knob17);
+    applyKnob (knob18);
+    applyKnob (knob19);
+    applyKnob (knob20);
+    applyKnob (knob21);
+    applyKnob (knob22);
+    applyKnob (outputGainKnob);
+    applyKnob (sideCheckHpKnob);
+    applyKnob (sideCheckLpKnob);
+
+    if (modSection != nullptr)
+        modSection->setThemeColors (r);
+
+    applyFaceplateTheme();
+    repaint();
 }
 
 void EqEditor::toggleModPanel()

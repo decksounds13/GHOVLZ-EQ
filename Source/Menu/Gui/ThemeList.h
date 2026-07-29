@@ -50,6 +50,8 @@ public:
     void createDefaultPreset();
     void overwritePreset (int index, const juce::String& name);
     void deletePreset (int index);
+    /** Copy an existing UI theme (including Default) into a new uniquely named entry. */
+    void duplicatePreset (int index);
     /** Rename in-place (keeps colours/state); blocked for Default (index 0). */
     void renamePreset (int index, const juce::String& newName);
     /**

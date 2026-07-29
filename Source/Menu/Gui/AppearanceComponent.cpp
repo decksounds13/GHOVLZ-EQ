@@ -1,5 +1,9 @@
 #include "AppearanceComponent.h"
+#include "../ThemeColorRegistry.h"
+#include <algorithm>
+#include <cstdint>
 #include "../../TextButtonLookAndFeel.h"
+#include "../../ComboBoxLookAndFeel.h"
 #include "QuadPickerOverlayComponent.h"
 #include "../Menu.h"  
 
@@ -41,7 +45,7 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	// Apply theme colors to customTwoValueSliderLookAndFeel
 	customTwoValueSliderLookAndFeel.applyThemeColors(
 		sharedResources.sharedColors.menuScrollBarTrackColor1,
-		sharedResources.sharedColors.menuListBoxSelectionColor1,
+		sharedResources.sharedColors.menuSliderFillColor,
 		sharedResources.sharedColors.menuBackgroundGradientColor1);
 
 	// Link the ThemeList to the UIElementsList
@@ -237,17 +241,17 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 
 
 	randomizeSelectedColorsButton.onClick = [this] {
-		auto selectedIndices = uiElementsList.getSelectedRows();
-		DBG("Selected indices for randomization: " + juce::String(selectedIndices.size()));
+		auto selectedIndices = uiElementsList.getSelectedPaletteIndices();
+		DBG("Selected palette indices for randomization: " + juce::String(selectedIndices.size()));
 		auto& sharedColors = sharedResources.sharedColors;
 
-		// Reset all flags to false
-		std::fill(sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), true);
+		// Reset all flags to false (skip) — then enable selected palette slots.
+		std::fill(sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), (uint8_t) 1);
 
-		// Set flags for the selected indices
+		// Set flags for the selected palette indices (0 = randomize; inverted historical semantics)
 		for (auto index : selectedIndices) {
 			if (index >= 0 && index < sharedColors.colorRandomizationFlags.size()) {
-				sharedColors.colorRandomizationFlags[index] = false;
+				sharedColors.colorRandomizationFlags[(size_t) index] = 0;
 			}
 		}
 
@@ -265,7 +269,7 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 		// Randomize the selected colors and get the randomized color
 		juce::Colour randomizedColor = sharedResources.sharedColors.randomizeSelectedColorsWithinRange();
 
-		std::fill(sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), true);
+		std::fill(sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), (uint8_t) 1);
 
 		colorValuesInput.updateSaturationSlider(currentColor.getSaturation() * 255.0f);
 		colorValuesInput.updateBrightnessSlider(currentColor.getBrightness() * 255.0f);
@@ -274,19 +278,6 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 		setupLabels();
 		updateComponents(randomizedColor);
 		updateAllComponents();
-
-		/*
-		sharedColors.randomizeSelectedColorsWithinRange(
-			selectedIndices,                  // juce::Array<int> of selected color indices
-			sharedColors.saturationLowerLimit, // Lower limit for saturation
-			sharedColors.saturationUpperLimit, // Upper limit for saturation
-			true,                             // Individual randomization toggle
-			true,                             // Randomize Hue
-			true,                             // Randomize Saturation
-			true                              // Randomize Brightness
-		);
-
-		*/
 
 		setRangeSliderColors();
 		setSliderLookAndFeels();
@@ -303,6 +294,7 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 
 		// Trigger a repaint of the Menu background with the updated colors
 		repaintParentComponent();
+		notifyThemeLiveChanged();
 		};
 
 
@@ -313,59 +305,17 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 
 		sharedResources.sharedColors.setHueRange(lowerHue, upperHue);
 
-		float brightnessLower = brightnessRangeSlider.getMinValue();
-		float brightnessUpper = brightnessRangeSlider.getMaxValue();
-		float saturationLower = saturationRangeSlider.getMinValue();
-		float saturationUpper = saturationRangeSlider.getMaxValue();
-
-
 		saturationRangeSlider.setMinValue(saturationRangeSlider.getMinValue());
 		saturationRangeSlider.setMaxValue(saturationRangeSlider.getMaxValue());
 
 		brightnessRangeSlider.setMinValue(brightnessRangeSlider.getMinValue());
 		brightnessRangeSlider.setMaxValue(brightnessRangeSlider.getMaxValue());
 
-
-
 		sharedResources.sharedColors.randomizeColors();
-
-		textButtonLookAndFeel.setButtonTextColor(sharedResources.sharedColors.menuButtonTextColor1);
-		textButtonLookAndFeel.setGradientColor1(sharedResources.sharedColors.menuButtonGradientColor1);
-		textButtonLookAndFeel.setGradientColor2(sharedResources.sharedColors.menuButtonGradientColor2);
-		textButtonLookAndFeel.setButtonOutlineColor(sharedResources.sharedColors.menuThinBorderColor);
-
-		textButtonLookAndFeel2.setButtonTextColor(sharedResources.sharedColors.menuButtonTextColor1);
-		textButtonLookAndFeel2.setGradientColor1(sharedResources.sharedColors.menuButtonGradientColor1);
-		textButtonLookAndFeel2.setGradientColor2(sharedResources.sharedColors.menuButtonGradientColor2);
-		textButtonLookAndFeel2.setButtonOutlineColor(sharedResources.sharedColors.menuThinBorderColor);
-
-		customTwoValueSliderLookAndFeel.applyThemeColors(
-			sharedResources.sharedColors.menuScrollBarTrackColor1,
-			sharedResources.sharedColors.menuListBoxSelectionColor1,
-			sharedResources.sharedColors.menuBackgroundGradientColor1);
-
-		colorValuesInput.updateSaturationSlider(currentColor.getSaturation() * 255.0f);
-		colorValuesInput.updateBrightnessSlider(currentColor.getBrightness() * 255.0f);
-		colorValuesInput.updateHueSlider(currentColor.getHue() * 255.0f);
-
-
-		setRangeSliderColors();
-		setupLabels();
-		setButtonLookAndFeels();
-		setSliderLookAndFeels();
-
-		juce::Colour trackColor = sharedResources.sharedColors.menuScrollBarTrackColor1;
-		juce::Colour thumbColor = sharedResources.sharedColors.menuScrollBarThumbColor1;
-		juce::Colour outlineColor = sharedResources.sharedColors.menuScrollBarOutlineColor1;
-
-		themeList.updateScrollBarColors(trackColor, thumbColor, outlineColor);
-		uiElementsList.updateScrollBarColors(trackColor, thumbColor, outlineColor);
-
-		updateAllComponents();
-		repaintComponents();
-		repaintParentComponent();
-
+		refreshAfterRandomize();
 		};
+
+	randomizeColorsButton.onPopupMenu = [this] { showRandomizeScopeMenu(); };
 
 	addAndMakeVisible(randomizeSelectedColorsButton);
 	randomizeSelectedColorsButton.setButtonText("Rand. Sel."); // Setting the button text
@@ -395,28 +345,13 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	randomizeAlphaToggleButton.setLookAndFeel(&textButtonLookAndFeel2); // Applying the custom LookAndFeel
 	randomizeAlphaToggleButton.setClickingTogglesState(true);
 
-	// Add the elements to the UIElementsList in the correct order
-	uiElementsList.addElement("Menu Background", sharedResources.sharedColors.menuBackgroundGradientColor1); // Corresponds to colors[0]
-	uiElementsList.addElement("Menu Background 2", sharedResources.sharedColors.menuBackgroundGradientColor2); // Corresponds to colors[1]
-	uiElementsList.addElement("Menu ListBox Background", sharedResources.sharedColors.menuListBoxBackgroundGradientColor1); // Corresponds to colors[4]
-	uiElementsList.addElement("Menu ListBox Background 2", sharedResources.sharedColors.menuListBoxBackgroundGradientColor2); // Corresponds to colors[5]
-	uiElementsList.addElement("Menu Border", sharedResources.sharedColors.menuTabBarBorderColor); // Corresponds to colors[2]
-	uiElementsList.addElement("Menu Thin Border", sharedResources.sharedColors.menuThinBorderColor); // Corresponds to colors[3]
-	uiElementsList.addElement("Menu Button Background", sharedResources.sharedColors.menuButtonGradientColor1); // Corresponds to colors[6]
-	uiElementsList.addElement("Menu Button Background 2", sharedResources.sharedColors.menuButtonGradientColor2); // Corresponds to colors7]
-	uiElementsList.addElement("Menu Button Text", sharedResources.sharedColors.menuButtonTextColor1); // Corresponds to colors[8]
-	uiElementsList.addElement("Menu Label Text", sharedResources.sharedColors.menuLabelTextColor1); // Corresponds to colors[9]
-	uiElementsList.addElement("Menu Scroll Track", sharedResources.sharedColors.menuScrollBarTrackColor1); // Corresponds to colors[10]
-	uiElementsList.addElement("Menu Scroll Thumb", sharedResources.sharedColors.menuScrollBarThumbColor1); // Corresponds to colors[11]
-	uiElementsList.addElement("Menu Scroll Outline", sharedResources.sharedColors.menuScrollBarOutlineColor1); // Corresponds to colors[12]
-	uiElementsList.addElement("Menu ListBox Text", sharedResources.sharedColors.menuListBoxTextColor1); // Corresponds to colors[13]
-	uiElementsList.addElement("Menu ListBox Selection", sharedResources.sharedColors.menuListBoxSelectionColor1); // Corresponds to colors[14]
-	uiElementsList.addElement("Menu TextBox Text", sharedResources.sharedColors.menuTextBoxTextColor1); // Corresponds to colors[15]
+	// Populate UI Elements from the theme colour registry (sorted A–Z on header click).
+	uiElementsList.populateFromRegistry();
 
 	// Get color of the first item in the list
 	juce::Colour firstItemColor = sharedResources.sharedColors.menuBackgroundGradientColor1;
 	auto arrowColor = sharedResources.sharedColors.menuScrollBarThumbColor1;
-	auto fillBarColor = sharedResources.sharedColors.menuListBoxSelectionColor1;
+	auto fillBarColor = sharedResources.sharedColors.menuSliderFillColor;
 
 	/*
 
@@ -639,7 +574,7 @@ void AppearanceComponent::initializeComponents() {
 		juce::Colour currentColor = quadPicker.getSelectedColor();
 		float currentSaturation = currentColor.getSaturation();
 		float currentBrightness = currentColor.getBrightness();
-		float currentAlpha = currentColor.getAlpha();
+		float currentAlpha = currentColor.getFloatAlpha();
 		juce::Colour newColor = juce::Colour::fromHSV(newHue, currentSaturation, currentBrightness, currentAlpha);
 
 		// Update ColorValuesInput Hue Slider
@@ -678,254 +613,74 @@ void AppearanceComponent::updateComponents(juce::Colour newColor)
 		return;
 	}
 
-	//DBG("Incoming Color in updateComponents: " + newColor.toString());
-
 	juce::String selectedElementName = uiElementsList.getSelectedElementName();
-	// juce::Colour currentColor;
-
-		 // Check if the new color is the same as the current color
-   //      if (newColor == currentColor)
-   //      {
-   //          DBG("New color is the same as current color. Skipping update.");
-   //          return;  // If the colors are the same, do nothing
-   //      }
 
 	juce::Colour menuLabelTextColor = sharedResources.sharedColors.menuLabelTextColor1;
-
-	// Set the text color for the labels
 	uiElementsLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
 	themesLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
 
-	// Update the corresponding SharedColors based on the selected element's name
-	if (selectedElementName == "Menu Background")
+	// Enable write for selected palette slots, then apply.
+	auto paletteIndices = uiElementsList.getSelectedPaletteIndices();
+	if (paletteIndices.isEmpty())
 	{
-		sharedResources.sharedColors.setMenuBackgroundGradientColor1(newColor);
+		const int pi = ThemeColorRegistry::indexForDisplayName (selectedElementName);
+		if (pi >= 0)
+			paletteIndices.add (pi);
 	}
-	else if (selectedElementName == "Menu Background 2")
+	sharedResources.sharedColors.toggleColorRandomizationFlags (paletteIndices);
 	{
-		sharedResources.sharedColors.setMenuBackgroundGradientColor2(newColor);
-		customTwoValueSliderLookAndFeel.setSliderThumbColor(sharedResources.sharedColors.menuBackgroundGradientColor2);
-		saturationRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-		hueRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-		brightnessRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-	}
-	else if (selectedElementName == "Menu Border")
-	{
-		sharedResources.sharedColors.setMenuTabBarBorderColor(newColor);
-	}
-	else if (selectedElementName == "Menu Thin Border")
-	{
-		textButtonLookAndFeel.setButtonOutlineColor(newColor);
-		sharedResources.sharedColors.setMenuThinBorderColor(newColor);
-	}
-	else if (selectedElementName == "Menu ListBox Background")
-	{
-		sharedResources.sharedColors.setMenuListBoxBackgroundGradientColor1(newColor);
-	}
-	else if (selectedElementName == "Menu ListBox Background 2")
-	{
-		sharedResources.sharedColors.setMenuListBoxBackgroundGradientColor2(newColor);
-	}
-	else if (selectedElementName == "Menu Button Background")
-	{
-		textButtonLookAndFeel.setGradientColor1(newColor);
-		saturationRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-		hueRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-		brightnessRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-		sharedResources.sharedColors.setMenuButtonGradientColor1(newColor);
-	}
-	else if (selectedElementName == "Menu Button Background 2")
-	{
-		textButtonLookAndFeel.setGradientColor2(newColor);
-		sharedResources.sharedColors.setMenuButtonGradientColor2(newColor);
-	}
-	else if (selectedElementName == "Menu Button Text")
-	{
-		textButtonLookAndFeel.setButtonTextColor(newColor);
-		sharedResources.sharedColors.setMenuButtonTextColor1(newColor);
-	}
-	else if (selectedElementName == "Menu Label Text")
-	{
-		colorValuesInput.setLabelTextColor(sharedResources.sharedColors.menuLabelTextColor1);
-		sharedResources.sharedColors.setMenuLabelTextColor1(newColor);
-	}
-	else if (selectedElementName == "Menu Scroll Track")
-	{
-		customTwoValueSliderLookAndFeel.setSliderTrackColor(sharedResources.sharedColors.menuScrollBarTrackColor1);
-		colorValuesInput.setSliderTrackColor(sharedResources.sharedColors.menuScrollBarTrackColor1);
-		sharedResources.sharedColors.setMenuScrollBarTrackColor1(newColor);
-		saturationRangeSlider.setColour(juce::Slider::backgroundColourId, newColor);
-		hueRangeSlider.setColour(juce::Slider::backgroundColourId, newColor);
-		brightnessRangeSlider.setColour(juce::Slider::backgroundColourId, newColor);
-		themeList.updateScrollBarColors(newColor, sharedResources.sharedColors.menuScrollBarThumbColor1, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-		uiElementsList.updateScrollBarColors(newColor, sharedResources.sharedColors.menuScrollBarThumbColor1, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-	}
-	else if (selectedElementName == "Menu Scroll Thumb")
-	{
-		colorValuesInput.setSliderThumbColor(sharedResources.sharedColors.menuBackgroundGradientColor1);
-		sharedResources.sharedColors.setMenuScrollBarThumbColor1(newColor);
-		themeList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, newColor, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-		uiElementsList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, newColor, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-	}
-	else if (selectedElementName == "Menu Scroll Outline")
-	{
-		//sharedResources.sharedColors.setMenuScrollBarOutlineColor1(newColor);
-		themeList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, sharedResources.sharedColors.menuScrollBarThumbColor1, newColor);
-		uiElementsList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, sharedResources.sharedColors.menuScrollBarThumbColor1, newColor);
-	}
-	else if (selectedElementName == "Menu ListBox Text")
-	{
-		sharedResources.sharedColors.setMenuListBoxTextColor1(newColor);
-	}
-	else if (selectedElementName == "Menu ListBox Selection")
-	{
-		customTwoValueSliderLookAndFeel.setSliderBackgroundColor(sharedResources.sharedColors.menuListBoxSelectionColor1);
-		sharedResources.sharedColors.setMenuListBoxSelectionColor1(newColor);
-		//hueRangeSlider.setColour(juce::Slider::trackColourId, newColor);
-		//saturationRangeSlider.setColour(juce::Slider::trackColourId, newColor);
-		//brightnessRangeSlider.setColour(juce::Slider::trackColourId, newColor);
-	}
-	else if (selectedElementName == "Menu TextBox Text")
-	{
-		colorValuesInput.setTextBoxTextColor(sharedResources.sharedColors.menuTextBoxTextColor1);
-		sharedResources.sharedColors.setMenuTextBoxTextColor1(newColor);
+		juce::Colour applied = newColor;
+		const int pi = ThemeColorRegistry::indexForDisplayName (selectedElementName);
+		if (pi >= 0)
+			applied = newColor.withAlpha (sharedResources.sharedColors.colourAt (pi).getFloatAlpha());
+		sharedResources.sharedColors.setColourByDisplayName (selectedElementName, applied, true);
+		applyColourSideEffects (selectedElementName, applied);
 	}
 
-	// Trigger a repaint of the Menu background with the updated colors
 	repaintParentComponent();
 
 	colorSwatch.setColor(newColor);
 	colorValuesInput.setColor(newColor);
 	uiElementsList.updateSelectedElementColor(newColor);
 
-	// Now, force the buttons to repaint using the updated LookAndFeel
 	newPresetButton.setLookAndFeel(&textButtonLookAndFeel);
 	overwritePresetButton.setLookAndFeel(&textButtonLookAndFeel);
 	deletePresetButton.setLookAndFeel(&textButtonLookAndFeel);
 	randomizeColorsButton.setLookAndFeel(&textButtonLookAndFeel);
 
-	// Repaint the buttons to reflect the new LookAndFeel settings
 	repaintComponents();
 	repaint();
+	notifyThemeLiveChanged();
 }
 
-void AppearanceComponent::directColorUpdate(juce::Colour newColor) {
-	//isUpdatingDirectly = true;
+void AppearanceComponent::directColorUpdate(juce::Colour newColor, bool applyAlpha) {
 	DBG("directColorUpdate Called");
 	auto& sharedColors = sharedResources.sharedColors;
-
-	// Store the original state of the flags
 	auto originalFlags = sharedColors.colorRandomizationFlags;
+	std::fill (sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), (uint8_t) 1);
 
-	// Temporarily set the necessary flags to true for direct update
-	sharedColors.colorRandomizationFlags.fill(true);
+	auto selectedRows = uiElementsList.getSelectedRows();
+	for (auto row : selectedRows)
+	{
+		juce::String selectedElementName = uiElementsList.getSelectedElementNameForIndex (row);
+		const int pi = uiElementsList.getPaletteIndexForRow (row);
+		juce::Colour applied = newColor;
+		if (! applyAlpha && pi >= 0)
+			applied = newColor.withAlpha (sharedColors.colourAt (pi).getFloatAlpha());
+		else if (! applyAlpha)
+		{
+			if (auto* existing = sharedColors.findByDisplayName (selectedElementName))
+				applied = newColor.withAlpha (existing->getFloatAlpha());
+		}
 
-	auto selectedIndices = uiElementsList.getSelectedRows();
-	//DBG("[directColorUpdate] Selected Indices Count: " << selectedIndices.size());
-
-	for (auto index : selectedIndices) {
-		juce::String selectedElementName = uiElementsList.getSelectedElementNameForIndex(index); // Implement getNameForIndex to return the name of the element at the given index
-		//DBG("[directColorUpdate] Index: " << index << ", Element Name: " << selectedElementName);
-
-		if (selectedElementName == "Menu Background") {
-			sharedResources.sharedColors.setMenuBackgroundGradientColor1(newColor);
-			//DBG("[directColorUpdate] Updated Menu Background Color");
-		}
-		else if (selectedElementName == "Menu Background 2") {
-			customTwoValueSliderLookAndFeel.setSliderThumbColor(sharedResources.sharedColors.menuBackgroundGradientColor2);
-			sharedResources.sharedColors.setMenuBackgroundGradientColor2(newColor);
-			saturationRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-			hueRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-			brightnessRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-			//DBG("[directColorUpdate] Updated Menu Background 2 Color");
-		}
-		else if (selectedElementName == "Menu ListBox Background") {
-			sharedResources.sharedColors.setMenuListBoxBackgroundGradientColor1(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu ListBox Background 2") {
-			sharedResources.sharedColors.setMenuListBoxBackgroundGradientColor2(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Border") {
-			sharedResources.sharedColors.setMenuTabBarBorderColor(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Thin Border") {
-			textButtonLookAndFeel.setButtonOutlineColor(newColor);
-			sharedResources.sharedColors.setMenuThinBorderColor(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Button Background") {
-			textButtonLookAndFeel.setGradientColor1(newColor);
-			saturationRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-			hueRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-			brightnessRangeSlider.setColour(juce::Slider::thumbColourId, newColor);
-			sharedResources.sharedColors.setMenuButtonGradientColor1(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Button Background 2") {
-			textButtonLookAndFeel.setGradientColor2(newColor);
-			sharedResources.sharedColors.setMenuButtonGradientColor2(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Button Text") {
-			textButtonLookAndFeel.setButtonTextColor(newColor);
-			sharedResources.sharedColors.setMenuButtonTextColor1(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Label Text") {
-			colorValuesInput.setLabelTextColor(sharedResources.sharedColors.menuLabelTextColor1);
-			sharedResources.sharedColors.setMenuLabelTextColor1(newColor);
-			uiElementsLabel.setColour(juce::Label::textColourId, newColor);
-			themesLabel.setColour(juce::Label::textColourId, newColor);
-			juce::Colour menuLabelTextColor = sharedResources.sharedColors.menuLabelTextColor1;
-			uiElementsLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
-			themesLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Scroll Track") {
-			customTwoValueSliderLookAndFeel.setSliderTrackColor(sharedResources.sharedColors.menuScrollBarTrackColor1);
-			colorValuesInput.setSliderTrackColor(sharedResources.sharedColors.menuScrollBarTrackColor1);
-			sharedResources.sharedColors.setMenuScrollBarTrackColor1(newColor);
-			saturationRangeSlider.setColour(juce::Slider::backgroundColourId, newColor);
-			hueRangeSlider.setColour(juce::Slider::backgroundColourId, newColor);
-			brightnessRangeSlider.setColour(juce::Slider::backgroundColourId, newColor);
-			themeList.updateScrollBarColors(newColor, sharedResources.sharedColors.menuScrollBarThumbColor1, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-			uiElementsList.updateScrollBarColors(newColor, sharedResources.sharedColors.menuScrollBarThumbColor1, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Scroll Thumb") {
-			colorValuesInput.setSliderThumbColor(sharedResources.sharedColors.menuBackgroundGradientColor1);
-			sharedResources.sharedColors.setMenuScrollBarThumbColor1(newColor);
-			themeList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, newColor, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-			uiElementsList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, newColor, sharedResources.sharedColors.menuScrollBarOutlineColor1);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu Scroll Outline") {
-			sharedResources.sharedColors.setMenuScrollBarOutlineColor1(newColor);
-			themeList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, sharedResources.sharedColors.menuScrollBarThumbColor1, newColor);
-			uiElementsList.updateScrollBarColors(sharedResources.sharedColors.menuScrollBarTrackColor1, sharedResources.sharedColors.menuScrollBarThumbColor1, newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu ListBox Text") {
-			sharedResources.sharedColors.setMenuListBoxTextColor1(newColor);
-			// Update the UI or other components if necessary
-		}
-		else if (selectedElementName == "Menu ListBox Selection") {
-			customTwoValueSliderLookAndFeel.setSliderBackgroundColor(sharedResources.sharedColors.menuListBoxSelectionColor1);
-			colorValuesInput.setSliderBackgroundColor(sharedResources.sharedColors.menuListBoxSelectionColor1);
-			sharedResources.sharedColors.setMenuListBoxSelectionColor1(newColor);
-			saturationRangeSlider.setColour(juce::Slider::trackColourId, newColor);
-			brightnessRangeSlider.setColour(juce::Slider::trackColourId, newColor);
-			hueRangeSlider.setColour(juce::Slider::trackColourId, newColor);
-		}
-		else if (selectedElementName == "Menu TextBox Text") {
-			colorValuesInput.setTextBoxTextColor(sharedResources.sharedColors.menuTextBoxTextColor1);
-			sharedResources.sharedColors.setMenuTextBoxTextColor1(newColor);
-			// Update the UI or other components if necessary
-		}
+		if (pi >= 0)
+			sharedColors.setColourAt (pi, applied, true);
+		else
+			sharedColors.setColourByDisplayName (selectedElementName, applied, true);
+		applyColourSideEffects (selectedElementName, applied);
 	}
+
+	sharedColors.colorRandomizationFlags = std::move (originalFlags);
 
 	colorSwatch.setColor(newColor);
 	colorValuesInput.setColor(newColor);
@@ -934,105 +689,37 @@ void AppearanceComponent::directColorUpdate(juce::Colour newColor) {
 	colorValuesInput.setColor(newColor);
 
 	repaintComponents();
-	updateAllComponents();	
+	updateAllComponents();
+	notifyThemeLiveChanged();
 }
 
 void AppearanceComponent::onElementSelected(const juce::String& name, const juce::Colour& color)
 {
 	DBG("onElemenetSelected Called");
-	// Fetch color from SharedResources
-	juce::Colour colorToSet = color;  // Default to the passed color
+	juce::Colour colorToSet = color;
+	if (auto* c = sharedResources.sharedColors.findByDisplayName (name))
+		colorToSet = *c;
 
-	if (name == "Menu Background")
-	{
-		colorToSet = sharedResources.sharedColors.menuBackgroundGradientColor1;
-	}
-	else if (name == "Menu Background 2")
-	{
-		colorToSet = sharedResources.sharedColors.menuBackgroundGradientColor2;
-	}
-	else if (name == "Menu ListBox Background")
-	{
-		colorToSet = sharedResources.sharedColors.menuListBoxBackgroundGradientColor1;
-	}
-	else if (name == "Menu ListBox Background 2")
-	{
-		colorToSet = sharedResources.sharedColors.menuListBoxBackgroundGradientColor2;
-	}
-	else if (name == "Menu Border")
-	{
-		colorToSet = sharedResources.sharedColors.menuTabBarBorderColor;
-	}
-	else if (name == "Menu Thin Border")
-	{
-		colorToSet = sharedResources.sharedColors.menuThinBorderColor;
-	}
-	else if (name == "Menu Button Background")
-	{
-		colorToSet = sharedResources.sharedColors.menuButtonGradientColor1;
-	}
-	else if (name == "Menu Button Background 2")
-	{
-		colorToSet = sharedResources.sharedColors.menuButtonGradientColor2;
-	}
-	else if (name == "Menu Button Text")
-	{
-		colorToSet = sharedResources.sharedColors.menuButtonTextColor1;
-	}
-	else if (name == "Menu Label Text")
-	{
-		colorToSet = sharedResources.sharedColors.menuLabelTextColor1;
-	}
-	else if (name == "Menu Scroll Track")
-	{
-		colorToSet = sharedResources.sharedColors.menuScrollBarTrackColor1;
-	}
-	else if (name == "Menu Scroll Thumb")
-	{
-		colorToSet = sharedResources.sharedColors.menuScrollBarThumbColor1;
-	}
-	else if (name == "Menu Scroll Outline")
-	{
-		colorToSet = sharedResources.sharedColors.menuScrollBarOutlineColor1;
-	}
-	else if (name == "Menu ListBox Text")
-	{
-		colorToSet = sharedResources.sharedColors.menuListBoxTextColor1;
-	}
-	else if (name == "Menu ListBox Selection")
-	{
-		colorToSet = sharedResources.sharedColors.menuListBoxSelectionColor1;
-	}
-	else if (name == "Menu TextBox Text")
-	{
-		colorToSet = sharedResources.sharedColors.menuTextBoxTextColor1;
-	}
-
+	currentColor = colorToSet;
 	colorValuesInput.updateSaturationSlider(currentColor.getSaturation() * 255.0f);
 	colorValuesInput.updateBrightnessSlider(currentColor.getBrightness() * 255.0f);
 	colorValuesInput.updateHueSlider(currentColor.getHue() * 255.0f);
-
-	// Set the color to QuadPicker and HueSelector
-	// Update ColorValuesInput
 	colorValuesInput.setColor(colorToSet);
 	quadPicker.setColor(colorToSet);
 	hueSelector.setColor(colorToSet);
 }
-
 void AppearanceComponent::colorChanged(float newHue)
 {
 	DBG("colorChanged Called");
 	// Get the current color from the QuadPicker
 	juce::Colour currentColor = quadPicker.getSelectedColor();
 
-	//DBG("Current Color Saturation: " + juce::String(currentColor.getSaturation()));
-
 	// Adjust the hue of the current color while preserving its alpha value
 	juce::Colour newColor = juce::Colour::fromHSV(
 		newHue,
-		currentColor.getSaturation() / 255.0f,
-		currentColor.getBrightness() / 255.0f,
-		currentColor.getAlpha() / 255.0f  // Normalize alpha to 0.0 - 1.0 range
+		currentColor.getSaturation(),
+		currentColor.getBrightness(),
+		currentColor.getFloatAlpha()
 	);
 
 	//DBG("New Color Saturation: " + juce::String(newColor.getSaturation()));
@@ -1044,73 +731,16 @@ void AppearanceComponent::colorChanged(float newHue)
 	colorSwatch.setColor(newColor);
 	colorValuesInput.setColor(newColor);
 
-	// Update selected element color in UIElementsList
 	uiElementsList.updateSelectedElementColor(newColor);
 
-	// Assuming you have some way to determine that the selected element corresponds to the menu background
-	if (uiElementsList.getSelectedElementName() == "Menu Background")
+	const auto selectedName = uiElementsList.getSelectedElementName();
 	{
-		sharedResources.sharedColors.menuBackgroundGradientColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Background 2")
-	{
-		sharedResources.sharedColors.menuBackgroundGradientColor2 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu ListBox Background")
-	{
-		sharedResources.sharedColors.menuListBoxBackgroundGradientColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu ListBox Background 2")
-	{
-		sharedResources.sharedColors.menuListBoxBackgroundGradientColor2 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Border")
-	{
-		sharedResources.sharedColors.menuTabBarBorderColor = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Thin Border")
-	{
-		sharedResources.sharedColors.menuThinBorderColor = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Button Background")
-	{
-		sharedResources.sharedColors.menuButtonGradientColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Button Background 2")
-	{
-		sharedResources.sharedColors.menuButtonGradientColor2 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Button Text")
-	{
-		sharedResources.sharedColors.menuButtonTextColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Label Text")
-	{
-		sharedResources.sharedColors.menuLabelTextColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Scroll Track")
-	{
-		sharedResources.sharedColors.menuScrollBarTrackColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Scroll Thumb")
-	{
-		sharedResources.sharedColors.menuScrollBarThumbColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu Scroll Outline")
-	{
-		sharedResources.sharedColors.menuScrollBarOutlineColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu ListBox Text")
-	{
-		sharedResources.sharedColors.menuListBoxTextColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu ListBox Selection")
-	{
-		sharedResources.sharedColors.menuListBoxSelectionColor1 = newColor;
-	}
-	if (uiElementsList.getSelectedElementName() == "Menu TextBox Text")
-	{
-		sharedResources.sharedColors.menuTextBoxTextColor1 = newColor;
+		juce::Colour applied = newColor;
+		const int pi = ThemeColorRegistry::indexForDisplayName (selectedName);
+		if (pi >= 0)
+			applied = newColor.withAlpha (sharedResources.sharedColors.colourAt (pi).getFloatAlpha());
+		sharedResources.sharedColors.setColourByDisplayName (selectedName, applied, true);
+		applyColourSideEffects (selectedName, applied);
 	}
 
 	// Ensure the onColorChanged callback is invoked to update the GUI
@@ -1124,6 +754,7 @@ void AppearanceComponent::colorChanged(float newHue)
 		colorValuesInput.onColorChanged(newColor);
 	}
 	setRangeSliderColors();
+	notifyThemeLiveChanged();
 }
 
 void AppearanceComponent::updateColorSelectors(const juce::Array<juce::Colour>& colors)
@@ -1172,7 +803,7 @@ void AppearanceComponent::onPresetApplied(const Theme& theme)
 	// Apply theme colors to customTwoValueSliderLookAndFeel
 	customTwoValueSliderLookAndFeel.applyThemeColors(
 		sharedResources.sharedColors.menuScrollBarTrackColor1,
-		sharedResources.sharedColors.menuListBoxSelectionColor1,
+		sharedResources.sharedColors.menuSliderFillColor,
 		sharedResources.sharedColors.menuBackgroundGradientColor1);
 
 	// Trigger a repaint on all components using the TextButtonLookAndFeel
@@ -1245,7 +876,7 @@ void AppearanceComponent::showPopup(const juce::String& message) {
 void AppearanceComponent::setRangeSliderColors() {
 	DBG("setRangeSliderColors Called");
 
-	colorValuesInput.setSliderBackgroundColor(sharedResources.sharedColors.menuListBoxSelectionColor1);
+	colorValuesInput.setSliderBackgroundColor(sharedResources.sharedColors.menuSliderFillColor);
 	colorValuesInput.setSliderTrackColor(sharedResources.sharedColors.menuScrollBarTrackColor1);
 	colorValuesInput.setSliderThumbColor(sharedResources.sharedColors.menuBackgroundGradientColor1);
 	colorValuesInput.setTextBoxTextColor(sharedResources.sharedColors.menuTextBoxTextColor1);
@@ -1294,26 +925,150 @@ void AppearanceComponent::updateAllComponents() {
 
 juce::Colour AppearanceComponent::getColorForIndex(int index) {
 	DBG("getColorForIndex Called");
-	// Example implementation. Adjust according to your actual color properties.
-	switch (index) {
-	case 0: return sharedResources.sharedColors.menuBackgroundGradientColor1;
-	case 1: return sharedResources.sharedColors.menuBackgroundGradientColor2;
-	case 2: return sharedResources.sharedColors.menuListBoxBackgroundGradientColor1;
-	case 3: return sharedResources.sharedColors.menuListBoxBackgroundGradientColor2;
-	case 4: return sharedResources.sharedColors.menuTabBarBorderColor;
-	case 5: return sharedResources.sharedColors.menuThinBorderColor;
-	case 6: return sharedResources.sharedColors.menuButtonGradientColor1;
-	case 7: return sharedResources.sharedColors.menuButtonGradientColor2;
-	case 8: return sharedResources.sharedColors.menuButtonTextColor1;
-	case 9: return sharedResources.sharedColors.menuLabelTextColor1;
-	case 10: return sharedResources.sharedColors.menuScrollBarTrackColor1;
-	case 11: return sharedResources.sharedColors.menuScrollBarThumbColor1;
-	case 12: return sharedResources.sharedColors.menuScrollBarOutlineColor1;
-	case 13: return sharedResources.sharedColors.menuListBoxTextColor1;
-	case 14: return sharedResources.sharedColors.menuListBoxSelectionColor1;
-	case 15: return sharedResources.sharedColors.menuTextBoxTextColor1;
-	default: return juce::Colours::black; // Default or error handling color
+	return uiElementsList.getElementColor (index);
+}
+
+void AppearanceComponent::applyColourSideEffects (const juce::String& elementName, juce::Colour newColor)
+{
+	if (elementName == "Menu Background 2")
+	{
+		customTwoValueSliderLookAndFeel.setSliderThumbColor (sharedResources.sharedColors.menuBackgroundGradientColor2);
+		saturationRangeSlider.setColour (juce::Slider::thumbColourId, newColor);
+		hueRangeSlider.setColour (juce::Slider::thumbColourId, newColor);
+		brightnessRangeSlider.setColour (juce::Slider::thumbColourId, newColor);
 	}
+	else if (elementName == "Menu Thin Border")
+	{
+		textButtonLookAndFeel.setButtonOutlineColor (newColor);
+	}
+	else if (elementName == "Menu Button Background")
+	{
+		textButtonLookAndFeel.setGradientColor1 (newColor);
+		saturationRangeSlider.setColour (juce::Slider::thumbColourId, newColor);
+		hueRangeSlider.setColour (juce::Slider::thumbColourId, newColor);
+		brightnessRangeSlider.setColour (juce::Slider::thumbColourId, newColor);
+	}
+	else if (elementName == "Menu Button Background 2")
+	{
+		textButtonLookAndFeel.setGradientColor2 (newColor);
+	}
+	else if (elementName == "Menu Button Text")
+	{
+		textButtonLookAndFeel.setButtonTextColor (newColor);
+	}
+	else if (elementName == "Menu Label Text")
+	{
+		colorValuesInput.setLabelTextColor (newColor);
+		uiElementsLabel.setColour (juce::Label::textColourId, newColor);
+		themesLabel.setColour (juce::Label::textColourId, newColor);
+	}
+	else if (elementName == "Menu Scroll Track")
+	{
+		customTwoValueSliderLookAndFeel.setSliderTrackColor (newColor);
+		colorValuesInput.setSliderTrackColor (newColor);
+		saturationRangeSlider.setColour (juce::Slider::backgroundColourId, newColor);
+		hueRangeSlider.setColour (juce::Slider::backgroundColourId, newColor);
+		brightnessRangeSlider.setColour (juce::Slider::backgroundColourId, newColor);
+		themeList.updateScrollBarColors (newColor, sharedResources.sharedColors.menuScrollBarThumbColor1, sharedResources.sharedColors.menuScrollBarOutlineColor1);
+		uiElementsList.updateScrollBarColors (newColor, sharedResources.sharedColors.menuScrollBarThumbColor1, sharedResources.sharedColors.menuScrollBarOutlineColor1);
+	}
+	else if (elementName == "Menu Scroll Thumb")
+	{
+		themeList.updateScrollBarColors (sharedResources.sharedColors.menuScrollBarTrackColor1, newColor, sharedResources.sharedColors.menuScrollBarOutlineColor1);
+		uiElementsList.updateScrollBarColors (sharedResources.sharedColors.menuScrollBarTrackColor1, newColor, sharedResources.sharedColors.menuScrollBarOutlineColor1);
+	}
+	else if (elementName == "Menu Scroll Outline")
+	{
+		themeList.updateScrollBarColors (sharedResources.sharedColors.menuScrollBarTrackColor1, sharedResources.sharedColors.menuScrollBarThumbColor1, newColor);
+		uiElementsList.updateScrollBarColors (sharedResources.sharedColors.menuScrollBarTrackColor1, sharedResources.sharedColors.menuScrollBarThumbColor1, newColor);
+	}
+	else if (elementName == "Menu Slider Fill")
+	{
+		customTwoValueSliderLookAndFeel.setSliderBackgroundColor (newColor);
+		colorValuesInput.setSliderBackgroundColor (newColor);
+		saturationRangeSlider.setColour (juce::Slider::trackColourId, newColor);
+		brightnessRangeSlider.setColour (juce::Slider::trackColourId, newColor);
+		hueRangeSlider.setColour (juce::Slider::trackColourId, newColor);
+	}
+	else if (elementName == "Menu TextBox Text")
+	{
+		colorValuesInput.setTextBoxTextColor (newColor);
+	}
+
+	if (auto* top = getTopLevelComponent())
+		top->repaint();
+}
+
+void AppearanceComponent::notifyThemeLiveChanged()
+{
+	if (onThemeLiveChanged)
+		onThemeLiveChanged();
+}
+
+void AppearanceComponent::refreshAfterRandomize()
+{
+	sharedResources.makeActive();
+
+	textButtonLookAndFeel.setButtonTextColor(sharedResources.sharedColors.menuButtonTextColor1);
+	textButtonLookAndFeel.setGradientColor1(sharedResources.sharedColors.menuButtonGradientColor1);
+	textButtonLookAndFeel.setGradientColor2(sharedResources.sharedColors.menuButtonGradientColor2);
+	textButtonLookAndFeel.setButtonOutlineColor(sharedResources.sharedColors.menuThinBorderColor);
+
+	textButtonLookAndFeel2.setButtonTextColor(sharedResources.sharedColors.menuButtonTextColor1);
+	textButtonLookAndFeel2.setGradientColor1(sharedResources.sharedColors.menuButtonGradientColor1);
+	textButtonLookAndFeel2.setGradientColor2(sharedResources.sharedColors.menuButtonGradientColor2);
+	textButtonLookAndFeel2.setButtonOutlineColor(sharedResources.sharedColors.menuThinBorderColor);
+
+	customTwoValueSliderLookAndFeel.applyThemeColors(
+		sharedResources.sharedColors.menuScrollBarTrackColor1,
+		sharedResources.sharedColors.menuSliderFillColor,
+		sharedResources.sharedColors.menuBackgroundGradientColor1);
+
+	colorValuesInput.updateSaturationSlider(currentColor.getSaturation() * 255.0f);
+	colorValuesInput.updateBrightnessSlider(currentColor.getBrightness() * 255.0f);
+	colorValuesInput.updateHueSlider(currentColor.getHue() * 255.0f);
+
+	setRangeSliderColors();
+	setupLabels();
+	setButtonLookAndFeels();
+	setSliderLookAndFeels();
+
+	juce::Colour trackColor = sharedResources.sharedColors.menuScrollBarTrackColor1;
+	juce::Colour thumbColor = sharedResources.sharedColors.menuScrollBarThumbColor1;
+	juce::Colour outlineColor = sharedResources.sharedColors.menuScrollBarOutlineColor1;
+
+	themeList.updateScrollBarColors(trackColor, thumbColor, outlineColor);
+	uiElementsList.updateScrollBarColors(trackColor, thumbColor, outlineColor);
+
+	updateAllComponents();
+	repaintComponents();
+	repaintParentComponent();
+	notifyThemeLiveChanged();
+}
+
+void AppearanceComponent::showRandomizeScopeMenu()
+{
+	auto& scopes = sharedResources.sharedColors;
+	juce::PopupMenu menu;
+	menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+	menu.addItem (1, "Faceplate/Mod", true, scopes.randomizeFaceplateMod);
+	menu.addItem (2, "Graph", true, scopes.randomizeGraphModule);
+	menu.addItem (3, "Menu", true, scopes.randomizeMenuModule);
+
+	menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&randomizeColorsButton),
+	                    [this] (int result)
+	                    {
+		                    if (result <= 0)
+			                    return;
+
+		                    auto& s = sharedResources.sharedColors;
+		                    if (result == 1)
+			                    s.randomizeFaceplateMod = ! s.randomizeFaceplateMod;
+		                    else if (result == 2)
+			                    s.randomizeGraphModule = ! s.randomizeGraphModule;
+		                    else if (result == 3)
+			                    s.randomizeMenuModule = ! s.randomizeMenuModule;
+	                    });
 }
 
 void AppearanceComponent::setButtonLookAndFeels()

@@ -1,6 +1,7 @@
 #include "RotaryImageKnobLookAndFeel1.h"
 #include "EqEditor.h"
 #include "KnobBandHighlight.h"
+#include "KnobThemeHelpers.h"
 //#include "Effects/shadows-main/shadows.h" 
 #include <JuceHeader.h> 
 #include "BinaryData.h"
@@ -49,17 +50,18 @@ void RotaryImageKnobLookAndFeel1::drawRotarySlider(juce::Graphics& g, int x, int
 
         juce::Colour customShadowColor = juce::Colour::fromRGBA(200, 120, 0, alphaValue);
         const bool bandHighlight = KnobBandHighlight::isActive (slider);
+        const auto& theme = KnobTheme::colors (themeColors);
 
         if (slider.isMouseOverOrDragging() || bandHighlight)
         {
             customSpread = bandHighlight ? 7 : 6;
             customShadowColor = KnobBandHighlight::intensify (
-                juce::Colour::fromRGBA(255, 200, 0, alphaValue), bandHighlight);
+                theme.knobArc.withAlpha ((float) alphaValue / 255.0f), bandHighlight);
         }
         else
         {
             customSpread = 1;
-            customShadowColor = juce::Colour::fromRGBA(140, 115, 10, alphaValue - 50);
+            customShadowColor = KnobTheme::arcDark (theme, bandHighlight).withAlpha ((float) (alphaValue - 50) / 255.0f);
         }
 
         // shadows::StackShadow stackShadow(customShadowColor, customOffset, customBlur, customSpread);
@@ -75,8 +77,10 @@ void RotaryImageKnobLookAndFeel1::drawRotarySlider(juce::Graphics& g, int x, int
         const int frameHeight = knobImage.getHeight() / frames;
 
         // Draw the knob image at the scaled size
-        g.drawImage(knobImage, x + xOffset, y + yOffset, scaledWidth, scaledHeight,
-            0, frameId * frameHeight, frameWidth, frameHeight, false);
+        KnobTheme::drawArtwork (g, knobImage,
+            x + xOffset, y + yOffset, scaledWidth, scaledHeight,
+            0, frameId * frameHeight, frameWidth, frameHeight,
+            theme);
 
         g.setImageResamplingQuality(juce::Graphics::ResamplingQuality::highResamplingQuality);
 
@@ -99,8 +103,8 @@ void RotaryImageKnobLookAndFeel1::drawRotarySlider(juce::Graphics& g, int x, int
 
 
         // Create colour references for the gradient start and end
-        juce::Colour brightOrange = KnobBandHighlight::intensify (juce::Colour(200, 65, 0), bandHighlight);
-        juce::Colour darkOrange = KnobBandHighlight::intensify (juce::Colour(50, 10, 0), bandHighlight);
+        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight);
+        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight);
 
         // Loop for the filled arc
         for (int i = numSegments - 1; i >= 0; --i) {

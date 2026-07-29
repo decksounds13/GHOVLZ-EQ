@@ -3,6 +3,7 @@
 #include "BinaryData.h"
 #include "FrequencyResponseComponent.h"
 #include "OscilloscopeComponent.h"
+#include "GoniometerComponent.h"
 #include <juce_dsp/juce_dsp.h>
 #include "Visualizer/Analyser.h"
 #include "FilterType.h"
@@ -175,6 +176,18 @@ void EqProcessor::setOscilloscopeTarget (OscilloscopeComponent* target) noexcept
 OscilloscopeComponent* EqProcessor::getOscilloscopeTarget() const noexcept
 {
     return oscilloscopeTarget.load (std::memory_order_acquire);
+}
+
+void EqProcessor::setGoniometerTarget (GoniometerComponent* target) noexcept
+{
+    goniometerTarget.store (target, std::memory_order_release);
+    if (target != nullptr && sampleRate > 0.0)
+        target->prepare (sampleRate);
+}
+
+GoniometerComponent* EqProcessor::getGoniometerTarget() const noexcept
+{
+    return goniometerTarget.load (std::memory_order_acquire);
 }
 
 void EqProcessor::setEcoMode (bool shouldEnable) noexcept
@@ -795,6 +808,53 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "OSC_QUALITY_ID", "OscQuality",
         juce::StringArray { "Draft", "High" },
         juce::jlimit (0, 1, analyserDefaults.getInt ("OSC_QUALITY_ID", 1))));
+    // Goniometer — mirrors oscilloscope appearance controls.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_LINE_OPACITY_ID", "GonLineOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("GON_LINE_OPACITY_ID", 100.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_LINE_WIDTH_ID", "GonLineWidth",
+        juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
+        analyserDefaults.getFloat ("GON_LINE_WIDTH_ID", 1.6f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "GON_GLOW_ENABLE_ID", "GonGlowEnable",
+        analyserDefaults.getBool ("GON_GLOW_ENABLE_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_GLOW_RADIUS_ID", "GonGlowRadius",
+        juce::NormalisableRange<float> (0.0f, 40.0f, 0.1f),
+        analyserDefaults.getFloat ("GON_GLOW_RADIUS_ID", 6.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_GLOW_SPREAD_ID", "GonGlowSpread",
+        juce::NormalisableRange<float> (0.0f, 20.0f, 0.1f),
+        analyserDefaults.getFloat ("GON_GLOW_SPREAD_ID", 1.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_GLOW_OPACITY_ID", "GonGlowOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("GON_GLOW_OPACITY_ID", 75.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_EXPANDED_LINE_WIDTH_ID", "GonExpandedLineWidth",
+        juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
+        analyserDefaults.getFloat ("GON_EXPANDED_LINE_WIDTH_ID", 2.6f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "GON_EXPANDED_GLOW_ENABLE_ID", "GonExpandedGlowEnable",
+        analyserDefaults.getBool ("GON_EXPANDED_GLOW_ENABLE_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_EXPANDED_GLOW_RADIUS_ID", "GonExpandedGlowRadius",
+        juce::NormalisableRange<float> (0.0f, 80.0f, 0.1f),
+        analyserDefaults.getFloat ("GON_EXPANDED_GLOW_RADIUS_ID", 18.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_EXPANDED_GLOW_SPREAD_ID", "GonExpandedGlowSpread",
+        juce::NormalisableRange<float> (0.0f, 40.0f, 0.1f),
+        analyserDefaults.getFloat ("GON_EXPANDED_GLOW_SPREAD_ID", 2.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "GON_EXPANDED_GLOW_OPACITY_ID", "GonExpandedGlowOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("GON_EXPANDED_GLOW_OPACITY_ID", 75.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "GON_QUALITY_ID", "GonQuality",
+        juce::StringArray { "Draft", "High" },
+        juce::jlimit (0, 1, analyserDefaults.getInt ("GON_QUALITY_ID", 1))));
     // Multicolor band fills (default on). Off → neutral golden-yellow boost/cut fills.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_MULTICOLOR_BAND_FILL_ID", "MulticolorBandFill",
@@ -1549,6 +1609,8 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     m_analyser.setSampleRate (sampleRate);
     if (auto* osc = oscilloscopeTarget.load (std::memory_order_acquire))
         osc->prepare (sampleRate);
+    if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
+        gon->prepare (sampleRate);
 
     // Initialize dsp modules
     juce::dsp::ProcessSpec spec;
@@ -1872,6 +1934,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                         if (auto bpmOpt = pos->getBpm())
                             osc->setHostBpm (*bpmOpt);
                 osc->pushSamples (left, right, numSamples);
+            }
+        }
+
+        if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
+        {
+            if (gon->isGoniometerEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                gon->pushSamples (left, right, numSamples);
             }
         }
 
@@ -2913,6 +2985,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             osc->pushSamples (left, right, mainBuffer.getNumSamples());
         }
     }
+
+    if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
+    {
+        if (gon->isGoniometerEnabled() && mainBuffer.getNumChannels() > 0)
+        {
+            const auto* left = mainBuffer.getReadPointer (0);
+            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+            gon->pushSamples (left, right, mainBuffer.getNumSamples());
+        }
+    }
 }
 
 
@@ -3369,6 +3451,11 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
     treeState.replaceState (state);
     updateParameters();
     migrateSpectralResHzFromLegacyParams();
+
+    // replaceState can clear pending FFT readiness; keep Analyser block size in sync
+    // the same way the factory-state path does after ctor replaceState.
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter ("BLOCK_ID")))
+        m_analyser.setFFTBlockSize (choice->getIndex());
 
     // Restore after replaceState so a missing snapshot set seeds from the new live state.
     restoreAbSnapshotsFromState (abProps);

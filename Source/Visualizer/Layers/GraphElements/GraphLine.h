@@ -20,6 +20,7 @@ public:
     // ========================================================================
     void setScaleType (const bool);
     virtual void setColour (const juce::Colour&);
+    void setBinOverlayColour (juce::Colour colour) noexcept { m_binOverlay.setBaseColour (colour); }
     void setAudioProcessorValueTreeState (juce::AudioProcessorValueTreeState* state);
 
 protected:

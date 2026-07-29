@@ -1,7 +1,36 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="ParametricEqProject\Source\Menu\Gui">
+      <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Menu">
+      <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations">
+      <UniqueIdentifier>{A44CA844-07B8-B554-5FA6-7C9504B03FBF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal">
+      <UniqueIdentifier>{14CAF6BB-C50B-F636-20B0-779A37377B7F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin">
+      <UniqueIdentifier>{9CD8191C-3100-B8A7-5BFA-BB628828565C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur">
+      <UniqueIdentifier>{AD506983-E63D-D43C-B288-A8F57385F0D3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Effects">
+      <UniqueIdentifier>{9F86C40A-42E8-D254-8DAD-0B70DFB2311F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Menu\Gui">
+      <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Menu">
+      <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Spectral">
+      <UniqueIdentifier>{069880E3-DEEB-3CBE-9DAD-2D22E0B80C82}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ParametricEqProject\Source\Controls\Categories">
       <UniqueIdentifier>{7EFDE8D3-7793-B6C7-C284-26939B297B82}</UniqueIdentifier>
     </Filter>
@@ -964,6 +993,39 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.cpp">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\GoniometerComponent.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.cpp">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.cpp">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\ApplyButton.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\ColorValuesInput.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\HueSelector.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\OscilloscopeComponent.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\GoniometerComponent.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\QuadPicker.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\UIElementsList.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\TextButtonLookAndFeel2.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
@@ -999,9 +1061,6 @@
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin_blur.cpp">
       <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\Effects\shadows-main\source\StackShadow.cpp">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main\source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\shadows-main\shadows.cpp">
       <Filter>ParametricEqProject\Source\Effects\shadows-main</Filter>
@@ -1046,6 +1105,9 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\EqEditor.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\EqPresetStore.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ModSectionComponent.cpp">
@@ -4629,6 +4691,96 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.h">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\GoniometerComponent.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.h">
+      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.h">
+      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\implementations.h">
+      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\rendered_single_channel_shadow.h">
+      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\blur_demo_component.h">
+      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\blur_options.h">
+      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.h">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.h">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Spectral\SpectralPerBandLattice.h">
+      <Filter>ParametricEqProject\Source\Spectral</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ApplyButton.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\BandChannel.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\BandSaturation.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ColorValuesInput.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\EqBand.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\FactoryDefaultsState.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\FilterSlope.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\FilterType.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\HueSelector.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\KnobBandHighlight.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\OscilloscopeComponent.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\GoniometerComponent.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\PhaseMode.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\QuadPicker.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\RetrigButton.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ShapeCurveEditor.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ShapeEditorPopup.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\SideCheck.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\UIElementsList.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\TextButtonLookAndFeel2.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
@@ -4782,6 +4934,9 @@
     <ClInclude Include="..\..\Source\EqEditor.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\EqPresetStore.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\ModSectionComponent.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
@@ -4816,9 +4971,6 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralBinning.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\Spectral\SpectralPerBandLattice.h">
       <Filter>ParametricEqProject\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralBandSettings.h">
@@ -10286,6 +10438,9 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\..\Source\Effects\MelatoninBlur\README.md">
+      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
+    </None>
     <None Include="..\..\Resources\DarkKnob4_Stitched.png">
       <Filter>ParametricEqProject\Source\Resources</Filter>
     </None>

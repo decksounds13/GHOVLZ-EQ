@@ -83,9 +83,11 @@ namespace
 }
 
 //==============================================================================
-ModSectionComponent::LfoColumn::LfoColumn (juce::AudioProcessorValueTreeState& state, int index)
+ModSectionComponent::LfoColumn::LfoColumn (juce::AudioProcessorValueTreeState& state, int index,
+                                            ModSectionComponent& ownerRef)
     : lfoIndex (index),
       treeState (state),
+      ownerSection (ownerRef),
       shapeCombo (state, LfoMod::shapeParamId (index))
 {
     title.setText ("LFO " + juce::String (index + 1), juce::dontSendNotification);
@@ -250,10 +252,11 @@ void ModSectionComponent::LfoColumn::setPlayhead (float phase01, bool active)
 
 void ModSectionComponent::LfoColumn::paint (juce::Graphics& g)
 {
+    const auto& c = ownerSection.getSharedColors();
     auto bounds = getLocalBounds().toFloat();
-    g.setColour (juce::Colour::fromRGBA (25, 18, 12, 220));
+    g.setColour (c.modBackground.withAlpha (220.0f / 255.0f));
     g.fillRoundedRectangle (bounds.reduced (1.0f), 4.0f);
-    g.setColour (juce::Colour::fromRGBA (90, 70, 45, 180));
+    g.setColour (c.modBorder.withAlpha (180.0f / 255.0f));
     g.drawRoundedRectangle (bounds.reduced (1.0f), 4.0f, 1.0f);
 
     auto preview = getLocalBounds();
@@ -262,9 +265,9 @@ void ModSectionComponent::LfoColumn::paint (juce::Graphics& g)
     preview.removeFromBottom (78);
     preview = preview.reduced (6, 3);
 
-    g.setColour (juce::Colour::fromRGB (12, 10, 8));
+    g.setColour (c.modBackground.darker (0.35f));
     g.fillRoundedRectangle (preview.toFloat(), 3.0f);
-    g.setColour (juce::Colour::fromRGBA (120, 95, 55, 160));
+    g.setColour (c.modBorder.withAlpha (160.0f / 255.0f));
     g.drawRoundedRectangle (preview.toFloat(), 3.0f, 1.0f);
 
     if (preview.getWidth() < 8 || preview.getHeight() < 8)
@@ -285,7 +288,7 @@ void ModSectionComponent::LfoColumn::paint (juce::Graphics& g)
             wave.lineTo (x, y);
     }
 
-    g.setColour (juce::Colour::fromRGB (220, 180, 90));
+    g.setColour (c.modAccent);
     g.strokePath (wave, juce::PathStrokeType (1.5f));
 
     // Playhead dot only when this LFO is assigned in the mod matrix.
@@ -295,7 +298,7 @@ void ModSectionComponent::LfoColumn::paint (juce::Graphics& g)
         const float x = (float) preview.getX() + t * (float) preview.getWidth();
         const float y = midY - LfoMod::shapeAt (currentShape, t) * amp;
 
-        g.setColour (juce::Colour::fromRGB (255, 230, 140));
+        g.setColour (c.modAccent.brighter (0.35f));
         g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
         g.setColour (juce::Colours::black.withAlpha (0.55f));
         g.drawEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f, 1.0f);
@@ -500,10 +503,11 @@ void ModSectionComponent::ShapeColumn::refreshPlayhead()
 
 void ModSectionComponent::ShapeColumn::paint (juce::Graphics& g)
 {
+    const auto& c = owner.getSharedColors();
     auto bounds = getLocalBounds().toFloat();
-    g.setColour (juce::Colour::fromRGBA (25, 18, 12, 220));
+    g.setColour (c.modBackground.withAlpha (220.0f / 255.0f));
     g.fillRoundedRectangle (bounds.reduced (1.0f), 4.0f);
-    g.setColour (juce::Colour::fromRGBA (90, 70, 45, 180));
+    g.setColour (c.modBorder.withAlpha (180.0f / 255.0f));
     g.drawRoundedRectangle (bounds.reduced (1.0f), 4.0f, 1.0f);
 }
 
@@ -535,11 +539,13 @@ void ModSectionComponent::ShapeColumn::resized()
 }
 
 //==============================================================================
-ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (juce::AudioProcessorValueTreeState& state)
+ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (juce::AudioProcessorValueTreeState& state,
+                                                              ModSectionComponent& ownerRef)
+    : ownerSection (ownerRef)
 {
     title.setText ("Env", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centred);
-    title.setColour (juce::Label::textColourId, juce::Colour::fromRGB (210, 190, 150));
+    title.setColour (juce::Label::textColourId, ownerSection.getSharedColors().modText);
     title.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
     title.setTooltip ("Envelope follower. Use as a mod matrix source");
     addAndMakeVisible (title);
@@ -570,10 +576,11 @@ ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (juce::AudioProcessorV
 
 void ModSectionComponent::EnvFollowerColumn::paint (juce::Graphics& g)
 {
+    const auto& c = ownerSection.getSharedColors();
     auto bounds = getLocalBounds().toFloat();
-    g.setColour (juce::Colour::fromRGBA (25, 18, 12, 220));
+    g.setColour (c.modBackground.withAlpha (220.0f / 255.0f));
     g.fillRoundedRectangle (bounds.reduced (1.0f), 4.0f);
-    g.setColour (juce::Colour::fromRGBA (90, 70, 45, 180));
+    g.setColour (c.modBorder.withAlpha (180.0f / 255.0f));
     g.drawRoundedRectangle (bounds.reduced (1.0f), 4.0f, 1.0f);
 }
 
@@ -733,19 +740,19 @@ ModSectionComponent::ModSectionComponent (EqProcessor& proc)
 {
     for (int i = 0; i < LfoMod::kNumLfos; ++i)
     {
-        columns[(size_t) i] = std::make_unique<LfoColumn> (treeState, i);
+        columns[(size_t) i] = std::make_unique<LfoColumn> (treeState, i, *this);
         addAndMakeVisible (*columns[(size_t) i]);
     }
 
     shapeColumn = std::make_unique<ShapeColumn> (processor, *this);
     addAndMakeVisible (*shapeColumn);
 
-    envColumn = std::make_unique<EnvFollowerColumn> (treeState);
+    envColumn = std::make_unique<EnvFollowerColumn> (treeState, *this);
     addAndMakeVisible (*envColumn);
 
     matrixTitle.setText ("Mod Matrix", juce::dontSendNotification);
     matrixTitle.setJustificationType (juce::Justification::centredLeft);
-    matrixTitle.setColour (juce::Label::textColourId, juce::Colour::fromRGB (210, 190, 150));
+    matrixTitle.setColour (juce::Label::textColourId, colors().modText);
     matrixTitle.setFont (juce::FontOptions (13.0f).withStyle ("Bold"));
     addAndMakeVisible (matrixTitle);
 
@@ -760,6 +767,7 @@ ModSectionComponent::ModSectionComponent (EqProcessor& proc)
     }
     addAndMakeVisible (matrixViewport);
 
+    applyThemeToChildControls();
     startTimerHz (24);
 }
 
@@ -781,6 +789,8 @@ void ModSectionComponent::showShapeEditorPopup()
 
     if (shapePopup == nullptr)
         shapePopup = std::make_unique<ShapeEditorPopup> (processor);
+
+    shapePopup->setThemeColors (themeColors);
 
     shapePopup->onClosed = [this]
     {
@@ -808,23 +818,95 @@ void ModSectionComponent::timerCallback()
 
 void ModSectionComponent::paint (juce::Graphics& g)
 {
+    const auto& c = colors();
     auto bounds = getLocalBounds().toFloat();
-    juce::ColourGradient grad (juce::Colour::fromRGB (28, 20, 14),
+    juce::ColourGradient grad (c.modBackground,
                                bounds.getTopLeft(),
-                               juce::Colour::fromRGB (8, 6, 4),
+                               c.modBackground.darker (0.55f),
                                bounds.getBottomRight(),
                                false);
     g.setGradientFill (grad);
     g.fillRect (bounds);
 
-    g.setColour (juce::Colour::fromRGBA (110, 90, 60, 200));
+    g.setColour (c.modBorder.withAlpha (200.0f / 255.0f));
     g.drawLine (0.0f, 0.5f, bounds.getWidth(), 0.5f, 1.5f);
     g.drawLine (0.0f, bounds.getHeight() - 0.5f, bounds.getWidth(), bounds.getHeight() - 0.5f, 1.5f);
 
-    // Separator stays at matrix boundary (matrix is ~45% from the right).
     const float sepX = bounds.getWidth() * 0.55f;
-    g.setColour (juce::Colour::fromRGBA (100, 80, 50, 160));
+    g.setColour (c.modBorder.withAlpha (160.0f / 255.0f));
     g.drawLine (sepX, 8.0f, sepX, bounds.getHeight() - 8.0f, 1.2f);
+}
+
+const SharedColors& ModSectionComponent::colors() const noexcept
+{
+    static const SharedColors defaultColors;
+    return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+}
+
+void ModSectionComponent::setThemeColors (SharedResources* r) noexcept
+{
+    themeColors = r;
+    applyThemeToChildControls();
+    repaint();
+}
+
+void ModSectionComponent::applyThemeToChildControls()
+{
+    const auto& c = colors();
+
+    ComboBoxLookAndFeel::sharedForPopupMenus().setThemeColors (themeColors);
+    matrixTitle.setColour (juce::Label::textColourId, c.modText);
+
+    auto styleModButton = [&c] (juce::TextButton& b)
+    {
+        b.setColour (juce::TextButton::buttonColourId, c.modBackground.brighter (0.15f));
+        b.setColour (juce::TextButton::buttonOnColourId, c.modAccent);
+        b.setColour (juce::TextButton::textColourOffId, c.modText);
+        b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    };
+
+    for (auto& col : columns)
+        if (col != nullptr)
+        {
+            col->title.setColour (juce::Label::textColourId, c.modText);
+            col->rateLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+            col->phaseLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+            styleModButton (col->prevShape);
+            styleModButton (col->nextShape);
+            styleModButton (col->retrigButton);
+            col->rateSlider.setThemeColors (themeColors);
+            col->phaseSlider.setThemeColors (themeColors);
+            col->repaint();
+        }
+
+    if (shapeColumn != nullptr)
+    {
+        shapeColumn->title.setColour (juce::Label::textColourId, c.modText);
+        shapeColumn->rateLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        shapeColumn->phaseLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        shapeColumn->smoothLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        styleModButton (shapeColumn->expandButton);
+        styleModButton (shapeColumn->retrigButton);
+        shapeColumn->rateSlider.setThemeColors (themeColors);
+        shapeColumn->phaseSlider.setThemeColors (themeColors);
+        shapeColumn->smoothSlider.setThemeColors (themeColors);
+        shapeColumn->editor.setThemeColors (themeColors);
+        shapeColumn->repaint();
+    }
+
+    if (shapePopup != nullptr)
+        shapePopup->setThemeColors (themeColors);
+
+    if (envColumn != nullptr)
+    {
+        envColumn->title.setColour (juce::Label::textColourId, c.modText);
+        envColumn->threshLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        envColumn->attackLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        envColumn->releaseLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        envColumn->attackSlider.setThemeColors (themeColors);
+        envColumn->releaseSlider.setThemeColors (themeColors);
+        envColumn->repaint();
+    }
 }
 
 void ModSectionComponent::resized()

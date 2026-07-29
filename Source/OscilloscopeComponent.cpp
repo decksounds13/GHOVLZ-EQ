@@ -12,6 +12,12 @@ OscilloscopeComponent::~OscilloscopeComponent()
     stopTimer();
 }
 
+const SharedColors& OscilloscopeComponent::colors() const noexcept
+{
+    static const SharedColors defaultColors;
+    return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+}
+
 void OscilloscopeComponent::prepare (double sampleRate)
 {
     const double sr = sampleRate > 0.0 ? sampleRate : 48000.0;
@@ -367,7 +373,8 @@ void OscilloscopeComponent::strokeWaveform (juce::Graphics& g, const juce::Path&
     if (waveform.isEmpty())
         return;
 
-    const auto lineColour = juce::Colour::fromRGBA (220, 190, 120, 220).withMultipliedAlpha (lineOpacity);
+    const auto& theme = colors();
+    const auto lineColour = theme.oscLine.withMultipliedAlpha (lineOpacity);
     const juce::PathStrokeType stroke (pathWidth,
                                        juce::PathStrokeType::curved,
                                        juce::PathStrokeType::rounded);
@@ -375,10 +382,11 @@ void OscilloscopeComponent::strokeWaveform (juce::Graphics& g, const juce::Path&
     const float radius = juce::jmax (0.0f, glowRadius);
     const float spread = juce::jmax (0.0f, glowSpread);
 
-    if (glowEnabled && glowOpacity > 0.05f && radius > 0.5f)
+    if (glowEnabled && SharedResources::glowShadowEffectsEnabled()
+        && glowOpacity > 0.05f && radius > 0.5f)
     {
-        const auto bloom = juce::Colour::fromRGBA (220, 190, 120, 130).withAlpha (glowOpacity * 0.45f);
-        const auto core = juce::Colour::fromRGBA (255, 230, 160, 180).withAlpha (glowOpacity * 0.75f);
+        const auto bloom = theme.oscGlow.withAlpha (glowOpacity * 0.45f);
+        const auto core = theme.oscGlow.brighter (0.15f).withAlpha (glowOpacity * 0.75f);
 
         // Melatonin ignores spread on stroked paths (only expands filled shapes).
         const juce::PathStrokeType glowStroke (juce::jmax (1.0f, pathWidth + 0.5f),
@@ -422,7 +430,8 @@ void OscilloscopeComponent::paintEnvelopeLane (juce::Graphics& g,
         return;
 
     const float xScale = plot.getWidth() / (float) juce::jmax (1, n);
-    const auto lineColour = juce::Colour::fromRGBA (220, 190, 120, 220).withMultipliedAlpha (lineOpacity);
+    const auto& theme = colors();
+    const auto lineColour = theme.oscLine.withMultipliedAlpha (lineOpacity);
 
     auto sampleMax = [useLeft, useRight] (const Column& col) -> float
     {
@@ -549,23 +558,24 @@ void OscilloscopeComponent::paintEnvelopeLane (juce::Graphics& g,
 
 void OscilloscopeComponent::paint (juce::Graphics& g)
 {
+    const auto& theme = colors();
     auto waveArea = getLocalBounds().toFloat();
 
     if (! expanded)
     {
         juce::Path window;
         window.addRoundedRectangle (waveArea.reduced (0.5f), 5.0f);
-        g.setColour (juce::Colour::fromRGBA (12, 10, 8, 170));
+        g.setColour (theme.oscBackground.withAlpha (170.0f / 255.0f));
         g.fillPath (window);
-        g.setColour (juce::Colour::fromRGBA (40, 32, 24, 140));
+        g.setColour (theme.oscBackground2.withAlpha (140.0f / 255.0f));
         g.strokePath (window, juce::PathStrokeType (1.0f));
     }
 
-    auto drawZoomLabel = [this, &g]()
+    auto drawZoomLabel = [this, &g, &theme]()
     {
         const float fontH = expanded ? 13.0f : 10.5f;
         g.setFont (juce::FontOptions().withHeight (fontH));
-        g.setColour (juce::Colours::whitesmoke.withAlpha (expanded ? 0.70f : 0.55f));
+        g.setColour (theme.graphAxisText.withAlpha (expanded ? 0.70f : 0.55f));
         auto textArea = getLocalBounds().reduced (expanded ? 10 : 5, expanded ? 8 : 3);
         g.drawText (getZoomLabel(),
                     textArea.removeFromBottom (expanded ? 16 : 13),
@@ -606,7 +616,7 @@ void OscilloscopeComponent::paint (juce::Graphics& g)
         auto top = juce::Rectangle<float> (plot.getX(), plot.getY(), plot.getWidth(), halfH - 1.0f);
         auto bottom = juce::Rectangle<float> (plot.getX(), midY + 1.0f, plot.getWidth(), halfH - 1.0f);
 
-        g.setColour (juce::Colour::fromRGBA (80, 70, 50, 90));
+        g.setColour (theme.oscBackground2.withAlpha (90.0f / 255.0f));
         g.drawHorizontalLine (juce::roundToInt (midY), plot.getX(), plot.getRight());
 
         paintEnvelopeLane (g, top, pathWidth, lineOpacity, highQuality,

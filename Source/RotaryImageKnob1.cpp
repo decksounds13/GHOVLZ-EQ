@@ -1,22 +1,13 @@
 #include <JuceHeader.h>
 #include "RotaryImageKnob1.h"
+#include "KnobThemeHelpers.h"
 
 namespace
 {
-    void showKnobValueText (juce::Slider& slider, bool show)
+    void showKnobValueText (juce::Slider& slider, bool show, SharedResources* themeColors)
     {
         slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 45, 20);
-
-        const auto textColour = show ? juce::Colours::whitesmoke.withAlpha (0.9f)
-                                     : juce::Colours::transparentBlack;
-        const auto bgColour = show ? juce::Colours::black.withAlpha (0.35f)
-                                   : juce::Colours::transparentBlack;
-        const auto outlineColour = show ? juce::Colours::whitesmoke.withAlpha (0.25f)
-                                        : juce::Colours::transparentBlack;
-
-        slider.setColour (juce::Slider::textBoxTextColourId, textColour);
-        slider.setColour (juce::Slider::textBoxBackgroundColourId, bgColour);
-        slider.setColour (juce::Slider::textBoxOutlineColourId, outlineColour);
+        KnobTheme::applyValuePopupColours (slider, show, KnobTheme::colors (themeColors));
     }
 }
 
@@ -33,7 +24,7 @@ RotaryImageKnob1::RotaryImageKnob1()
     float endAngleDegrees = 320.0;
     setRotaryParameters(juce::degreesToRadians(startAngleDegrees), juce::degreesToRadians(endAngleDegrees), true);
 
-    showKnobValueText (*this, false);
+    showKnobValueText (*this, false, themeColors);
     repaint();
 }
 
@@ -42,14 +33,24 @@ RotaryImageKnob1::~RotaryImageKnob1()
     setLookAndFeel(nullptr);
 }
 
+void RotaryImageKnob1::setThemeColors (SharedResources* r) noexcept
+{
+    themeColors = r;
+    rotaryImageKnobLookAndFeel1.setThemeColors (r);
+    refreshValuePopup (isMouseOverOrDragging() || hasKeyboardFocus (true));
+    repaint();
+}
+
+void RotaryImageKnob1::refreshValuePopup (bool show)
+{
+    showKnobValueText (*this, show, themeColors);
+}
+
 void RotaryImageKnob1::paint(juce::Graphics& g)
 {
-    if (rotaryImageKnobLookAndFeel1.isImageValid()) {
-        DBG("Image is valid.");
-    }
-    else {
-        DBG("Image is NOT valid.");
-    }
+    rotaryImageKnobLookAndFeel1.setThemeColors (themeColors);
+    rotaryImageKnobLookAndFeel1.setMinValue ((float) getMinimum());
+    rotaryImageKnobLookAndFeel1.setMaxValue ((float) getMaximum());
 
     const int side = juce::jmin (getWidth(), getHeight());
     const int x = (getWidth() - side) / 2;
@@ -57,7 +58,6 @@ void RotaryImageKnob1::paint(juce::Graphics& g)
     rotaryImageKnobLookAndFeel1.drawRotarySlider (g, x, y, side, side,
         static_cast<float> (getValue()), 0.0f, 1.0f, *this);
 }
-
 
 void RotaryImageKnob1::setCustomRange(double newMin, double newMax, double newInterval)
 {
@@ -67,7 +67,7 @@ void RotaryImageKnob1::setCustomRange(double newMin, double newMax, double newIn
 void RotaryImageKnob1::mouseEnter(const juce::MouseEvent& event)
 {
     juce::ignoreUnused (event);
-    showKnobValueText (*this, true);
+    refreshValuePopup (true);
 }
 
 void RotaryImageKnob1::mouseExit(const juce::MouseEvent& event)
@@ -75,7 +75,7 @@ void RotaryImageKnob1::mouseExit(const juce::MouseEvent& event)
     juce::ignoreUnused (event);
     if (hasKeyboardFocus (true))
         return;
-    showKnobValueText (*this, false);
+    refreshValuePopup (false);
 }
 
 bool RotaryImageKnob1::isImageValid() const {

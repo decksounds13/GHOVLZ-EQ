@@ -9,8 +9,11 @@ public:
     ~CustomTextButton();
     void paint(juce::Graphics& g) override;
     void resized() override; // Override the resized method to update the button path
+    void mouseDown (const juce::MouseEvent& e) override;
 
     const juce::Path& getButtonPath() const { return buttonPath; }
+
+    std::function<void()> onPopupMenu;
 
 private:
     TextButtonLookAndFeel customLookAndFeel;

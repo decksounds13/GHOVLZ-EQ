@@ -22,6 +22,7 @@
 
 class FrequencyResponseComponent;
 class OscilloscopeComponent;
+class GoniometerComponent;
 
 class EqProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener//, public juce::Timer 
 
@@ -54,6 +55,10 @@ public:
     /** Optional oscilloscope strip (UI). Audio thread pushes when non-null and enabled. */
     void setOscilloscopeTarget (class OscilloscopeComponent* target) noexcept;
     OscilloscopeComponent* getOscilloscopeTarget() const noexcept;
+
+    /** Optional goniometer (UI). Audio thread pushes when non-null and enabled. */
+    void setGoniometerTarget (class GoniometerComponent* target) noexcept;
+    GoniometerComponent* getGoniometerTarget() const noexcept;
 
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     const juce::UndoManager& getUndoManager() const noexcept { return undoManager; }
@@ -402,6 +407,7 @@ private:
     Analyser m_analyser;
 
     std::atomic<OscilloscopeComponent*> oscilloscopeTarget { nullptr };
+    std::atomic<GoniometerComponent*> goniometerTarget { nullptr };
 
     std::atomic<bool> ecoMode { false };
 

@@ -91,18 +91,12 @@ void QuadPicker::mouseDrag(const juce::MouseEvent& event)
 
 void QuadPicker::setHue(float newHue)
 {
-    // Extract the current saturation and brightness
     float currentSaturation = selectedColor.getSaturation();
     float currentBrightness = selectedColor.getBrightness();
-    float currentAlpha = selectedColor.getAlpha();
+    float currentAlpha = selectedColor.getFloatAlpha();
 
-    // Create a new color with the new hue, but keeping the old saturation and brightness
     hueColor = juce::Colour::fromHSV(newHue, currentSaturation, currentBrightness, currentAlpha);
-
-    // Update the selected color
     selectedColor = hueColor;
-
-    // Repaint the component to reflect the changes
     repaint();
 }
 
@@ -116,15 +110,14 @@ void QuadPicker::setSelectedPosition(juce::Point<float> newPosition) {
     float saturation = newPosition.x / (float)getWidth();
     float lightness = 1.0f - newPosition.y / (float)getHeight();
 
-    // Get the current hue of selectedColor
     float currentHue, currentSaturation, currentBrightness;
     selectedColor.getHSB(currentHue, currentSaturation, currentBrightness);
+    const float keepAlpha = selectedColor.getFloatAlpha();
 
-    // Clamp the hue within the specified range
     float limitedHue = std::clamp(currentHue, sharedResources.sharedColors.hueLowerLimit, sharedResources.sharedColors.hueUpperLimit);
 
-    // Create a new color with the limited hue, but keep the old saturation and brightness
-    selectedColor = juce::Colour::fromHSV(limitedHue, saturation, lightness, 1.0f);
+    // Preserve the element's assigned alpha — picker is HSV-only.
+    selectedColor = juce::Colour::fromHSV(limitedHue, saturation, lightness, keepAlpha);
 
     DBG("Selected Color: " + selectedColor.toString());
 

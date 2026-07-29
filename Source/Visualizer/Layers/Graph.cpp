@@ -193,18 +193,21 @@ void Graph::timerCallback()
         return;
     }
 
-    if ( mr_analyser.getNextFFTBlockStatus() || mr_analyser.getNextPreFFTBlockStatus() )
+    // Analyser is on — always keep layers visible, even before the first FFT frame.
+    // Gating visibility on getNextFFTBlockStatus() left the graph blank after project
+    // load / BLOCK_ID resets (flags cleared) until the user toggled Spectrum in Settings.
+    m_graphMaximumsLine.setVisible (m_maximumVolumesIsVisible.load());
+    m_graphLine.setVisible (m_graphStyleIsLine.load());
+    m_graphBins.setVisible (! m_graphStyleIsLine.load());
+
+    if (mr_analyser.getNextFFTBlockStatus() || mr_analyser.getNextPreFFTBlockStatus())
     {
         mr_analyser.calculateNextFrameOfSpectrum();
-        
-        m_graphMaximumsLine.setScaleType( m_scaleTypeIsLogarithmic.load() );
-        m_graphLine.setScaleType( m_scaleTypeIsLogarithmic.load() );
-        m_graphBins.setScaleType( m_scaleTypeIsLogarithmic.load() );
-        
-        m_graphMaximumsLine.setVisible( m_maximumVolumesIsVisible.load() );
-        m_graphLine.setVisible( m_graphStyleIsLine.load() );
-        m_graphBins.setVisible( ! m_graphStyleIsLine.load() );
-        
+
+        m_graphMaximumsLine.setScaleType (m_scaleTypeIsLogarithmic.load());
+        m_graphLine.setScaleType (m_scaleTypeIsLogarithmic.load());
+        m_graphBins.setScaleType (m_scaleTypeIsLogarithmic.load());
+
         repaint();
     }
 }
@@ -214,13 +217,19 @@ void Graph::timerCallback()
 void Graph::setGraphColour( juce::Colour colour )
 {
     m_volumeGraphColour = colour;
+    m_graphLine.setColour (colour);
+    m_graphBins.setColour (colour);
 }
 
-
+void Graph::setBinOverlayColour (juce::Colour colour)
+{
+    m_graphLine.setBinOverlayColour (colour);
+}
 
 void Graph::setGraphMaximumsColour( juce::Colour colour )
 {
     m_volumeMaximumsGraphColour = colour;
+    m_graphMaximumsLine.setColour (colour);
 }
 
 

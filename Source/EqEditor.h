@@ -19,6 +19,7 @@
 #include "PhaseMode.h"
 #include "ModSectionComponent.h"
 #include "ComboBoxLookAndFeel.h"
+#include "Menu/SharedResources.h"
 
 // Forward declaration
 class MainComponent;
@@ -63,6 +64,8 @@ public:
     bool isModPanelOpen() const noexcept { return modPanelOpen; }
     void syncModButton (bool isOpen);
 
+    void setThemeColors (SharedResources* r) noexcept;
+
     void loadUiPrefs();
     void saveUiPrefs() const;
 
@@ -72,19 +75,14 @@ public:
     std::function<void()> handle1DragStart;
     std::function<void()> handle1DragEnd;
 
-  //  static const char* DarkKnob4_Stitched_png;
-  //  static const char* DarkKnob4_Stitched_pngSize;
-
-   // static juce::Image darkKnob4_StitchedImage;
-        
     void timerCallback() override;
 
     void initializeSharedImages();
 
-    //RotaryImageKnob1& getKnob1();
-
-
 private:
+    const SharedColors& themePalette() const noexcept;
+    void applyFaceplateTheme();
+
     void applyCompactUi();
     void setFaceplateVisible (bool shouldShow);
     /** Show faceplate Gain knobs only when that band's filter type uses gain. */
@@ -305,6 +303,7 @@ private:
 
     BrandWordmark brandWordmark;
     juce::TooltipWindow tooltipWindow { this, 500 };
+    SharedResources* themeColors = nullptr;
 
     /** Bottom chrome: toggle plugin tooltips (lit = enabled). Visible in compact and expanded. */
     juce::TextButton helpTooltipsButton { "?" };

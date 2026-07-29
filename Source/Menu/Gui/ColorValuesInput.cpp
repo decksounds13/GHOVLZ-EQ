@@ -75,9 +75,9 @@ void ColorValuesInput::sliderValueChanged(juce::Slider* slider)
         );
     }
 
-    // Notify AppearanceComponent of the color change
+    // Notify AppearanceComponent of the color change (A slider / RGBA may change alpha)
     if (auto* appearanceComponent = findParentComponentOfClass<AppearanceComponent>()) {
-        appearanceComponent->directColorUpdate(newColor);
+        appearanceComponent->directColorUpdate(newColor, true);
     }
 
     // Notify via callback and listeners

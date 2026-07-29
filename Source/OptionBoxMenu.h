@@ -12,6 +12,7 @@
 #include "Spectral/SpectralPerBandLattice.h"
 #include "BandSaturation.h"
 #include "BandSidechain.h"
+#include "Menu/SharedResources.h"
 
 class OptionBoxMenu : public juce::Component,
                       public juce::Button::Listener,
@@ -48,8 +49,7 @@ public:
     void updateUiScaleFromParent();
     int getCurrentBandIndex() const { return currentBandIndex; }
 
-    /** Wide enough for filter-type + slope side-by-side without clipping. */
-    static constexpr int designWidth = 178;
+    static constexpr int designWidth = 150;
     /** Spectral + A/R room; shorter header/Q share a row (see topCrop in resized). */
     static constexpr int designHeight = 302;
     /** Pixels removed from the old 340 layout so the box top can sit lower on screen. */
@@ -64,6 +64,8 @@ public:
     std::function<void(int)> onBandCycled;
     /** Optional: start an undo transaction before OptionBox parameter edits. */
     juce::UndoManager* undoManager = nullptr;
+
+    void setThemeColors (SharedResources* r) noexcept;
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -106,6 +108,8 @@ private:
     int getVisualHeight() const;
     /** Hard-clamp so the transformed visual bounds never leave the graph parent. */
     void constrainVisualBoundsToParent();
+    const SharedColors& colors() const noexcept;
+    void applyThemeToChildControls();
 
     bool isBeingDragged = false;
     juce::Point<int> lastMousePosition;
@@ -132,11 +136,8 @@ private:
     std::string currentBandName;
     std::array<std::string, 8> cachedBandNames {};
     juce::Line<float> separator;
-    juce::Colour backgroundColor;
-    juce::Colour borderColor;
-    juce::Colour titleColor;
-    juce::Colour labelTextColor;
-    juce::Colour separatorColor;
+
+    SharedResources* themeColors = nullptr;
 
     ComboBoxLookAndFeel customLookAndFeel;
 

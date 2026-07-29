@@ -8,6 +8,7 @@
 #include "TextButtonLookAndFeel.h"
 #include "RotaryImageKnobForOptionBox.h"
 #include "RetrigButton.h"
+#include "Menu/SharedResources.h"
 
 class EqProcessor;
 class ShapeEditorPopup;
@@ -27,7 +28,12 @@ public:
     void resized() override;
     void timerCallback() override;
 
+    void setThemeColors (SharedResources* r) noexcept;
+    const SharedColors& getSharedColors() const noexcept { return colors(); }
+
 private:
+    const SharedColors& colors() const noexcept;
+    void applyThemeToChildControls();
     /** Image knob with right-click for Hz / Sync (same gesture as before). */
     class RateImageKnob : public RotaryImageKnobForOptionBox
     {
@@ -48,7 +54,7 @@ private:
     struct LfoColumn : public juce::Component,
                        public juce::AudioProcessorValueTreeState::Listener
     {
-        LfoColumn (juce::AudioProcessorValueTreeState& state, int index);
+        LfoColumn (juce::AudioProcessorValueTreeState& state, int index, ModSectionComponent& ownerSection);
         ~LfoColumn() override;
 
         void paint (juce::Graphics& g) override;
@@ -63,6 +69,7 @@ private:
 
         int lfoIndex = 0;
         juce::AudioProcessorValueTreeState& treeState;
+        ModSectionComponent& ownerSection;
         bool rateSyncMode = false;
         float playheadPhase = 0.0f;
         bool playheadActive = false;
@@ -125,12 +132,13 @@ private:
 
     struct EnvFollowerColumn : public juce::Component
     {
-        explicit EnvFollowerColumn (juce::AudioProcessorValueTreeState& state);
+        explicit EnvFollowerColumn (juce::AudioProcessorValueTreeState& state, ModSectionComponent& ownerSection);
         void resized() override;
         void paint (juce::Graphics& g) override;
 
         juce::Label title;
         juce::Slider thresholdSlider;
+        ModSectionComponent& ownerSection;
         RotaryImageKnobForOptionBox attackSlider;
         RotaryImageKnobForOptionBox releaseSlider;
         juce::Label threshLabel;
@@ -180,6 +188,7 @@ private:
 
     EqProcessor& processor;
     juce::AudioProcessorValueTreeState& treeState;
+    SharedResources* themeColors = nullptr;
     std::array<std::unique_ptr<LfoColumn>, LfoMod::kNumLfos> columns;
     std::unique_ptr<ShapeColumn> shapeColumn;
     std::unique_ptr<EnvFollowerColumn> envColumn;

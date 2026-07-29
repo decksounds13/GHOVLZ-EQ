@@ -7,7 +7,8 @@
 #include "MelatoninBlur/melatonin/shadows.h"
 
 class UIElementsList : public juce::Component,
-    public juce::ListBoxModel
+    public juce::ListBoxModel,
+    public CustomHeader2::Listener
 {
 public:
     class Listener
@@ -27,6 +28,11 @@ public:
     void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override;
     void listBoxItemClicked(int row, const juce::MouseEvent&) override;
     void addElement(const juce::String& name, const juce::Colour& color);
+    void addElement(const juce::String& name, const juce::Colour& color, int paletteIndex);
+    void populateFromRegistry();
+    void sortByElementName();
+    juce::Array<int> getSelectedPaletteIndices();
+    int getPaletteIndexForRow (int row) const;
     void updateSelectedElementColor(const juce::Colour& newColor);
     juce::String getSelectedElementName();
     juce::String getSelectedElementNameForIndex(int index);
@@ -42,6 +48,7 @@ public:
     void updateIfNeeded();
 
     void mouseMove(const juce::MouseEvent& event) override;
+    void elementNameHeaderClicked() override;
 
     void updateGradient();
     void setColor1(juce::Colour newColor);
@@ -81,6 +88,7 @@ private:
     {
         juce::String name;
         juce::Colour color;
+        int paletteIndex = -1;
     };
 
     juce::Array<UIElement> uiElements;
@@ -88,6 +96,8 @@ private:
     juce::ListBox listBox;
     int selectedRow = -1;
     int hoveredRow = -1;
+    bool nameSortAscending = true;
+    bool nameSortActive = false;
     std::unique_ptr<CustomScrollBar> customScrollBar;
   
     std::unique_ptr<CustomHeader2> customHeader;

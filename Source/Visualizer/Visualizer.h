@@ -4,6 +4,7 @@
 #include "Layers/Grid.h"
 #include "Layers/Graph.h"
 #include "Analyser.h"
+#include "Menu/SharedResources.h"
 
 /*
     TASKS
@@ -33,7 +34,9 @@ public:
     
     // ========================================================================
     void setMarginInPixels( const int );
-    
+
+    void setThemeColors (SharedResources* r) noexcept;
+
 private:
     // ========================================================================
     ::Grid m_grid;  // Use :: to indicate that Grid is in the global namespace
@@ -41,6 +44,10 @@ private:
     
     juce::Colour m_backgroundColour { 0xff323232 };
     int m_marginInPixels { 10 };
+    SharedResources* themeColors = nullptr;
+
+    const SharedColors& colors() const noexcept;
+    void applyThemeColours();
     
     
     // ========================================================================

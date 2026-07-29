@@ -34,3 +34,15 @@ void CustomTextButton::resized() {
 
 }
 
+void CustomTextButton::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        if (onPopupMenu != nullptr)
+            onPopupMenu();
+        return;
+    }
+
+    juce::TextButton::mouseDown (e);
+}
+
