@@ -1,65 +1,65 @@
 # GHOVLZ! EQ — Release Notes
 
-**Checkpoint:** 2026-07-30  
-**Status:** Pre-spectrogram / pre-metering-VST baseline. Working tree was clean at `1cd6fc4`; this file documents the shipped product so the next feature wave has a clear freeze point.
+**Checkpoint:** 2026-07-30 (post–Scope mode / spectrogram)  
+**Status:** Spectrogram + quad Scope metering view landed. Known follow-ups: spectrogram history clears on pane resize; fullscreen spectrogram CPU is heavy vs compact.
 
 ---
 
 ## Product snapshot
 
-Compact parametric EQ VST3/AU with overlapping spectrum analysis, beat-synced oscilloscope, stereo goniometer, per-band saturation, spectral lattice dynamics, SideCheck, linear-phase FIR path, UI themes, and EQ presets — still a small Release binary with headroom for more metering chrome.
+Compact parametric EQ VST3/AU with overlapping spectrum analysis, beat-synced oscilloscope, stereo goniometer, scrolling spectrogram, per-band saturation, spectral lattice dynamics, SideCheck, linear-phase FIR path, UI themes, EQ presets, and a **Scope** metering layout (dry passthrough) — still a small Release binary with headroom for a future metering-only product.
 
 ---
 
-## Highlights since last notes pass (2026-07-26 → now)
+## This checkpoint
+
+### Spectrogram
+- Compact strip between UI dice and EQ preset bar (osc-like height, slightly wider).
+- **Spec** toggle under Gon; tool column: speed + / − and expand (fullscreen).
+- Colour schemes: Classic, **Inferno (default)**, Magma, Viridis, Ice, Greyscale, Heat.
+- Settings tab (Look / Behaviour): scheme, brightness, FFT size, channel, scroll speed, floor/ceiling dB, smoothing, log freq, freeze; Save Default via analyser defaults.
+- Wired through processor audio push like osc/gon.
+
+### Scope mode (quad metering)
+- Bottom-trim **Scope** button (SideCheck styling), right of SideCheck.
+- Graph splits into four resizable panes (drag gold crosshair):
+  - Top-left: Goniometer  
+  - Top-right: Spectrum / FFT visualizer  
+  - Bottom-left: Oscilloscope  
+  - Bottom-right: Spectrogram  
+- Minimized-state tools sit at the bottom of each pane; expand still maximizes that meter.
+- While Scope is on: **EQ / spectral / SideCheck DSP off** (dry + latency-matched passthrough); meters, analyser, and scopes keep running.
+- Persisted in `ui_prefs.xml` (`scopeModeEnabled`).
+
+### Eco
+- Eco now disables **all scopes** (OSC / Gon / Spec) as well as analyser/FFT, and exits Scope mode if active.
+- Prior scope toggles restore when Eco turns off.
+- Eco and Scope are mutually exclusive.
+
+### Known issues (next)
+- Resizing Scope panes (or the spectrogram bounds) **resets** spectrogram history.
+- Spectrogram is **CPU-heavy in fullscreen** / large panes; compact strip is fine. Optimize paint/FFT path before polish.
+
+---
+
+## Earlier highlights (themes → scopes)
 
 ### UI themes & chrome
-- UI theme list (CallOutBox) stays open for Rename / Duplicate / Delete without dismissing on right-click.
-- Option box paints with the faceplate radial wash (`pluginBackground2` → `pluginBackground`).
-- Knob tint/multiply, glow disable, oscilloscope/goniometer colour unification, and settings-button theming wired through shared theme colours.
-- Top chrome: Bypass, A–D reference slots, UI theme picker + dice randomize, centered EQ preset bar, Eco / OSC / Gon toggles, undo/redo, Settings.
+- UI theme CallOutBox stays open for Rename / Duplicate / Delete.
+- Option box faceplate wash; knob tint; shared theme colours for glow/settings/scopes.
+- Top chrome: Bypass, A–D, UI + dice, preset bar, Eco / OSC / Gon / Spec, undo/redo, Settings.
 
-### Meters & scopes
-- Overlapping (Ableton-style) spectrum analyser with Spectrum / FFT settings tabs.
-- Compact + expandable oscilloscope (beat zoom, ST / L-R, scroll vs overwrite, HQ envelopes).
-- Compact + expandable goniometer with correlation meter and matching settings tab (quality, line opacity, compact/expanded glow).
+### Meters & scopes (pre-spectrogram)
+- Overlapping spectrum analyser; Spectrum / FFT settings.
+- Oscilloscope + goniometer compact/expand with settings tabs.
 
 ### EQ / DSP
-- Per-band HP/LP slopes; spectral per-band lattice.
-- Factory defaults hard-coded from the “new default” preset (`FactoryDefaultsState.h`).
-- Linear-phase highpass FIR restore fixed (Nyquist passband); min-phase HP/LP slope changes reset state to avoid clicks.
-- Per-band saturation (Tape / Tube / Diode / Dual-Triode) with OS and Pre/Post.
+- Per-band HP/LP slopes; spectral lattice; factory defaults; LP FIR HP restore; min-phase slope click fixes; per-band sat.
 
-### Build notes (ops)
-- Prefer **Release** builds for UI/CPU (Debug is dramatically heavier).
-- Windows: JUCE 9.0.0 + Gin modules layout; Mac AU path proven on MacinCloud; Mac VST3 still hardening (manifest / SDK paths).
+### Build notes
+- Prefer **Release** for UI/CPU.
+- Windows JUCE 9; Mac AU proven; Mac VST3 still hardening.
 
 ---
 
-## Explicitly not in this checkpoint
-
-- Spectrogram strip (next: left of preset bar, right of UI dice; osc-like height, slightly wider; colour schemes + settings tab).
-- Metering-only VST that hosts scopes alone (later).
-
----
-
-## Earlier notes (2026-07-26)
-
-### Spectrum analyser
-- Ring-buffer write + background FFT on Refresh cadence (overlapping windows).
-- Default Refresh tuned for smoother UI; Spectrum Average exposed in menus.
-
-### Oscilloscope
-- HQ continuous min/max envelopes with soft fill; connector artefact fixes.
-- Separate line/glow for compact vs expanded; compact HQ avoids double-trace look.
-
-### Factory default state
-- Notable factory: **8192** FFT, **30 ms** refresh, Auto Gain, Linear Phase, Band 1 sat + post Tube, spectrum smoothness High.
-
-### UI / HP fixes
-- Level meters re-raised with chrome; input L/R meters made visible.
-- Linear-phase HP FIR and min-phase slope click fixes as above.
-
----
-
-*Next commit stream: spectrogram + settings; metering product remains deferred.*
+*Next: spectrogram resize-history + fullscreen cost; metering-only VST remains deferred.*

@@ -28,6 +28,10 @@
                 resource="0" file="Source/Menu/Gui/GoniometerSettingsComponent.cpp"/>
           <FILE id="UyuIph" name="GoniometerSettingsComponent.h" compile="0"
                 resource="0" file="Source/Menu/Gui/GoniometerSettingsComponent.h"/>
+          <FILE id="sP3sEt" name="SpectrogramSettingsComponent.cpp" compile="1"
+                resource="0" file="Source/Menu/Gui/SpectrogramSettingsComponent.cpp"/>
+          <FILE id="sP3sHd" name="SpectrogramSettingsComponent.h" compile="0"
+                resource="0" file="Source/Menu/Gui/SpectrogramSettingsComponent.h"/>
         </GROUP>
         <GROUP id="{3A6E8CAB-E493-DB48-C58B-A9E8BF1A1503}" name="ScreenCaptureLite">
           <GROUP id="{AD79FC31-B391-8F0F-9DB1-35DB05D6996B}" name="internal"/>
@@ -47,6 +51,10 @@
             file="Source/GoniometerComponent.cpp"/>
       <FILE id="eEkl4d" name="GoniometerComponent.h" compile="0" resource="0"
             file="Source/GoniometerComponent.h"/>
+      <FILE id="sP3cGr" name="SpectrogramComponent.cpp" compile="1" resource="0"
+            file="Source/SpectrogramComponent.cpp"/>
+      <FILE id="sP3cHd" name="SpectrogramComponent.h" compile="0" resource="0"
+            file="Source/SpectrogramComponent.h"/>
       <GROUP id="{9EC25483-0AAE-0C15-44BA-C86660009C38}" name="Controls">
         <GROUP id="{C9343919-A1D1-42E4-67D1-DA11C771B79F}" name="Categories"/>
       </GROUP>

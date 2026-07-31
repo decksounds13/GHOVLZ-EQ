@@ -361,6 +361,20 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     sideCheckAttachment = std::make_unique<ButtonAttachment> (
         audioProcessor.treeState, SideCheck::enabledParamId(), sideCheckButton);
 
+    scopeModeButton.setClickingTogglesState (true);
+    scopeModeButton.setTooltip (
+        "Scope - quad metering view (Gon / Spectrum / Oscilloscope / Spectrogram). EQ DSP is bypassed while active.");
+    scopeModeButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
+    scopeModeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
+    scopeModeButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
+    scopeModeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    scopeModeButton.onClick = [this]
+    {
+        if (mainComponent != nullptr)
+            mainComponent->setScopeMode (scopeModeButton.getToggleState(), true);
+    };
+    addAndMakeVisible (scopeModeButton);
+
     sideCheckAmountSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     sideCheckAmountSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     sideCheckAmountSlider.setRange (SideCheck::kMinAmount, SideCheck::kMaxAmount, 0.01);
@@ -842,6 +856,7 @@ void EqEditor::resized()
         layoutHelpTooltipsButton();
         layoutPhaseModeCombo();
         layoutSideCheckButton();
+        layoutScopeModeButton();
         return;
     }
 
@@ -1077,6 +1092,7 @@ void EqEditor::resized()
     layoutHelpTooltipsButton();
     layoutPhaseModeCombo();
     layoutSideCheckButton();
+    layoutScopeModeButton();
 
     int parentWidth = getWidth();
     int componentWidth = parentWidth;
@@ -1356,6 +1372,30 @@ void EqEditor::layoutPhaseModeCombo()
 }
 
 
+void EqEditor::layoutScopeModeButton()
+{
+    scopeModeButton.setVisible (true);
+    addAndMakeVisible (scopeModeButton);
+
+    const float scale = (float) getWidth() / (float) designWidth;
+    auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
+
+    constexpr int trimH = 30;
+    const int btnSize = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
+    const int btnW = juce::jmax (btnSize, px (uiCompact ? 52.0f : 58.0f));
+    const int gap = px (6.0f);
+
+    // Sit just right of SideCheck (and its open controls when enabled).
+    int x = sideCheckButton.getRight() + gap;
+    if (sideCheckAmountSlider.isVisible())
+        x = juce::jmax (x, sideCheckLpKnob.getRight() + gap);
+    const int y = sideCheckButton.getY() + (sideCheckButton.getHeight() - btnSize) / 2;
+    scopeModeButton.setBounds (x, y, btnW, btnSize);
+    scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
+                                    juce::dontSendNotification);
+    scopeModeButton.toFront (false);
+}
+
 void EqEditor::layoutSideCheckButton()
 {
     sideCheckButton.setVisible (true);
@@ -1432,6 +1472,8 @@ void EqEditor::layoutSideCheckButton()
         sideCheckHpLabel.setBounds ({});
         sideCheckLpLabel.setBounds ({});
     }
+
+    layoutScopeModeButton();
 }
 
 void EqEditor::updateSideCheckAmountVisibility()
@@ -1513,11 +1555,18 @@ juce::File EqEditor::getUiPrefsFile()
         .getChildFile ("ui_prefs.xml");
 }
 
+void EqEditor::syncScopeModeButton()
+{
+    scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
+                                    juce::dontSendNotification);
+}
+
 void EqEditor::loadUiPrefs()
 {
     tooltipsEnabled = true;
     bool ecoEnabled = false;
     bool disableGlow = false;
+    bool scopeMode = false;
 
     const auto file = getUiPrefsFile();
     if (file.existsAsFile())
@@ -1529,6 +1578,7 @@ void EqEditor::loadUiPrefs()
                 tooltipsEnabled = xml->getBoolAttribute ("tooltipsEnabled", true);
                 ecoEnabled = xml->getBoolAttribute ("ecoEnabled", false);
                 disableGlow = xml->getBoolAttribute ("disableGlowShadowEffects", false);
+                scopeMode = xml->getBoolAttribute ("scopeModeEnabled", false);
             }
         }
     }
@@ -1537,6 +1587,8 @@ void EqEditor::loadUiPrefs()
     {
         mainComponent->setEcoMode (ecoEnabled, false);
         mainComponent->setDisableGlowShadowEffects (disableGlow, false);
+        mainComponent->setScopeMode (scopeMode, false);
+        scopeModeButton.setToggleState (mainComponent->isScopeMode(), juce::dontSendNotification);
     }
 }
 
@@ -1547,6 +1599,7 @@ void EqEditor::saveUiPrefs() const
     xml->setAttribute ("ecoEnabled", mainComponent != nullptr && mainComponent->isEcoMode());
     xml->setAttribute ("disableGlowShadowEffects",
                        mainComponent != nullptr && mainComponent->areGlowShadowEffectsDisabled());
+    xml->setAttribute ("scopeModeEnabled", mainComponent != nullptr && mainComponent->isScopeMode());
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
 
     auto file = getUiPrefsFile();

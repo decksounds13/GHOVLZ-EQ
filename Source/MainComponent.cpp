@@ -592,10 +592,10 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     processor.getUndoManager().addChangeListener (this);
     syncUndoRedoButtons();
 
-    // Eco — same Y as Bypass, X just right of Save. Disables analyser/FFT visuals only.
+    // Eco — same Y as Bypass, X just right of Save. Disables analyser/FFT + all scopes.
     styleChromeButton (ecoButton);
     ecoButton.setClickingTogglesState (true);
-    ecoButton.setTooltip ("Eco - disables analyser and spectrum drawing to save CPU. Dynamic (D) and Spectral (S) still work.");
+    ecoButton.setTooltip ("Eco - disables analyser, spectrum, and all scopes to save CPU. Dynamic (D) and Spectral (S) still work.");
     ecoButton.setAlwaysOnTop (true);
     ecoButton.onClick = [this]
     {
@@ -665,10 +665,41 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     gonExpandButton.setVisible (false);
     addChildComponent (gonExpandButton);
 
+    // Spec — spectrogram strip between UI dice and EQ preset bar.
+    styleChromeButton (specButton);
+    specButton.setClickingTogglesState (true);
+    specButton.setTooltip ("Spectrogram - scrolling frequency waterfall");
+    specButton.setAlwaysOnTop (true);
+    specButton.onClick = [this]
+    {
+        applySpectrogramActive (specButton.getToggleState());
+    };
+    addAndMakeVisible (specButton);
+
+    specSpeedUpButton.setTooltip ("Speed up spectrogram scroll");
+    specSpeedDownButton.setTooltip ("Slow down spectrogram scroll");
+    specExpandButton.setTooltip ("Expand spectrogram over the full graph");
+    specSpeedUpButton.setAlwaysOnTop (true);
+    specSpeedDownButton.setAlwaysOnTop (true);
+    specExpandButton.setAlwaysOnTop (true);
+    specSpeedUpButton.onClick = [this] { spectrogram.speedUp(); };
+    specSpeedDownButton.onClick = [this] { spectrogram.speedDown(); };
+    specExpandButton.onClick = [this] { setSpecExpanded (! specExpanded); };
+    specSpeedUpButton.setVisible (false);
+    specSpeedDownButton.setVisible (false);
+    specExpandButton.setVisible (false);
+    addChildComponent (specSpeedUpButton);
+    addChildComponent (specSpeedDownButton);
+    addChildComponent (specExpandButton);
+
     oscDimmer.setInterceptsMouseClicks (false, false);
     oscDimmer.setAlwaysOnTop (true);
     oscDimmer.setVisible (false);
     addChildComponent (oscDimmer);
+
+    scopeSplitOverlay.setAlwaysOnTop (true);
+    scopeSplitOverlay.setVisible (false);
+    addChildComponent (scopeSplitOverlay);
 
     oscilloscope.setAlwaysOnTop (true);
     oscilloscope.setParameterTree (&processor.treeState);
@@ -680,12 +711,20 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     addChildComponent (goniometer);
     processor.setGoniometerTarget (&goniometer);
 
-    // Default: scope on at load (summed stereo). Gon off.
+    spectrogram.setAlwaysOnTop (true);
+    spectrogram.setParameterTree (&processor.treeState);
+    addChildComponent (spectrogram);
+    processor.setSpectrogramTarget (&spectrogram);
+
+    // Default: scope on at load (summed stereo). Gon off. Spec on.
     oscButton.setToggleState (true, juce::dontSendNotification);
     oscilloscope.setEnabled (true);
     oscilloscope.setChannelMode (OscilloscopeComponent::ChannelMode::summedStereo);
     syncOscToolButtons();
     syncGonToolButtons();
+    syncSpecToolButtons();
+    specButton.setToggleState (true, juce::dontSendNotification);
+    spectrogram.setEnabled (true);
 
     frequencyResponseComponent.onOptionBoxVisibilityChanged = [this]
     {
@@ -747,6 +786,7 @@ MainComponent::~MainComponent()
     processor.setFrequencyResponseComponent (nullptr);
     processor.setOscilloscopeTarget (nullptr);
     processor.setGoniometerTarget (nullptr);
+    processor.setSpectrogramTarget (nullptr);
 
     menuToggleButton.setLookAndFeel (nullptr);
     bypassAttachment.reset();
@@ -786,6 +826,7 @@ void MainComponent::applyThemeToChildComponents()
     styleChromeButton (ecoButton);
     styleChromeButton (oscButton);
     styleChromeButton (gonButton);
+    styleChromeButton (specButton);
     styleChromeButton (meterChannelModeButton);
 
     customLookAndFeel.setThemeColors (&sharedResources);
@@ -798,12 +839,16 @@ void MainComponent::applyThemeToChildComponents()
     oscChannelModeButton.setThemeResources (&sharedResources);
     oscExpandButton.setThemeResources (&sharedResources);
     gonExpandButton.setThemeResources (&sharedResources);
+    specSpeedUpButton.setThemeResources (&sharedResources);
+    specSpeedDownButton.setThemeResources (&sharedResources);
+    specExpandButton.setThemeResources (&sharedResources);
     uiRandomizeButton.setThemeResources (&sharedResources);
 
     frequencyResponseComponent.setThemeColors (&sharedResources);
     m_visualizer.setThemeColors (&sharedResources);
     oscilloscope.setThemeColors (&sharedResources);
     goniometer.setThemeColors (&sharedResources);
+    spectrogram.setThemeColors (&sharedResources);
     verticalGradientMeterL.setThemeColors (&sharedResources);
     verticalGradientMeterR.setThemeColors (&sharedResources);
     verticalGradientMeterPostL.setThemeColors (&sharedResources);
@@ -852,10 +897,14 @@ void MainComponent::setOscExpanded (bool shouldExpand)
         return;
 
     if (shouldExpand)
+    {
         setGonExpanded (false);
+        setSpecExpanded (false);
+    }
 
     oscExpanded = shouldExpand;
-    oscilloscope.setExpanded (oscExpanded);
+    // In Scope mode panes always use the rich (expanded) drawing style.
+    oscilloscope.setExpanded (scopeModeEnabled || oscExpanded);
     syncOscToolButtons();
     resized();
     syncExpandedOscOverlayStack();
@@ -867,11 +916,33 @@ void MainComponent::setGonExpanded (bool shouldExpand)
         return;
 
     if (shouldExpand)
+    {
         setOscExpanded (false);
+        setSpecExpanded (false);
+    }
 
     gonExpanded = shouldExpand;
-    goniometer.setExpanded (gonExpanded);
+    goniometer.setExpanded (scopeModeEnabled || gonExpanded);
     syncGonToolButtons();
+    syncScopeChromeButtonOpacity();
+    resized();
+    syncExpandedOscOverlayStack();
+}
+
+void MainComponent::setSpecExpanded (bool shouldExpand)
+{
+    if (specExpanded == shouldExpand)
+        return;
+
+    if (shouldExpand)
+    {
+        setOscExpanded (false);
+        setGonExpanded (false);
+    }
+
+    specExpanded = shouldExpand;
+    spectrogram.setExpanded (scopeModeEnabled || specExpanded);
+    syncSpecToolButtons();
     syncScopeChromeButtonOpacity();
     resized();
     syncExpandedOscOverlayStack();
@@ -898,6 +969,32 @@ void MainComponent::applyGoniometerActive (bool shouldEnable)
     goniometer.setEnabled (shouldEnable);
     syncGonToolButtons();
     syncScopeChromeButtonOpacity();
+    resized();
+}
+
+void MainComponent::syncSpecToolButtons()
+{
+    const bool on = specButton.getToggleState();
+    specSpeedUpButton.setVisible (on);
+    specSpeedDownButton.setVisible (on);
+    specExpandButton.setVisible (on);
+
+    specExpandButton.setGlyph (specExpanded ? OscToolButton::Glyph::Collapse
+                                            : OscToolButton::Glyph::Expand);
+    specExpandButton.setTooltip (specExpanded
+                                     ? "Collapse spectrogram back to the strip"
+                                     : "Expand spectrogram over the full graph");
+    specExpandButton.setToggleState (specExpanded, juce::dontSendNotification);
+}
+
+void MainComponent::applySpectrogramActive (bool shouldEnable)
+{
+    if (! shouldEnable)
+        setSpecExpanded (false);
+
+    specButton.setToggleState (shouldEnable, juce::dontSendNotification);
+    spectrogram.setEnabled (shouldEnable);
+    syncSpecToolButtons();
     resized();
 }
 
@@ -938,13 +1035,15 @@ void MainComponent::hostOptionBoxAboveExpandedOsc (bool shouldHost)
 
 void MainComponent::syncExpandedOscOverlayStack()
 {
-    // Expanded scope/gon: above graph, below OptionBox + Settings menu.
+    // Expanded scope/gon/spec: above graph, below OptionBox + Settings menu.
     // Compact strip: stay in the always-on-top chrome layer.
     const bool oscExp = oscExpanded && oscButton.getToggleState();
     const bool gonExp = gonExpanded && gonButton.getToggleState();
-    const bool expanded = oscExp || gonExp;
+    const bool specExp = specExpanded && specButton.getToggleState();
+    const bool expanded = oscExp || gonExp || specExp;
     oscilloscope.setAlwaysOnTop (! oscExp);
     goniometer.setAlwaysOnTop (! gonExp);
+    spectrogram.setAlwaysOnTop (! specExp);
     oscDimmer.setAlwaysOnTop (! expanded);
 
     auto* box = frequencyResponseComponent.getOptionBoxMenu();
@@ -997,14 +1096,64 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
         syncUndoRedoButtons();
 }
 
+void MainComponent::disableAllScopes()
+{
+    setOscExpanded (false);
+    setGonExpanded (false);
+    setSpecExpanded (false);
+
+    oscButton.setToggleState (false, juce::dontSendNotification);
+    oscilloscope.setEnabled (false);
+    applyGoniometerActive (false);
+    applySpectrogramActive (false);
+    syncOscToolButtons();
+    syncGonToolButtons();
+    syncSpecToolButtons();
+}
+
 void MainComponent::applyEcoMode (bool shouldEnable)
 {
     processor.setEcoMode (shouldEnable);
     ecoEnabled = shouldEnable;
     ecoButton.setToggleState (shouldEnable, juce::dontSendNotification);
 
+    if (shouldEnable)
+    {
+        if (scopeModeEnabled)
+            setScopeMode (false, false);
+
+        scopesBeforeEcoOsc = oscButton.getToggleState();
+        scopesBeforeEcoGon = gonButton.getToggleState();
+        scopesBeforeEcoSpec = specButton.getToggleState();
+        disableAllScopes();
+        oscButton.setEnabled (false);
+        gonButton.setEnabled (false);
+        specButton.setEnabled (false);
+    }
+    else
+    {
+        oscButton.setEnabled (true);
+        gonButton.setEnabled (true);
+        specButton.setEnabled (true);
+
+        if (scopesBeforeEcoOsc)
+        {
+            oscButton.setToggleState (true, juce::dontSendNotification);
+            oscilloscope.setEnabled (true);
+        }
+        if (scopesBeforeEcoGon)
+            applyGoniometerActive (true);
+        if (scopesBeforeEcoSpec)
+            applySpectrogramActive (true);
+
+        syncOscToolButtons();
+        syncGonToolButtons();
+        syncSpecToolButtons();
+    }
+
     // Force Graph layers to refresh visibility immediately.
     m_visualizer.repaint();
+    resized();
 }
 
 void MainComponent::setEcoMode (bool shouldEnable, bool notifyPrefs)
@@ -1018,6 +1167,64 @@ void MainComponent::setEcoMode (bool shouldEnable, bool notifyPrefs)
     // Eco gates analyser/FFT via processor + Analyser flags — SPECTRUM_ANALYSER_ID
     // preference is left untouched so turning Eco off restores the previous setting.
     applyEcoMode (shouldEnable);
+
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+void MainComponent::applyScopeMode (bool shouldEnable)
+{
+    scopeModeEnabled = shouldEnable;
+    processor.setScopeMode (shouldEnable);
+
+    if (shouldEnable)
+    {
+        if (ecoEnabled)
+            setEcoMode (false, false);
+
+        setOscExpanded (false);
+        setGonExpanded (false);
+        setSpecExpanded (false);
+
+        oscButton.setToggleState (true, juce::dontSendNotification);
+        oscilloscope.setEnabled (true);
+        applyGoniometerActive (true);
+        applySpectrogramActive (true);
+
+        // Richer drawing in large panes (not the fullscreen overlay path).
+        oscilloscope.setExpanded (true);
+        goniometer.setExpanded (true);
+        spectrogram.setExpanded (true);
+
+        frequencyResponseComponent.setVisible (false);
+        scopeSplitOverlay.setVisible (true);
+    }
+    else
+    {
+        oscilloscope.setExpanded (oscExpanded);
+        goniometer.setExpanded (gonExpanded);
+        spectrogram.setExpanded (specExpanded);
+        frequencyResponseComponent.setVisible (true);
+        scopeSplitOverlay.setVisible (false);
+    }
+
+    syncOscToolButtons();
+    syncGonToolButtons();
+    syncSpecToolButtons();
+    resized();
+    syncExpandedOscOverlayStack();
+}
+
+void MainComponent::setScopeMode (bool shouldEnable, bool notifyPrefs)
+{
+    if (shouldEnable == scopeModeEnabled)
+    {
+        editor.syncScopeModeButton();
+        return;
+    }
+
+    applyScopeMode (shouldEnable);
+    editor.syncScopeModeButton();
 
     if (notifyPrefs)
         editor.saveUiPrefs();
@@ -1358,6 +1565,182 @@ void MainComponent::onPresetListChanged()
     // Appearance UI theme list changed — chrome EQ name is independent.
 }
 
+void MainComponent::ScopeSplitOverlay::setSplitNorm (float xNorm, float yNorm) noexcept
+{
+    splitX = juce::jlimit (0.18f, 0.82f, xNorm);
+    splitY = juce::jlimit (0.18f, 0.82f, yNorm);
+}
+
+int MainComponent::ScopeSplitOverlay::splitXPx() const noexcept
+{
+    return juce::roundToInt ((float) getWidth() * splitX);
+}
+
+int MainComponent::ScopeSplitOverlay::splitYPx() const noexcept
+{
+    return juce::roundToInt ((float) getHeight() * splitY);
+}
+
+MainComponent::ScopeSplitOverlay::Drag MainComponent::ScopeSplitOverlay::hitZone (juce::Point<int> p) const noexcept
+{
+    const int sx = splitXPx();
+    const int sy = splitYPx();
+    const bool nearV = std::abs (p.x - sx) <= kHitPad;
+    const bool nearH = std::abs (p.y - sy) <= kHitPad;
+    if (nearV && nearH) return Drag::both;
+    if (nearV) return Drag::vertical;
+    if (nearH) return Drag::horizontal;
+    return Drag::none;
+}
+
+bool MainComponent::ScopeSplitOverlay::hitTest (int x, int y)
+{
+    return hitZone ({ x, y }) != Drag::none;
+}
+
+void MainComponent::ScopeSplitOverlay::paint (juce::Graphics& g)
+{
+    const float sx = (float) splitXPx();
+    const float sy = (float) splitYPx();
+    g.setColour (juce::Colour::fromRGBA (180, 150, 55, 160));
+    g.drawLine (sx, 0.0f, sx, (float) getHeight(), 1.5f);
+    g.drawLine (0.0f, sy, (float) getWidth(), sy, 1.5f);
+
+    auto hub = juce::Rectangle<float> (sx - 5.0f, sy - 5.0f, 10.0f, 10.0f);
+    g.setColour (juce::Colour::fromRGBA (220, 200, 120, 200));
+    g.fillEllipse (hub);
+}
+
+void MainComponent::ScopeSplitOverlay::mouseDown (const juce::MouseEvent& e)
+{
+    drag = hitZone (e.getPosition());
+    if (drag != Drag::none)
+        setMouseCursor (drag == Drag::vertical ? juce::MouseCursor::LeftRightResizeCursor
+                      : drag == Drag::horizontal ? juce::MouseCursor::UpDownResizeCursor
+                                                 : juce::MouseCursor::UpDownLeftRightResizeCursor);
+}
+
+void MainComponent::ScopeSplitOverlay::mouseDrag (const juce::MouseEvent& e)
+{
+    if (drag == Drag::none || getWidth() <= 0 || getHeight() <= 0)
+        return;
+
+    if (drag == Drag::vertical || drag == Drag::both)
+        splitX = juce::jlimit (0.18f, 0.82f, (float) e.x / (float) getWidth());
+    if (drag == Drag::horizontal || drag == Drag::both)
+        splitY = juce::jlimit (0.18f, 0.82f, (float) e.y / (float) getHeight());
+
+    main.resized();
+}
+
+void MainComponent::ScopeSplitOverlay::mouseUp (const juce::MouseEvent&)
+{
+    drag = Drag::none;
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
+void MainComponent::layoutScopeModePanes (float scale)
+{
+    auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
+
+    auto graph = getLocalBounds();
+    scopeSplitOverlay.setBounds (graph);
+    scopeSplitOverlay.setVisible (true);
+    scopeSplitOverlay.toFront (false);
+
+    const int gap = px (3.0f);
+    const int sx = juce::roundToInt ((float) graph.getWidth() * scopeSplitOverlay.getSplitX());
+    const int sy = juce::roundToInt ((float) graph.getHeight() * scopeSplitOverlay.getSplitY());
+
+    auto tl = juce::Rectangle<int> (graph.getX(), graph.getY(), sx, sy).reduced (gap);
+    auto tr = juce::Rectangle<int> (graph.getX() + sx, graph.getY(), graph.getWidth() - sx, sy).reduced (gap);
+    auto bl = juce::Rectangle<int> (graph.getX(), graph.getY() + sy, sx, graph.getHeight() - sy).reduced (gap);
+    auto br = juce::Rectangle<int> (graph.getX() + sx, graph.getY() + sy,
+                                    graph.getWidth() - sx, graph.getHeight() - sy).reduced (gap);
+
+    const int toolH = px (22.0f);
+    const int toolGap = px (2.0f);
+    const int toolSize = juce::jmax (14, toolH - 2);
+
+    // Top-left: Goniometer
+    {
+        auto pane = tl;
+        auto tools = pane.removeFromBottom (toolH);
+        goniometer.setBounds (pane);
+        goniometer.setVisible (true);
+        gonExpandButton.setVisible (true);
+        gonExpandButton.setBounds (tools.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
+    }
+
+    // Top-right: Spectrum / FFT (visualizer)
+    {
+        m_visualizer.setBounds (tr);
+        m_visualizer.setVisible (true);
+    }
+
+    // Bottom-left: Oscilloscope + tools
+    {
+        auto pane = bl;
+        auto tools = pane.removeFromBottom (toolH);
+        oscilloscope.setBounds (pane);
+        oscilloscope.setVisible (true);
+
+        oscZoomInButton.setVisible (true);
+        oscZoomOutButton.setVisible (true);
+        oscChannelModeButton.setVisible (true);
+        oscExpandButton.setVisible (true);
+
+        auto place = [&] (OscToolButton& b)
+        {
+            b.setBounds (tools.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
+            tools.removeFromLeft (toolGap);
+        };
+        place (oscZoomInButton);
+        place (oscZoomOutButton);
+        place (oscChannelModeButton);
+        place (oscExpandButton);
+    }
+
+    // Bottom-right: Spectrogram + tools
+    {
+        auto pane = br;
+        auto tools = pane.removeFromBottom (toolH);
+        spectrogram.setBounds (pane);
+        spectrogram.setVisible (true);
+
+        specSpeedUpButton.setVisible (true);
+        specSpeedDownButton.setVisible (true);
+        specExpandButton.setVisible (true);
+
+        auto place = [&] (OscToolButton& b)
+        {
+            b.setBounds (tools.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
+            tools.removeFromLeft (toolGap);
+        };
+        place (specSpeedUpButton);
+        place (specSpeedDownButton);
+        place (specExpandButton);
+    }
+
+    frequencyResponseComponent.setVisible (false);
+    oscDimmer.setVisible (false);
+
+    // Keep tool chrome above panes; divider above panes for grab, under Settings menu.
+    goniometer.toFront (false);
+    m_visualizer.toFront (false);
+    oscilloscope.toFront (false);
+    spectrogram.toFront (false);
+    gonExpandButton.toFront (false);
+    oscZoomInButton.toFront (false);
+    oscZoomOutButton.toFront (false);
+    oscChannelModeButton.toFront (false);
+    oscExpandButton.toFront (false);
+    specSpeedUpButton.toFront (false);
+    specSpeedDownButton.toFront (false);
+    specExpandButton.toFront (false);
+    scopeSplitOverlay.toFront (false);
+}
+
 void MainComponent::layoutPresetChrome (float scale)
 {
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
@@ -1418,7 +1801,8 @@ void MainComponent::resized()
 
     auto area = getLocalBounds().reduced (px ((float) m_marginInPixels));
 
-    m_visualizer.setBounds(xPos, FrequencyResponseyOffset, componentWidth, componentHeight);
+    if (! scopeModeEnabled)
+        m_visualizer.setBounds(xPos, FrequencyResponseyOffset, componentWidth, componentHeight);
 
     const int controlsWidth = px (200.0f);
     const int controlsHeight = px (180.0f);
@@ -1523,17 +1907,57 @@ void MainComponent::resized()
         const int oscY = chromeY + (chromeH - oscH) / 2;
         oscButton.setBounds (ecoButton.getRight() + gap, oscY, oscW, oscH);
         gonButton.setBounds (oscButton.getX(), oscButton.getBottom() + px (2.0f), oscW, oscH);
+        specButton.setBounds (gonButton.getX(), gonButton.getBottom() + px (2.0f), oscW, oscH);
+
+        if (scopeModeEnabled)
+        {
+            const bool anyExpanded = oscExpanded || gonExpanded || specExpanded;
+            if (! anyExpanded)
+            {
+                layoutScopeModePanes (scale);
+            }
+            else
+            {
+                // One meter maximized over the graph; collapse returns to the quad.
+                scopeSplitOverlay.setVisible (false);
+                frequencyResponseComponent.setVisible (false);
+                m_visualizer.setVisible (false);
+                oscilloscope.setVisible (oscExpanded);
+                goniometer.setVisible (gonExpanded);
+                spectrogram.setVisible (specExpanded);
+                oscDimmer.setBounds (getLocalBounds());
+                oscDimmer.setVisible (true);
+                if (oscExpanded)
+                    oscilloscope.setBounds (getLocalBounds());
+                if (gonExpanded)
+                    goniometer.setBounds (getLocalBounds());
+                if (specExpanded)
+                    spectrogram.setBounds (getLocalBounds());
+                syncOscToolButtons();
+                syncGonToolButtons();
+                syncSpecToolButtons();
+            }
+        }
+        else
+        {
+        scopeSplitOverlay.setVisible (false);
+        if (! frequencyResponseComponent.isVisible())
+            frequencyResponseComponent.setVisible (true);
+        m_visualizer.setVisible (true);
 
         const bool oscOn = oscButton.getToggleState();
         const bool gonOn = gonButton.getToggleState();
+        const bool specOn = specButton.getToggleState();
         syncOscToolButtons();
         syncGonToolButtons();
+        syncSpecToolButtons();
 
         const int scopeH = OscilloscopeComponent::kWindowHeightPx;
         const int btnGap = px (2.0f);
         const int btnSize = juce::jmax (14, (scopeH - 3 * btnGap) / 4);
         const int scopeY = chromeY + px (10.0f);
         const int gonExpandSize = juce::jmax (14, btnSize);
+        const int specBtnSize = juce::jmax (14, (scopeH - 2 * btnGap) / 3);
 
         // Reserve right-side room for Gon square + correlation + expand when Gon is on.
         int rightLimit = meterChannelModeButton.getX() - gap;
@@ -1602,8 +2026,56 @@ void MainComponent::resized()
         }
 
         // Dimmer only while something is expanded.
-        if (! oscExpanded && ! gonExpanded)
+        if (! oscExpanded && ! gonExpanded && ! specExpanded)
             oscDimmer.setVisible (false);
+
+        // Spectrogram: between UI dice (left) and EQ preset bar (right), osc height, a bit wider.
+        // Tool column (+ / - / expand) sits on the right edge of the strip, like OSC.
+        if (specOn)
+        {
+            const int pad = px (8.0f);
+            const int left = uiRandomizeButton.getRight() + pad;
+            const int right = presetPrevButton.getX() - pad;
+            const int specH = SpectrogramComponent::kWindowHeightPx;
+            const int preferredW = juce::jmax (SpectrogramComponent::kPreferredWidthPx,
+                                               OscilloscopeComponent::kWindowHeightPx + px (80.0f));
+            const int toolColW = specBtnSize + px (2.0f);
+            const int availW = right - left - toolColW;
+            if (availW >= 48)
+            {
+                const int specW = juce::jmin (availW, juce::jmax (preferredW, (availW * 3) / 4));
+                const int blockW = specW + toolColW;
+                const int blockX = left + juce::jmax (0, (right - left - blockW) / 2);
+                const int specY = juce::jmax (chromeY + px (10.0f),
+                                              presetPrevButton.getY() + (presetPrevButton.getHeight() - specH) / 2);
+                const int btnX = blockX + specW + px (2.0f);
+
+                if (specExpanded)
+                {
+                    oscDimmer.setBounds (getLocalBounds());
+                    oscDimmer.setVisible (true);
+                    spectrogram.setBounds (frequencyResponseComponent.getBounds());
+                }
+                else
+                {
+                    spectrogram.setBounds (blockX, specY, specW, specH);
+                }
+
+                spectrogram.setVisible (true);
+                specSpeedUpButton.setBounds (btnX, specY, specBtnSize, specBtnSize);
+                specSpeedDownButton.setBounds (btnX, specY + specBtnSize + btnGap, specBtnSize, specBtnSize);
+                specExpandButton.setBounds (btnX, specY + 2 * (specBtnSize + btnGap), specBtnSize, specBtnSize);
+            }
+            else
+            {
+                spectrogram.setVisible (false);
+            }
+        }
+        else
+        {
+            spectrogram.setVisible (false);
+        }
+        } // !scopeModeEnabled compact strips
     }
 
     // Keep menu content at design size and scale uniformly with the plugin.
@@ -1658,7 +2130,8 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     //   → OptionBox → Settings menu → Settings button
     const bool oscExp = oscExpanded && oscButton.getToggleState() && oscilloscope.isVisible();
     const bool gonExp = gonExpanded && gonButton.getToggleState() && goniometer.isVisible();
-    const bool expanded = oscExp || gonExp;
+    const bool specExp = specExpanded && specButton.getToggleState() && spectrogram.isVisible();
+    const bool expanded = oscExp || gonExp || specExp;
 
     // Graph peers first (under an expanded scope).
     m_visualizer.toFront (false);
@@ -1671,6 +2144,8 @@ void MainComponent::raiseMenuSystemAboveWordmark()
             oscilloscope.toFront (false);
         if (gonExp)
             goniometer.toFront (false);
+        if (specExp)
+            spectrogram.toFront (false);
     }
 
     // Compact logo sits above the opaque graph, below Bypass / presets / Settings.
@@ -1684,6 +2159,8 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     presetSaveButton.toFront (false);
     uiThemeButton.toFront (false);
     uiRandomizeButton.toFront (false);
+    if (! specExp)
+        spectrogram.toFront (false);
     bypassButton.toFront (false);
     slotAButton.toFront (false);
     slotBButton.toFront (false);
@@ -1692,12 +2169,14 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     ecoButton.toFront (false);
     oscButton.toFront (false);
     gonButton.toFront (false);
+    specButton.toFront (false);
 
     if (! expanded)
     {
         oscDimmer.toFront (false);
         oscilloscope.toFront (false);
         goniometer.toFront (false);
+        spectrogram.toFront (false);
     }
     else
     {
@@ -1706,6 +2185,8 @@ void MainComponent::raiseMenuSystemAboveWordmark()
             oscilloscope.toFront (false);
         if (! gonExp)
             goniometer.toFront (false);
+        if (! specExp)
+            spectrogram.toFront (false);
     }
 
     // Side meters above graph / compact scope.
@@ -1718,17 +2199,25 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     // the right-edge correlation meter is never covered.
     if (gonExp)
         goniometer.toFront (false);
+    if (specExp)
+        spectrogram.toFront (false);
 
-    // OSC / Gon stay above the expanded goniometer (semi-transparent) so they
+    // OSC / Gon / Spec stay above the expanded goniometer (semi-transparent) so they
     // remain clickable while the correlation +1 region stays readable underneath.
     oscButton.toFront (false);
     gonButton.toFront (false);
+    specButton.toFront (false);
 
     oscZoomInButton.toFront (false);
     oscZoomOutButton.toFront (false);
     oscChannelModeButton.toFront (false);
     oscExpandButton.toFront (false);
     gonExpandButton.toFront (false);
+    specSpeedUpButton.toFront (false);
+    specSpeedDownButton.toFront (false);
+    specExpandButton.toFront (false);
+    if (scopeModeEnabled && ! oscExp && ! gonExp && ! specExp)
+        scopeSplitOverlay.toFront (false);
     meterChannelModeButton.toFront (false);
     undoButton.toFront (false);
     redoButton.toFront (false);

@@ -23,6 +23,7 @@
 class FrequencyResponseComponent;
 class OscilloscopeComponent;
 class GoniometerComponent;
+class SpectrogramComponent;
 
 class EqProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener//, public juce::Timer 
 
@@ -60,6 +61,10 @@ public:
     void setGoniometerTarget (class GoniometerComponent* target) noexcept;
     GoniometerComponent* getGoniometerTarget() const noexcept;
 
+    /** Optional spectrogram strip (UI). Audio thread pushes when non-null and enabled. */
+    void setSpectrogramTarget (class SpectrogramComponent* target) noexcept;
+    SpectrogramComponent* getSpectrogramTarget() const noexcept;
+
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     const juce::UndoManager& getUndoManager() const noexcept { return undoManager; }
 
@@ -67,7 +72,11 @@ public:
     void setEcoMode (bool shouldEnable) noexcept;
     bool isEcoMode() const noexcept { return ecoMode.load(); }
 
-    /** True when spectrum analyser should run (pref on and Eco off). */
+    /** Scope mode: dry passthrough + meters/scopes only (EQ / spectral / SideCheck DSP off). */
+    void setScopeMode (bool shouldEnable) noexcept;
+    bool isScopeMode() const noexcept { return scopeMode.load(); }
+
+    /** True when spectrum analyser should run (pref on and Eco off; always on in Scope mode). */
     bool isSpectrumAnalyserActive() const noexcept;
 
     bool acceptsMidi() const override;
@@ -408,8 +417,10 @@ private:
 
     std::atomic<OscilloscopeComponent*> oscilloscopeTarget { nullptr };
     std::atomic<GoniometerComponent*> goniometerTarget { nullptr };
+    std::atomic<SpectrogramComponent*> spectrogramTarget { nullptr };
 
     std::atomic<bool> ecoMode { false };
+    std::atomic<bool> scopeMode { false };
 
     double sampleRate = 48000;
 

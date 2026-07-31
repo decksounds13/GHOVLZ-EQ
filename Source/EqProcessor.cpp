@@ -4,6 +4,7 @@
 #include "FrequencyResponseComponent.h"
 #include "OscilloscopeComponent.h"
 #include "GoniometerComponent.h"
+#include "SpectrogramComponent.h"
 #include <juce_dsp/juce_dsp.h>
 #include "Visualizer/Analyser.h"
 #include "FilterType.h"
@@ -190,16 +191,37 @@ GoniometerComponent* EqProcessor::getGoniometerTarget() const noexcept
     return goniometerTarget.load (std::memory_order_acquire);
 }
 
+void EqProcessor::setSpectrogramTarget (SpectrogramComponent* target) noexcept
+{
+    spectrogramTarget.store (target, std::memory_order_release);
+    if (target != nullptr && sampleRate > 0.0)
+        target->prepare (sampleRate);
+}
+
+SpectrogramComponent* EqProcessor::getSpectrogramTarget() const noexcept
+{
+    return spectrogramTarget.load (std::memory_order_acquire);
+}
+
 void EqProcessor::setEcoMode (bool shouldEnable) noexcept
 {
     ecoMode.store (shouldEnable);
     m_analyser.setEcoMode (shouldEnable);
 }
 
+void EqProcessor::setScopeMode (bool shouldEnable) noexcept
+{
+    scopeMode.store (shouldEnable, std::memory_order_release);
+}
+
 bool EqProcessor::isSpectrumAnalyserActive() const noexcept
 {
     if (ecoMode.load())
         return false;
+
+    // Quad Scope view always needs the spectrum analyser.
+    if (scopeMode.load (std::memory_order_acquire))
+        return true;
 
     if (auto* p = treeState.getRawParameterValue ("SPECTRUM_ANALYSER_ID"))
         return p->load() > 0.5f;
@@ -855,6 +877,50 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "GON_QUALITY_ID", "GonQuality",
         juce::StringArray { "Draft", "High" },
         juce::jlimit (0, 1, analyserDefaults.getInt ("GON_QUALITY_ID", 1))));
+    // Spectrogram strip — look + behaviour.
+    {
+        const auto specSchemes = SpectrogramComponent::getColourSchemeNames();
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            "SPEC_COLOUR_SCHEME_ID", "SpecColourScheme",
+            specSchemes,
+            juce::jlimit (0, juce::jmax (0, specSchemes.size() - 1),
+                          analyserDefaults.getInt ("SPEC_COLOUR_SCHEME_ID",
+                                                  (int) SpectrogramComponent::ColourScheme::inferno))));
+    }
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "SPEC_FFT_SIZE_ID", "SpecFftSize",
+        juce::StringArray { "512", "1024", "2048", "4096" },
+        juce::jlimit (0, 3, analyserDefaults.getInt ("SPEC_FFT_SIZE_ID", 2))));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "SPEC_CHANNEL_ID", "SpecChannel",
+        juce::StringArray { "Sum", "Left", "Right" },
+        juce::jlimit (0, 2, analyserDefaults.getInt ("SPEC_CHANNEL_ID", 0))));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_SPEED_ID", "SpecSpeed",
+        juce::NormalisableRange<float> (1.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("SPEC_SPEED_ID", 55.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_BRIGHTNESS_ID", "SpecBrightness",
+        juce::NormalisableRange<float> (10.0f, 200.0f, 0.1f),
+        analyserDefaults.getFloat ("SPEC_BRIGHTNESS_ID", 100.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_MIN_DB_ID", "SpecMinDb",
+        juce::NormalisableRange<float> (-120.0f, -20.0f, 0.1f),
+        analyserDefaults.getFloat ("SPEC_MIN_DB_ID", -90.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_MAX_DB_ID", "SpecMaxDb",
+        juce::NormalisableRange<float> (-40.0f, 0.0f, 0.1f),
+        analyserDefaults.getFloat ("SPEC_MAX_DB_ID", -6.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_SMOOTH_ID", "SpecSmooth",
+        juce::NormalisableRange<float> (0.0f, 95.0f, 0.1f),
+        analyserDefaults.getFloat ("SPEC_SMOOTH_ID", 35.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPEC_LOG_FREQ_ID", "SpecLogFreq",
+        analyserDefaults.getBool ("SPEC_LOG_FREQ_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPEC_FREEZE_ID", "SpecFreeze",
+        analyserDefaults.getBool ("SPEC_FREEZE_ID", false)));
     // Multicolor band fills (default on). Off → neutral golden-yellow boost/cut fills.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_MULTICOLOR_BAND_FILL_ID", "MulticolorBandFill",
@@ -1611,6 +1677,8 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         osc->prepare (sampleRate);
     if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
         gon->prepare (sampleRate);
+    if (auto* spec = spectrogramTarget.load (std::memory_order_acquire))
+        spec->prepare (sampleRate);
 
     // Initialize dsp modules
     juce::dsp::ProcessSpec spec;
@@ -1847,6 +1915,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     }
 
     const bool bypassed = bypassParam != nullptr && bypassParam->get();
+    // Scope mode = metering / scopes only: dry through, no EQ / spectral / SideCheck DSP.
+    const bool meteringOnly = bypassed || scopeMode.load (std::memory_order_acquire);
 
     // Advance smoothers even while bypassed so un-bypass doesn't zipper.
     auto take = [numSamples] (juce::LinearSmoothedValue<float>& s) -> float
@@ -1855,7 +1925,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         return s.getCurrentValue();
     };
 
-    if (bypassed)
+    if (meteringOnly)
     {
         smoothAutoGainOffset.skip (numSamples);
         take (smoothOutputGain);
@@ -1944,6 +2014,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                 const auto* left = mainBuffer.getReadPointer (0);
                 const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
                 gon->pushSamples (left, right, numSamples);
+            }
+        }
+
+        if (auto* spec = spectrogramTarget.load (std::memory_order_acquire))
+        {
+            if (spec->isSpectrogramEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                spec->pushSamples (left, right, numSamples);
             }
         }
 
@@ -2993,6 +3073,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const auto* left = mainBuffer.getReadPointer (0);
             const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
             gon->pushSamples (left, right, mainBuffer.getNumSamples());
+        }
+    }
+
+    if (auto* spec = spectrogramTarget.load (std::memory_order_acquire))
+    {
+        if (spec->isSpectrogramEnabled() && mainBuffer.getNumChannels() > 0)
+        {
+            const auto* left = mainBuffer.getReadPointer (0);
+            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+            spec->pushSamples (left, right, mainBuffer.getNumSamples());
         }
     }
 }

@@ -68,6 +68,7 @@ public:
 
     void loadUiPrefs();
     void saveUiPrefs() const;
+    void syncScopeModeButton();
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -97,6 +98,7 @@ private:
     void layoutHelpTooltipsButton();
     void layoutPhaseModeCombo();
     void layoutSideCheckButton();
+    void layoutScopeModeButton();
     void updateSideCheckAmountVisibility();
     void updateSideCheckSpeedButtonText();
     void toggleSideCheckSpeed();
@@ -162,6 +164,8 @@ private:
     RotaryImageKnob3 outputGainKnob;
     juce::TextButton autoGainButton { "A" };
     juce::TextButton sideCheckButton { "SideCheck" };
+    /** Quad Scope metering view (dry DSP); styled like SideCheck. */
+    juce::TextButton scopeModeButton { "Scope" };
     /** Amount 0-1; visible only while Side Check is enabled. */
     juce::Slider sideCheckAmountSlider;
     /** Fast / Med / Slow ballistics toggle; shows current state; visible with Amount while SC on. */

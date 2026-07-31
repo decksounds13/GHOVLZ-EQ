@@ -139,6 +139,8 @@
   <ItemGroup>
     <ClCompile Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.cpp" />
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp" />
+    <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp" />
+    <ClCompile Include="..\..\Source\SpectrogramComponent.cpp" />
     <ClCompile Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.cpp" />
     <ClCompile Include="..\..\Source\ApplyButton.cpp" />
     <ClCompile Include="..\..\Source\ColorValuesInput.cpp" />
@@ -3429,6 +3431,8 @@
   <ItemGroup>
     <ClInclude Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.h" />
     <ClInclude Include="..\..\Source\GoniometerComponent.h" />
+    <ClInclude Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.h" />
+    <ClInclude Include="..\..\Source\SpectrogramComponent.h" />
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.h" />
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.h" />
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\implementations.h" />

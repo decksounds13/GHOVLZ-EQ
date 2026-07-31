@@ -999,6 +999,12 @@
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\SpectrogramComponent.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.cpp">
       <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
     </ClCompile>

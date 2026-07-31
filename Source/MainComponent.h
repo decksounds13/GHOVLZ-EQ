@@ -13,6 +13,7 @@
 #include "Menu/Gui/ThemeList.h"
 #include "OscilloscopeComponent.h"
 #include "GoniometerComponent.h"
+#include "SpectrogramComponent.h"
 #include "EqPresetStore.h"
 
 class MainComponent : public juce::Component,
@@ -55,9 +56,13 @@ public:
 
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
 
-    /** Eco mode (FFT/analyser off). Persisted via EqEditor ui_prefs. Default off. */
+    /** Eco mode (FFT/analyser off + all scopes off). Persisted via EqEditor ui_prefs. Default off. */
     void setEcoMode (bool shouldEnable, bool notifyPrefs = true);
     bool isEcoMode() const noexcept { return ecoEnabled; }
+
+    /** Quad Scope view: Gon | Spectrum / Osc | Spec; dry metering, no EQ DSP. */
+    void setScopeMode (bool shouldEnable, bool notifyPrefs = true);
+    bool isScopeMode() const noexcept { return scopeModeEnabled; }
 
     /** Global Melatonin glow / drop-shadow bypass. Persisted via ui_prefs. */
     void setDisableGlowShadowEffects (bool shouldDisable, bool notifyPrefs = true);
@@ -100,16 +105,22 @@ private:
     void saveCurrentEqPreset();
     void layoutPresetChrome (float scale);
     void applyEcoMode (bool shouldEnable);
+    void applyScopeMode (bool shouldEnable);
+    void layoutScopeModePanes (float scale);
     void syncMeterChannelModeButton();
     void toggleMeterChannelMode();
     void setOscExpanded (bool shouldExpand);
     void setGonExpanded (bool shouldExpand);
+    void setSpecExpanded (bool shouldExpand);
     void syncOscToolButtons();
     void syncGonToolButtons();
+    void syncSpecToolButtons();
     void syncScopeChromeButtonOpacity();
     void syncExpandedOscOverlayStack();
     void hostOptionBoxAboveExpandedOsc (bool shouldHost);
     void applyGoniometerActive (bool shouldEnable);
+    void applySpectrogramActive (bool shouldEnable);
+    void disableAllScopes();
 
     static constexpr double m_marginInPixels{ 10 };
 
@@ -290,6 +301,10 @@ private:
     juce::TextButton gonButton { "Gon" };
     GoniometerComponent goniometer;
 
+    /** Spec toggle — spectrogram strip between UI dice and the EQ preset bar. */
+    juce::TextButton specButton { "Spec" };
+    SpectrogramComponent spectrogram;
+
     /** Dims UI under an expanded scope (clicks pass through). */
     class OscDimmerComponent : public juce::Component
     {
@@ -301,15 +316,54 @@ private:
     };
 
     OscDimmerComponent oscDimmer;
+
+    /** Hit-tests only near the crosshair; drag H/V split ratios for Scope mode. */
+    class ScopeSplitOverlay : public juce::Component
+    {
+    public:
+        explicit ScopeSplitOverlay (MainComponent& owner) : main (owner) {}
+
+        void paint (juce::Graphics& g) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp (const juce::MouseEvent& e) override;
+        bool hitTest (int x, int y) override;
+
+        void setSplitNorm (float xNorm, float yNorm) noexcept;
+        float getSplitX() const noexcept { return splitX; }
+        float getSplitY() const noexcept { return splitY; }
+
+    private:
+        enum class Drag { none, vertical, horizontal, both };
+        Drag hitZone (juce::Point<int> p) const noexcept;
+        int splitXPx() const noexcept;
+        int splitYPx() const noexcept;
+
+        MainComponent& main;
+        float splitX = 0.5f;
+        float splitY = 0.5f;
+        Drag drag = Drag::none;
+        static constexpr int kHitPad = 6;
+    };
+
     OscToolButton oscZoomInButton { OscToolButton::Glyph::Plus };
     OscToolButton oscZoomOutButton { OscToolButton::Glyph::Minus };
     OscToolButton oscChannelModeButton { OscToolButton::Glyph::SummedStereo };
     OscToolButton oscExpandButton { OscToolButton::Glyph::Expand };
     OscToolButton gonExpandButton { OscToolButton::Glyph::Expand };
+    OscToolButton specSpeedUpButton { OscToolButton::Glyph::Plus };
+    OscToolButton specSpeedDownButton { OscToolButton::Glyph::Minus };
+    OscToolButton specExpandButton { OscToolButton::Glyph::Expand };
+    ScopeSplitOverlay scopeSplitOverlay { *this };
 
     bool ecoEnabled = false;
+    bool scopeModeEnabled = false;
     bool oscExpanded = false;
     bool gonExpanded = false;
+    bool specExpanded = false;
+    bool scopesBeforeEcoOsc = true;
+    bool scopesBeforeEcoGon = false;
+    bool scopesBeforeEcoSpec = true;
     bool refreshingPresetName = false;
     juce::Component* hostedWordmark = nullptr;
 
