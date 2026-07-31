@@ -66,19 +66,28 @@ public:
         setColour (juce::ComboBox::focusedOutlineColourId, c.optionComboHighlight);
     }
 
+    void drawPopupMenuBackground (juce::Graphics& g, int width, int height) override
+    {
+        // Refresh cached colour IDs from the live theme (dice / UI randomize).
+        applyThemeColours();
+        g.fillAll (colors().optionComboBackground);
+        juce::ignoreUnused (width, height);
+    }
+
     void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
                        int buttonX, int buttonY, int buttonW, int buttonH,
                        juce::ComboBox& box) override
     {
         juce::ignoreUnused (isButtonDown, buttonX, buttonY, buttonW, buttonH);
 
+        const auto& c = colors();
         auto cornerSize = box.findParentComponentOfClass<juce::ChoicePropertyComponent>() != nullptr
                               ? 0.0f : 2.0f;
         auto bounds = juce::Rectangle<int> (0, 0, width, height).toFloat();
 
-        g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
+        g.setColour (c.optionComboBackground);
         g.fillRoundedRectangle (bounds, cornerSize);
-        g.setColour (box.findColour (juce::ComboBox::outlineColourId));
+        g.setColour (c.optionBorder);
         g.drawRoundedRectangle (bounds.reduced (0.5f), cornerSize, 1.0f);
 
         juce::Rectangle<int> arrowZone (width - 14, 0, 12, height);
@@ -86,8 +95,7 @@ public:
         path.startNewSubPath ((float) arrowZone.getX() + 2.0f, (float) arrowZone.getCentreY() - 2.0f);
         path.lineTo ((float) arrowZone.getCentreX(), (float) arrowZone.getCentreY() + 2.5f);
         path.lineTo ((float) arrowZone.getRight() - 2.0f, (float) arrowZone.getCentreY() - 2.0f);
-        g.setColour (box.findColour (juce::ComboBox::arrowColourId)
-                         .withAlpha (box.isEnabled() ? 0.95f : 0.35f));
+        g.setColour (c.optionComboText.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
         g.strokePath (path, juce::PathStrokeType (1.4f));
     }
 
@@ -105,13 +113,17 @@ public:
         label.setMinimumHorizontalScale (0.75f); // prefer slight squeeze over "..."
     }
 
-private:
+protected:
     SharedResources* themeColors = nullptr;
 
     const SharedColors& colors() const noexcept
     {
         static const SharedColors defaultColors;
-        return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
+        if (themeColors != nullptr)
+            return themeColors->sharedColors;
+        if (auto* active = SharedResources::getActive())
+            return active->sharedColors;
+        return defaultColors;
     }
 };
 

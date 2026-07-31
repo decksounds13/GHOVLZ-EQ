@@ -164,6 +164,18 @@ void ColourRampBank::disableAllCustomRamps()
     sendChangeMessage();
 }
 
+void ColourRampBank::disableCustomRamp (Target t)
+{
+    auto& ramp = ramps[(int) clampTarget ((int) t)];
+    if (! ramp.enabled)
+        return;
+
+    ramp.enabled = false;
+    ++ramp.revision;
+    save();
+    sendChangeMessage();
+}
+
 juce::File ColourRampBank::getStoreFile()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
@@ -201,19 +213,23 @@ void ColourRampBank::load()
         loadOne (Target::spectrumFill, "SpectrumFill");
         sanitizeMapModes();
 
-        // schemaVersion < 1: older builds force-enabled path samples on disk, which
-        // silently replaced Magma/Inferno on every reload. Keep stop colours, but
-        // start with Use off so built-in schemes are the default again.
-        const int schema = (int) tree.getProperty ("schemaVersion", 0);
-        if (schema < 1)
+        // Custom ramps must never silently override built-in colour schemes on load.
+        // Stops stay on disk for editing; Use always starts off so Heat/Inferno/etc. win
+        // until the user explicitly checks Use again this session.
+        bool anyForcedOff = false;
+        for (int ti = 0; ti < (int) Target::numTargets; ++ti)
         {
-            for (int ti = 0; ti < (int) Target::numTargets; ++ti)
+            if (ramps[ti].enabled)
             {
                 ramps[ti].enabled = false;
                 ++ramps[ti].revision;
+                anyForcedOff = true;
             }
-            save();
         }
+
+        const int schema = (int) tree.getProperty ("schemaVersion", 0);
+        if (schema < 2 || anyForcedOff)
+            save();
     }
 }
 
@@ -235,7 +251,7 @@ void ColourRampBank::sanitizeMapModes()
 void ColourRampBank::save() const
 {
     juce::ValueTree tree ("ColourRamps");
-    tree.setProperty ("schemaVersion", 1, nullptr);
+    tree.setProperty ("schemaVersion", 2, nullptr);
     tree.setProperty ("activeTarget", (int) activeTarget, nullptr);
     tree.appendChild (ramps[(int) Target::fftBars].toValueTree ("FftBars"), nullptr);
     tree.appendChild (ramps[(int) Target::spectrogram].toValueTree ("Spectrogram"), nullptr);

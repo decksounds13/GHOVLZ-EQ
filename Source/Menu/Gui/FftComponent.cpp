@@ -208,6 +208,7 @@ void FftComponent::Content::styleToggle (juce::ToggleButton& toggle)
 
 void FftComponent::Content::styleSettingsCombo (juce::ComboBox& combo)
 {
+    comboLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&comboLookAndFeel);
     combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }

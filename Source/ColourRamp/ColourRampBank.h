@@ -43,8 +43,10 @@ public:
     */
     void randomizeRamps (const SharedColors& colours,
                          const bool* targetEnabled3 = nullptr);
-    /** Turn Use off on all targets so built-in schemes (e.g. Magma) show again. */
+    /** Turn Use off on all targets so built-in schemes (e.g. Heat) show again. */
     void disableAllCustomRamps();
+    /** Turn Use off on one target (e.g. when Colour Scheme combo changes). */
+    void disableCustomRamp (Target t);
 
     void load();
     void save() const;

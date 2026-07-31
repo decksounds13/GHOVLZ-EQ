@@ -70,6 +70,8 @@ public:
     static constexpr float kMaxDisplayHz = 20000.0f;
 
     static juce::StringArray getColourSchemeNames();
+    /** Sample a built-in scheme LUT colour at t in [0,1] (for UI swatches / colourise). */
+    static juce::Colour colourForScheme (ColourScheme scheme, float t) noexcept;
     /** 2048 / 4096 / 8192 / 16384 — default index 2 = 8192. */
     static juce::StringArray getFftSizeNames();
     /** Draft / Normal / High / Ultra display pixel density. */
@@ -80,8 +82,11 @@ private:
     void resetDisplay();
     void ensureScratchImage();
     void ensureFft (int order);
+    void ensureBinForRowMap();
     void advanceFromRing();
     void appendColumn (const float* magnitudesDb, int numBins);
+    /** Deposit a finished display-row dB column (Enhanced Frequency path). */
+    void appendDisplayColumn (const float* displayDbRows);
     void rebuildColourLut();
     void resolveDisplaySize (int& outW, int& outH) const;
     void rebuildScreenSoftened();
@@ -126,6 +131,11 @@ private:
     std::vector<float> columnDb;
     /** Fractional FFT bin per display row (for interpolated magnitude). */
     std::vector<float> binForRow;
+    /** Previous-frame unwrapped phase per bin (Enhanced Frequency IF). */
+    std::vector<float> prevPhase;
+    bool havePrevPhase = false;
+    bool lastEnhancedMode = false;
+    int lastHopSamples = 0;
 
     int internalW = 1280;
     int internalH = 720;

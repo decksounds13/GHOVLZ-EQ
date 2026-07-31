@@ -62,9 +62,13 @@ public:
     void setEcoMode (bool shouldEnable, bool notifyPrefs = true);
     bool isEcoMode() const noexcept { return ecoEnabled; }
 
-    /** Quad Scope view: Gon | Spectrum / Osc | Spec; dry metering, no EQ DSP. */
+    /** Quad Scope view: Gon | Spectrum / Osc | Spec. Pre = analyzer dry; Post = EQ DSP on. */
     void setScopeMode (bool shouldEnable, bool notifyPrefs = true);
     bool isScopeMode() const noexcept { return scopeModeEnabled; }
+
+    /** Scope-mode tap only (compact chrome scopes unchanged). Persisted via ui_prefs. */
+    void setScopeTapPost (bool shouldTapPost, bool notifyPrefs = true);
+    bool isScopeTapPost() const noexcept { return scopeTapPost; }
 
     /** Global Melatonin glow / drop-shadow bypass. Persisted via ui_prefs. */
     void setDisableGlowShadowEffects (bool shouldDisable, bool notifyPrefs = true);
@@ -385,6 +389,8 @@ private:
 
     bool ecoEnabled = false;
     bool scopeModeEnabled = false;
+    /** Scope-mode Pre/Post tap preference (false = Pre). Persisted; Scope itself is not. */
+    bool scopeTapPost = false;
     bool oscExpanded = false;
     bool gonExpanded = false;
     bool specExpanded = false;

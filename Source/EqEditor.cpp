@@ -362,8 +362,6 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
         audioProcessor.treeState, SideCheck::enabledParamId(), sideCheckButton);
 
     scopeModeButton.setClickingTogglesState (true);
-    scopeModeButton.setTooltip (
-        "Scope - quad metering view (Gon / Spectrum / Oscilloscope / Spectrogram). EQ DSP is bypassed while active.");
     scopeModeButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
     scopeModeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
     scopeModeButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
@@ -373,7 +371,9 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
         if (mainComponent != nullptr)
             mainComponent->setScopeMode (scopeModeButton.getToggleState(), true);
     };
+    scopeModeButton.onPopupMenu = [this] { showScopeTapMenu(); };
     addAndMakeVisible (scopeModeButton);
+    syncScopeModeButton();
 
     sideCheckAmountSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     sideCheckAmountSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
@@ -1244,7 +1244,14 @@ void EqEditor::updateBandFaceplateGainVisibility()
 
 void EqEditor::layoutBrandWordmark (int outClusterLeftX)
 {
-    brandWordmark.setVisible (true);
+    const bool scopeOn = mainComponent != nullptr && mainComponent->isScopeMode();
+    brandWordmark.setVisible (! scopeOn);
+    if (scopeOn)
+    {
+        brandWordmark.setBounds ({});
+        return;
+    }
+
     brandWordmark.setCompactLook (uiCompact);
 
     const float scale = (float) getWidth() / (float) designWidth;
@@ -1315,6 +1322,8 @@ void EqEditor::layoutHelpTooltipsButton()
     constexpr int trimH = 30;
     const int btnSize = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
     const int margin = px (8.0f);
+    // Scope quad: osc tools sit in the BL pane — nudge ? / Phase / SideCheck / Scope right.
+    const int scopeShift = (mainComponent != nullptr && mainComponent->isScopeMode()) ? 100 : 0;
 
     if (uiCompact)
     {
@@ -1325,7 +1334,7 @@ void EqEditor::layoutHelpTooltipsButton()
         constexpr int gap = 4;
         constexpr int bottomMargin = 18;
         const int graphBottom = (mainComponent != nullptr) ? mainComponent->getBottom() : getHeight();
-        const int x = pLeft + pW + gap;
+        const int x = pLeft + pW + gap + scopeShift;
         const int y = graphBottom - btnSize - bottomMargin;
         helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
     }
@@ -1335,14 +1344,14 @@ void EqEditor::layoutHelpTooltipsButton()
         if (modPanelOpen && mainComponent != nullptr)
         {
             constexpr int bottomMargin = 18;
-            const int x = margin;
+            const int x = margin + scopeShift;
             const int y = mainComponent->getBottom() - btnSize - bottomMargin;
             helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
         }
         else
         {
             const int trimTop = getHeight() - trimH;
-            const int x = margin;
+            const int x = margin + scopeShift;
             const int y = trimTop + (trimH - btnSize) / 2;
             helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
         }
@@ -1557,8 +1566,51 @@ juce::File EqEditor::getUiPrefsFile()
 
 void EqEditor::syncScopeModeButton()
 {
-    scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
-                                    juce::dontSendNotification);
+    const bool scopeOn = mainComponent != nullptr && mainComponent->isScopeMode();
+    const bool tapPost = mainComponent != nullptr && mainComponent->isScopeTapPost();
+    scopeModeButton.setToggleState (scopeOn, juce::dontSendNotification);
+
+    juce::String tip = "Scope - quad metering view (Gon / Spectrum / Oscilloscope / Spectrogram).";
+    tip << " Right-click for Pre/Post tap.";
+    tip << (tapPost ? " Scope · Post (EQ DSP on)." : " Scope · Pre (analyzer, DSP off).");
+    scopeModeButton.setTooltip (tip);
+}
+
+void EqEditor::syncScopeModeLayout()
+{
+    if (getWidth() <= 0 || getHeight() <= 0)
+        return;
+
+    layoutBrandWordmark (-1);
+    layoutHelpTooltipsButton();
+    layoutPhaseModeCombo();
+    layoutSideCheckButton();
+    layoutScopeModeButton();
+}
+
+void EqEditor::showScopeTapMenu()
+{
+    if (mainComponent == nullptr)
+        return;
+
+    const bool tapPost = mainComponent->isScopeTapPost();
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Scope tap");
+    menu.addItem (1, "Pre (analyzer / DSP off)", true, ! tapPost);
+    menu.addItem (2, "Post (EQ DSP on)", true, tapPost);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&scopeModeButton),
+                        [safe = juce::Component::SafePointer<EqEditor> (this)] (int result)
+                        {
+                            if (safe == nullptr || safe->mainComponent == nullptr || result <= 0)
+                                return;
+
+                            if (result == 1)
+                                safe->mainComponent->setScopeTapPost (false, true);
+                            else if (result == 2)
+                                safe->mainComponent->setScopeTapPost (true, true);
+                        });
 }
 
 void EqEditor::loadUiPrefs()
@@ -1566,6 +1618,7 @@ void EqEditor::loadUiPrefs()
     tooltipsEnabled = true;
     bool ecoEnabled = false;
     bool disableGlow = false;
+    bool scopeTapPost = false; // default Pre (analyzer)
     bool randFaceplate = true, randGraph = true, randMenu = true;
     bool randRampFft = true, randRampSpec = true, randRampFill = true;
 
@@ -1579,6 +1632,7 @@ void EqEditor::loadUiPrefs()
                 tooltipsEnabled = xml->getBoolAttribute ("tooltipsEnabled", true);
                 ecoEnabled = xml->getBoolAttribute ("ecoEnabled", false);
                 disableGlow = xml->getBoolAttribute ("disableGlowShadowEffects", false);
+                scopeTapPost = xml->getBoolAttribute ("scopeTapPost", false);
                 randFaceplate = xml->getBoolAttribute ("randFaceplateMod", true);
                 randGraph = xml->getBoolAttribute ("randGraph", true);
                 randMenu = xml->getBoolAttribute ("randMenu", true);
@@ -1593,9 +1647,9 @@ void EqEditor::loadUiPrefs()
     {
         mainComponent->setEcoMode (ecoEnabled, false);
         mainComponent->setDisableGlowShadowEffects (disableGlow, false);
+        mainComponent->setScopeTapPost (scopeTapPost, false);
         // Scope is a session view — always start in EQ mode, never restore from prefs.
         mainComponent->setScopeMode (false, false);
-        scopeModeButton.setToggleState (false, juce::dontSendNotification);
 
         auto& c = mainComponent->getSharedResources().sharedColors;
         c.randomizeFaceplateMod = randFaceplate;
@@ -1605,6 +1659,8 @@ void EqEditor::loadUiPrefs()
         c.randomizeRampSpectrogram = randRampSpec;
         c.randomizeRampSpectrumFill = randRampFill;
     }
+
+    syncScopeModeButton();
 }
 
 void EqEditor::saveUiPrefs() const
@@ -1614,6 +1670,7 @@ void EqEditor::saveUiPrefs() const
     xml->setAttribute ("ecoEnabled", mainComponent != nullptr && mainComponent->isEcoMode());
     xml->setAttribute ("disableGlowShadowEffects",
                        mainComponent != nullptr && mainComponent->areGlowShadowEffectsDisabled());
+    xml->setAttribute ("scopeTapPost", mainComponent != nullptr && mainComponent->isScopeTapPost());
     if (mainComponent != nullptr)
     {
         const auto& c = mainComponent->getSharedResources().sharedColors;

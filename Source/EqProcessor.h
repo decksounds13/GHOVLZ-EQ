@@ -72,9 +72,17 @@ public:
     void setEcoMode (bool shouldEnable) noexcept;
     bool isEcoMode() const noexcept { return ecoMode.load(); }
 
-    /** Scope mode: dry passthrough + meters/scopes only (EQ / spectral / SideCheck DSP off). */
+    /** Scope mode: quad metering view. DSP bypass depends on Pre/Post tap (see setScopeTapPost). */
     void setScopeMode (bool shouldEnable) noexcept;
     bool isScopeMode() const noexcept { return scopeMode.load(); }
+
+    /**
+        Scope-mode audio tap (Scope UI only; compact chrome scopes stay post when processing).
+        false = Pre: dry passthrough + scopes see input (analyzer).
+        true  = Post: EQ DSP runs + scopes see wet output.
+    */
+    void setScopeTapPost (bool shouldTapPost) noexcept;
+    bool isScopeTapPost() const noexcept { return scopeTapPost.load (std::memory_order_acquire); }
 
     /** True when spectrum analyser should run (pref on and Eco off; always on in Scope mode). */
     bool isSpectrumAnalyserActive() const noexcept;
@@ -421,6 +429,8 @@ private:
 
     std::atomic<bool> ecoMode { false };
     std::atomic<bool> scopeMode { false };
+    /** When Scope is on: true = Post (DSP on), false = Pre (analyzer / meteringOnly). */
+    std::atomic<bool> scopeTapPost { false };
 
     double sampleRate = 48000;
 

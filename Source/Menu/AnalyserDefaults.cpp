@@ -76,6 +76,7 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "SPEC_SMOOTH_ID",
         "SPEC_SOFTEN_ID",
         "SPEC_LOG_FREQ_ID",
+        "SPEC_ENHANCED_FREQ_ID",
         "SPEC_FREEZE_ID",
         "EQ_MULTICOLOR_BAND_FILL_ID",
         "EQ_SHOW_CROSSHAIR_ID",

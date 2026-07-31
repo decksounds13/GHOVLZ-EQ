@@ -69,6 +69,9 @@ public:
     void loadUiPrefs();
     void saveUiPrefs() const;
     void syncScopeModeButton();
+    void showScopeTapMenu();
+    /** Re-layout brand + bottom chrome after Scope mode toggles (hide logo, shift ? cluster). */
+    void syncScopeModeLayout();
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -164,8 +167,30 @@ private:
     RotaryImageKnob3 outputGainKnob;
     juce::TextButton autoGainButton { "A" };
     juce::TextButton sideCheckButton { "SideCheck" };
-    /** Quad Scope metering view (dry DSP); styled like SideCheck. */
-    juce::TextButton scopeModeButton { "Scope" };
+
+    /** TextButton with right-click Pre/Post menu for Scope mode. */
+    class ScopeModeButton : public juce::TextButton
+    {
+    public:
+        ScopeModeButton() : juce::TextButton ("Scope") {}
+
+        std::function<void()> onPopupMenu;
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+            {
+                if (onPopupMenu != nullptr)
+                    onPopupMenu();
+                return;
+            }
+
+            juce::TextButton::mouseDown (e);
+        }
+    };
+
+    /** Quad Scope metering view; right-click chooses Pre (analyzer) / Post (DSP on). */
+    ScopeModeButton scopeModeButton;
     /** Amount 0-1; visible only while Side Check is enabled. */
     juce::Slider sideCheckAmountSlider;
     /** Fast / Med / Slow ballistics toggle; shows current state; visible with Amount while SC on. */

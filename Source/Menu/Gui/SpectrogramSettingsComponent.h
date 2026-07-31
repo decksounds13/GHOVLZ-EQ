@@ -3,8 +3,34 @@
 #include <JuceHeader.h>
 
 #include "../../ComboBoxLookAndFeel.h"
+#include "../../SpectrogramComponent.h"
 #include "../SharedResources.h"
 #include "CustomScrollBar.h"
+
+/** Colour-scheme combo: ramp swatch + name (matches Gradients Load preset rows). */
+class ColourSchemeComboLookAndFeel : public ComboBoxLookAndFeel
+{
+public:
+    void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator,
+                                    int standardMenuItemHeight,
+                                    int& idealWidth, int& idealHeight) override;
+
+    void drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area,
+                            bool isSeparator, bool isActive, bool isHighlighted,
+                            bool isTicked, bool hasSubMenu,
+                            const juce::String& text, const juce::String& shortcutKeyText,
+                            const juce::Drawable* icon, const juce::Colour* textColour) override;
+
+    void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
+                       int buttonX, int buttonY, int buttonW, int buttonH,
+                       juce::ComboBox& box) override;
+
+    void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override;
+
+    static SpectrogramComponent::ColourScheme schemeFromName (const juce::String& name) noexcept;
+    static void paintSchemeSwatch (juce::Graphics& g, juce::Rectangle<float> swatch,
+                                   SpectrogramComponent::ColourScheme scheme);
+};
 
 class SpectrogramSettingsComponent : public juce::Component
 {
@@ -43,6 +69,7 @@ private:
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
         ComboBoxLookAndFeel comboLookAndFeel;
+        ColourSchemeComboLookAndFeel colourSchemeLookAndFeel;
 
         juce::Label titleLabel;
         juce::TextButton saveDefaultButton { "Save Default" };
@@ -91,6 +118,9 @@ private:
 
         juce::ToggleButton logFreqToggle { "Log Frequency" };
         std::unique_ptr<ButtonAttachment> logFreqAttachment;
+
+        juce::ToggleButton enhancedFreqToggle { "Enhanced Frequency" };
+        std::unique_ptr<ButtonAttachment> enhancedFreqAttachment;
 
         juce::ToggleButton freezeToggle { "Freeze" };
         std::unique_ptr<ButtonAttachment> freezeAttachment;

@@ -214,6 +214,11 @@ void EqProcessor::setScopeMode (bool shouldEnable) noexcept
     scopeMode.store (shouldEnable, std::memory_order_release);
 }
 
+void EqProcessor::setScopeTapPost (bool shouldTapPost) noexcept
+{
+    scopeTapPost.store (shouldTapPost, std::memory_order_release);
+}
+
 bool EqProcessor::isSpectrumAnalyserActive() const noexcept
 {
     if (ecoMode.load())
@@ -885,7 +890,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
             specSchemes,
             juce::jlimit (0, juce::jmax (0, specSchemes.size() - 1),
                           analyserDefaults.getInt ("SPEC_COLOUR_SCHEME_ID",
-                                                  (int) SpectrogramComponent::ColourScheme::magma))));
+                                                  (int) SpectrogramComponent::ColourScheme::heat))));
     }
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "SPEC_FFT_SIZE_ID", "SpecFftSize",
@@ -927,6 +932,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_LOG_FREQ_ID", "SpecLogFreq",
         analyserDefaults.getBool ("SPEC_LOG_FREQ_ID", true)));
+    // Wave Candy–style frequency reassignment (thin LF ridges). Off = classic STFT.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPEC_ENHANCED_FREQ_ID", "SpecEnhancedFreq",
+        analyserDefaults.getBool ("SPEC_ENHANCED_FREQ_ID", false)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_FREEZE_ID", "SpecFreeze",
         analyserDefaults.getBool ("SPEC_FREEZE_ID", false)));
@@ -1924,8 +1933,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     }
 
     const bool bypassed = bypassParam != nullptr && bypassParam->get();
-    // Scope mode = metering / scopes only: dry through, no EQ / spectral / SideCheck DSP.
-    const bool meteringOnly = bypassed || scopeMode.load (std::memory_order_acquire);
+    // Scope + Pre = analyzer (dry). Scope + Post keeps DSP on; Bypass always dry.
+    const bool scopeAnalyzerOnly = scopeMode.load (std::memory_order_acquire)
+                                   && ! scopeTapPost.load (std::memory_order_acquire);
+    const bool meteringOnly = bypassed || scopeAnalyzerOnly;
 
     // Advance smoothers even while bypassed so un-bypass doesn't zipper.
     auto take = [numSamples] (juce::LinearSmoothedValue<float>& s) -> float
@@ -2231,6 +2242,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const float preRightDb = inputRmsDbRight.load();
 
     // Pre-EQ spectrum capture (before any band processing).
+    // Scope+Post: leave SPECTRUM_PRE_* prefs alone so users can still compare.
     {
         const bool analyserOn = isSpectrumAnalyserActive();
         const bool wantPre = analyserOn
@@ -3024,9 +3036,13 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     if (mainBuffer.getNumChannels() > 1)
     {
         const bool analyserOn = isSpectrumAnalyserActive();
+        // Scope+Post: always feed wet into TR spectrum so all panes agree.
+        const bool forceScopePost = scopeMode.load (std::memory_order_acquire)
+                                    && scopeTapPost.load (std::memory_order_acquire);
         const bool wantPost = analyserOn
-                              && ((treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID") == nullptr
-                                   || treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID")->load() > 0.5f)
+                              && (forceScopePost
+                                  || (treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID") == nullptr
+                                      || treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID")->load() > 0.5f)
                                   || (treeState.getRawParameterValue ("SPECTRUM_POST_FILL_ID") == nullptr
                                       || treeState.getRawParameterValue ("SPECTRUM_POST_FILL_ID")->load() > 0.5f)
                                   || (treeState.getRawParameterValue ("MAX_ID") == nullptr
@@ -3046,9 +3062,12 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     else if (mainBuffer.getNumChannels() > 0)
     {
         const bool analyserOn = isSpectrumAnalyserActive();
+        const bool forceScopePost = scopeMode.load (std::memory_order_acquire)
+                                    && scopeTapPost.load (std::memory_order_acquire);
         const bool wantPost = analyserOn
-                              && ((treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID") == nullptr
-                                   || treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID")->load() > 0.5f)
+                              && (forceScopePost
+                                  || (treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID") == nullptr
+                                      || treeState.getRawParameterValue ("SPECTRUM_POST_CURVE_ID")->load() > 0.5f)
                                   || (treeState.getRawParameterValue ("SPECTRUM_POST_FILL_ID") == nullptr
                                       || treeState.getRawParameterValue ("SPECTRUM_POST_FILL_ID")->load() > 0.5f)
                                   || (treeState.getRawParameterValue ("MAX_ID") == nullptr

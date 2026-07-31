@@ -130,6 +130,8 @@ void LevelMetersComponent::Content::styleSaveDefaultButton (juce::TextButton& bu
 
 void LevelMetersComponent::Content::styleModeCombo (juce::ComboBox& combo)
 {
+    modeLookAndFeel.setThemeColors (&sharedResources);
+    channelModeLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&modeLookAndFeel);
     combo.setColour (juce::Slider::textBoxTextColourId, juce::Colours::whitesmoke.withAlpha (0.8f));
 }

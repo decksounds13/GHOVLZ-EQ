@@ -172,6 +172,7 @@ void OscilloscopeSettingsComponent::Content::styleToggle (juce::ToggleButton& to
 
 void OscilloscopeSettingsComponent::Content::styleQualityCombo (juce::ComboBox& combo)
 {
+    qualityLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&qualityLookAndFeel);
     combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }

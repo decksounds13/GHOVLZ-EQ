@@ -1,6 +1,5 @@
 #include "SpectrogramSettingsComponent.h"
 
-#include "../../SpectrogramComponent.h"
 #include "../AnalyserDefaults.h"
 
 namespace
@@ -16,11 +15,145 @@ namespace
     constexpr int kSectionGap = 10;
 }
 
+SpectrogramComponent::ColourScheme ColourSchemeComboLookAndFeel::schemeFromName (const juce::String& name) noexcept
+{
+    const auto names = SpectrogramComponent::getColourSchemeNames();
+    const int idx = names.indexOf (name);
+    if (idx < 0)
+        return SpectrogramComponent::ColourScheme::heat;
+    return static_cast<SpectrogramComponent::ColourScheme> (
+        juce::jlimit (0, (int) SpectrogramComponent::ColourScheme::numSchemes - 1, idx));
+}
+
+void ColourSchemeComboLookAndFeel::paintSchemeSwatch (juce::Graphics& g,
+                                                      juce::Rectangle<float> swatch,
+                                                      SpectrogramComponent::ColourScheme scheme)
+{
+    g.setColour (juce::Colours::black.withAlpha (0.45f));
+    g.fillRoundedRectangle (swatch, 2.5f);
+
+    juce::ColourGradient grad (SpectrogramComponent::colourForScheme (scheme, 0.0f),
+                               swatch.getX(), swatch.getCentreY(),
+                               SpectrogramComponent::colourForScheme (scheme, 1.0f),
+                               swatch.getRight(), swatch.getCentreY(), false);
+    constexpr int kMidStops = 6;
+    for (int i = 1; i < kMidStops; ++i)
+    {
+        const float t = (float) i / (float) kMidStops;
+        grad.addColour ((double) t, SpectrogramComponent::colourForScheme (scheme, t));
+    }
+    g.setGradientFill (grad);
+    g.fillRoundedRectangle (swatch.reduced (1.0f), 2.5f);
+}
+
+void ColourSchemeComboLookAndFeel::getIdealPopupMenuItemSize (const juce::String& text,
+                                                             bool isSeparator,
+                                                             int standardMenuItemHeight,
+                                                             int& idealWidth,
+                                                             int& idealHeight)
+{
+    if (isSeparator)
+    {
+        ComboBoxLookAndFeel::getIdealPopupMenuItemSize (text, isSeparator, standardMenuItemHeight,
+                                                        idealWidth, idealHeight);
+        return;
+    }
+
+    idealWidth = 240;
+    idealHeight = 28;
+}
+
+void ColourSchemeComboLookAndFeel::drawPopupMenuItem (juce::Graphics& g,
+                                                      const juce::Rectangle<int>& area,
+                                                      bool isSeparator, bool isActive,
+                                                      bool isHighlighted, bool isTicked,
+                                                      bool hasSubMenu,
+                                                      const juce::String& text,
+                                                      const juce::String& shortcutKeyText,
+                                                      const juce::Drawable* icon,
+                                                      const juce::Colour* textColourToUse)
+{
+    juce::ignoreUnused (hasSubMenu, shortcutKeyText, icon, textColourToUse);
+
+    if (isSeparator)
+    {
+        ComboBoxLookAndFeel::drawPopupMenuItem (g, area, isSeparator, isActive, isHighlighted,
+                                                isTicked, hasSubMenu, text, shortcutKeyText,
+                                                icon, textColourToUse);
+        return;
+    }
+
+    auto bounds = area.toFloat().reduced (4.0f, 3.0f);
+    if (isHighlighted && isActive)
+    {
+        g.setColour (colors().optionComboHighlight.withAlpha (0.85f));
+        g.fillRoundedRectangle (bounds.expanded (2.0f), 3.0f);
+    }
+
+    auto swatch = bounds.removeFromLeft (bounds.getWidth() * 0.55f).reduced (0.0f, 2.0f);
+    paintSchemeSwatch (g, swatch, schemeFromName (text));
+
+    bounds.removeFromLeft (8.0f);
+    g.setColour (isHighlighted ? juce::Colours::black
+                               : colors().optionComboText.withAlpha (isActive ? 0.95f : 0.45f));
+    g.setFont (juce::FontOptions (12.5f));
+    g.drawText (text, bounds.toNearestIntEdges(), juce::Justification::centredLeft, true);
+
+    if (isTicked)
+    {
+        g.setColour (juce::Colours::goldenrod);
+        g.fillEllipse (area.getRight() - 14.0f, area.getCentreY() - 3.0f, 6.0f, 6.0f);
+    }
+}
+
+void ColourSchemeComboLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height,
+                                                bool isButtonDown,
+                                                int buttonX, int buttonY, int buttonW, int buttonH,
+                                                juce::ComboBox& box)
+{
+    juce::ignoreUnused (isButtonDown, buttonX, buttonY, buttonW, buttonH);
+
+    const auto& c = colors();
+    auto bounds = juce::Rectangle<int> (0, 0, width, height).toFloat();
+    g.setColour (c.optionComboBackground);
+    g.fillRoundedRectangle (bounds, 2.0f);
+    g.setColour (c.optionBorder);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), 2.0f, 1.0f);
+
+    auto inner = bounds.reduced (4.0f, 3.0f);
+    auto swatch = inner.removeFromLeft (juce::jmin (inner.getWidth() * 0.42f, 72.0f));
+    paintSchemeSwatch (g, swatch, schemeFromName (box.getText()));
+    inner.removeFromLeft (6.0f);
+    inner.removeFromRight (14.0f);
+
+    g.setColour (c.optionComboText.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
+    g.setFont (juce::Font ("Lato Black", 11.0f, juce::Font::plain));
+    g.drawText (box.getText(), inner.toNearestIntEdges(), juce::Justification::centredLeft, true);
+
+    juce::Rectangle<int> arrowZone (width - 14, 0, 12, height);
+    juce::Path path;
+    path.startNewSubPath ((float) arrowZone.getX() + 2.0f, (float) arrowZone.getCentreY() - 2.0f);
+    path.lineTo ((float) arrowZone.getCentreX(), (float) arrowZone.getCentreY() + 2.5f);
+    path.lineTo ((float) arrowZone.getRight() - 2.0f, (float) arrowZone.getCentreY() - 2.0f);
+    g.setColour (c.optionComboText.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
+    g.strokePath (path, juce::PathStrokeType (1.4f));
+}
+
+// Hide default combo label — we paint name beside the swatch ourselves.
+void ColourSchemeComboLookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
+{
+    label.setBounds ({});
+    juce::ignoreUnused (box);
+}
+
 SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
                                                 juce::AudioProcessorValueTreeState& state)
     : sharedResources (resources),
       treeState (state)
 {
+    comboLookAndFeel.setThemeColors (&sharedResources);
+    colourSchemeLookAndFeel.setThemeColors (&sharedResources);
+
     titleLabel.setText ("Spectrogram", juce::dontSendNotification);
     titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
@@ -35,7 +168,8 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (lookSectionLabel);
 
     colourSchemeLabel.setText ("Colour Scheme", juce::dontSendNotification);
-    styleCombo (colourSchemeCombo);
+    colourSchemeCombo.setLookAndFeel (&colourSchemeLookAndFeel);
+    colourSchemeCombo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
     {
         const auto names = SpectrogramComponent::getColourSchemeNames();
         for (int i = 0; i < names.size(); ++i)
@@ -125,6 +259,13 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (logFreqToggle);
     logFreqAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_LOG_FREQ_ID", logFreqToggle);
 
+    styleToggle (enhancedFreqToggle);
+    enhancedFreqToggle.setTooltip (
+        "Wave Candy–style sharpening: relocates FFT energy to instantaneous frequency "
+        "so low tones paint as thin ridges instead of fat lobes. Uses more CPU.");
+    addAndMakeVisible (enhancedFreqToggle);
+    enhancedFreqAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_ENHANCED_FREQ_ID", enhancedFreqToggle);
+
     styleToggle (freezeToggle);
     addAndMakeVisible (freezeToggle);
     freezeAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_FREEZE_ID", freezeToggle);
@@ -186,6 +327,7 @@ void SpectrogramSettingsComponent::Content::styleToggle (juce::ToggleButton& tog
 
 void SpectrogramSettingsComponent::Content::styleCombo (juce::ComboBox& combo)
 {
+    comboLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&comboLookAndFeel);
     combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }
@@ -234,7 +376,7 @@ int SpectrogramSettingsComponent::Content::getPreferredHeight() const
 {
     const int comboRows = 4;
     const int sliderRows = 6;
-    const int toggles = 2;
+    const int toggles = 3;
 
     return kPadY * 2
            + 24 + 8
@@ -271,6 +413,8 @@ void SpectrogramSettingsComponent::Content::resized()
     layoutSliderRow (area, softenLabel, softenSlider);
 
     logFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+    area.removeFromTop (6);
+    enhancedFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
     area.removeFromTop (6);
     freezeToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
 }

@@ -44,117 +44,6 @@ namespace
         return juce::String ((int) std::round (hz));
     }
 
-    float lerpColourChannel (float a, float b, float t) noexcept
-    {
-        return a + (b - a) * t;
-    }
-
-    juce::Colour lerpColour (juce::Colour a, juce::Colour b, float t) noexcept
-    {
-        t = juce::jlimit (0.0f, 1.0f, t);
-        return juce::Colour::fromFloatRGBA (
-            lerpColourChannel (a.getFloatRed(), b.getFloatRed(), t),
-            lerpColourChannel (a.getFloatGreen(), b.getFloatGreen(), t),
-            lerpColourChannel (a.getFloatBlue(), b.getFloatBlue(), t),
-            1.0f);
-    }
-
-    juce::Colour sampleStops (const juce::Colour* stops, int numStops, float t) noexcept
-    {
-        if (numStops <= 1)
-            return stops[0];
-
-        t = juce::jlimit (0.0f, 1.0f, t);
-        const float scaled = t * (float) (numStops - 1);
-        const int i0 = (int) scaled;
-        const int i1 = juce::jmin (numStops - 1, i0 + 1);
-        return lerpColour (stops[i0], stops[i1], scaled - (float) i0);
-    }
-
-    juce::Colour colourForScheme (SpectrogramComponent::ColourScheme scheme, float t) noexcept
-    {
-        switch (scheme)
-        {
-            case SpectrogramComponent::ColourScheme::inferno:
-            {
-                const juce::Colour stops[] = {
-                    juce::Colour::fromRGB (0, 0, 4),
-                    juce::Colour::fromRGB (40, 11, 84),
-                    juce::Colour::fromRGB (101, 21, 110),
-                    juce::Colour::fromRGB (159, 42, 99),
-                    juce::Colour::fromRGB (212, 72, 66),
-                    juce::Colour::fromRGB (245, 125, 21),
-                    juce::Colour::fromRGB (252, 255, 164)
-                };
-                return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
-            }
-            case SpectrogramComponent::ColourScheme::magma:
-            {
-                const juce::Colour stops[] = {
-                    juce::Colour::fromRGB (0, 0, 4),
-                    juce::Colour::fromRGB (28, 16, 68),
-                    juce::Colour::fromRGB (79, 18, 123),
-                    juce::Colour::fromRGB (129, 37, 129),
-                    juce::Colour::fromRGB (181, 54, 122),
-                    juce::Colour::fromRGB (229, 92, 110),
-                    juce::Colour::fromRGB (252, 253, 191)
-                };
-                return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
-            }
-            case SpectrogramComponent::ColourScheme::viridis:
-            {
-                const juce::Colour stops[] = {
-                    juce::Colour::fromRGB (68, 1, 84),
-                    juce::Colour::fromRGB (59, 82, 139),
-                    juce::Colour::fromRGB (33, 145, 140),
-                    juce::Colour::fromRGB (94, 201, 98),
-                    juce::Colour::fromRGB (253, 231, 37)
-                };
-                return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
-            }
-            case SpectrogramComponent::ColourScheme::ice:
-            {
-                const juce::Colour stops[] = {
-                    juce::Colour::fromRGB (0, 0, 0),
-                    juce::Colour::fromRGB (0, 20, 80),
-                    juce::Colour::fromRGB (0, 80, 180),
-                    juce::Colour::fromRGB (40, 180, 255),
-                    juce::Colour::fromRGB (220, 250, 255)
-                };
-                return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
-            }
-            case SpectrogramComponent::ColourScheme::greyscale:
-            {
-                const juce::Colour stops[] = { juce::Colours::black, juce::Colours::white };
-                return sampleStops (stops, 2, t);
-            }
-            case SpectrogramComponent::ColourScheme::heat:
-            {
-                const juce::Colour stops[] = {
-                    juce::Colours::black,
-                    juce::Colour::fromRGB (120, 0, 0),
-                    juce::Colour::fromRGB (220, 40, 0),
-                    juce::Colour::fromRGB (255, 180, 0),
-                    juce::Colours::white
-                };
-                return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
-            }
-            case SpectrogramComponent::ColourScheme::classic:
-            default:
-            {
-                const juce::Colour stops[] = {
-                    juce::Colours::black,
-                    juce::Colour::fromRGB (20, 0, 80),
-                    juce::Colour::fromRGB (0, 40, 200),
-                    juce::Colour::fromRGB (0, 200, 200),
-                    juce::Colour::fromRGB (40, 220, 40),
-                    juce::Colour::fromRGB (240, 240, 0),
-                    juce::Colours::white
-                };
-                return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
-            }
-        }
-    }
 }
 
 SpectrogramComponent::SpectrogramComponent()
@@ -175,6 +64,109 @@ SpectrogramComponent::~SpectrogramComponent()
 juce::StringArray SpectrogramComponent::getColourSchemeNames()
 {
     return { "Classic", "Inferno", "Magma", "Viridis", "Ice", "Greyscale", "Heat" };
+}
+
+juce::Colour SpectrogramComponent::colourForScheme (ColourScheme scheme, float t) noexcept
+{
+    auto sampleStops = [] (const juce::Colour* stops, int numStops, float tt) noexcept -> juce::Colour
+    {
+        if (numStops <= 1)
+            return stops[0];
+
+        tt = juce::jlimit (0.0f, 1.0f, tt);
+        const float scaled = tt * (float) (numStops - 1);
+        const int i0 = (int) scaled;
+        const int i1 = juce::jmin (numStops - 1, i0 + 1);
+        const float frac = scaled - (float) i0;
+        const auto a = stops[i0], b = stops[i1];
+        return juce::Colour::fromFloatRGBA (
+            a.getFloatRed()   + (b.getFloatRed()   - a.getFloatRed())   * frac,
+            a.getFloatGreen() + (b.getFloatGreen() - a.getFloatGreen()) * frac,
+            a.getFloatBlue()  + (b.getFloatBlue()  - a.getFloatBlue())  * frac,
+            1.0f);
+    };
+
+    switch (scheme)
+    {
+        case ColourScheme::inferno:
+        {
+            const juce::Colour stops[] = {
+                juce::Colour::fromRGB (0, 0, 4),
+                juce::Colour::fromRGB (40, 11, 84),
+                juce::Colour::fromRGB (101, 21, 110),
+                juce::Colour::fromRGB (159, 42, 99),
+                juce::Colour::fromRGB (212, 72, 66),
+                juce::Colour::fromRGB (245, 125, 21),
+                juce::Colour::fromRGB (252, 255, 164)
+            };
+            return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
+        }
+        case ColourScheme::magma:
+        {
+            const juce::Colour stops[] = {
+                juce::Colour::fromRGB (0, 0, 4),
+                juce::Colour::fromRGB (28, 16, 68),
+                juce::Colour::fromRGB (79, 18, 123),
+                juce::Colour::fromRGB (129, 37, 129),
+                juce::Colour::fromRGB (181, 54, 122),
+                juce::Colour::fromRGB (229, 92, 110),
+                juce::Colour::fromRGB (252, 253, 191)
+            };
+            return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
+        }
+        case ColourScheme::viridis:
+        {
+            const juce::Colour stops[] = {
+                juce::Colour::fromRGB (68, 1, 84),
+                juce::Colour::fromRGB (59, 82, 139),
+                juce::Colour::fromRGB (33, 145, 140),
+                juce::Colour::fromRGB (94, 201, 98),
+                juce::Colour::fromRGB (253, 231, 37)
+            };
+            return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
+        }
+        case ColourScheme::ice:
+        {
+            const juce::Colour stops[] = {
+                juce::Colour::fromRGB (0, 0, 0),
+                juce::Colour::fromRGB (0, 20, 80),
+                juce::Colour::fromRGB (0, 80, 180),
+                juce::Colour::fromRGB (40, 180, 255),
+                juce::Colour::fromRGB (220, 250, 255)
+            };
+            return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
+        }
+        case ColourScheme::greyscale:
+        {
+            const juce::Colour stops[] = { juce::Colours::black, juce::Colours::white };
+            return sampleStops (stops, 2, t);
+        }
+        case ColourScheme::heat:
+        {
+            const juce::Colour stops[] = {
+                juce::Colours::black,
+                juce::Colour::fromRGB (120, 0, 0),
+                juce::Colour::fromRGB (220, 40, 0),
+                juce::Colour::fromRGB (255, 180, 0),
+                juce::Colours::white
+            };
+            return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
+        }
+        case ColourScheme::classic:
+        default:
+        {
+            const juce::Colour stops[] = {
+                juce::Colours::black,
+                juce::Colour::fromRGB (20, 0, 80),
+                juce::Colour::fromRGB (0, 40, 200),
+                juce::Colour::fromRGB (0, 200, 200),
+                juce::Colour::fromRGB (40, 220, 40),
+                juce::Colour::fromRGB (240, 240, 0),
+                juce::Colours::white
+            };
+            return sampleStops (stops, (int) (sizeof (stops) / sizeof (stops[0])), t);
+        }
+    }
 }
 
 juce::StringArray SpectrogramComponent::getFftSizeNames()
@@ -261,6 +253,7 @@ void SpectrogramComponent::resetDisplay()
     if (scrollImage.isValid())
         scrollImage.clear (scrollImage.getBounds(), juce::Colours::black);
     historyDb.assign ((size_t) internalW * (size_t) internalH, -120.0f);
+    havePrevPhase = false;
     lastLookFingerprint = lookFingerprint();
     imageDirty = true;
     screenSoftDirty = true;
@@ -364,7 +357,7 @@ bool SpectrogramComponent::loadBoolParam (const char* id, bool fallback) const
 SpectrogramComponent::ColourScheme SpectrogramComponent::currentScheme() const
 {
     const int idx = juce::jlimit (0, (int) ColourScheme::numSchemes - 1,
-                                  loadChoiceIndex ("SPEC_COLOUR_SCHEME_ID", (int) ColourScheme::magma));
+                                  loadChoiceIndex ("SPEC_COLOUR_SCHEME_ID", (int) ColourScheme::heat));
     return static_cast<ColourScheme> (idx);
 }
 
@@ -423,6 +416,8 @@ void SpectrogramComponent::ensureFft (int order)
     fftWork.assign ((size_t) (fftSize * 2), 0.0f);
     windowed.assign ((size_t) fftSize, 0.0f);
     columnDb.assign ((size_t) (fftSize / 2 + 1), -120.0f);
+    prevPhase.assign ((size_t) (fftSize / 2 + 1), 0.0f);
+    havePrevPhase = false;
     fftSizeCachedForBins = 0; // force bin map rebuild
 }
 
@@ -501,6 +496,21 @@ void SpectrogramComponent::advanceFromRing()
     const float smooth = juce::jlimit (0.0f, 0.95f, loadFloatParam ("SPEC_SMOOTH_ID", 35.0f) / 100.0f);
     const auto channel = currentChannelMode();
     const int numBins = fftSize / 2 + 1;
+    const bool enhanced = loadBoolParam ("SPEC_ENHANCED_FREQ_ID", false);
+    const bool logFreq = loadBoolParam ("SPEC_LOG_FREQ_ID", true);
+    lastHopSamples = hop;
+
+    if (enhanced != lastEnhancedMode)
+    {
+        lastEnhancedMode = enhanced;
+        havePrevPhase = false;
+    }
+
+    if (enhanced && (int) prevPhase.size() != numBins)
+    {
+        prevPhase.assign ((size_t) numBins, 0.0f);
+        havePrevPhase = false;
+    }
 
     int columnsWritten = 0;
     while (available >= fftSize && columnsWritten < kMaxColumnsPerTick)
@@ -523,16 +533,149 @@ void SpectrogramComponent::advanceFromRing()
         window->multiplyWithWindowingTable (windowed.data(), (size_t) fftSize);
         std::fill (fftWork.begin(), fftWork.end(), 0.0f);
         std::copy (windowed.begin(), windowed.end(), fftWork.begin());
-        fft->performFrequencyOnlyForwardTransform (fftWork.data());
 
-        for (int bin = 0; bin < numBins; ++bin)
+        if (enhanced)
         {
-            const float mag = fftWork[(size_t) bin] / (float) fftSize;
-            const float db = juce::Decibels::gainToDecibels (juce::jmax (mag, 1.0e-12f), -120.0f);
-            columnDb[(size_t) bin] = columnDb[(size_t) bin] * smooth + db * (1.0f - smooth);
-        }
+            // Complex STFT + bin-relative IF (Wave Candy / MiniMeters Sharp family).
+            // Absolute phase→Hz wraps when hop is large; refine around each bin instead.
+            fft->performRealOnlyForwardTransform (fftWork.data(), true);
 
-        appendColumn (columnDb.data(), numBins);
+            constexpr float kTwoPi = juce::MathConstants<float>::twoPi;
+            const float binHz = (float) sr / (float) fftSize;
+            const float expectedPerBin = kTwoPi * (float) hop / (float) fftSize;
+
+            for (int bin = 0; bin < numBins; ++bin)
+            {
+                const float re = fftWork[(size_t) (bin * 2)];
+                const float im = fftWork[(size_t) (bin * 2 + 1)];
+                const float mag = std::sqrt (re * re + im * im) / (float) fftSize;
+                const float db = juce::Decibels::gainToDecibels (juce::jmax (mag, 1.0e-12f), -120.0f);
+                columnDb[(size_t) bin] = columnDb[(size_t) bin] * smooth + db * (1.0f - smooth);
+            }
+
+            // Classic continuum first — keeps LF texture matching normal mode.
+            ensureBinForRowMap();
+            columnScratch.assign ((size_t) internalH, -120.0f);
+            for (int y = 0; y < internalH; ++y)
+            {
+                const float bf = binForRow[(size_t) y];
+                const int b0 = juce::jlimit (0, numBins - 1, (int) std::floor (bf));
+                const int b1 = juce::jmin (numBins - 1, b0 + 1);
+                const float t = juce::jlimit (0.0f, 1.0f, bf - (float) b0);
+                columnScratch[(size_t) y] = columnDb[(size_t) b0] * (1.0f - t)
+                                          + columnDb[(size_t) b1] * t;
+            }
+
+            // Sharpen tones: relocate strong bin energy to the IF row (bin + phase residual).
+            for (int bin = 1; bin < numBins - 1; ++bin)
+            {
+                const float smoothedDb = columnDb[(size_t) bin];
+                if (smoothedDb < -95.0f || internalH <= 1)
+                {
+                    const float re = fftWork[(size_t) (bin * 2)];
+                    const float im = fftWork[(size_t) (bin * 2 + 1)];
+                    prevPhase[(size_t) bin] = std::atan2 (im, re);
+                    continue;
+                }
+
+                // Local peak preference — broadband noise stays on the classic continuum.
+                const float leftDb = columnDb[(size_t) (bin - 1)];
+                const float rightDb = columnDb[(size_t) (bin + 1)];
+                const bool isPeak = smoothedDb >= leftDb - 0.5f && smoothedDb >= rightDb - 0.5f
+                                    && smoothedDb > juce::jmax (leftDb, rightDb) - 6.0f;
+
+                const float re = fftWork[(size_t) (bin * 2)];
+                const float im = fftWork[(size_t) (bin * 2 + 1)];
+                const float phase = std::atan2 (im, re);
+                float ifHz = (float) bin * binHz;
+
+                if (havePrevPhase && isPeak)
+                {
+                    float dPhase = phase - prevPhase[(size_t) bin];
+                    while (dPhase > juce::MathConstants<float>::pi)  dPhase -= kTwoPi;
+                    while (dPhase < -juce::MathConstants<float>::pi) dPhase += kTwoPi;
+
+                    float residual = dPhase - expectedPerBin * (float) bin;
+                    while (residual > juce::MathConstants<float>::pi)  residual -= kTwoPi;
+                    while (residual < -juce::MathConstants<float>::pi) residual += kTwoPi;
+
+                    // Clamp to ~±1.25 bins so hop wrapping can't fling energy across decades.
+                    const float binOffset = juce::jlimit (-1.25f, 1.25f,
+                                                          residual / expectedPerBin);
+                    ifHz = ((float) bin + binOffset) * binHz;
+                    if (! std::isfinite (ifHz) || ifHz < kMinDisplayHz * 0.25f)
+                        ifHz = (float) bin * binHz;
+                }
+
+                prevPhase[(size_t) bin] = phase;
+
+                if (! isPeak)
+                    continue;
+
+                // Boost IF row on top of the classic continuum (no carve — carving
+                // left sparse "lines only" below ~150 Hz where many bins share rows).
+                const float yNorm = normYForFreq (ifHz, sr, logFreq);
+                const float yf = yNorm * (float) (internalH - 1);
+                const int y0 = juce::jlimit (0, internalH - 1, (int) std::floor (yf));
+                const int y1 = juce::jmin (internalH - 1, y0 + 1);
+                const float frac = juce::jlimit (0.0f, 1.0f, yf - (float) y0);
+
+                columnScratch[(size_t) y0] = juce::jmax (columnScratch[(size_t) y0],
+                                                         smoothedDb - 1.5f * frac);
+                columnScratch[(size_t) y1] = juce::jmax (columnScratch[(size_t) y1],
+                                                         smoothedDb - 1.5f * (1.0f - frac));
+            }
+
+            // Keep DC/Nyquist phase state coherent.
+            for (int bin : { 0, numBins - 1 })
+            {
+                if (bin < 0 || bin >= numBins)
+                    continue;
+                const float re = fftWork[(size_t) (bin * 2)];
+                const float im = fftWork[(size_t) (bin * 2 + 1)];
+                prevPhase[(size_t) bin] = std::atan2 (im, re);
+            }
+
+            havePrevPhase = true;
+            // Mild soften only — enough to hide row gaps without undoing ridges.
+            const float soften = juce::jlimit (0.0f, 0.55f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f) / 100.0f * 0.55f);
+            if (soften > 0.001f && internalH > 2)
+            {
+                columnSoftTmp = columnScratch;
+                constexpr float kKernel[3] = { 0.20f, 0.60f, 0.20f };
+                for (int y = 0; y < internalH; ++y)
+                {
+                    float acc = 0.0f, wSum = 0.0f;
+                    for (int k = -1; k <= 1; ++k)
+                    {
+                        const int yy = y + k;
+                        if (yy < 0 || yy >= internalH)
+                            continue;
+                        const float w = kKernel[k + 1];
+                        acc += columnSoftTmp[(size_t) yy] * w;
+                        wSum += w;
+                    }
+                    columnScratch[(size_t) y] = columnSoftTmp[(size_t) y] * (1.0f - soften)
+                                              + (acc / juce::jmax (1.0e-6f, wSum)) * soften;
+                }
+            }
+
+            appendDisplayColumn (columnScratch.data());
+        }
+        else
+        {
+            havePrevPhase = false;
+            fft->performFrequencyOnlyForwardTransform (fftWork.data());
+
+            for (int bin = 0; bin < numBins; ++bin)
+            {
+                const float mag = fftWork[(size_t) bin] / (float) fftSize;
+                const float db = juce::Decibels::gainToDecibels (juce::jmax (mag, 1.0e-12f), -120.0f);
+                columnDb[(size_t) bin] = columnDb[(size_t) bin] * smooth + db * (1.0f - smooth);
+            }
+
+            appendColumn (columnDb.data(), numBins);
+        }
 
         ringReadPos = (ringReadPos + hop) % cap;
         available -= hop;
@@ -599,6 +742,39 @@ void SpectrogramComponent::rerenderScrollFromHistory()
     screenSoftDirty = true;
 }
 
+void SpectrogramComponent::ensureBinForRowMap()
+{
+    const double sr = sampleRateHz.load (std::memory_order_relaxed);
+    const bool logFreq = loadBoolParam ("SPEC_LOG_FREQ_ID", true);
+    const int numBinsSafe = juce::jmax (1, fftSize / 2 + 1);
+
+    if (logFreq == logFreqCached && fftSize == fftSizeCachedForBins && sr == srCachedForBins
+        && (int) binForRow.size() == internalH)
+        return;
+
+    // Axis / FFT remap invalidates display-row history — wipe then rebuild map.
+    const bool axisChanged = (logFreq != logFreqCached) && fftSizeCachedForBins != 0;
+    logFreqCached = logFreq;
+    fftSizeCachedForBins = fftSize;
+    srCachedForBins = sr;
+    binForRow.resize ((size_t) internalH);
+
+    for (int y = 0; y < internalH; ++y)
+    {
+        const float yNorm = internalH > 1 ? (float) y / (float) (internalH - 1) : 0.0f;
+        const float freq = freqForNormY (yNorm, sr, logFreq);
+        const float binF = (float) (freq * (double) fftSize / sr);
+        binForRow[(size_t) y] = juce::jlimit (0.0f, (float) (numBinsSafe - 1), binF);
+    }
+
+    if (axisChanged)
+    {
+        historyDb.assign ((size_t) internalW * (size_t) internalH, -120.0f);
+        if (scrollImage.isValid())
+            scrollImage.clear (scrollImage.getBounds(), juce::Colours::black);
+    }
+}
+
 void SpectrogramComponent::appendColumn (const float* magnitudesDb, int numBins)
 {
     juce::ignoreUnused (numBins);
@@ -606,36 +782,9 @@ void SpectrogramComponent::appendColumn (const float* magnitudesDb, int numBins)
         return;
 
     ensureHistoryBuffer();
+    ensureBinForRowMap();
 
-    const double sr = sampleRateHz.load (std::memory_order_relaxed);
-    const bool logFreq = loadBoolParam ("SPEC_LOG_FREQ_ID", true);
     const int numBinsSafe = fftSize / 2 + 1;
-
-    if (logFreq != logFreqCached || fftSize != fftSizeCachedForBins || sr != srCachedForBins
-        || (int) binForRow.size() != internalH)
-    {
-        // Axis / FFT remap invalidates display-row history — wipe then rebuild map.
-        const bool axisChanged = (logFreq != logFreqCached);
-        logFreqCached = logFreq;
-        fftSizeCachedForBins = fftSize;
-        srCachedForBins = sr;
-        binForRow.resize ((size_t) internalH);
-
-        for (int y = 0; y < internalH; ++y)
-        {
-            const float yNorm = internalH > 1 ? (float) y / (float) (internalH - 1) : 0.0f;
-            const float freq = freqForNormY (yNorm, sr, logFreq);
-            const float binF = (float) (freq * (double) fftSize / sr);
-            binForRow[(size_t) y] = juce::jlimit (0.0f, (float) (numBinsSafe - 1), binF);
-        }
-
-        if (axisChanged)
-        {
-            historyDb.assign ((size_t) internalW * (size_t) internalH, -120.0f);
-            if (scrollImage.isValid())
-                scrollImage.clear (scrollImage.getBounds(), juce::Colours::black);
-        }
-    }
 
     // Interpolate bins → rows, then vertical Gaussian before storing / colourising.
     columnScratch.resize ((size_t) internalH);
@@ -649,6 +798,15 @@ void SpectrogramComponent::appendColumn (const float* magnitudesDb, int numBins)
                                   + magnitudesDb[(size_t) b1] * frac;
     }
     softenColumnVertical (columnScratch, internalH);
+    appendDisplayColumn (columnScratch.data());
+}
+
+void SpectrogramComponent::appendDisplayColumn (const float* displayDbRows)
+{
+    if (! scrollImage.isValid() || displayDbRows == nullptr || internalH <= 0)
+        return;
+
+    ensureHistoryBuffer();
 
     // Scroll history + pixels one column left, write new column on the right.
     if (internalW > 1 && ! historyDb.empty())
@@ -674,7 +832,7 @@ void SpectrogramComponent::appendColumn (const float* magnitudesDb, int numBins)
     }
 
     const int x = internalW - 1;
-    std::copy (columnScratch.begin(), columnScratch.begin() + internalH,
+    std::copy (displayDbRows, displayDbRows + internalH,
                historyDb.begin() + (size_t) x * (size_t) internalH);
 
     const float brightness = juce::jlimit (10.0f, 200.0f, loadFloatParam ("SPEC_BRIGHTNESS_ID", 100.0f)) / 100.0f;
@@ -684,7 +842,7 @@ void SpectrogramComponent::appendColumn (const float* magnitudesDb, int numBins)
     if (lutScheme != currentScheme())
         rebuildColourLut();
 
-    colouriseColumnIntoImage (x, columnScratch.data(), brightness, minDb, maxDb);
+    colouriseColumnIntoImage (x, displayDbRows, brightness, minDb, maxDb);
     lastLookFingerprint = lookFingerprint();
 
     imageDirty = true;

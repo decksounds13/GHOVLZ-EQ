@@ -1034,6 +1034,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     syncMeterChannelModeButton();
 
     processor.treeState.addParameterListener ("METER_CHANNEL_MODE_ID", this);
+    processor.treeState.addParameterListener ("SPEC_COLOUR_SCHEME_ID", this);
 
     applyThemeToChildComponents();
 }
@@ -1042,6 +1043,7 @@ MainComponent::~MainComponent()
 {
     colourRamps.removeChangeListener (this);
     processor.treeState.removeParameterListener ("METER_CHANNEL_MODE_ID", this);
+    processor.treeState.removeParameterListener ("SPEC_COLOUR_SCHEME_ID", this);
 
     processor.getUndoManager().removeChangeListener (this);
 
@@ -1098,6 +1100,7 @@ void MainComponent::applyThemeToChildComponents()
     styleChromeButton (meterChannelModeButton);
 
     customLookAndFeel.setThemeColors (&sharedResources);
+    ComboBoxLookAndFeel::sharedForPopupMenus().setThemeColors (&sharedResources);
     menuToggleButton.repaint();
 
     stylePresetNameEditor();
@@ -1305,13 +1308,15 @@ void MainComponent::syncExpandedOscOverlayStack()
 {
     // Expanded scope/gon/spec: above graph, below OptionBox + Settings menu.
     // Compact strip: stay in the always-on-top chrome layer.
+    // Scope quad: never always-on-top — post meters must stay above the BR spectrogram.
     const bool oscExp = oscExpanded && oscButton.getToggleState();
     const bool gonExp = gonExpanded && gonButton.getToggleState();
     const bool specExp = specExpanded && specButton.getToggleState();
     const bool expanded = oscExp || gonExp || specExp;
-    oscilloscope.setAlwaysOnTop (! oscExp);
-    goniometer.setAlwaysOnTop (! gonExp);
-    spectrogram.setAlwaysOnTop (! specExp);
+    const bool compactChrome = ! scopeModeEnabled;
+    oscilloscope.setAlwaysOnTop (compactChrome && ! oscExp);
+    goniometer.setAlwaysOnTop (compactChrome && ! gonExp);
+    spectrogram.setAlwaysOnTop (compactChrome && ! specExp);
     oscDimmer.setAlwaysOnTop (! expanded);
 
     auto* box = frequencyResponseComponent.getOptionBoxMenu();
@@ -1520,6 +1525,23 @@ void MainComponent::setScopeMode (bool shouldEnable, bool notifyPrefs)
     }
 
     applyScopeMode (shouldEnable);
+    editor.syncScopeModeButton();
+    editor.syncScopeModeLayout();
+
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+void MainComponent::setScopeTapPost (bool shouldTapPost, bool notifyPrefs)
+{
+    if (shouldTapPost == scopeTapPost)
+    {
+        editor.syncScopeModeButton();
+        return;
+    }
+
+    scopeTapPost = shouldTapPost;
+    processor.setScopeTapPost (shouldTapPost);
     editor.syncScopeModeButton();
 
     if (notifyPrefs)
@@ -2114,11 +2136,40 @@ void MainComponent::layoutScopeModePanes (float scale)
     specSpeedDownButton.toFront (false);
     specExpandButton.toFront (false);
     scopeSplitOverlay.toFront (false);
+
+    // Post meters sit on the right edge — keep them above the BR spectrogram pane.
+    verticalGradientMeterL.toFront (false);
+    verticalGradientMeterR.toFront (false);
+    verticalGradientMeterPostL.toFront (false);
+    verticalGradientMeterPostR.toFront (false);
+    meterChannelModeButton.toFront (false);
 }
 
 void MainComponent::layoutPresetChrome (float scale)
 {
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
+
+    // Scope mode: clear the center for meters — keep Bypass / A–D / UI / Dice / Eco.
+    if (scopeModeEnabled)
+    {
+        presetPrevButton.setVisible (false);
+        presetNameEditor.setVisible (false);
+        presetMenuButton.setVisible (false);
+        presetNextButton.setVisible (false);
+        presetSaveButton.setVisible (false);
+        presetPrevButton.setBounds ({});
+        presetNameEditor.setBounds ({});
+        presetMenuButton.setBounds ({});
+        presetNextButton.setBounds ({});
+        presetSaveButton.setBounds ({});
+        return;
+    }
+
+    presetPrevButton.setVisible (true);
+    presetNameEditor.setVisible (true);
+    presetMenuButton.setVisible (true);
+    presetNextButton.setVisible (true);
+    presetSaveButton.setVisible (true);
 
     const int chromeH = px (28.0f);
     const int chromeY = px (6.0f);
@@ -2267,25 +2318,31 @@ void MainComponent::resized()
 
     layoutPresetChrome (scale);
 
-    // Eco: just right of Save; same W×H as L/R ↔ M/S meter-mode button.
-    // OSC (smaller) sits beside Eco; Gon sits under OSC.
+    // Eco: just right of Save (or Dice in Scope mode). Same W×H as L/R ↔ M/S.
+    // OSC / Gon / Spec enable toggles sit beside Eco (hidden in Scope — panes stay on).
     // Scope strip fills toward Gon (or L/R) when OSC is on; Gon parks on the right.
     {
         const int chromeH = px (28.0f);
         const int chromeY = px (6.0f);
         const int gap = px (6.0f);
         const int ecoY = chromeY + (chromeH - meterModeH) / 2;
-        ecoButton.setBounds (presetSaveButton.getRight() + gap, ecoY, meterModeW, meterModeH);
+        const int ecoX = scopeModeEnabled ? (uiRandomizeButton.getRight() + gap)
+                                          : (presetSaveButton.getRight() + gap);
+        ecoButton.setBounds (ecoX, ecoY, meterModeW, meterModeH);
 
         const int oscW = juce::jmax (28, (meterModeW * 3) / 4);
         const int oscH = juce::jmax (16, (meterModeH * 3) / 4);
         const int oscY = chromeY + (chromeH - oscH) / 2;
-        oscButton.setBounds (ecoButton.getRight() + gap, oscY, oscW, oscH);
-        gonButton.setBounds (oscButton.getX(), oscButton.getBottom() + px (2.0f), oscW, oscH);
-        specButton.setBounds (gonButton.getX(), gonButton.getBottom() + px (2.0f), oscW, oscH);
 
         if (scopeModeEnabled)
         {
+            oscButton.setVisible (false);
+            gonButton.setVisible (false);
+            specButton.setVisible (false);
+            oscButton.setBounds ({});
+            gonButton.setBounds ({});
+            specButton.setBounds ({});
+
             const bool anyExpanded = oscExpanded || gonExpanded || specExpanded;
             if (! anyExpanded)
             {
@@ -2315,6 +2372,13 @@ void MainComponent::resized()
         }
         else
         {
+        oscButton.setVisible (true);
+        gonButton.setVisible (true);
+        specButton.setVisible (true);
+        oscButton.setBounds (ecoButton.getRight() + gap, oscY, oscW, oscH);
+        gonButton.setBounds (oscButton.getX(), oscButton.getBottom() + px (2.0f), oscW, oscH);
+        specButton.setBounds (gonButton.getX(), gonButton.getBottom() + px (2.0f), oscW, oscH);
+
         scopeSplitOverlay.setVisible (false);
         if (! frequencyResponseComponent.isVisible())
             frequencyResponseComponent.setVisible (true);
@@ -2329,10 +2393,10 @@ void MainComponent::resized()
 
         const int scopeH = OscilloscopeComponent::kWindowHeightPx;
         const int btnGap = px (2.0f);
+        // Shared tool size for Osc / Gon / Spec compact chrome (was oversized for Spec).
         const int btnSize = juce::jmax (14, (scopeH - 3 * btnGap) / 4);
         const int scopeY = chromeY + px (10.0f);
         const int gonExpandSize = juce::jmax (14, btnSize);
-        const int specBtnSize = juce::jmax (14, (scopeH - 2 * btnGap) / 3);
 
         // Reserve right-side room for Gon square + correlation + expand when Gon is on.
         int rightLimit = meterChannelModeButton.getX() - gap;
@@ -2414,7 +2478,7 @@ void MainComponent::resized()
             const int specH = SpectrogramComponent::kWindowHeightPx;
             const int preferredW = juce::jmax (SpectrogramComponent::kPreferredWidthPx,
                                                OscilloscopeComponent::kWindowHeightPx + px (80.0f));
-            const int toolColW = specBtnSize + px (2.0f);
+            const int toolColW = btnSize + px (2.0f);
             const int availW = right - left - toolColW;
             if (availW >= 48)
             {
@@ -2437,9 +2501,9 @@ void MainComponent::resized()
                 }
 
                 spectrogram.setVisible (true);
-                specSpeedUpButton.setBounds (btnX, specY, specBtnSize, specBtnSize);
-                specSpeedDownButton.setBounds (btnX, specY + specBtnSize + btnGap, specBtnSize, specBtnSize);
-                specExpandButton.setBounds (btnX, specY + 2 * (specBtnSize + btnGap), specBtnSize, specBtnSize);
+                specSpeedUpButton.setBounds (btnX, specY, btnSize, btnSize);
+                specSpeedDownButton.setBounds (btnX, specY + btnSize + btnGap, btnSize, btnSize);
+                specExpandButton.setBounds (btnX, specY + 2 * (btnSize + btnGap), btnSize, btnSize);
             }
             else
             {
@@ -2564,17 +2628,18 @@ void MainComponent::raiseMenuSystemAboveWordmark()
             spectrogram.toFront (false);
     }
 
-    // Side meters above graph / compact scope.
+    // Side meters above graph / compact scope / Scope-mode spectrogram pane.
     verticalGradientMeterL.toFront (false);
     verticalGradientMeterR.toFront (false);
     verticalGradientMeterPostL.toFront (false);
     verticalGradientMeterPostR.toFront (false);
 
     // Expanded goniometer (incl. correlation strip) sits above the post meters so
-    // the right-edge correlation meter is never covered.
+    // the right-edge correlation meter is never covered. In Scope mode keep meters
+    // on top of the spectrogram pane (including when a pane is maximized).
     if (gonExp)
         goniometer.toFront (false);
-    if (specExp)
+    if (specExp && ! scopeModeEnabled)
         spectrogram.toFront (false);
 
     // OSC / Gon / Spec stay above the expanded goniometer (semi-transparent) so they
@@ -2636,6 +2701,13 @@ void MainComponent::parameterChanged(const juce::String& parameterID, float newV
     if (parameterID == "METER_CHANNEL_MODE_ID")
     {
         syncMeterChannelModeButton();
+        return;
+    }
+
+    // Built-in schemes must win over a leftover custom Use toggle.
+    if (parameterID == "SPEC_COLOUR_SCHEME_ID")
+    {
+        colourRamps.disableCustomRamp (ColourRampBank::Target::spectrogram);
         return;
     }
 
