@@ -5,6 +5,7 @@
 #include "Layers/Graph.h"
 #include "Analyser.h"
 #include "Menu/SharedResources.h"
+#include "ColourRamp/GradientRamp.h"
 
 /*
     TASKS
@@ -36,6 +37,8 @@ public:
     void setMarginInPixels( const int );
 
     void setThemeColors (SharedResources* r) noexcept;
+    void setBinOverlayColourRamp (const GradientRamp* ramp);
+    void setSpectrumFillRamp (const GradientRamp* ramp);
 
 private:
     // ========================================================================

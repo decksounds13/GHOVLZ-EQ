@@ -39,6 +39,18 @@ void Visualizer::applyThemeColours()
     m_graph.setBinOverlayColour (c.spectrumFill);
 }
 
+void Visualizer::setBinOverlayColourRamp (const GradientRamp* ramp)
+{
+    m_graph.setBinOverlayColourRamp (ramp);
+    repaint();
+}
+
+void Visualizer::setSpectrumFillRamp (const GradientRamp* ramp)
+{
+    m_graph.setSpectrumFillRamp (ramp);
+    repaint();
+}
+
 
 // ============================================================================
 void Visualizer::paint( juce::Graphics &g )

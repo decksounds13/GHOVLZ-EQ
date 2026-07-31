@@ -5,14 +5,18 @@
 #include "../Menu/SharedResources.h"
 #include "../TextButtonLookAndFeel.h"
 #include "Gui/AppearanceComponent.h"
-#include "../Menu/Gui/CustomTabBarLookAndFeel.h" 
+#include "../Menu/Gui/CustomTabBarLookAndFeel.h"
+#include "../ColourRamp/ColourRampBank.h"
 
 class Menu : public juce::Component,
              public juce::Button::Listener
 {
 public:
     // Fixed constructor declaration
-    Menu(SharedResources& resources, juce::AudioProcessorValueTreeState& state, TextButtonLookAndFeel& lookAndFeel);
+    Menu (SharedResources& resources,
+          juce::AudioProcessorValueTreeState& state,
+          TextButtonLookAndFeel& lookAndFeel,
+          ColourRampBank& colourRamps);
     ~Menu() override;
 
     void paint(juce::Graphics&) override;

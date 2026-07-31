@@ -36,9 +36,9 @@ Compact parametric EQ VST3/AU with overlapping spectrum analysis, beat-synced os
 - Prior scope toggles restore when Eco turns off.
 - Eco and Scope are mutually exclusive.
 
-### Known issues (next)
-- Resizing Scope panes (or the spectrogram bounds) **resets** spectrogram history.
-- Spectrogram is **CPU-heavy in fullscreen** / large panes; compact strip is fine. Optimize paint/FFT path before polish.
+### Spectrogram perf follow-up (in tree after this checkpoint)
+- Fixed internal resolution (480×160) + left-scrolling image — resize no longer wipes history.
+- Colour LUT, ≤3 FFT columns/tick, 30 Hz timer, paint is a single stretched blit.
 
 ---
 

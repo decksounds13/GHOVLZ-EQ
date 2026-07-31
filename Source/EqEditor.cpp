@@ -1566,7 +1566,8 @@ void EqEditor::loadUiPrefs()
     tooltipsEnabled = true;
     bool ecoEnabled = false;
     bool disableGlow = false;
-    bool scopeMode = false;
+    bool randFaceplate = true, randGraph = true, randMenu = true;
+    bool randRampFft = true, randRampSpec = true, randRampFill = true;
 
     const auto file = getUiPrefsFile();
     if (file.existsAsFile())
@@ -1578,7 +1579,12 @@ void EqEditor::loadUiPrefs()
                 tooltipsEnabled = xml->getBoolAttribute ("tooltipsEnabled", true);
                 ecoEnabled = xml->getBoolAttribute ("ecoEnabled", false);
                 disableGlow = xml->getBoolAttribute ("disableGlowShadowEffects", false);
-                scopeMode = xml->getBoolAttribute ("scopeModeEnabled", false);
+                randFaceplate = xml->getBoolAttribute ("randFaceplateMod", true);
+                randGraph = xml->getBoolAttribute ("randGraph", true);
+                randMenu = xml->getBoolAttribute ("randMenu", true);
+                randRampFft = xml->getBoolAttribute ("randRampFft", true);
+                randRampSpec = xml->getBoolAttribute ("randRampSpec", true);
+                randRampFill = xml->getBoolAttribute ("randRampFill", true);
             }
         }
     }
@@ -1587,8 +1593,17 @@ void EqEditor::loadUiPrefs()
     {
         mainComponent->setEcoMode (ecoEnabled, false);
         mainComponent->setDisableGlowShadowEffects (disableGlow, false);
-        mainComponent->setScopeMode (scopeMode, false);
-        scopeModeButton.setToggleState (mainComponent->isScopeMode(), juce::dontSendNotification);
+        // Scope is a session view — always start in EQ mode, never restore from prefs.
+        mainComponent->setScopeMode (false, false);
+        scopeModeButton.setToggleState (false, juce::dontSendNotification);
+
+        auto& c = mainComponent->getSharedResources().sharedColors;
+        c.randomizeFaceplateMod = randFaceplate;
+        c.randomizeGraphModule = randGraph;
+        c.randomizeMenuModule = randMenu;
+        c.randomizeRampFftBars = randRampFft;
+        c.randomizeRampSpectrogram = randRampSpec;
+        c.randomizeRampSpectrumFill = randRampFill;
     }
 }
 
@@ -1599,7 +1614,16 @@ void EqEditor::saveUiPrefs() const
     xml->setAttribute ("ecoEnabled", mainComponent != nullptr && mainComponent->isEcoMode());
     xml->setAttribute ("disableGlowShadowEffects",
                        mainComponent != nullptr && mainComponent->areGlowShadowEffectsDisabled());
-    xml->setAttribute ("scopeModeEnabled", mainComponent != nullptr && mainComponent->isScopeMode());
+    if (mainComponent != nullptr)
+    {
+        const auto& c = mainComponent->getSharedResources().sharedColors;
+        xml->setAttribute ("randFaceplateMod", c.randomizeFaceplateMod);
+        xml->setAttribute ("randGraph", c.randomizeGraphModule);
+        xml->setAttribute ("randMenu", c.randomizeMenuModule);
+        xml->setAttribute ("randRampFft", c.randomizeRampFftBars);
+        xml->setAttribute ("randRampSpec", c.randomizeRampSpectrogram);
+        xml->setAttribute ("randRampFill", c.randomizeRampSpectrumFill);
+    }
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
 
     auto file = getUiPrefsFile();

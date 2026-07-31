@@ -58,13 +58,25 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
 
     fftSizeLabel.setText ("FFT Size", juce::dontSendNotification);
     styleCombo (fftSizeCombo);
-    fftSizeCombo.addItem ("512", 1);
-    fftSizeCombo.addItem ("1024", 2);
-    fftSizeCombo.addItem ("2048", 3);
-    fftSizeCombo.addItem ("4096", 4);
+    {
+        const auto names = SpectrogramComponent::getFftSizeNames();
+        for (int i = 0; i < names.size(); ++i)
+            fftSizeCombo.addItem (names[i], i + 1);
+    }
     addAndMakeVisible (fftSizeLabel);
     addAndMakeVisible (fftSizeCombo);
     fftSizeAttachment = std::make_unique<ComboBoxAttachment> (treeState, "SPEC_FFT_SIZE_ID", fftSizeCombo);
+
+    displayResLabel.setText ("Display Resolution", juce::dontSendNotification);
+    styleCombo (displayResCombo);
+    {
+        const auto names = SpectrogramComponent::getDisplayResNames();
+        for (int i = 0; i < names.size(); ++i)
+            displayResCombo.addItem (names[i], i + 1);
+    }
+    addAndMakeVisible (displayResLabel);
+    addAndMakeVisible (displayResCombo);
+    displayResAttachment = std::make_unique<ComboBoxAttachment> (treeState, "SPEC_DISPLAY_RES_ID", displayResCombo);
 
     channelLabel.setText ("Channel", juce::dontSendNotification);
     styleCombo (channelCombo);
@@ -102,6 +114,13 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (smoothSlider);
     smoothAttachment = std::make_unique<SliderAttachment> (treeState, "SPEC_SMOOTH_ID", smoothSlider);
 
+    softenLabel.setText ("Soften (screen blur)", juce::dontSendNotification);
+    styleSlider (softenSlider);
+    softenSlider.setTextValueSuffix (" %");
+    addAndMakeVisible (softenLabel);
+    addAndMakeVisible (softenSlider);
+    softenAttachment = std::make_unique<SliderAttachment> (treeState, "SPEC_SOFTEN_ID", softenSlider);
+
     styleToggle (logFreqToggle);
     addAndMakeVisible (logFreqToggle);
     logFreqAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_LOG_FREQ_ID", logFreqToggle);
@@ -114,17 +133,20 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (colourSchemeLabel);
     styleLabel (brightnessLabel);
     styleLabel (fftSizeLabel);
+    styleLabel (displayResLabel);
     styleLabel (channelLabel);
     styleLabel (speedLabel);
     styleLabel (minDbLabel);
     styleLabel (maxDbLabel);
     styleLabel (smoothLabel);
+    styleLabel (softenLabel);
 }
 
 SpectrogramSettingsComponent::Content::~Content()
 {
     colourSchemeCombo.setLookAndFeel (nullptr);
     fftSizeCombo.setLookAndFeel (nullptr);
+    displayResCombo.setLookAndFeel (nullptr);
     channelCombo.setLookAndFeel (nullptr);
 }
 
@@ -210,8 +232,8 @@ void SpectrogramSettingsComponent::Content::layoutComboRow (juce::Rectangle<int>
 
 int SpectrogramSettingsComponent::Content::getPreferredHeight() const
 {
-    const int comboRows = 3;
-    const int sliderRows = 5;
+    const int comboRows = 4;
+    const int sliderRows = 6;
     const int toggles = 2;
 
     return kPadY * 2
@@ -240,11 +262,13 @@ void SpectrogramSettingsComponent::Content::resized()
     behaviourSectionLabel.setBounds (area.removeFromTop (kSectionH));
     area.removeFromTop (kLabelGap);
     layoutComboRow (area, fftSizeLabel, fftSizeCombo);
+    layoutComboRow (area, displayResLabel, displayResCombo);
     layoutComboRow (area, channelLabel, channelCombo);
     layoutSliderRow (area, speedLabel, speedSlider);
     layoutSliderRow (area, minDbLabel, minDbSlider);
     layoutSliderRow (area, maxDbLabel, maxDbSlider);
     layoutSliderRow (area, smoothLabel, smoothSlider);
+    layoutSliderRow (area, softenLabel, softenSlider);
 
     logFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
     area.removeFromTop (6);

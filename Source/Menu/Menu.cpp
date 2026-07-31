@@ -5,25 +5,30 @@
 #include "Gui/OscilloscopeSettingsComponent.h"
 #include "Gui/GoniometerSettingsComponent.h"
 #include "Gui/SpectrogramSettingsComponent.h"
+#include "Gui/GradientsSettingsComponent.h"
 #include "Gui/LevelMetersComponent.h"
 #include "../Effects/shadows-main/shadows.h" 
 #include "../Effects/shadows-main/source/StackShadow.h" 
 #include "SharedResources.h"
 #include <JuceHeader.h>
 
-Menu::Menu(SharedResources& resources, juce::AudioProcessorValueTreeState& state, TextButtonLookAndFeel& lookAndFeel)
-    : sharedResources(resources), quadPicker(resources), textButtonLookAndFeel(lookAndFeel) // This matches the member declaration
+Menu::Menu (SharedResources& resources,
+            juce::AudioProcessorValueTreeState& state,
+            TextButtonLookAndFeel& lookAndFeel,
+            ColourRampBank& colourRamps)
+    : sharedResources (resources),
+      quadPicker (resources),
+      textButtonLookAndFeel (lookAndFeel)
 {
     juce::Colour menuBorderColor = sharedResources.sharedColors.menuTabBarBorderColor;
 
-
-    // DBG("Menu constructor called");
     auto* appearance = new AppearanceComponent (resources, state);
     auto* spectrum = new SpectrumComponent (resources, state);
     auto* fft = new FftComponent (resources, state);
     auto* oscilloscope = new OscilloscopeSettingsComponent (resources, state);
     auto* goniometer = new GoniometerSettingsComponent (resources, state);
     auto* spectrogram = new SpectrogramSettingsComponent (resources, state);
+    auto* gradients = new GradientsSettingsComponent (resources, colourRamps);
     auto* levelMeters = new LevelMetersComponent (resources, state);
     tabBar.setLookAndFeel (&customTabBarLookAndFeel);
     tabBar.addTab ("Spectrum", juce::Colours::transparentBlack, spectrum, true);
@@ -31,6 +36,7 @@ Menu::Menu(SharedResources& resources, juce::AudioProcessorValueTreeState& state
     tabBar.addTab ("Oscilloscope", juce::Colours::transparentBlack, oscilloscope, true);
     tabBar.addTab ("Goniometer", juce::Colours::transparentBlack, goniometer, true);
     tabBar.addTab ("Spectrogram", juce::Colours::transparentBlack, spectrogram, true);
+    tabBar.addTab ("Gradients", juce::Colours::transparentBlack, gradients, true);
     tabBar.addTab ("Level Meters", juce::Colours::transparentBlack, levelMeters, true);
     tabBar.addTab ("Appearance (WIP)", juce::Colours::transparentBlack, appearance, true);
     addAndMakeVisible (tabBar);

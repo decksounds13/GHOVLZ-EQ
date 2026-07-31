@@ -61,6 +61,10 @@ private:
         juce::ComboBox fftSizeCombo;
         std::unique_ptr<ComboBoxAttachment> fftSizeAttachment;
 
+        juce::Label displayResLabel;
+        juce::ComboBox displayResCombo;
+        std::unique_ptr<ComboBoxAttachment> displayResAttachment;
+
         juce::Label channelLabel;
         juce::ComboBox channelCombo;
         std::unique_ptr<ComboBoxAttachment> channelAttachment;
@@ -80,6 +84,10 @@ private:
         juce::Label smoothLabel;
         juce::Slider smoothSlider;
         std::unique_ptr<SliderAttachment> smoothAttachment;
+
+        juce::Label softenLabel;
+        juce::Slider softenSlider;
+        std::unique_ptr<SliderAttachment> softenAttachment;
 
         juce::ToggleButton logFreqToggle { "Log Frequency" };
         std::unique_ptr<ButtonAttachment> logFreqAttachment;

@@ -151,10 +151,15 @@ public:
     /** Per-slot randomization gates (index = ThemeColorRegistry entry order). */
     std::vector<uint8_t> colorRandomizationFlags;
 
-    /** Rand. All / dice scopes — right-click Rand. All to toggle. */
+    /** Rand. All / dice scopes — right-click Rand. All or dice to toggle. */
     bool randomizeFaceplateMod = true;
     bool randomizeGraphModule = true;
     bool randomizeMenuModule = true;
+
+    /** Dice: per colour-ramp randomization gates (left-click honours these). */
+    bool randomizeRampFftBars = true;
+    bool randomizeRampSpectrogram = true;
+    bool randomizeRampSpectrumFill = true;
 
     SharedColors();
 
@@ -204,6 +209,9 @@ public:
     void updateColorsDirectly (juce::Colour newColor, const juce::Array<int>& paletteIndices);
     void randomizeColors();
     juce::Colour randomizeSelectedColorsWithinRange();
+
+    /** One HSV colour inside the Appearance H/S/V limit sliders (and H/S/V gates). */
+    juce::Colour randomColourInLimits (float alpha = 1.0f) const;
 
     /** Keep gonLine/gonGlow mirrored to oscLine/oscGlow. */
     void syncSharedScopePathColours() noexcept;

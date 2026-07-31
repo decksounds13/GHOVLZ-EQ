@@ -376,8 +376,19 @@ void GraphLine::drawFrame (juce::Graphics& g)
     // --- Post fill (240-ish warm fill under the live curve) ---
     if (drawSpectrumPaths && showPostFill && needPost)
     {
-        g.setColour (juce::Colour::fromRGBA (115, 100, 63, 90).withMultipliedAlpha (fillOpacity));
-        g.fillPath (closeFill (postCurve));
+        const auto fillPath = closeFill (postCurve);
+        if (m_spectrumFillRamp != nullptr && m_spectrumFillRamp->isUsable())
+        {
+            // Spatial map: L→R / R→L / T→B / B→T (selectable in Gradients settings).
+            g.setGradientFill (m_spectrumFillRamp->makeSpatialGradient ({ 0.0f, 0.0f, width, height },
+                                                                       fillOpacity));
+            g.fillPath (fillPath);
+        }
+        else
+        {
+            g.setColour (juce::Colour::fromRGBA (115, 100, 63, 90).withMultipliedAlpha (fillOpacity));
+            g.fillPath (fillPath);
+        }
     }
 
     if (binsWanted)

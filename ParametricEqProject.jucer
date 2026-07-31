@@ -3,8 +3,9 @@
 <JUCERPROJECT id="zglKbV" name="ParametricEqProject" projectType="audioplug"
               useAppConfig="0" addUsingNamespaceToJuceHeader="0" displaySplashScreen="1"
               jucerFormatVersion="1" pluginFormats="buildVST3" cppLanguageStandard="20"
-              headerPath="Source/Effects&#10;Source" companyName="Decksounds" companyWebsite="www.decksounds.com"
-              pluginName="Decksounds - GHOVLZ! EQ" pluginDesc="Decksounds - GHOVLZ! EQ">
+              headerPath="../../Source/Effects&#10;../../Source" companyName="Decksounds"
+              companyWebsite="www.decksounds.com" pluginName="Decksounds - GHOVLZ! EQ"
+              pluginDesc="Decksounds - GHOVLZ! EQ">
   <MAINGROUP id="TFwMAc" name="ParametricEqProject">
     <GROUP id="{B7F6F1A6-BAE5-93A9-99C8-E0858B1F883A}" name="Source">
       <GROUP id="{322DB6F1-EAB1-BE0E-B6B2-652D203120C1}" name="Controls">
@@ -55,6 +56,33 @@
             file="Source/SpectrogramComponent.cpp"/>
       <FILE id="sP3cHd" name="SpectrogramComponent.h" compile="0" resource="0"
             file="Source/SpectrogramComponent.h"/>
+      <GROUP name="ColourRamp" id="SCMpqC">
+        <FILE id="cRamp01" name="GradientRamp.h" compile="0" resource="0" file="Source/ColourRamp/GradientRamp.h"/>
+        <FILE id="cRamp02" name="ColourRampBank.cpp" compile="1" resource="0"
+              file="Source/ColourRamp/ColourRampBank.cpp"/>
+        <FILE id="cRamp03" name="ColourRampBank.h" compile="0" resource="0"
+              file="Source/ColourRamp/ColourRampBank.h"/>
+        <FILE id="cRamp04" name="PathSampleOverlay.cpp" compile="1" resource="0"
+              file="Source/ColourRamp/PathSampleOverlay.cpp"/>
+        <FILE id="cRamp05" name="PathSampleOverlay.h" compile="0" resource="0"
+              file="Source/ColourRamp/PathSampleOverlay.h"/>
+        <FILE id="cRamp06" name="RampColorPickerPanel.cpp" compile="1" resource="0"
+              file="Source/ColourRamp/RampColorPickerPanel.cpp"/>
+        <FILE id="cRamp07" name="RampColorPickerPanel.h" compile="0" resource="0"
+              file="Source/ColourRamp/RampColorPickerPanel.h"/>
+        <FILE id="cRamp08" name="GradientStripEditor.cpp" compile="1" resource="0"
+              file="Source/ColourRamp/GradientStripEditor.cpp"/>
+        <FILE id="cRamp09" name="GradientStripEditor.h" compile="0" resource="0"
+              file="Source/ColourRamp/GradientStripEditor.h"/>
+        <FILE id="cRamp12" name="RampPresetStore.cpp" compile="1" resource="0"
+              file="Source/ColourRamp/RampPresetStore.cpp"/>
+        <FILE id="cRamp13" name="RampPresetStore.h" compile="0" resource="0"
+              file="Source/ColourRamp/RampPresetStore.h"/>
+      </GROUP>
+      <FILE id="cRamp10" name="GradientsSettingsComponent.cpp" compile="1"
+            resource="0" file="Source/Menu/Gui/GradientsSettingsComponent.cpp"/>
+      <FILE id="cRamp11" name="GradientsSettingsComponent.h" compile="0"
+            resource="0" file="Source/Menu/Gui/GradientsSettingsComponent.h"/>
       <GROUP id="{9EC25483-0AAE-0C15-44BA-C86660009C38}" name="Controls">
         <GROUP id="{C9343919-A1D1-42E4-67D1-DA11C771B79F}" name="Categories"/>
       </GROUP>
@@ -293,7 +321,8 @@
             file="Source/ComboBoxLookAndFeel.h"/>
       <FILE id="cIqw3s" name="EqEditor.cpp" compile="1" resource="0" file="Source/EqEditor.cpp"/>
       <FILE id="tpMr0Z" name="EqEditor.h" compile="0" resource="0" file="Source/EqEditor.h"/>
-      <FILE id="eqPrSt" name="EqPresetStore.cpp" compile="1" resource="0" file="Source/EqPresetStore.cpp"/>
+      <FILE id="eqPrSt" name="EqPresetStore.cpp" compile="1" resource="0"
+            file="Source/EqPresetStore.cpp"/>
       <FILE id="eqPrSh" name="EqPresetStore.h" compile="0" resource="0" file="Source/EqPresetStore.h"/>
       <FILE id="mOdSc1" name="ModSectionComponent.cpp" compile="1" resource="0"
             file="Source/ModSectionComponent.cpp"/>
@@ -456,7 +485,8 @@
               file="Source/Menu/SharedResources.cpp"/>
         <FILE id="cLCiKA" name="SharedResources.h" compile="0" resource="0"
               file="Source/Menu/SharedResources.h"/>
-        <FILE id="thClrR" name="ThemeColorRegistry.h" compile="0" resource="0" file="Source/Menu/ThemeColorRegistry.h"/>
+        <FILE id="thClrR" name="ThemeColorRegistry.h" compile="0" resource="0"
+              file="Source/Menu/ThemeColorRegistry.h"/>
         <GROUP id="{F7ACC9E5-61F2-F5EE-0D03-BAD6763ADEBB}" name="Gui">
           <FILE id="GaoKLh" name="AppearanceComponent.cpp" compile="1" resource="0"
                 file="Source/Menu/Gui/AppearanceComponent.cpp"/>

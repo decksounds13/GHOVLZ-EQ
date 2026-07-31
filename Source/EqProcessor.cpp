@@ -885,12 +885,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
             specSchemes,
             juce::jlimit (0, juce::jmax (0, specSchemes.size() - 1),
                           analyserDefaults.getInt ("SPEC_COLOUR_SCHEME_ID",
-                                                  (int) SpectrogramComponent::ColourScheme::inferno))));
+                                                  (int) SpectrogramComponent::ColourScheme::magma))));
     }
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "SPEC_FFT_SIZE_ID", "SpecFftSize",
-        juce::StringArray { "512", "1024", "2048", "4096" },
-        juce::jlimit (0, 3, analyserDefaults.getInt ("SPEC_FFT_SIZE_ID", 2))));
+        SpectrogramComponent::getFftSizeNames(),
+        juce::jlimit (0, 3, analyserDefaults.getInt ("SPEC_FFT_SIZE_ID", 2)))); // default 8192
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "SPEC_DISPLAY_RES_ID", "SpecDisplayRes",
+        SpectrogramComponent::getDisplayResNames(),
+        juce::jlimit (0, 3, analyserDefaults.getInt ("SPEC_DISPLAY_RES_ID", 2)))); // default High
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "SPEC_CHANNEL_ID", "SpecChannel",
         juce::StringArray { "Sum", "Left", "Right" },
@@ -898,7 +902,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "SPEC_SPEED_ID", "SpecSpeed",
         juce::NormalisableRange<float> (1.0f, 100.0f, 0.1f),
-        analyserDefaults.getFloat ("SPEC_SPEED_ID", 55.0f)));
+        analyserDefaults.getFloat ("SPEC_SPEED_ID", 70.0f)));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "SPEC_BRIGHTNESS_ID", "SpecBrightness",
         juce::NormalisableRange<float> (10.0f, 200.0f, 0.1f),
@@ -915,6 +919,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "SPEC_SMOOTH_ID", "SpecSmooth",
         juce::NormalisableRange<float> (0.0f, 95.0f, 0.1f),
         analyserDefaults.getFloat ("SPEC_SMOOTH_ID", 35.0f)));
+    // Screen-space soften after upscale (0 = sharp pixels, 100 ≈ 5px stack blur).
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_SOFTEN_ID", "SpecSoften",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("SPEC_SOFTEN_ID", 55.0f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_LOG_FREQ_ID", "SpecLogFreq",
         analyserDefaults.getBool ("SPEC_LOG_FREQ_ID", true)));

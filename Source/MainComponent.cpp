@@ -6,6 +6,7 @@
 #include "ComboBoxLookAndFeel.h"
 #include "EqPresetStore.h"
 #include "Menu/Gui/ThemeList.h"
+#include "ColourRamp/GradientStripEditor.h"
 #include <functional>
 
 namespace
@@ -127,12 +128,14 @@ namespace
     ThemePresetContextPanel* ThemePresetContextPanel::active = nullptr;
 
     /** One UI theme row inside the CallOutBox dropdown (not a PopupMenu item). */
-    class UiThemePresetRow final : public juce::Component
+    class UiThemePresetRow final : public juce::Component,
+                                   public juce::SettableTooltipClient
     {
     public:
         UiThemePresetRow (juce::String nameIn,
                           bool tickedIn,
                           int themeIndexIn,
+                          float uiScaleIn,
                           std::function<void (int)> onApplyIn,
                           std::function<void (int)> onRenameIn,
                           std::function<void (int)> onDuplicateIn,
@@ -140,6 +143,7 @@ namespace
             : name (std::move (nameIn)),
               ticked (tickedIn),
               themeIndex (themeIndexIn),
+              uiScale (uiScaleIn),
               onApply (std::move (onApplyIn)),
               onRename (std::move (onRenameIn)),
               onDuplicate (std::move (onDuplicateIn)),
@@ -148,6 +152,7 @@ namespace
             setMouseCursor (juce::MouseCursor::PointingHandCursor);
             setWantsKeyboardFocus (false);
             setMouseClickGrabsKeyboardFocus (false);
+            setTooltip (ticked ? "Active theme" : "Apply this theme");
         }
 
         void paint (juce::Graphics& g) override
@@ -165,13 +170,13 @@ namespace
                 g.setColour (PluginMenuTheme::text());
             }
 
-            g.setFont (juce::FontOptions (14.5f));
-            auto textArea = getLocalBounds().reduced (10, 0);
+            g.setFont (juce::FontOptions (14.5f * uiScale));
+            auto textArea = getLocalBounds().reduced (juce::roundToInt (10.0f * uiScale), 0);
 
             if (ticked)
             {
-                g.drawText (juce::CharPointer_UTF8 ("\xe2\x9c\x93"),
-                            textArea.removeFromLeft (18),
+                g.drawText ("*",
+                            textArea.removeFromLeft (juce::roundToInt (14.0f * uiScale)),
                             juce::Justification::centredLeft,
                             false);
             }
@@ -242,27 +247,182 @@ namespace
         bool ticked = false;
         bool hovered = false;
         int themeIndex = -1;
+        float uiScale = 1.0f;
         std::function<void (int)> onApply;
         std::function<void (int)> onRename;
         std::function<void (int)> onDuplicate;
         std::function<void (int)> onDelete;
     };
 
+    /** One FFT / Spec / Fill row: click to select/deselect sample target; Edit/Hide opens editor. */
+    class RampTargetAccordion final : public juce::Component
+    {
+    public:
+        RampTargetAccordion (SharedResources& resources,
+                             ColourRampBank& bankIn,
+                             ColourRampBank::Target targetIn,
+                             GradientStripEditor::ModeFamily family,
+                             float uiScaleIn,
+                             std::function<void()> onLayoutChangedIn,
+                             std::function<void()> onActiveChangedIn)
+            : bank (bankIn),
+              target (targetIn),
+              uiScale (uiScaleIn),
+              editor (resources, family, &bankIn.getPresets()),
+              onLayoutChanged (std::move (onLayoutChangedIn)),
+              onActiveChanged (std::move (onActiveChangedIn))
+        {
+            setWantsKeyboardFocus (false);
+
+            headerButton.setButtonText (ColourRampBank::targetName (target));
+            headerButton.setTooltip ("Select as path-sample target (click again to deselect)");
+            headerButton.setColour (juce::TextButton::buttonColourId, PluginMenuTheme::background().brighter (0.04f));
+            headerButton.setColour (juce::TextButton::buttonOnColourId, PluginMenuTheme::highlight());
+            headerButton.setColour (juce::TextButton::textColourOffId, PluginMenuTheme::text());
+            headerButton.setColour (juce::TextButton::textColourOnId, PluginMenuTheme::textOnHighlight());
+            headerButton.setClickingTogglesState (true);
+            headerButton.onClick = [this]
+            {
+                // Toggle: radio groups cannot clear selection, so manage it ourselves.
+                if (bank.hasActiveTarget() && bank.getActiveTarget() == target)
+                    bank.clearActiveTarget();
+                else
+                    bank.setActiveTarget (target);
+                bank.save();
+                if (onActiveChanged)
+                    onActiveChanged();
+            };
+            addAndMakeVisible (headerButton);
+
+            editToggle.setButtonText ("Edit");
+            editToggle.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+            editToggle.setColour (juce::TextButton::textColourOffId, PluginMenuTheme::text().withAlpha (0.85f));
+            editToggle.setTooltip ("Show the gradient editor for this ramp");
+            editToggle.onClick = [this]
+            {
+                expanded = ! expanded;
+                editor.setVisible (expanded);
+                editToggle.setButtonText (expanded ? "Hide" : "Edit");
+                editToggle.setTooltip (expanded ? "Hide the gradient editor"
+                                                : "Show the gradient editor for this ramp");
+                if (expanded)
+                {
+                    bank.setActiveTarget (target);
+                    bank.save();
+                    if (onActiveChanged)
+                        onActiveChanged();
+                }
+                else
+                {
+                    refreshHeaderLook();
+                }
+                if (onLayoutChanged)
+                    onLayoutChanged();
+            };
+            addAndMakeVisible (editToggle);
+
+            editor.setUiScale (uiScale);
+            editor.setRamp (&bank.get (target));
+            editor.setVisible (false);
+            editor.onRampChanged = [this]
+            {
+                bank.notifyEdited();
+                refreshHeaderLook();
+            };
+            editor.onRampPreview = [this]
+            {
+                bank.notifyPreview();
+                refreshHeaderLook();
+            };
+            editor.onPreferredHeightChanged = [this]
+            {
+                if (onLayoutChanged)
+                    onLayoutChanged();
+            };
+            addChildComponent (editor);
+
+            refreshHeaderLook();
+        }
+
+        int getPreferredHeight() const noexcept
+        {
+            const int headH = juce::roundToInt (28.0f * uiScale);
+            return headH + (expanded ? juce::roundToInt (4.0f * uiScale) + editor.getPreferredHeight() : 0);
+        }
+
+        void resized() override
+        {
+            const int headH = juce::roundToInt (28.0f * uiScale);
+            const int editW = juce::roundToInt (40.0f * uiScale);
+            auto area = getLocalBounds();
+            auto head = area.removeFromTop (headH);
+            editToggle.setBounds (head.removeFromRight (editW));
+            headerButton.setBounds (head);
+            if (expanded)
+            {
+                area.removeFromTop (juce::roundToInt (4.0f * uiScale));
+                editor.setBounds (area);
+            }
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            if (expanded)
+            {
+                g.setColour (PluginMenuTheme::highlight().withAlpha (0.08f));
+                g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 3.0f);
+            }
+        }
+
+        void refreshFromBank()
+        {
+            editor.setRamp (&bank.get (target));
+            refreshHeaderLook();
+        }
+
+    private:
+        void refreshHeaderLook()
+        {
+            const bool active = bank.hasActiveTarget() && bank.getActiveTarget() == target;
+            headerButton.setToggleState (active, juce::dontSendNotification);
+            const auto& ramp = bank.get (target);
+            auto text = ColourRampBank::targetName (target);
+            if (ramp.isUsable())
+                text << " - " << GradientRamp::mapModeName (ramp.mapMode);
+            headerButton.setButtonText (text);
+        }
+
+        ColourRampBank& bank;
+        ColourRampBank::Target target;
+        float uiScale = 1.0f;
+        bool expanded = false;
+        juce::TextButton headerButton, editToggle;
+        GradientStripEditor editor;
+        std::function<void()> onLayoutChanged;
+        std::function<void()> onActiveChanged;
+    };
+
     /**
         UI theme dropdown content shown via CallOutBox.
-        Avoids JUCE PopupMenu, which dismisses itself when anything steals focus on right-click.
+        Colour-ramp accordion + sample live under the theme actions.
     */
     class UiThemeDropdownContent final : public juce::Component
     {
     public:
+        static constexpr float kUiScale = 0.7f;
+
         UiThemeDropdownContent (bool glowDisabled,
                                 ThemeList& themes,
+                                SharedResources& resources,
+                                ColourRampBank& ramps,
                                 std::function<void()> onSave,
                                 std::function<void()> onToggleGlow,
                                 std::function<void (int)> onApply,
                                 std::function<void (int)> onRename,
                                 std::function<void (int)> onDuplicate,
-                                std::function<void (int)> onDelete)
+                                std::function<void (int)> onDelete,
+                                std::function<void()> onSamplePath)
+            : colourRamps (ramps)
         {
             setWantsKeyboardFocus (false);
             setMouseClickGrabsKeyboardFocus (false);
@@ -280,6 +440,7 @@ namespace
             };
 
             saveButton.setButtonText ("Save Current UI as Preset");
+            saveButton.setTooltip ("Save the current look as a named UI theme preset");
             styleAction (saveButton);
             saveButton.onClick = [onSave]
             {
@@ -290,6 +451,7 @@ namespace
             addAndMakeVisible (saveButton);
 
             glowButton.setButtonText ("Disable glow/shadow effects");
+            glowButton.setTooltip ("Turn off glow and shadow drawing for a flatter UI");
             styleAction (glowButton, true);
             glowButton.setClickingTogglesState (true);
             glowButton.setToggleState (glowDisabled, juce::dontSendNotification);
@@ -301,6 +463,44 @@ namespace
             };
             addAndMakeVisible (glowButton);
 
+            rampHeader.setText ("Colour ramps", juce::dontSendNotification);
+            rampHeader.setFont (juce::FontOptions().withName ("Lato Black").withHeight (13.0f * kUiScale));
+            rampHeader.setColour (juce::Label::textColourId, PluginMenuTheme::highlight());
+            rampHeader.setJustificationType (juce::Justification::centredLeft);
+            addAndMakeVisible (rampHeader);
+
+            sampleButton.setButtonText ("Sample path on UI");
+            styleAction (sampleButton);
+            sampleButton.setTooltip ("Select a ramp row below, then drag across the plugin UI to fill it");
+            sampleButton.onClick = [onSamplePath]
+            {
+                ThemePresetContextPanel::dismissActive();
+                if (onSamplePath)
+                    onSamplePath();
+            };
+            addAndMakeVisible (sampleButton);
+
+            auto layoutCb = [this] { relayout(); };
+            auto activeCb = [this]
+            {
+                if (fftRow != nullptr)  fftRow->refreshFromBank();
+                if (specRow != nullptr) specRow->refreshFromBank();
+                if (fillRow != nullptr) fillRow->refreshFromBank();
+            };
+
+            fftRow = std::make_unique<RampTargetAccordion> (
+                resources, colourRamps, ColourRampBank::Target::fftBars,
+                GradientStripEditor::ModeFamily::intensity, kUiScale, layoutCb, activeCb);
+            specRow = std::make_unique<RampTargetAccordion> (
+                resources, colourRamps, ColourRampBank::Target::spectrogram,
+                GradientStripEditor::ModeFamily::intensity, kUiScale, layoutCb, activeCb);
+            fillRow = std::make_unique<RampTargetAccordion> (
+                resources, colourRamps, ColourRampBank::Target::spectrumFill,
+                GradientStripEditor::ModeFamily::spatial, kUiScale, layoutCb, activeCb);
+            addAndMakeVisible (*fftRow);
+            addAndMakeVisible (*specRow);
+            addAndMakeVisible (*fillRow);
+
             listContainer.setWantsKeyboardFocus (false);
             listContainer.setMouseClickGrabsKeyboardFocus (false);
             viewport.setViewedComponent (&listContainer, false);
@@ -310,7 +510,10 @@ namespace
 
             const int selected = themes.getSelectedRow();
             const int n = themes.getNumRows();
-            constexpr int rowH = 24;
+            const int rowH = juce::roundToInt (24.0f * kUiScale);
+            const int pad = juce::roundToInt (16.0f * kUiScale);
+            // Wider than the old glyph-rail layout so English toolbar labels still fit at 70% scale.
+            panelW = juce::roundToInt (360.0f * kUiScale);
             for (int i = 0; i < n; ++i)
             {
                 const auto name = themes.getPresetName (i);
@@ -318,6 +521,7 @@ namespace
                 auto* row = rows.add (new UiThemePresetRow (label,
                                                             i == selected,
                                                             i,
+                                                            kUiScale,
                                                             onApply,
                                                             onRename,
                                                             onDuplicate,
@@ -325,12 +529,12 @@ namespace
                 listContainer.addAndMakeVisible (row);
             }
 
-            listContainer.setSize (220, juce::jmax (rowH, n * rowH));
+            listContainer.setSize (panelW - pad, juce::jmax (rowH, n * rowH));
             for (int i = 0; i < rows.size(); ++i)
-                rows[i]->setBounds (0, i * rowH, 220, rowH);
+                rows[i]->setBounds (0, i * rowH, panelW - pad, rowH);
 
-            const int listH = juce::jmin (8 * rowH, listContainer.getHeight());
-            setSize (228, 8 + 28 + 4 + 28 + (n > 0 ? 8 + listH : 0) + 8);
+            themeListH = juce::jmin (7 * rowH, listContainer.getHeight());
+            relayout();
         }
 
         ~UiThemeDropdownContent() override
@@ -344,18 +548,49 @@ namespace
             g.fillAll (PluginMenuTheme::background());
             g.setColour (PluginMenuTheme::highlight().withAlpha (0.4f));
             g.drawRect (getLocalBounds().toFloat(), 1.0f);
+
+            if (rows.size() > 0 && viewport.getHeight() > 0)
+            {
+                const float y = (float) viewport.getY() - 4.0f * kUiScale;
+                g.setColour (PluginMenuTheme::highlight().withAlpha (0.22f));
+                g.drawLine (12.0f * kUiScale, y, (float) getWidth() - 12.0f * kUiScale, y, 1.0f);
+            }
         }
 
         void resized() override
         {
-            auto area = getLocalBounds().reduced (8);
-            saveButton.setBounds (area.removeFromTop (28));
-            area.removeFromTop (4);
-            glowButton.setBounds (area.removeFromTop (28));
+            const auto px = [] (float v) { return juce::roundToInt (v * kUiScale); };
+            auto area = getLocalBounds().reduced (px (8));
+            saveButton.setBounds (area.removeFromTop (px (28)));
+            area.removeFromTop (px (4));
+            glowButton.setBounds (area.removeFromTop (px (28)));
+            area.removeFromTop (px (10));
+
+            rampHeader.setBounds (area.removeFromTop (px (18)));
+            area.removeFromTop (px (4));
+            sampleButton.setBounds (area.removeFromTop (px (28)));
+            area.removeFromTop (px (6));
+
+            if (fftRow != nullptr)
+            {
+                fftRow->setBounds (area.removeFromTop (fftRow->getPreferredHeight()));
+                area.removeFromTop (px (4));
+            }
+            if (specRow != nullptr)
+            {
+                specRow->setBounds (area.removeFromTop (specRow->getPreferredHeight()));
+                area.removeFromTop (px (4));
+            }
+            if (fillRow != nullptr)
+            {
+                fillRow->setBounds (area.removeFromTop (fillRow->getPreferredHeight()));
+                area.removeFromTop (px (4));
+            }
+
             if (rows.size() > 0)
             {
-                area.removeFromTop (8);
-                viewport.setBounds (area);
+                area.removeFromTop (px (4));
+                viewport.setBounds (area.removeFromTop (themeListH));
             }
         }
 
@@ -365,7 +600,29 @@ namespace
         }
 
     private:
-        juce::TextButton saveButton, glowButton;
+        void relayout()
+        {
+            const auto px = [] (float v) { return juce::roundToInt (v * kUiScale); };
+            const int rampH = (fftRow != nullptr ? fftRow->getPreferredHeight() : 0)
+                              + (specRow != nullptr ? specRow->getPreferredHeight() : 0)
+                              + (fillRow != nullptr ? fillRow->getPreferredHeight() : 0)
+                              + px (8) + px (8);
+            const int h = px (8) + px (28) + px (4) + px (28) + px (10) + px (18) + px (4) + px (28) + px (6)
+                          + rampH
+                          + (rows.size() > 0 ? px (8) + themeListH : 0) + px (8);
+            setSize (panelW, h);
+            resized();
+
+            if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+                box->resized();
+        }
+
+        ColourRampBank& colourRamps;
+        int panelW = juce::roundToInt (360.0f * kUiScale);
+        int themeListH = 0;
+        juce::TextButton saveButton, glowButton, sampleButton;
+        juce::Label rampHeader;
+        std::unique_ptr<RampTargetAccordion> fftRow, specRow, fillRow;
         juce::Viewport viewport;
         juce::Component listContainer;
         juce::OwnedArray<UiThemePresetRow> rows;
@@ -438,8 +695,9 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     m_controls(treeState),
     processor(p),
     editor(editorRef),
-    menu(sharedResources, treeState, textButtonLookAndFeel)
+    menu (sharedResources, treeState, textButtonLookAndFeel, colourRamps)
 {
+    colourRamps.addChangeListener (this);
     frequencyResponseComponent.onBandManipulationHighlight = [this] (int bandIndex)
     {
         editor.setBandManipulationHighlight (bandIndex);
@@ -548,16 +806,24 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     addAndMakeVisible (presetSaveButton);
 
     styleChromeButton (uiThemeButton);
-    uiThemeButton.setTooltip ("UI colour themes (appearance only)");
+    uiThemeButton.setTooltip ("UI themes, glow, and colour ramps (path sample)");
     uiThemeButton.setAlwaysOnTop (true);
     uiThemeButton.onClick = [this] { showUiThemePopupMenu(); };
     addAndMakeVisible (uiThemeButton);
 
     uiRandomizeButton.setThemeResources (&sharedResources);
-    uiRandomizeButton.setTooltip ("Randomize UI colours");
+    uiRandomizeButton.setTooltip ("Randomize checked UI scopes and colour ramps. Right-click to choose what.");
     uiRandomizeButton.setAlwaysOnTop (true);
-    uiRandomizeButton.onClick = [this] { randomizeUiTheme(); };
+    uiRandomizeButton.onClick = [this] { runDiceRandomize(); };
+    uiRandomizeButton.onPopupMenu = [this] { showRandomizeDiceMenu(); };
     addAndMakeVisible (uiRandomizeButton);
+
+    rampSampleOverlay.onSampled = [this] (GradientRamp ramp)
+    {
+        if (colourRamps.hasActiveTarget())
+            colourRamps.setRamp (colourRamps.getActiveTarget(), std::move (ramp));
+    };
+    addChildComponent (rampSampleOverlay);
 
     eqPresets = std::make_unique<EqPresetStore> (processor);
     eqPresets->onChanged = [this]
@@ -715,6 +981,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram.setParameterTree (&processor.treeState);
     addChildComponent (spectrogram);
     processor.setSpectrogramTarget (&spectrogram);
+    applyColourRampsToMeters();
 
     // Default: scope on at load (summed stereo). Gon off. Spec on.
     oscButton.setToggleState (true, juce::dontSendNotification);
@@ -773,6 +1040,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
 MainComponent::~MainComponent()
 {
+    colourRamps.removeChangeListener (this);
     processor.treeState.removeParameterListener ("METER_CHANNEL_MODE_ID", this);
 
     processor.getUndoManager().removeChangeListener (this);
@@ -1094,6 +1362,34 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
     if (source == &processor.getUndoManager())
         syncUndoRedoButtons();
+
+    if (source == &colourRamps)
+        applyColourRampsToMeters();
+}
+
+void MainComponent::beginRampSampling()
+{
+    if (! colourRamps.hasActiveTarget())
+    {
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::AlertWindow::InfoIcon,
+            "Colour ramp",
+            "Select FFT Bars, Spectrogram, or Spectrum Fill first (yellow highlight), then sample a path.");
+        return;
+    }
+
+    rampSampleOverlay.beginSession (*this);
+}
+
+void MainComponent::applyColourRampsToMeters()
+{
+    const auto* fftRamp = &colourRamps.get (ColourRampBank::Target::fftBars);
+    const auto* specRamp = &colourRamps.get (ColourRampBank::Target::spectrogram);
+    const auto* fillRamp = &colourRamps.get (ColourRampBank::Target::spectrumFill);
+
+    m_visualizer.setBinOverlayColourRamp (fftRamp->isUsable() ? fftRamp : nullptr);
+    m_visualizer.setSpectrumFillRamp (fillRamp->isUsable() ? fillRamp : nullptr);
+    spectrogram.setCustomColourRamp (specRamp->isUsable() ? specRamp : nullptr);
 }
 
 void MainComponent::disableAllScopes()
@@ -1484,15 +1780,25 @@ void MainComponent::showUiThemePopupMenu()
         safeThis->frequencyResponseComponent.repaint();
     };
 
+    auto samplePath = [safeThis, dismissUiCallout]
+    {
+        dismissUiCallout();
+        if (safeThis != nullptr)
+            safeThis->beginRampSampling();
+    };
+
     auto content = std::make_unique<UiThemeDropdownContent> (
         sharedResources.disableGlowShadowEffects,
         *themes,
+        sharedResources,
+        colourRamps,
         saveTheme,
         toggleGlow,
         applyTheme,
         renameTheme,
         duplicateTheme,
-        deleteTheme);
+        deleteTheme,
+        samplePath);
 
     auto& box = juce::CallOutBox::launchAsynchronously (std::move (content),
                                                         uiThemeButton.getScreenBounds(),
@@ -1513,6 +1819,75 @@ void MainComponent::randomizeUiTheme()
         appearance->repaintComponents();
         appearance->repaintParentComponent();
     }
+}
+
+void MainComponent::randomizeColourRamps()
+{
+    sharedResources.makeActive();
+    const auto& c = sharedResources.sharedColors;
+    const bool mask[3] = {
+        c.randomizeRampFftBars,
+        c.randomizeRampSpectrogram,
+        c.randomizeRampSpectrumFill
+    };
+    colourRamps.randomizeRamps (c, mask);
+    applyColourRampsToMeters();
+}
+
+void MainComponent::disableCustomColourRamps()
+{
+    colourRamps.disableAllCustomRamps();
+    applyColourRampsToMeters();
+}
+
+void MainComponent::runDiceRandomize()
+{
+    const auto& c = sharedResources.sharedColors;
+    const bool anyUi = c.randomizeFaceplateMod || c.randomizeGraphModule || c.randomizeMenuModule;
+    const bool anyRamp = c.randomizeRampFftBars || c.randomizeRampSpectrogram || c.randomizeRampSpectrumFill;
+
+    if (anyUi)
+        randomizeUiTheme();
+    if (anyRamp)
+        randomizeColourRamps();
+}
+
+void MainComponent::showRandomizeDiceMenu()
+{
+    auto& scopes = sharedResources.sharedColors;
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+
+    menu.addSectionHeader ("UI colours");
+    menu.addItem (1, "Faceplate/Mod", true, scopes.randomizeFaceplateMod);
+    menu.addItem (2, "Graph", true, scopes.randomizeGraphModule);
+    menu.addItem (3, "Menu", true, scopes.randomizeMenuModule);
+    menu.addSeparator();
+    menu.addSectionHeader ("Colour ramps");
+    menu.addItem (4, "FFT Bars", true, scopes.randomizeRampFftBars);
+    menu.addItem (5, "Spectrogram", true, scopes.randomizeRampSpectrogram);
+    menu.addItem (6, "Spectrum Fill", true, scopes.randomizeRampSpectrumFill);
+    menu.addSeparator();
+    menu.addItem (7, "Disable custom ramps (use schemes)");
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&uiRandomizeButton),
+                        [safe = juce::Component::SafePointer<MainComponent> (this)] (int result)
+                        {
+                            if (safe == nullptr || result <= 0)
+                                return;
+
+                            auto& s = safe->sharedResources.sharedColors;
+                            if (result == 1)      s.randomizeFaceplateMod = ! s.randomizeFaceplateMod;
+                            else if (result == 2) s.randomizeGraphModule = ! s.randomizeGraphModule;
+                            else if (result == 3) s.randomizeMenuModule = ! s.randomizeMenuModule;
+                            else if (result == 4) s.randomizeRampFftBars = ! s.randomizeRampFftBars;
+                            else if (result == 5) s.randomizeRampSpectrogram = ! s.randomizeRampSpectrogram;
+                            else if (result == 6) s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill;
+                            else if (result == 7) safe->disableCustomColourRamps();
+
+                            if (result >= 1 && result <= 6)
+                                safe->editor.saveUiPrefs();
+                        });
 }
 
 void MainComponent::showPresetPopupMenu()
@@ -1857,7 +2232,7 @@ void MainComponent::resized()
         undoButton.setBounds (hx, historyY, historySize, historySize);
     }
 
-    // Top-left chrome: clear of FRC minimize (6,6 / 22px), then Bypass | A | B | C | D | UI | Dice.
+    // Top-left chrome: Bypass | A | B | C | D | UI | Dice.
     {
         constexpr int minimizeSize = 22;
         constexpr int minimizeMargin = 6;
@@ -2236,6 +2611,12 @@ void MainComponent::raiseMenuSystemAboveWordmark()
         menu.toFront (false);
 
     menuToggleButton.toFront (false);
+
+    if (rampSampleOverlay.isVisible())
+    {
+        rampSampleOverlay.setBounds (getLocalBounds());
+        rampSampleOverlay.toFront (true);
+    }
 }
 
 void MainComponent::setOptionBoxInteractionFaded (bool shouldFade)

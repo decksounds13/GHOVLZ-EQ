@@ -18,6 +18,8 @@ int CustomTabBarLookAndFeel::getTabButtonBestWidth (juce::TabBarButton& button, 
         return 130;
     if (text.equalsIgnoreCase ("Spectrogram"))
         return 140;
+    if (text.equalsIgnoreCase ("Gradients"))
+        return 120;
     if (text.equalsIgnoreCase ("Level Meters"))
         return 130;
     if (text.containsIgnoreCase ("Appearance"))

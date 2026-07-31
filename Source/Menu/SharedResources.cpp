@@ -252,6 +252,21 @@ void SharedColors::updateColorsDirectly (juce::Colour newColor, const juce::Arra
     colorRandomizationFlags = std::move (originalFlags);
 }
 
+juce::Colour SharedColors::randomColourInLimits (float alpha) const
+{
+    auto& rng = juce::Random::getSystemRandom();
+    const float h = randomizeHue
+                        ? rng.nextFloat() * (hueUpperLimit - hueLowerLimit) + hueLowerLimit
+                        : hueLowerLimit;
+    const float s = randomizeSaturation
+                        ? rng.nextFloat() * (saturationUpperLimit - saturationLowerLimit) + saturationLowerLimit
+                        : saturationLowerLimit;
+    const float b = randomizeBrightness
+                        ? rng.nextFloat() * (brightnessUpperLimit - brightnessLowerLimit) + brightnessLowerLimit
+                        : brightnessLowerLimit;
+    return juce::Colour::fromHSV (h, s, b, juce::jlimit (0.0f, 1.0f, alpha));
+}
+
 void SharedColors::randomizeColors()
 {
     auto randomHue = [this]() -> float

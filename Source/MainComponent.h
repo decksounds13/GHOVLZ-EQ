@@ -15,6 +15,8 @@
 #include "GoniometerComponent.h"
 #include "SpectrogramComponent.h"
 #include "EqPresetStore.h"
+#include "ColourRamp/ColourRampBank.h"
+#include "ColourRamp/PathSampleOverlay.h"
 
 class MainComponent : public juce::Component,
     public juce::ComponentListener,
@@ -68,6 +70,9 @@ public:
     void setDisableGlowShadowEffects (bool shouldDisable, bool notifyPrefs = true);
     bool areGlowShadowEffectsDisabled() const noexcept;
 
+    SharedResources& getSharedResources() noexcept { return sharedResources; }
+    const SharedResources& getSharedResources() const noexcept { return sharedResources; }
+
 private:
     /** TextButton that exposes a right-click callback for A/B/C/D snapshot menus. */
     class AbSlotButton : public juce::TextButton
@@ -101,6 +106,11 @@ private:
     void showPresetPopupMenu();
     void showUiThemePopupMenu();
     void randomizeUiTheme();
+    /** Left-click dice: randomize every checked UI scope + colour ramp. */
+    void runDiceRandomize();
+    void showRandomizeDiceMenu();
+    void randomizeColourRamps();
+    void disableCustomColourRamps();
     void cycleEqPreset (int delta);
     void saveCurrentEqPreset();
     void layoutPresetChrome (float scale);
@@ -117,6 +127,8 @@ private:
     void syncSpecToolButtons();
     void syncScopeChromeButtonOpacity();
     void syncExpandedOscOverlayStack();
+    void beginRampSampling();
+    void applyColourRampsToMeters();
     void hostOptionBoxAboveExpandedOsc (bool shouldHost);
     void applyGoniometerActive (bool shouldEnable);
     void applySpectrogramActive (bool shouldEnable);
@@ -148,6 +160,19 @@ private:
         {
             themeResources = resources;
             repaint();
+        }
+
+        std::function<void()> onPopupMenu;
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu() && onPopupMenu != nullptr)
+            {
+                onPopupMenu();
+                return;
+            }
+
+            juce::Button::mouseDown (e);
         }
 
         void paintButton (juce::Graphics& g, bool highlighted, bool down) override
@@ -252,6 +277,7 @@ private:
     EqProcessor& processor;
     EqEditor& editor;
     SharedResources sharedResources;
+    ColourRampBank colourRamps;
     Menu menu;
     std::unique_ptr<EqPresetStore> eqPresets;
 
@@ -282,9 +308,10 @@ private:
     juce::TextButton presetNextButton { juce::String::charToString ((juce::juce_wchar) 0x25B6) };
     juce::TextButton presetSaveButton { "Save" };
 
-    /** Left of preset bar: UI theme picker + dice randomize. */
+    /** Left of preset bar: UI theme picker + dice randomize (ramps live in the UI dropdown). */
     juce::TextButton uiThemeButton { "UI" };
     OscToolButton uiRandomizeButton { OscToolButton::Glyph::Dice };
+    PathSampleOverlay rampSampleOverlay;
 
     /** Top-right: Undo / Redo just left of Settings. Curved arrows (↶ ↷). */
     juce::TextButton undoButton { juce::CharPointer_UTF8 ("\xe2\x86\xb6") }; // ↶

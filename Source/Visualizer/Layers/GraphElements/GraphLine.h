@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "../../Analyser.h"
 #include "SpectrumBinOverlay.h"
+#include "../../../ColourRamp/GradientRamp.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 
 // ****************************************************************************
@@ -21,6 +22,8 @@ public:
     void setScaleType (const bool);
     virtual void setColour (const juce::Colour&);
     void setBinOverlayColour (juce::Colour colour) noexcept { m_binOverlay.setBaseColour (colour); }
+    void setBinOverlayColourRamp (const GradientRamp* ramp) noexcept { m_binOverlay.setColourRamp (ramp); }
+    void setSpectrumFillRamp (const GradientRamp* ramp) noexcept { m_spectrumFillRamp = ramp; }
     void setAudioProcessorValueTreeState (juce::AudioProcessorValueTreeState* state);
 
 protected:
@@ -43,6 +46,7 @@ protected:
     Analyser& mr_analyser;
     juce::AudioProcessorValueTreeState* mr_valueTree = nullptr;
     SpectrumBinOverlay m_binOverlay;
+    const GradientRamp* m_spectrumFillRamp = nullptr;
     // Dual-layer Melatonin glow (bloom + core), same approach as FFT bins.
     melatonin::DropShadow m_curveGlow {
         {

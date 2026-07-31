@@ -73,6 +73,15 @@ float SpectrumBinOverlay::shapePresence (float peak, float intensityScale, float
 juce::Colour SpectrumBinOverlay::colourForIntensity (float peak, float opacity, float intensityScale, float threshold) const
 {
     const float shaped = shapePresence (peak, intensityScale, threshold);
+    const float themeAlpha = baseColour.getFloatAlpha();
+    const float alpha = juce::jmap (shaped * shaped, 0.0f, 1.0f, 0.08f, 1.0f) * opacity * themeAlpha;
+
+    if (colourRamp != nullptr && colourRamp->isUsable())
+    {
+        // Ramp maps to bar intensity (Quiet→Loud or inverted via MapMode).
+        auto colour = colourRamp->colourForDriver (shaped);
+        return colour.withMultipliedBrightness (0.85f + 0.45f * shaped).withAlpha (alpha);
+    }
 
     // Orange intensity ramp (independent of osc/gon path colours), tinted by Spectrum Fill.
     const auto cool = baseColour.withRotatedHue (-0.08f).darker (0.25f);
@@ -85,8 +94,6 @@ juce::Colour SpectrumBinOverlay::colourForIntensity (float peak, float opacity, 
     else
         colour = warm.interpolatedWith (hot, (shaped - 0.45f) / 0.55f);
 
-    const float themeAlpha = baseColour.getFloatAlpha();
-    const float alpha = juce::jmap (shaped * shaped, 0.0f, 1.0f, 0.08f, 1.0f) * opacity * themeAlpha;
     return colour.withMultipliedBrightness (0.85f + 0.45f * shaped).withAlpha (alpha);
 }
 

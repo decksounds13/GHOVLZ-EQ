@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../../Analyser.h"
+#include "../../../ColourRamp/GradientRamp.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 
 /** Draws Fruity-EQ-style FFT bin bars with optional Melatonin glow. */
@@ -11,6 +12,7 @@ public:
     SpectrumBinOverlay();
 
     void setBaseColour (juce::Colour colour) noexcept { baseColour = colour; }
+    void setColourRamp (const GradientRamp* ramp) noexcept { colourRamp = ramp; }
 
     void paint (juce::Graphics& g,
                 Analyser& analyser,
@@ -60,4 +62,5 @@ private:
     std::vector<Bar> bars;
     std::vector<float> glowColumnPeaks;
     juce::Colour baseColour { juce::Colour::fromRGBA (255, 90, 40, 160) };
+    const GradientRamp* colourRamp = nullptr;
 };

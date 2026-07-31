@@ -226,6 +226,16 @@ void Graph::setBinOverlayColour (juce::Colour colour)
     m_graphLine.setBinOverlayColour (colour);
 }
 
+void Graph::setBinOverlayColourRamp (const GradientRamp* ramp)
+{
+    m_graphLine.setBinOverlayColourRamp (ramp);
+}
+
+void Graph::setSpectrumFillRamp (const GradientRamp* ramp)
+{
+    m_graphLine.setSpectrumFillRamp (ramp);
+}
+
 void Graph::setGraphMaximumsColour( juce::Colour colour )
 {
     m_volumeMaximumsGraphColour = colour;
