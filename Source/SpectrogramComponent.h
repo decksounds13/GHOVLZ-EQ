@@ -76,17 +76,33 @@ public:
     static juce::StringArray getFftSizeNames();
     /** Draft / Normal / High / Ultra display pixel density. */
     static juce::StringArray getDisplayResNames();
+    /** Enhanced LF multi-res: Off / 2× / 4× — default index 2 = 4×. */
+    static juce::StringArray getEnhancedLfDetailNames();
 
 private:
     void timerCallback() override;
     void resetDisplay();
     void ensureScratchImage();
     void ensureFft (int order);
+    /** Aux analysis window for Enhanced Frequency (orderBoost 1 = 2×, 2 = 4×). */
+    void ensureAuxFft (int mainOrder, int orderBoost,
+                       std::unique_ptr<juce::dsp::FFT>& auxFft,
+                       std::unique_ptr<juce::dsp::WindowingFunction<float>>& auxWindow,
+                       int& auxOrder, int& auxSize,
+                       std::vector<float>& auxWork, std::vector<float>& auxWindowed,
+                       std::vector<float>& auxColumnDb, std::vector<float>& auxPrevPhase,
+                       bool& auxHavePrev, int& auxBinsCached);
     void ensureBinForRowMap();
+    void ensureAuxBinForRowMap (int auxFftSize, int& auxBinsCached, std::vector<float>& auxBinForRow);
     void advanceFromRing();
     void appendColumn (const float* magnitudesDb, int numBins);
     /** Deposit a finished display-row dB column (Enhanced Frequency path). */
     void appendDisplayColumn (const float* displayDbRows);
+    /** Scatter energy at IF into log rows; optional previous-column time reassignment.
+        Returns true if the previous history column was written. */
+    bool depositEnhanced (float* columnRows, float* prevColumnRows,
+                          float ifHz, float db, double sr, bool logFreq,
+                          float timeOffsetSamples, float hopSamples) const;
     void rebuildColourLut();
     void resolveDisplaySize (int& outW, int& outH) const;
     void rebuildScreenSoftened();
@@ -108,6 +124,8 @@ private:
     static constexpr int kMaxBufferSeconds = 4;
     static constexpr int kMaxColumnsPerTick = 2;
     static constexpr int kLutSize = 256;
+    static constexpr int kMaxAuxFftOrder = 15; // 32768
+    static constexpr float kEnhancedMidHiHz = 2000.0f;
 
     juce::AudioProcessorValueTreeState* valueTree = nullptr;
     SharedResources* themeColors = nullptr;
@@ -119,6 +137,12 @@ private:
     int fftOrder = 0;
     int fftSize = 0;
 
+    /** Enhanced-Frequency LF (up to 4×) and Mid (2×) analysis windows. */
+    std::unique_ptr<juce::dsp::FFT> lfFft, midFft;
+    std::unique_ptr<juce::dsp::WindowingFunction<float>> lfWindow, midWindow;
+    int lfFftOrder = 0, midFftOrder = 0;
+    int lfFftSize = 0, midFftSize = 0;
+
     std::vector<float> ringL;
     std::vector<float> ringR;
     std::atomic<int> writePos { 0 };
@@ -129,13 +153,21 @@ private:
     std::vector<float> fftWork;
     std::vector<float> windowed;
     std::vector<float> columnDb;
+    std::vector<float> lfFftWork, midFftWork;
+    std::vector<float> lfWindowed, midWindowed;
+    std::vector<float> columnDbLf, columnDbMid;
     /** Fractional FFT bin per display row (for interpolated magnitude). */
     std::vector<float> binForRow;
+    std::vector<float> binForRowLf, binForRowMid;
     /** Previous-frame unwrapped phase per bin (Enhanced Frequency IF). */
     std::vector<float> prevPhase;
+    std::vector<float> prevPhaseLf, prevPhaseMid;
     bool havePrevPhase = false;
+    bool havePrevPhaseLf = false, havePrevPhaseMid = false;
     bool lastEnhancedMode = false;
     int lastHopSamples = 0;
+    int lfFftSizeCachedForBins = 0, midFftSizeCachedForBins = 0;
+    int enhancedLfFrameCounter = 0;
 
     int internalW = 1280;
     int internalH = 720;

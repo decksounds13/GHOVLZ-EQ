@@ -46,7 +46,7 @@ public:
     juce::Colour menuListBoxTextColor1 = createColorWithOptionalAlpha (245, 245, 245, 255);
     juce::Colour menuListBoxSelectionColor1 = createColorWithOptionalAlpha (220, 220, 220, 255);
     juce::Colour menuTextBoxTextColor1 = createColorWithOptionalAlpha (245, 245, 245, 217);
-    juce::Colour menuSliderFillColor = createColorWithOptionalAlpha (220, 220, 220, 255);
+    juce::Colour menuSliderFillColor = createColorWithOptionalAlpha (218, 165, 32, 255); // goldenrod
 
     //--------------------------------------------------------------------------
     // Plugin chrome

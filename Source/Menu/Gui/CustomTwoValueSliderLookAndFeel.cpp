@@ -106,7 +106,10 @@ float CustomTwoValueSliderLookAndFeel::getRotationForOrientation() const
 
 void CustomTwoValueSliderLookAndFeel::updateGlowShadowColor(const juce::Colour& newColor)
 {
-    glowShadow = { { newColor, 10, { 0, 0 }, 2 } };
+    glowShadow = {
+        { newColor.withMultipliedAlpha (0.40f), 4, { 0, 0 }, 0 },
+        { newColor.withMultipliedAlpha (0.65f), 2, { 0, 0 }, 0 }
+    };
 }
 
 void CustomTwoValueSliderLookAndFeel::drawLabel(juce::Graphics& g, juce::Label& label)

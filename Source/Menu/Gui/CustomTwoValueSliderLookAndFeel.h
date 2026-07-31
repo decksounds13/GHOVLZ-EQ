@@ -50,7 +50,10 @@ private:
 
 
     melatonin::DropShadow shadow = { { juce::Colours::black, 10, { 0, 2 } } };
-    melatonin::DropShadow glowShadow = { { juce::Colours::green, 6, { 0, 0 } } };
+    melatonin::DropShadow glowShadow = {
+        { juce::Colours::goldenrod.withAlpha (0.40f), 4, { 0, 0 }, 0 },
+        { juce::Colours::goldenrod.withAlpha (0.65f), 2, { 0, 0 }, 0 }
+    };
     melatonin::InnerShadow innerShadow = { { juce::Colours::black, 3, { 0, -1 } } };
     melatonin::InnerShadow innerShadow2 = { { juce::Colours::black, 4, { 0, 2 } } };
     melatonin::InnerShadow innerShadow3 = { { juce::Colours::black.withAlpha(0.6f), 4, {0, 2} } };

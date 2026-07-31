@@ -1837,9 +1837,8 @@ void MainComponent::randomizeUiTheme()
 
     if (auto* appearance = menu.getAppearanceComponent())
     {
-        appearance->updateAllComponents();
-        appearance->repaintComponents();
-        appearance->repaintParentComponent();
+        // refreshAfterRandomize updates Menu Slider Fill + glow (updateAllComponents alone does not).
+        appearance->refreshAfterRandomize();
     }
 }
 

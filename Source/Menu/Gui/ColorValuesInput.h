@@ -110,9 +110,10 @@ private:
         }
 
         void updateGlowShadowColor(const juce::Colour& newColor) {
+            // Soft local bloom — keep it close to the filled track.
             glowShadow = {
-                { newColor, 10, { 0, 0 }, 2 },
-                { newColor, 5, { 0, 0 }, 1 } // Additional shadow with a smaller radius
+                { newColor.withMultipliedAlpha (0.40f), 4, { 0, 0 }, 0 },
+                { newColor.withMultipliedAlpha (0.65f), 2, { 0, 0 }, 0 }
             };
         }
   
@@ -140,7 +141,10 @@ private:
 
     private:
         melatonin::DropShadow shadow = { { juce::Colours::black, 10, { 0, 2 } } };
-        melatonin::DropShadow glowShadow = { { juce::Colours::green, 12, { 0, 0 } } };
+        melatonin::DropShadow glowShadow = {
+            { juce::Colours::goldenrod.withAlpha (0.40f), 4, { 0, 0 }, 0 },
+            { juce::Colours::goldenrod.withAlpha (0.65f), 2, { 0, 0 }, 0 }
+        };
         melatonin::InnerShadow innerShadow = { { juce::Colours::black, 3, { 0, - 1 } } }; 
         melatonin::InnerShadow innerShadow2 = { { juce::Colours::black, 4, { 0, 2 } } };
         melatonin::InnerShadow innerShadow3 = { { juce::Colours::black.withAlpha(0.6f), 4, {0, 2}}};

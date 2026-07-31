@@ -261,10 +261,42 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
 
     styleToggle (enhancedFreqToggle);
     enhancedFreqToggle.setTooltip (
-        "Wave Candy–style sharpening: relocates FFT energy to instantaneous frequency "
-        "so low tones paint as thin ridges instead of fat lobes. Uses more CPU.");
+        "Multi-resolution analysis + instantaneous-frequency reassignment: "
+        "thinner tonal ridges (especially bass). Uses more CPU — tune Strength / LF Detail below.");
     addAndMakeVisible (enhancedFreqToggle);
     enhancedFreqAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_ENHANCED_FREQ_ID", enhancedFreqToggle);
+
+    enhancedStrengthLabel.setText ("Enhanced Strength", juce::dontSendNotification);
+    styleSlider (enhancedStrengthSlider);
+    enhancedStrengthSlider.setTextValueSuffix (" %");
+    enhancedStrengthSlider.setTooltip ("0% = multi-res continuum only; 100% = full frequency/time reassignment.");
+    addAndMakeVisible (enhancedStrengthLabel);
+    addAndMakeVisible (enhancedStrengthSlider);
+    enhancedStrengthAttachment = std::make_unique<SliderAttachment> (
+        treeState, "SPEC_ENHANCED_STRENGTH_ID", enhancedStrengthSlider);
+
+    enhancedLfDetailLabel.setText ("Enhanced LF Detail", juce::dontSendNotification);
+    styleCombo (enhancedLfDetailCombo);
+    {
+        const auto names = SpectrogramComponent::getEnhancedLfDetailNames();
+        for (int i = 0; i < names.size(); ++i)
+            enhancedLfDetailCombo.addItem (names[i], i + 1);
+    }
+    enhancedLfDetailCombo.setTooltip (
+        "Off = base FFT only. 2× = longer bass window. 4× = longest bass + mid-band 2× window.");
+    addAndMakeVisible (enhancedLfDetailLabel);
+    addAndMakeVisible (enhancedLfDetailCombo);
+    enhancedLfDetailAttachment = std::make_unique<ComboBoxAttachment> (
+        treeState, "SPEC_ENHANCED_LF_DETAIL_ID", enhancedLfDetailCombo);
+
+    enhancedCrossoverLabel.setText ("Enhanced Crossover", juce::dontSendNotification);
+    styleSlider (enhancedCrossoverSlider);
+    enhancedCrossoverSlider.setTextValueSuffix (" Hz");
+    enhancedCrossoverSlider.setTooltip ("LF / mid multi-res split (soft blend around this frequency).");
+    addAndMakeVisible (enhancedCrossoverLabel);
+    addAndMakeVisible (enhancedCrossoverSlider);
+    enhancedCrossoverAttachment = std::make_unique<SliderAttachment> (
+        treeState, "SPEC_ENHANCED_CROSSOVER_ID", enhancedCrossoverSlider);
 
     styleToggle (freezeToggle);
     addAndMakeVisible (freezeToggle);
@@ -281,6 +313,9 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (maxDbLabel);
     styleLabel (smoothLabel);
     styleLabel (softenLabel);
+    styleLabel (enhancedStrengthLabel);
+    styleLabel (enhancedLfDetailLabel);
+    styleLabel (enhancedCrossoverLabel);
 }
 
 SpectrogramSettingsComponent::Content::~Content()
@@ -289,6 +324,7 @@ SpectrogramSettingsComponent::Content::~Content()
     fftSizeCombo.setLookAndFeel (nullptr);
     displayResCombo.setLookAndFeel (nullptr);
     channelCombo.setLookAndFeel (nullptr);
+    enhancedLfDetailCombo.setLookAndFeel (nullptr);
 }
 
 void SpectrogramSettingsComponent::Content::styleSlider (juce::Slider& slider)
@@ -374,9 +410,9 @@ void SpectrogramSettingsComponent::Content::layoutComboRow (juce::Rectangle<int>
 
 int SpectrogramSettingsComponent::Content::getPreferredHeight() const
 {
-    const int comboRows = 4;
-    const int sliderRows = 6;
-    const int toggles = 3;
+    const int comboRows = 5;   // colour, fft, display, channel, enhanced LF detail
+    const int sliderRows = 8;  // brightness, speed, min/max, smooth, soften, strength, crossover
+    const int toggles = 3;     // log, enhanced, freeze
 
     return kPadY * 2
            + 24 + 8
@@ -416,6 +452,9 @@ void SpectrogramSettingsComponent::Content::resized()
     area.removeFromTop (6);
     enhancedFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
     area.removeFromTop (6);
+    layoutSliderRow (area, enhancedStrengthLabel, enhancedStrengthSlider);
+    layoutComboRow (area, enhancedLfDetailLabel, enhancedLfDetailCombo);
+    layoutSliderRow (area, enhancedCrossoverLabel, enhancedCrossoverSlider);
     freezeToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
 }
 

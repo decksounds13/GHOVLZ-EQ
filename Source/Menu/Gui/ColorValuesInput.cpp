@@ -175,12 +175,12 @@ void ColorValuesInput::setSliderTrackColor(const juce::Colour& color)
 
 void ColorValuesInput::setSliderBackgroundColor(const juce::Colour& color)
 {
+    customLookAndFeel.updateGlowShadowColor (color);
+
     for (int i = 0; i < colorSliders.size(); ++i)
     {
-        colorSliders[i]->setColour(juce::Slider::backgroundColourId, color);
-
-        // Update the glowShadow color in the CustomLookAndFeel
-        customLookAndFeel.updateGlowShadowColor(color);
+        colorSliders[i]->setColour (juce::Slider::backgroundColourId, color);
+        colorSliders[i]->repaint();
     }
 }
 

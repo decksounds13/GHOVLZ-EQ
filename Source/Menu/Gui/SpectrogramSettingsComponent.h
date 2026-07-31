@@ -122,6 +122,18 @@ private:
         juce::ToggleButton enhancedFreqToggle { "Enhanced Frequency" };
         std::unique_ptr<ButtonAttachment> enhancedFreqAttachment;
 
+        juce::Label enhancedStrengthLabel;
+        juce::Slider enhancedStrengthSlider;
+        std::unique_ptr<SliderAttachment> enhancedStrengthAttachment;
+
+        juce::Label enhancedLfDetailLabel;
+        juce::ComboBox enhancedLfDetailCombo;
+        std::unique_ptr<ComboBoxAttachment> enhancedLfDetailAttachment;
+
+        juce::Label enhancedCrossoverLabel;
+        juce::Slider enhancedCrossoverSlider;
+        std::unique_ptr<SliderAttachment> enhancedCrossoverAttachment;
+
         juce::ToggleButton freezeToggle { "Freeze" };
         std::unique_ptr<ButtonAttachment> freezeAttachment;
     };

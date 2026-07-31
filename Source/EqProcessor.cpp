@@ -936,6 +936,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_ENHANCED_FREQ_ID", "SpecEnhancedFreq",
         analyserDefaults.getBool ("SPEC_ENHANCED_FREQ_ID", false)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_ENHANCED_STRENGTH_ID", "SpecEnhancedStrength",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("SPEC_ENHANCED_STRENGTH_ID", 100.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "SPEC_ENHANCED_LF_DETAIL_ID", "SpecEnhancedLfDetail",
+        SpectrogramComponent::getEnhancedLfDetailNames(),
+        juce::jlimit (0, 2, analyserDefaults.getInt ("SPEC_ENHANCED_LF_DETAIL_ID", 2)))); // default 4×
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "SPEC_ENHANCED_CROSSOVER_ID", "SpecEnhancedCrossover",
+        juce::NormalisableRange<float> (200.0f, 600.0f, 1.0f, 0.4f),
+        analyserDefaults.getFloat ("SPEC_ENHANCED_CROSSOVER_ID", 350.0f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_FREEZE_ID", "SpecFreeze",
         analyserDefaults.getBool ("SPEC_FREEZE_ID", false)));
