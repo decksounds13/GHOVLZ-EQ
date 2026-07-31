@@ -1,37 +1,65 @@
-# GHOVLZ! EQ — Progress Update
+# GHOVLZ! EQ — Release Notes
 
-**Date:** 2026-07-26  
-**Scope:** General day summary (not a commit-by-commit changelog)
-
----
-
-## Spectrum analyser
-
-- Switched analysis to an Ableton-style overlapping model: audio writes into fixed ring buffers; a background thread FFTs the latest Block window on the Refresh cadence instead of waiting for non-overlapping full blocks.
-- Default Refresh set for smoother UI updates; Spectrum/FFT menus expose Refresh (and Spectrum Average) controls.
-- Improves feel at larger FFT sizes without the heavy/choppy wait of block-aligned analysis.
-
-## Oscilloscope
-
-- Restored High-quality continuous min/max envelopes with soft fill; fixed cross-window connector artefacts (path breaks at gaps and at the in-place write seam).
-- Separate line/glow tuning for compact strip vs expanded overlay.
-- Compact High-quality path no longer strokes max and min as two full traces (that read as a double waveform in the short strip); soft fill + stubs in compact, dual-envelope stroke kept for expanded.
-
-## Factory default state
-
-- Hard-coded factory plugin state from the user preset **“new default”** (`FactoryDefaultsState.h`), applied on processor construction and attached to the built-in **Default** theme.
-- Notable factory settings: **8192** FFT block, **30 ms** refresh, Auto Gain on, Linear Phase, Band 1 sat + post on (Tube), spectrum curve smoothness High, compact/expanded osc line widths and glow as tuned.
-- Built-in Default theme text colour aligned with that preset.
-
-## UI fixes
-
-- Level meters were getting buried under the EQ graph after z-order refreshes; meters are raised with chrome again. Input L/R meters are also shown (they were laid out but never made visible).
-
-## Highpass / linear phase
-
-- **Linear Phase:** FIR post-window gain restore used DC for all designs. Highpass target DC ≈ 0 crushed the impulse response (lowpass was unaffected). Restore now uses **Nyquist** when that is the stronger passband; stopband magnitude can be true zero.
-- **Minimum Phase clicks:** Steeper HP/LP slopes hard-swapped cascaded IIR coeffs without resetting filter state. Stages now reset on slope/stage-count changes; HP/LP cutoff/Q smoothing lengthened to reduce zipper pops.
+**Checkpoint:** 2026-07-30  
+**Status:** Pre-spectrogram / pre-metering-VST baseline. Working tree was clean at `1cd6fc4`; this file documents the shipped product so the next feature wave has a clear freeze point.
 
 ---
 
-*Later releases can track notes commit-to-commit from this point forward.*
+## Product snapshot
+
+Compact parametric EQ VST3/AU with overlapping spectrum analysis, beat-synced oscilloscope, stereo goniometer, per-band saturation, spectral lattice dynamics, SideCheck, linear-phase FIR path, UI themes, and EQ presets — still a small Release binary with headroom for more metering chrome.
+
+---
+
+## Highlights since last notes pass (2026-07-26 → now)
+
+### UI themes & chrome
+- UI theme list (CallOutBox) stays open for Rename / Duplicate / Delete without dismissing on right-click.
+- Option box paints with the faceplate radial wash (`pluginBackground2` → `pluginBackground`).
+- Knob tint/multiply, glow disable, oscilloscope/goniometer colour unification, and settings-button theming wired through shared theme colours.
+- Top chrome: Bypass, A–D reference slots, UI theme picker + dice randomize, centered EQ preset bar, Eco / OSC / Gon toggles, undo/redo, Settings.
+
+### Meters & scopes
+- Overlapping (Ableton-style) spectrum analyser with Spectrum / FFT settings tabs.
+- Compact + expandable oscilloscope (beat zoom, ST / L-R, scroll vs overwrite, HQ envelopes).
+- Compact + expandable goniometer with correlation meter and matching settings tab (quality, line opacity, compact/expanded glow).
+
+### EQ / DSP
+- Per-band HP/LP slopes; spectral per-band lattice.
+- Factory defaults hard-coded from the “new default” preset (`FactoryDefaultsState.h`).
+- Linear-phase highpass FIR restore fixed (Nyquist passband); min-phase HP/LP slope changes reset state to avoid clicks.
+- Per-band saturation (Tape / Tube / Diode / Dual-Triode) with OS and Pre/Post.
+
+### Build notes (ops)
+- Prefer **Release** builds for UI/CPU (Debug is dramatically heavier).
+- Windows: JUCE 9.0.0 + Gin modules layout; Mac AU path proven on MacinCloud; Mac VST3 still hardening (manifest / SDK paths).
+
+---
+
+## Explicitly not in this checkpoint
+
+- Spectrogram strip (next: left of preset bar, right of UI dice; osc-like height, slightly wider; colour schemes + settings tab).
+- Metering-only VST that hosts scopes alone (later).
+
+---
+
+## Earlier notes (2026-07-26)
+
+### Spectrum analyser
+- Ring-buffer write + background FFT on Refresh cadence (overlapping windows).
+- Default Refresh tuned for smoother UI; Spectrum Average exposed in menus.
+
+### Oscilloscope
+- HQ continuous min/max envelopes with soft fill; connector artefact fixes.
+- Separate line/glow for compact vs expanded; compact HQ avoids double-trace look.
+
+### Factory default state
+- Notable factory: **8192** FFT, **30 ms** refresh, Auto Gain, Linear Phase, Band 1 sat + post Tube, spectrum smoothness High.
+
+### UI / HP fixes
+- Level meters re-raised with chrome; input L/R meters made visible.
+- Linear-phase HP FIR and min-phase slope click fixes as above.
+
+---
+
+*Next commit stream: spectrogram + settings; metering product remains deferred.*
