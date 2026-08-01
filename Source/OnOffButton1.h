@@ -1,6 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
 
+/** Classic power-symbol on/off (gap + dash). Kept for OptionBox and future reuse.
+    Faceplate bands use BandNumberButton instead. */
 class OnOffButton1 : public juce::Button
 {
 public:

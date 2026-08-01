@@ -13,6 +13,7 @@
 #include "BandSaturation.h"
 #include "BandSidechain.h"
 #include "Menu/SharedResources.h"
+#include "MelatoninBlur/melatonin/shadows.h"
 
 class OptionBoxMenu : public juce::Component,
                       public juce::Button::Listener,
@@ -43,10 +44,15 @@ public:
     bool isVisible() const;
     void setInitialPosition(int x, int y);
     void setDraggable(bool shouldBeDraggable);
+    /**
+        Select the OptionBox target band.
+        @param index Internal Bank 1 slot 0–7, or global display index 8–63 (Band 9–64).
+    */
     void setCurrentBandIndex(int index, const std::string bandNames[]);
     void setInteractionFaded (bool shouldFade);
     /** Keep OptionBox visual size locked to the plugin scale after parent resize. */
     void updateUiScaleFromParent();
+    /** Internal 0–7, or global display 8–63 for extended bands. */
     int getCurrentBandIndex() const { return currentBandIndex; }
 
     static constexpr int designWidth = 150;
@@ -121,6 +127,7 @@ private:
     bool isMouseOverChildComponent = false;
     bool interactionFaded = false;
     int separatorY;
+    /** Bank 1: internal DSP index 0–7. Extended: global display index 8–63. */
     int currentBandIndex = -1;
     juce::String currentOnOffParamID;
     juce::String currentDynamicParamID;
@@ -138,6 +145,11 @@ private:
     juce::Line<float> separator;
 
     SharedResources* themeColors = nullptr;
+
+    /** Soft drop shadow under the floating OptionBox (Melatonin). */
+    melatonin::DropShadow panelShadow {
+        { juce::Colours::black.withAlpha (0.55f), 14, { 0, 5 }, 0 }
+    };
 
     ComboBoxLookAndFeel customLookAndFeel;
 

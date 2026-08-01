@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <juce_dsp/juce_dsp.h>
 #include <cmath>
+#include "EqBand.h"
 
 /**
     Per-band saturation (Spectre-inspired).
@@ -137,10 +138,38 @@ namespace BandSaturation
     constexpr float kMaxSatDriveDb = 12.0f;
     constexpr float kDefaultSatDriveDb = 0.0f;
 
-    /** All eight Band 1–8 slots (Sat only engages when filter type uses gain). */
+    /** Any slot that can use gain (Sat only engages when filter type uses gain). */
     inline bool supportsSat (int bandIndex) noexcept
     {
-        return bandIndex >= 0 && bandIndex <= 7;
+        return bandIndex >= 0 && bandIndex < EqBand::kMaxBands;
+    }
+
+    inline juce::String satParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return satParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "Sat");
+    }
+
+    inline juce::String satModelParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return satModelParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "SatModel");
+    }
+
+    inline juce::String satPostParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return satPostParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "SatPost");
+    }
+
+    inline juce::String satDriveDbParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return satDriveDbParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "SatDriveDb");
     }
 
     inline float shapeSample (float x, int model) noexcept

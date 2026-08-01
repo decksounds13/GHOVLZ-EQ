@@ -48,6 +48,7 @@ namespace
 
 SpectrogramComponent::SpectrogramComponent()
 {
+    // Compact strip uses rounded chrome like the oscilloscope (corners must not be forced opaque).
     setOpaque (false);
     setVisible (false);
     resolveDisplaySize (internalW, internalH);
@@ -293,6 +294,7 @@ void SpectrogramComponent::setExpanded (bool shouldExpand) noexcept
         return;
 
     expanded = shouldExpand;
+    setOpaque (expanded); // pane fills the rect; compact uses rounded transparent corners
     setInterceptsMouseClicks (! expanded, ! expanded);
     // Do not wipe history — pane / fullscreen is only a paint stretch of the same image.
     repaint();
@@ -1315,19 +1317,30 @@ void SpectrogramComponent::paint (juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     const auto& theme = colors();
 
+    juce::Path window;
     if (! expanded)
     {
-        juce::Path chrome;
-        chrome.addRoundedRectangle (bounds.reduced (0.5f), 5.0f);
-        g.setColour (theme.oscBackground.withAlpha (170.0f / 255.0f));
-        g.fillPath (chrome);
+        // Match oscilloscope compact chrome: opaque fill + rounded outline.
+        window.addRoundedRectangle (bounds.reduced (0.5f), 5.0f);
+        g.setColour (theme.oscBackground);
+        g.fillPath (window);
+        g.setColour (theme.oscBackground2.withAlpha (140.0f / 255.0f));
+        g.strokePath (window, juce::PathStrokeType (1.0f));
+    }
+    else
+    {
+        g.fillAll (theme.oscBackground);
     }
 
     if (scrollImage.isValid())
     {
-        const auto imageBounds = bounds.reduced (expanded ? 0.0f : 1.0f);
+        const auto imageBounds = bounds;
         const float soften = juce::jlimit (0.0f, 100.0f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f));
         const int radius = juce::roundToInt (soften * 0.05f);
+
+        juce::Graphics::ScopedSaveState state (g);
+        if (! expanded)
+            g.reduceClipRegion (window);
 
         if (radius <= 0)
         {

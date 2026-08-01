@@ -3,13 +3,11 @@
 #include <JuceHeader.h>
 #include <JucePluginDefines.h>
 
-/** Temporary GHOVLZ! EQ wordmark — click to cycle Windows system font placeholders. */
+/** GHOVLZ! EQ wordmark — Bahnschrift brand type, fixed (not user-selectable). */
 class BrandWordmark : public juce::Component,
                       public juce::SettableTooltipClient
 {
 public:
-    static constexpr int numFontOptions = 4;
-
     /** Hero product name painted at full brand weight. */
     static juce::String getBrandText()
     {
@@ -35,11 +33,15 @@ public:
         return juce::String ("v") + JucePlugin_VersionString + "-beta";
     }
 
+    static juce::String getTypefaceName()
+    {
+        return "Bahnschrift";
+    }
+
     BrandWordmark()
     {
-        setInterceptsMouseClicks (true, false);
-        setMouseCursor (juce::MouseCursor::PointingHandCursor);
-        refreshTooltip();
+        setInterceptsMouseClicks (false, false);
+        setTooltip (getBrandText() + " " + getSideCheckTagTextAscii());
     }
 
     void setCompactLook (bool shouldBeCompact)
@@ -57,49 +59,9 @@ public:
         repaint();
     }
 
-    int getFontOptionIndex() const noexcept { return fontOptionIndex; }
-
-    juce::String getOptionTitle() const
-    {
-        switch (fontOptionIndex)
-        {
-            case 0:  return "1 - Segoe UI Semibold";
-            case 1:  return "2 - Bahnschrift";
-            case 2:  return "3 - Consolas";
-            default: return "4 - Candara";
-        }
-    }
-
-    juce::String getOptionCharacter() const
-    {
-        switch (fontOptionIndex)
-        {
-            case 0:  return "geometric bold sans";
-            case 1:  return "condensed modern geometric";
-            case 2:  return "technical monospace";
-            default: return "rounded friendly geometric";
-        }
-    }
-
-    juce::String getTypefaceName() const
-    {
-        switch (fontOptionIndex)
-        {
-            case 0:  return "Segoe UI Semibold";
-            case 1:  return "Bahnschrift";
-            case 2:  return "Consolas";
-            default: return "Candara";
-        }
-    }
-
     juce::Font makeFont (float height) const
     {
-        auto options = juce::FontOptions().withName (getTypefaceName()).withHeight (height);
-
-        if (fontOptionIndex == 2)
-            options = options.withStyle ("bold");
-
-        return juce::Font (options);
+        return juce::Font (juce::FontOptions().withName (getTypefaceName()).withHeight (height));
     }
 
     static float measureTextWidth (const juce::Font& font, const juce::String& text)
@@ -163,7 +125,6 @@ public:
                     false);
         x += brandW + gapBrandToTag;
 
-        // Temporary bold "with SideCheck™" — follows brand colour so it randomizes with the theme.
         g.setFont (tagFont);
         g.setColour (brandColour.withAlpha (sideCheckAlpha));
         g.drawText (sideCheckText,
@@ -172,7 +133,6 @@ public:
                     false);
         x += sideCheckW + gapTagToVersion;
 
-        // Beta version: subdued color, 75% of SideCheck tag height (click still cycles fonts).
         g.setFont (versionFont);
         g.setColour (brandColour.withAlpha (betaAlpha));
         g.drawText (versionText,
@@ -181,22 +141,7 @@ public:
                     false);
     }
 
-    void mouseDown (const juce::MouseEvent&) override
-    {
-        fontOptionIndex = (fontOptionIndex + 1) % numFontOptions;
-        refreshTooltip();
-        repaint();
-    }
-
 private:
-    void refreshTooltip()
-    {
-        setTooltip (getBrandText() + " " + getSideCheckTagTextAscii()
-                     + "  |  " + getOptionTitle() + " - " + getOptionCharacter()
-                     + "  (click to cycle fonts)");
-    }
-
-    int fontOptionIndex = 1; // default: Bahnschrift (option 2 / "2A")
     bool compactLook = false;
     juce::Colour brandColour { juce::Colours::whitesmoke };
 

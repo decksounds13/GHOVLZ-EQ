@@ -697,6 +697,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     editor(editorRef),
     menu (sharedResources, treeState, textButtonLookAndFeel, colourRamps)
 {
+    restoreSessionUiThemeIfAny();
     colourRamps.addChangeListener (this);
     frequencyResponseComponent.onBandManipulationHighlight = [this] (int bandIndex)
     {
@@ -723,12 +724,14 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     menuToggleButton.setLookAndFeel(&customLookAndFeel);
     customLookAndFeel.setThemeColors (&sharedResources);
 
+    menu.addComponentListener (this);
     menuToggleButton.onClick = [this] {
         const bool shouldShowMenu = !menu.isVisible();
         menu.setVisible(shouldShowMenu);
 
         if (shouldShowMenu)
         {
+            layoutSettingsMenu();
             syncExpandedOscOverlayStack();
             menu.setInterceptsMouseClicks(true, true);
             frequencyResponseComponent.setInterceptsMouseClicks(false, false);
@@ -1010,6 +1013,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
         appearance->onThemeLiveChanged = [this]
         {
             applyThemeToChildComponents();
+            persistSessionUiTheme();
         };
     }
 
@@ -1041,6 +1045,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
 MainComponent::~MainComponent()
 {
+    persistSessionUiTheme();
     colourRamps.removeChangeListener (this);
     processor.treeState.removeParameterListener ("METER_CHANNEL_MODE_ID", this);
     processor.treeState.removeParameterListener ("SPEC_COLOUR_SCHEME_ID", this);
@@ -1051,6 +1056,8 @@ MainComponent::~MainComponent()
 
     if (auto* themes = menu.getThemeList())
         themes->removeListener (this);
+
+    menu.removeComponentListener (this);
 
     frequencyResponseComponent.removeMouseListener (this);
     processor.setFrequencyResponseComponent (nullptr);
@@ -1369,7 +1376,10 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
         syncUndoRedoButtons();
 
     if (source == &colourRamps)
+    {
         applyColourRampsToMeters();
+        persistSessionUiTheme();
+    }
 }
 
 void MainComponent::beginRampSampling()
@@ -1384,6 +1394,17 @@ void MainComponent::beginRampSampling()
     }
 
     rampSampleOverlay.beginSession (*this);
+}
+
+void MainComponent::beginRampSamplingForTarget (ColourRampBank::Target target)
+{
+    colourRamps.setActiveTarget (target);
+    colourRamps.save();
+
+    if (menu.isVisible())
+        menu.setVisible (false);
+
+    beginRampSampling();
 }
 
 void MainComponent::applyColourRampsToMeters()
@@ -1497,6 +1518,7 @@ void MainComponent::applyScopeMode (bool shouldEnable)
         goniometer.setExpanded (true);
         spectrogram.setExpanded (true);
 
+        frequencyResponseComponent.setOptionBoxVisible (false);
         frequencyResponseComponent.setVisible (false);
         scopeSplitOverlay.setVisible (true);
     }
@@ -1840,6 +1862,8 @@ void MainComponent::randomizeUiTheme()
         // refreshAfterRandomize updates Menu Slider Fill + glow (updateAllComponents alone does not).
         appearance->refreshAfterRandomize();
     }
+
+    persistSessionUiTheme();
 }
 
 void MainComponent::randomizeColourRamps()
@@ -1853,12 +1877,33 @@ void MainComponent::randomizeColourRamps()
     };
     colourRamps.randomizeRamps (c, mask);
     applyColourRampsToMeters();
+    persistSessionUiTheme();
 }
 
 void MainComponent::disableCustomColourRamps()
 {
     colourRamps.disableAllCustomRamps();
     applyColourRampsToMeters();
+    persistSessionUiTheme();
+}
+
+void MainComponent::persistSessionUiTheme()
+{
+    processor.storeSessionUiTheme (sharedResources.sharedColors, colourRamps.toValueTree());
+}
+
+void MainComponent::restoreSessionUiThemeIfAny()
+{
+    juce::ValueTree rampTree;
+    if (! processor.tryRestoreSessionUiTheme (sharedResources.sharedColors, rampTree))
+        return;
+
+    colourRamps.applyFromValueTree (rampTree, false);
+    sharedResources.makeActive();
+
+    // Menu/Appearance were constructed before restore; refresh cached colour widgets.
+    if (auto* appearance = menu.getAppearanceComponent())
+        appearance->refreshAfterRandomize();
 }
 
 void MainComponent::runDiceRandomize()
@@ -1954,6 +1999,7 @@ void MainComponent::saveCurrentEqPreset()
 void MainComponent::onPresetApplied (const Theme&)
 {
     applyThemeToChildComponents();
+    persistSessionUiTheme();
 }
 
 void MainComponent::onPresetListChanged()
@@ -2516,21 +2562,8 @@ void MainComponent::resized()
         } // !scopeModeEnabled compact strips
     }
 
-    // Keep menu content at design size and scale uniformly with the plugin.
-    // AffineTransform::scale is relative to the parent origin, so compensate with a
-    // translation and right-anchor so the visual right edge stays flush on resize.
-    constexpr float designHeight = 850.0f;
-    constexpr int designMenuW = 800; // 1200 * 2/3
-    const int designMenuH = juce::roundToInt (designHeight / 1.9f);
-    const int menuY = FrequencyResponseyOffset;
-    const int visualMenuW = juce::roundToInt ((float) designMenuW * scale);
-    const int menuX = juce::jmax (0, getWidth() - visualMenuW);
-
-    menu.setBounds (menuX, menuY, designMenuW, designMenuH);
-    menu.setTransform (juce::AffineTransform::scale (scale)
-                           .followedBy (juce::AffineTransform::translation (
-                               (float) menuX * (1.0f - scale),
-                               (float) menuY * (1.0f - scale))));
+    // Settings panel: freely movable/resizable; content stays at design size (viewport scrolls).
+    layoutSettingsMenu();
 
     // Wordmark may be re-hosted from EqEditor::resized; keep menu chrome above it.
     syncExpandedOscOverlayStack();
@@ -2545,6 +2578,50 @@ void MainComponent::mouseDrag(const juce::MouseEvent& event)
 void MainComponent::mouseDown(const juce::MouseEvent& event)
 {
     juce::ignoreUnused(event);
+}
+
+void MainComponent::layoutSettingsMenu()
+{
+    menu.setTransform ({});
+
+    const int contentW = Menu::kContentWidth;
+    const int contentH = Menu::kContentHeight + Menu::kDragBarHeight;
+    const int parentW = getWidth();
+    const int parentH = getHeight();
+    if (parentW <= 0 || parentH <= 0)
+        return;
+
+    if (settingsMenuBounds.isEmpty() || ! settingsMenuBoundsFromUser)
+    {
+        // Default: right-anchored, design content size (clipped if the host is smaller).
+        constexpr int topY = 0;
+        const int w = juce::jmin (contentW, parentW);
+        const int h = juce::jmin (contentH, juce::jmax (140, parentH - topY));
+        const int x = juce::jmax (0, parentW - w);
+        const int y = juce::jlimit (0, juce::jmax (0, parentH - h), topY);
+        settingsMenuBounds = { x, y, w, h };
+    }
+
+    auto b = settingsMenuBounds;
+    b.setWidth (juce::jlimit (200, parentW, b.getWidth()));
+    b.setHeight (juce::jlimit (140, parentH, b.getHeight()));
+    b.setX (juce::jlimit (0, juce::jmax (0, parentW - b.getWidth()), b.getX()));
+    b.setY (juce::jlimit (0, juce::jmax (0, parentH - b.getHeight()), b.getY()));
+
+    updatingSettingsMenuBounds = true;
+    menu.setBounds (b);
+    updatingSettingsMenuBounds = false;
+    settingsMenuBounds = menu.getBounds();
+}
+
+void MainComponent::componentMovedOrResized (juce::Component& component, bool wasMoved, bool wasResized)
+{
+    juce::ignoreUnused (wasMoved, wasResized);
+    if (updatingSettingsMenuBounds || &component != &menu)
+        return;
+
+    settingsMenuBounds = menu.getBounds();
+    settingsMenuBoundsFromUser = true;
 }
 
 void MainComponent::hostBrandWordmark (juce::Component& wordmark)

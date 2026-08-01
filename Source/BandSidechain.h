@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "DynamicEq.h"
+#include "EqBand.h"
 
 /**
     Per-band external sidechain ducking (audio bus or MIDI gate).
@@ -47,6 +48,20 @@ namespace BandSidechain
     inline bool supportsSidechain (int bandIndex)
     {
         return DynamicEq::supportsDynamic (bandIndex);
+    }
+
+    inline juce::String sidechainParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return sidechainParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "Sidechain");
+    }
+
+    inline juce::String midiParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return midiParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "SidechainMidi");
     }
 
     /** MIDI / audio envelope state (0..1 amount). */

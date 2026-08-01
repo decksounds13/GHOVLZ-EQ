@@ -12,7 +12,7 @@
 #include "RotaryImageKnobLookAndFeel3.h"
 #include "RotaryImageKnobLookAndFeel4.h"
 #include "RotaryImageKnobLookAndFeel5.h"
-#include "OnOffButton1.h"
+#include "BandNumberButton.h"
 #include "MainComponent.h"
 #include "BinaryData.h"
 #include "BrandWordmark.h"
@@ -52,8 +52,11 @@ public:
 
     void buttonClicked(juce::Button* button) override;
 
-    /** Highlight faceplate knobs for bandIndex (0-7). Pass -1 to clear. */
+    /** Highlight faceplate knobs for bandIndex (Bank1 internal 0–7, or global 8–63). Pass -1 to clear. */
     void setBandManipulationHighlight (int bandIndex);
+    /** Faceplate bank pager (0-based). Persisted in UI prefs. */
+    void setFaceplateBank (int bankIndex, bool savePrefs = true);
+    int getFaceplateBank() const noexcept { return faceplateBank; }
 
     /** Toggle graph-only compact UI (hides faceplate knobs). */
     void toggleCompactUi();
@@ -72,6 +75,8 @@ public:
     void showScopeTapMenu();
     /** Re-layout brand + bottom chrome after Scope mode toggles (hide logo, shift ? cluster). */
     void syncScopeModeLayout();
+    /** True while Scope mode is active (faceplate / OptionBox suppressed). */
+    bool isScopeModeActive() const noexcept;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -89,12 +94,20 @@ private:
 
     void applyCompactUi();
     void setFaceplateVisible (bool shouldShow);
+    /** Faceplate knobs/strip hidden in compact UI or Scope mode. */
+    bool isFaceplateSuppressed() const noexcept;
     /** Show faceplate Gain knobs only when that band's filter type uses gain. */
     void updateBandFaceplateGainVisibility();
-    /** Internal band index 0–7 for a faceplate knob, or -1. */
+    /** Band index for OptionBox: Bank1 internal 0–7, or global 8–63 when paged. -1 if none. */
     int faceplateBandIndexForSlider (const juce::Slider* slider) const noexcept;
+    /** Display column 0–7 for a faceplate knob, or -1. */
+    int faceplateColumnForSlider (const juce::Slider* slider) const noexcept;
     void wireFaceplateKnobInteraction (juce::Slider& knob);
     void openOptionBoxForFaceplateBand (int bandIndex);
+    void rebindFaceplateAttachments();
+    void updateFaceplateBandNumbers();
+    void updateFaceplateBankChrome();
+    void showBandsFullSoftMaxFeedback();
     bool cycleFilterSlopeForBand (int bandIndex, int delta);
     void updateFaceplateSlopeWheelMode();
     void layoutBrandWordmark (int outClusterLeftX);
@@ -189,6 +202,73 @@ private:
         }
     };
 
+    /** Small faceplate bank pager — paints a chevron (avoids TextButton "..." ellipsis). */
+    class BankArrowButton : public juce::Button
+    {
+    public:
+        explicit BankArrowButton (bool pointRightIn)
+            : juce::Button (pointRightIn ? "bankNext" : "bankPrev"),
+              pointRight (pointRightIn)
+        {
+            setClickingTogglesState (false);
+        }
+
+        void setChromeColours (juce::Colour fill, juce::Colour ink) noexcept
+        {
+            fillColour = fill;
+            inkColour = ink;
+            repaint();
+        }
+
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override
+        {
+            auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+            auto fill = fillColour;
+            auto ink = inkColour;
+            if (! isEnabled())
+            {
+                fill = fill.withMultipliedAlpha (0.45f);
+                ink = ink.withMultipliedAlpha (0.4f);
+            }
+            else if (down)
+            {
+                fill = fill.brighter (0.15f);
+                ink = ink.brighter (0.1f);
+            }
+            else if (highlighted)
+            {
+                fill = fill.brighter (0.1f);
+                ink = ink.brighter (0.08f);
+            }
+
+            g.setColour (fill);
+            g.fillRoundedRectangle (bounds, 3.0f);
+            g.setColour (ink.withAlpha (0.35f));
+            g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
+
+            // Chevron
+            const float cx = bounds.getCentreX();
+            const float cy = bounds.getCentreY();
+            const float halfH = juce::jmin (bounds.getHeight(), bounds.getWidth()) * 0.22f;
+            const float halfW = halfH * 0.85f;
+            const float dir = pointRight ? 1.0f : -1.0f;
+
+            juce::Path chevron;
+            chevron.startNewSubPath (cx - dir * halfW, cy - halfH);
+            chevron.lineTo (cx + dir * halfW, cy);
+            chevron.lineTo (cx - dir * halfW, cy + halfH);
+            g.setColour (ink);
+            g.strokePath (chevron, juce::PathStrokeType (2.0f,
+                                                         juce::PathStrokeType::curved,
+                                                         juce::PathStrokeType::rounded));
+        }
+
+    private:
+        bool pointRight = false;
+        juce::Colour fillColour { juce::Colour::fromRGBA (50, 42, 28, 255) };
+        juce::Colour inkColour { juce::Colours::whitesmoke.withAlpha (0.9f) };
+    };
+
     /** Quad Scope metering view; right-click chooses Pre (analyzer) / Post (DSP on). */
     ScopeModeButton scopeModeButton;
     /** Amount 0-1; visible only while Side Check is enabled. */
@@ -277,15 +357,6 @@ private:
     juce::GroupComponent border22;
     juce::GroupComponent borderOutputGain;
 
-    juce::Label bandNumberLabel1;
-    juce::Label bandNumberLabel2;
-    juce::Label bandNumberLabel3;
-    juce::Label bandNumberLabel4;
-    juce::Label bandNumberLabel5;
-    juce::Label bandNumberLabel6;
-    juce::Label bandNumberLabel7;
-    juce::Label bandNumberLabel8;
-
    // RotaryImageKnobLookAndFeel1 rotaryImageKnobLookAndFeel1;
    
     //Highpass  
@@ -345,14 +416,14 @@ private:
 
     bool hasForcedRepaint = false;
 
-    std::unique_ptr<OnOffButton1> onOffButton1;
-    std::unique_ptr<OnOffButton1> onOffButton2;
-    std::unique_ptr<OnOffButton1> onOffButton3;
-    std::unique_ptr<OnOffButton1> onOffButton4;
-    std::unique_ptr<OnOffButton1> onOffButton5;
-    std::unique_ptr<OnOffButton1> onOffButton6;
-    std::unique_ptr<OnOffButton1> onOffButton7;
-    std::unique_ptr<OnOffButton1> onOffButton8;
+    std::unique_ptr<BandNumberButton> onOffButton1;
+    std::unique_ptr<BandNumberButton> onOffButton2;
+    std::unique_ptr<BandNumberButton> onOffButton3;
+    std::unique_ptr<BandNumberButton> onOffButton4;
+    std::unique_ptr<BandNumberButton> onOffButton5;
+    std::unique_ptr<BandNumberButton> onOffButton6;
+    std::unique_ptr<BandNumberButton> onOffButton7;
+    std::unique_ptr<BandNumberButton> onOffButton8;
 
     juce::TextButton testButton;
 
@@ -370,6 +441,12 @@ private:
 
     bool modPanelOpen = false;
     std::unique_ptr<ModSectionComponent> modSection;
+
+    int faceplateBank = 0;
+    BankArrowButton faceplateBankPrevButton { false };
+    BankArrowButton faceplateBankNextButton { true };
+    juce::Label bandsFullToastLabel;
+    int bandsFullToastTicks = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EqEditor)
 

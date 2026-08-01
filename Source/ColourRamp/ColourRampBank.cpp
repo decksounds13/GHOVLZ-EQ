@@ -184,6 +184,53 @@ juce::File ColourRampBank::getStoreFile()
         .getChildFile ("colour_ramps.xml");
 }
 
+juce::ValueTree ColourRampBank::toValueTree() const
+{
+    juce::ValueTree tree ("ColourRamps");
+    tree.setProperty ("schemaVersion", 2, nullptr);
+    tree.setProperty ("activeTarget", (int) activeTarget, nullptr);
+    tree.appendChild (ramps[(int) Target::fftBars].toValueTree ("FftBars"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrogram].toValueTree ("Spectrogram"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrumFill].toValueTree ("SpectrumFill"), nullptr);
+    return tree;
+}
+
+void ColourRampBank::applyFromValueTree (const juce::ValueTree& tree, bool forceCustomRampsOff)
+{
+    if (! tree.hasType ("ColourRamps"))
+        return;
+
+    {
+        const int stored = (int) tree.getProperty ("activeTarget", -1);
+        activeTarget = (stored < 0) ? -1 : (int) clampTarget (stored);
+    }
+
+    auto loadOne = [&] (Target t, const juce::Identifier& id)
+    {
+        auto child = tree.getChildWithName (id);
+        if (child.isValid())
+            ramps[(int) t] = GradientRamp::fromValueTree (child);
+    };
+
+    loadOne (Target::fftBars, "FftBars");
+    loadOne (Target::spectrogram, "Spectrogram");
+    loadOne (Target::spectrumFill, "SpectrumFill");
+    sanitizeMapModes();
+
+    if (! forceCustomRampsOff)
+        return;
+
+    // Disk load: keep stops, but never silently override built-in colour schemes.
+    for (int ti = 0; ti < (int) Target::numTargets; ++ti)
+    {
+        if (ramps[ti].enabled)
+        {
+            ramps[ti].enabled = false;
+            ++ramps[ti].revision;
+        }
+    }
+}
+
 void ColourRampBank::load()
 {
     const auto file = getStoreFile();
@@ -196,39 +243,18 @@ void ColourRampBank::load()
         if (! tree.hasType ("ColourRamps"))
             return;
 
-        {
-            const int stored = (int) tree.getProperty ("activeTarget", -1);
-            activeTarget = (stored < 0) ? -1 : (int) clampTarget (stored);
-        }
-
-        auto loadOne = [&] (Target t, const juce::Identifier& id)
+        bool anyWereEnabled = false;
+        for (auto id : { juce::Identifier ("FftBars"), juce::Identifier ("Spectrogram"), juce::Identifier ("SpectrumFill") })
         {
             auto child = tree.getChildWithName (id);
-            if (child.isValid())
-                ramps[(int) t] = GradientRamp::fromValueTree (child);
-        };
-
-        loadOne (Target::fftBars, "FftBars");
-        loadOne (Target::spectrogram, "Spectrogram");
-        loadOne (Target::spectrumFill, "SpectrumFill");
-        sanitizeMapModes();
-
-        // Custom ramps must never silently override built-in colour schemes on load.
-        // Stops stay on disk for editing; Use always starts off so Heat/Inferno/etc. win
-        // until the user explicitly checks Use again this session.
-        bool anyForcedOff = false;
-        for (int ti = 0; ti < (int) Target::numTargets; ++ti)
-        {
-            if (ramps[ti].enabled)
-            {
-                ramps[ti].enabled = false;
-                ++ramps[ti].revision;
-                anyForcedOff = true;
-            }
+            if (child.isValid() && (bool) child.getProperty ("enabled", false))
+                anyWereEnabled = true;
         }
 
+        applyFromValueTree (tree, true);
+
         const int schema = (int) tree.getProperty ("schemaVersion", 0);
-        if (schema < 2 || anyForcedOff)
+        if (schema < 2 || anyWereEnabled)
             save();
     }
 }
@@ -250,14 +276,7 @@ void ColourRampBank::sanitizeMapModes()
 
 void ColourRampBank::save() const
 {
-    juce::ValueTree tree ("ColourRamps");
-    tree.setProperty ("schemaVersion", 2, nullptr);
-    tree.setProperty ("activeTarget", (int) activeTarget, nullptr);
-    tree.appendChild (ramps[(int) Target::fftBars].toValueTree ("FftBars"), nullptr);
-    tree.appendChild (ramps[(int) Target::spectrogram].toValueTree ("Spectrogram"), nullptr);
-    tree.appendChild (ramps[(int) Target::spectrumFill].toValueTree ("SpectrumFill"), nullptr);
-
-    if (auto xml = tree.createXml())
+    if (auto xml = toValueTree().createXml())
     {
         const auto file = getStoreFile();
         file.getParentDirectory().createDirectory();

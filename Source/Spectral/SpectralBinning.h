@@ -129,8 +129,8 @@ namespace SpectralBinning
     constexpr int kQuietBlocksBeforeSleep = 4;
     constexpr int kSleepBlocks = 4;
 
-    /** Publish UI GR curve every N process blocks. */
-    constexpr int kPublishBlockStride = 2;
+    /** Publish UI GR curve every N process blocks (1 = every block, same as Side Check). */
+    constexpr int kPublishBlockStride = 1;
 
     inline float clampBandwidthHz (float hz) noexcept
     {

@@ -836,9 +836,10 @@ void SpectralDynamicsProcessor::publishGrCurves() noexcept
                     continue;
 
                 dest.centerHz[(size_t) dest.count] = unit.centerHz;
-                // Publish smoothed audible GR so UI matches the anti-zipper mix.
+                // Match audible mix: wet = (grLinear - 1) * gateGain → lin = 1 + wet.
+                const float audibleLin = 1.0f + (unit.grLinear - 1.0f) * unit.gateGain;
                 const float audibleGrDb = juce::Decibels::gainToDecibels (
-                    juce::jmax (1.0e-6f, unit.grLinear), -100.0f) * unit.gateGain;
+                    juce::jmax (1.0e-6f, audibleLin), -100.0f);
                 dest.grDb[(size_t) dest.count] = audibleGrDb;
                 // Strongest engagement by magnitude; keep sign for cut/boost UI.
                 if (std::abs (audibleGrDb) > std::abs (peak))

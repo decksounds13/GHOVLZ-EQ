@@ -2,14 +2,19 @@
 
 #include <JuceHeader.h>
 
+#include "../../ColourRamp/ColourRampBank.h"
+#include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
 #include "CustomScrollBar.h"
 
-class FftComponent : public juce::Component
+class FftComponent : public juce::Component,
+                     private juce::ChangeListener
 {
 public:
-    FftComponent (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+    FftComponent (SharedResources& resources,
+                  juce::AudioProcessorValueTreeState& state,
+                  ColourRampBank& colourRamps);
     ~FftComponent() override;
 
     void paint (juce::Graphics& g) override;
@@ -20,15 +25,20 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
     class Content : public juce::Component,
                     private juce::AudioProcessorValueTreeState::Listener
     {
     public:
-        Content (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+        Content (SharedResources& resources,
+                 juce::AudioProcessorValueTreeState& state,
+                 ColourRampBank& colourRamps);
         ~Content() override;
 
         void resized() override;
         int getPreferredHeight() const;
+        void syncGradientFromBank();
 
     private:
         void parameterChanged (const juce::String& parameterID, float newValue) override;
@@ -45,6 +55,7 @@ private:
 
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
+        ColourRampBank& colourRamps;
         ComboBoxLookAndFeel comboLookAndFeel;
 
         juce::Label titleLabel;
@@ -104,9 +115,13 @@ private:
         juce::Label glowOffsetYLabel;
         juce::Slider glowOffsetYSlider;
         std::unique_ptr<SliderAttachment> glowOffsetYAttachment;
+
+        juce::Label gradientLabel;
+        GradientStripEditor gradientEditor;
     };
 
     SharedResources& sharedResources;
+    ColourRampBank& colourRamps;
     Content content;
     juce::Viewport viewport;
     std::unique_ptr<CustomScrollBar> customScrollBar;

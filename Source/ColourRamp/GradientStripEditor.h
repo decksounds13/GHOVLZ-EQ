@@ -41,8 +41,24 @@ public:
     std::function<void()> onRampPreview;
     /** Fired when preferred height changes (inline colour picker open/close). */
     std::function<void()> onPreferredHeightChanged;
+    /** Begin UI path-sampling into this editor's ramp (host wires active target + overlay). */
+    std::function<void()> onSamplePath;
 
 private:
+    /** Combo-like field: current gradient swatch + preset name (opens preset picker). */
+    class PresetFieldButton final : public juce::Button
+    {
+    public:
+        PresetFieldButton();
+        void setDisplay (const GradientRamp* ramp, juce::String name);
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+
+    private:
+        GradientRamp displayRamp;
+        juce::String displayName { "Choose preset..." };
+        bool hasRamp = false;
+    };
+
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     int hitTestStop (juce::Point<float> p) const;
     juce::Rectangle<float> stripBounds() const;
@@ -52,10 +68,13 @@ private:
     void notifyHeightChanged();
     void rebuildMapCombo();
     void syncControlsFromRamp();
+    void syncPresetField();
     void simplifyClicked();
     void densifyClicked();
     void savePresetClicked();
     void showPresetMenu();
+    void samplePathClicked();
+    int findMatchingPresetIndex() const;
 
     SharedResources& sharedResources;
     ModeFamily modeFamily;
@@ -70,9 +89,11 @@ private:
     /** Pole count; click toggles Hard / Soft blend (no extra toolbar buttons). */
     juce::TextButton stopCountButton;
     juce::TextButton savePresetButton { "Save" };
-    juce::TextButton presetMenuButton { "Load" };
+    PresetFieldButton presetField;
+    juce::TextButton samplePathButton { "Sample Path" };
     GradientRamp* ramp = nullptr;
     float uiScale = 1.0f;
+    int selectedPresetIndex = -1;
 
     int dragIndex = -1;
     int selectedIndex = -1;

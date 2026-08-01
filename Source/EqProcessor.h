@@ -19,6 +19,8 @@
 #include "LfoMod.h"
 #include "BandSidechain.h"
 #include "ShapeMod.h"
+#include "EqBand.h"
+#include "Menu/SharedResources.h"
 
 class FrequencyResponseComponent;
 class OscilloscopeComponent;
@@ -117,6 +119,11 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    /** UI theme for the current plugin instance (survives editor close/reopen). */
+    void storeSessionUiTheme (const SharedColors& colours, const juce::ValueTree& colourRamps);
+    bool tryRestoreSessionUiTheme (SharedColors& colours, juce::ValueTree& colourRampsOut) const;
+    bool hasSessionUiTheme() const noexcept { return sessionUiThemeValid; }
+
     /** A/B/C/D referencing — four full APVTS snapshots (bypass excluded). */
     enum class AbSlot { A = 0, B = 1, C = 2, D = 3 };
 
@@ -154,6 +161,12 @@ public:
         return publishedLfoPhase[(size_t) lfoIndex].load (std::memory_order_relaxed);
     }
 
+    /** Envelope follower level in dB (smoothed), for threshold meter UI. */
+    float getPublishedEnvDb() const noexcept
+    {
+        return publishedEnvDb.load (std::memory_order_relaxed);
+    }
+
     bool getIsHighpassOn() const { return isHighpassOn; }
     bool getIsLowpassOn() const { return isLowpassOn; }
     bool getIsHighShelfOn() const { return isHighShelfOn; }
@@ -162,6 +175,16 @@ public:
     bool getIsBand2On() const { return isBand2On; }
     bool getIsBand3On() const { return isBand3On; }
     bool getIsBand4On() const { return isBand4On; }
+
+    /** True when the given global display band (0 = Band 1) is enabled. */
+    bool isGlobalBandOn (int globalDisplay) const noexcept;
+    /** First off slot, preferring currentBank's column order then any bank. -1 if all on. */
+    int findFreeGlobalBand (int preferredBank = 0) const noexcept;
+    /** Highest bank index that has at least one band on (0 if none). */
+    int highestBankWithActiveBand() const noexcept;
+    /** Number of banks to show in the faceplate pager (at least 1, grows with use). */
+    int getFaceplateBankCount() const noexcept;
+    void ensureBankAvailable (int bankIndex) noexcept;
 
 
     void setFrequencyResponseComponent (FrequencyResponseComponent* component);
@@ -485,6 +508,7 @@ private:
     ShapeMod::Engine shapeEngine;
     int midiNotesHeld = 0;
     std::atomic<float> publishedEnvAmount { 0.0f };
+    std::atomic<float> publishedEnvDb { -140.0f };
     std::atomic<float> publishedShapeBipolar { 0.0f };
     std::atomic<float> publishedShapePhase { 0.0f };
 
@@ -494,8 +518,57 @@ private:
     /** Global Side Check (S<=M): post-Spectral BP-lattice Mid/Side balance. */
     SideCheck::Processor sideCheck;
 
-    /** Per-band sat engines (own juce::dsp::Oversampling state each). */
-    std::array<BandSaturation::Engine, 8> bandSatEngines;
+    /** Per-band sat engines — Bank 1 uses internal indices 0–7; extended use global 8–63. */
+    std::array<BandSaturation::Engine, EqBand::kMaxBands> bandSatEngines;
+
+    /**
+        Agnostic IIR slots for banks 2–8 (global display 8…63).
+        Index = globalDisplay - kBankSize.
+    */
+    struct ExtendedBandSlot
+    {
+        std::array<StereoIIR, FilterSlope::maxBiquadStages> cascade {};
+        StereoIIR single;
+        int activeStages = 1;
+        bool useCascade = false;
+        CoeffCache lastCoeffs {};
+    };
+
+    /** Cached APVTS atomics — never build juce::String on the audio thread. */
+    struct ExtendedParamPtrs
+    {
+        std::atomic<float>* on = nullptr;
+        std::atomic<float>* frequency = nullptr;
+        std::atomic<float>* q = nullptr;
+        std::atomic<float>* gain = nullptr;
+        std::atomic<float>* type = nullptr;
+        std::atomic<float>* slope = nullptr;
+        std::atomic<float>* channel = nullptr;
+        std::atomic<float>* dynamic = nullptr;
+        std::atomic<float>* dynThreshold = nullptr;
+        std::atomic<float>* attackMs = nullptr;
+        std::atomic<float>* releaseMs = nullptr;
+    };
+
+    static constexpr int kNumExtended = EqBand::kMaxBands - EqBand::kBankSize;
+    std::array<ExtendedBandSlot, kNumExtended> extendedSlots {};
+    std::array<DynamicEq::BandState, kNumExtended> extendedDyn {};
+    std::array<ExtendedParamPtrs, kNumExtended> extendedParams {};
+    std::array<juce::LinearSmoothedValue<float>, kNumExtended> smoothExtFreq {};
+    std::array<juce::LinearSmoothedValue<float>, kNumExtended> smoothExtQ {};
+    std::array<juce::LinearSmoothedValue<float>, kNumExtended> smoothExtGain {};
+    /** UI: how many banks have been opened (1…kMaxBanks). Grows when creating past a full bank. */
+    std::atomic<int> banksOpened { 1 };
+    /** Fast audio-thread gate — skip extended DSP when zero. */
+    std::atomic<int> extendedOnCount { 0 };
+
+    void cacheExtendedParamPointers();
+    void refreshExtendedOnCount() noexcept;
+    void prepareExtendedSlots (const juce::dsp::ProcessSpec& spec, int blockSize);
+    void processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock,
+                               const float* dryL, const float* dryR, int numSamples,
+                               bool proportionalQOn);
+    void appendExtendedLinearPhaseSpecs (LinearPhaseEqEngine::BandSpec* specs, int& count) const;
 
     /** Stage 2 — post-Spectral bus sat. */
     BandSaturation::Engine spectralSatEngine;
@@ -548,6 +621,10 @@ private:
 
     juce::ValueTree abSnapshots[abSlotCount];
     AbSlot activeAbSlot = AbSlot::A;
+
+    bool sessionUiThemeValid = false;
+    SharedColors sessionUiColors;
+    juce::ValueTree sessionColourRamps;
 
     juce::ValueTree captureStateForSnapshot();
     void applySnapshotState (const juce::ValueTree& snapshot);

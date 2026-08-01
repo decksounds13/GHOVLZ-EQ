@@ -145,6 +145,16 @@ EqProcessor::EqProcessor()
 
     treeState.addParameterListener("outputGain", this);
 
+    cacheExtendedParamPointers();
+    for (int g = EqBand::kBankSize; g < EqBand::kMaxBands; ++g)
+    {
+        treeState.addParameterListener (EqBand::frequencyParamIDForGlobal (g), this);
+        treeState.addParameterListener (EqBand::qParamIDForGlobal (g), this);
+        treeState.addParameterListener (EqBand::gainParamIDForGlobal (g), this);
+        treeState.addParameterListener (EqBand::onOffParamIDForGlobal (g), this);
+    }
+    refreshExtendedOnCount();
+
     treeState.addParameterListener("menuBackgroundColor", this);
 
     treeState.addParameterListener("BLOCK_ID", this);
@@ -267,6 +277,14 @@ EqProcessor::~EqProcessor()
     treeState.removeParameterListener("band4Frequency", this);
 
     treeState.removeParameterListener("outputGain", this);
+
+    for (int g = EqBand::kBankSize; g < EqBand::kMaxBands; ++g)
+    {
+        treeState.removeParameterListener (EqBand::frequencyParamIDForGlobal (g), this);
+        treeState.removeParameterListener (EqBand::qParamIDForGlobal (g), this);
+        treeState.removeParameterListener (EqBand::gainParamIDForGlobal (g), this);
+        treeState.removeParameterListener (EqBand::onOffParamIDForGlobal (g), this);
+    }
 
     treeState.removeParameterListener("menuBackgroundColor", this);
 
@@ -1278,6 +1296,65 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pBand3OnOff));
     params.push_back(std::move(pBand4OnOff));
 
+    // Banks 2–8 (Band 9–64): uniform eqB{NN}* IDs, all off / type-agnostic defaults.
+    for (int g = EqBand::kBankSize; g < EqBand::kMaxBands; ++g)
+    {
+        const auto prefix = EqBand::extendedPrefix (g);
+        const auto label = "Band" + juce::String (g + 1);
+        const float defaultHz = 1000.0f;
+
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "Frequency", label + "Frequency",
+            juce::NormalisableRange<float> (20.0f, 20000.0f, 1.0f, 0.2f), defaultHz));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "Q", label + "Q",
+            juce::NormalisableRange<float> (0.15f, 10.0f, 0.01f, 0.25f), 0.707f));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "Gain", label + "Gain", -24.0f, 24.0f, 0.0f));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "OnOff", label + "OnOff", false));
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            prefix + "Type", label + "Type", FilterType::getChoiceNames(), FilterType::bell));
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            prefix + "Slope", label + "Slope", FilterSlope::getChoiceNames(), FilterSlope::db12));
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            prefix + "Channel", label + "Channel", BandChannel::getChoiceNames(), BandChannel::stereo));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "Dynamic", label + "Dynamic", false));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "Sidechain", label + "Sidechain", false));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "SidechainMidi", label + "SidechainMidi", false));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "Spectral", label + "Spectral", false));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "DynThreshold", label + "DynThreshold",
+            juce::NormalisableRange<float> (-120.0f, 0.0f, 0.1f), -24.0f));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "AttackMs", label + "AttackMs", DynamicEq::attackMsRange(), DynamicEq::attackMs));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "ReleaseMs", label + "ReleaseMs", DynamicEq::releaseMsRange(), DynamicEq::releaseMs));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "SpectralResHz", label + "SpectralResHz",
+            juce::NormalisableRange<float> (SpectralBinning::kMinBandwidthHz, SpectralBinning::kTargetBandwidthHz, 0.05f),
+            SpectralBinning::kDefaultBandwidthHz));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "SpectralDepth", label + "SpectralAmount",
+            juce::NormalisableRange<float> (SpectralDynamics::kMinSpectralAmount, SpectralDynamics::kMaxSpectralAmount, 0.01f),
+            SpectralDynamics::kDefaultSpectralAmount));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "SpectralExpand", label + "SpectralExpand", false));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "Sat", label + "Sat", false));
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            prefix + "SatModel", label + "SatModel", BandSaturation::getModelChoiceNames(), BandSaturation::tube));
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            prefix + "SatPost", label + "SatPost", false));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            prefix + "SatDriveDb", label + "SatDriveDb",
+            juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb, BandSaturation::kMaxSatDriveDb, 0.01f),
+            BandSaturation::kDefaultSatDriveDb));
+    }
 
     return { params.begin(), params.end() };
 }
@@ -1411,7 +1488,27 @@ void EqProcessor::parameterChanged(const juce::String& parameterID, float newVal
         smoothOutputGain.setTargetValue(newValue);
     }
 
-
+    // Extended banks 2–8 (eqB09…eqB64) — keep smoothers in sync without String work on audio thread.
+    if (parameterID.startsWith ("eqB") && parameterID.length() >= 8)
+    {
+        // eqB09Frequency / eqB12OnOff …
+        const int bandNumber = parameterID.substring (3, 5).getIntValue(); // 09..64
+        if (bandNumber >= 9 && bandNumber <= EqBand::kMaxBands)
+        {
+            const int ei = bandNumber - 1 - EqBand::kBankSize; // globalDisplay - 8
+            if (ei >= 0 && ei < kNumExtended)
+            {
+                if (parameterID.endsWith ("Frequency"))
+                    smoothExtFreq[(size_t) ei].setTargetValue (newValue);
+                else if (parameterID.endsWith ("Q") && ! parameterID.contains ("Frequency"))
+                    smoothExtQ[(size_t) ei].setTargetValue (newValue);
+                else if (parameterID.endsWith ("Gain"))
+                    smoothExtGain[(size_t) ei].setTargetValue (newValue);
+                else if (parameterID.endsWith ("OnOff"))
+                    refreshExtendedOnCount();
+            }
+        }
+    }
 
 if (parameterID == "highpassOnOff")
 {
@@ -1633,6 +1730,266 @@ void EqProcessor::updateParameters()
     isBand2On     = onOff ("band2OnOff");
     isBand3On     = onOff ("band3OnOff");
     isBand4On     = onOff ("band4OnOff");
+
+    // Grow opened-bank count if any extended band is already on (preset load).
+    const int hi = highestBankWithActiveBand();
+    banksOpened.store (juce::jmax (1, hi + 1), std::memory_order_relaxed);
+
+    // Snap extended smoothers to restored APVTS (preset / A-B).
+    for (int ei = 0; ei < kNumExtended; ++ei)
+    {
+        const auto& p = extendedParams[(size_t) ei];
+        if (p.frequency != nullptr)
+            smoothExtFreq[(size_t) ei].setCurrentAndTargetValue (p.frequency->load());
+        if (p.q != nullptr)
+            smoothExtQ[(size_t) ei].setCurrentAndTargetValue (p.q->load());
+        if (p.gain != nullptr)
+            smoothExtGain[(size_t) ei].setCurrentAndTargetValue (p.gain->load());
+    }
+    refreshExtendedOnCount();
+}
+
+void EqProcessor::cacheExtendedParamPointers()
+{
+    for (int g = EqBand::kBankSize; g < EqBand::kMaxBands; ++g)
+    {
+        const int ei = g - EqBand::kBankSize;
+        auto& p = extendedParams[(size_t) ei];
+        p.on = treeState.getRawParameterValue (EqBand::onOffParamIDForGlobal (g));
+        p.frequency = treeState.getRawParameterValue (EqBand::frequencyParamIDForGlobal (g));
+        p.q = treeState.getRawParameterValue (EqBand::qParamIDForGlobal (g));
+        p.gain = treeState.getRawParameterValue (EqBand::gainParamIDForGlobal (g));
+        p.type = treeState.getRawParameterValue (FilterType::paramIDForGlobal (g));
+        p.slope = treeState.getRawParameterValue (FilterSlope::paramIDForGlobal (g));
+        p.channel = treeState.getRawParameterValue (BandChannel::paramIDForGlobal (g));
+        p.dynamic = treeState.getRawParameterValue (DynamicEq::dynamicParamIDForGlobal (g));
+        p.dynThreshold = treeState.getRawParameterValue (DynamicEq::thresholdParamIDForGlobal (g));
+        p.attackMs = treeState.getRawParameterValue (DynamicEq::attackMsParamIDForGlobal (g));
+        p.releaseMs = treeState.getRawParameterValue (DynamicEq::releaseMsParamIDForGlobal (g));
+    }
+}
+
+void EqProcessor::refreshExtendedOnCount() noexcept
+{
+    int n = 0;
+    for (const auto& p : extendedParams)
+        if (p.on != nullptr && p.on->load() > 0.5f)
+            ++n;
+    extendedOnCount.store (n, std::memory_order_relaxed);
+}
+
+bool EqProcessor::isGlobalBandOn (int globalDisplay) const noexcept
+{
+    if (globalDisplay < 0 || globalDisplay >= EqBand::kMaxBands)
+        return false;
+
+    if (globalDisplay >= EqBand::kBankSize)
+    {
+        const auto* on = extendedParams[(size_t) (globalDisplay - EqBand::kBankSize)].on;
+        return on != nullptr && on->load() > 0.5f;
+    }
+
+    const auto id = EqBand::onOffParamIDForGlobal (globalDisplay);
+    if (auto* v = treeState.getRawParameterValue (id))
+        return v->load() > 0.5f;
+    return false;
+}
+
+int EqProcessor::findFreeGlobalBand (int preferredBank) const noexcept
+{
+    preferredBank = juce::jlimit (0, EqBand::kMaxBanks - 1, preferredBank);
+    const int opened = juce::jlimit (1, EqBand::kMaxBanks, banksOpened.load (std::memory_order_relaxed));
+
+    auto scanBank = [this] (int bank) -> int
+    {
+        for (int slot = 0; slot < EqBand::kBankSize; ++slot)
+        {
+            const int g = EqBand::globalFromBankSlot (bank, slot);
+            if (! isGlobalBandOn (g))
+                return g;
+        }
+        return -1;
+    };
+
+    if (const int g = scanBank (preferredBank); g >= 0)
+        return g;
+
+    for (int bank = 0; bank < opened; ++bank)
+    {
+        if (bank == preferredBank)
+            continue;
+        if (const int g = scanBank (bank); g >= 0)
+            return g;
+    }
+
+    // Next unused bank (pre-allocated, all off).
+    if (opened < EqBand::kMaxBanks)
+        return EqBand::globalFromBankSlot (opened, 0);
+
+    return -1;
+}
+
+int EqProcessor::highestBankWithActiveBand() const noexcept
+{
+    int highest = 0;
+    for (int g = 0; g < EqBand::kMaxBands; ++g)
+        if (isGlobalBandOn (g))
+            highest = juce::jmax (highest, EqBand::bankFromGlobal (g));
+    return highest;
+}
+
+int EqProcessor::getFaceplateBankCount() const noexcept
+{
+    const int opened = banksOpened.load (std::memory_order_relaxed);
+    return juce::jlimit (1, EqBand::kMaxBanks, juce::jmax (opened, highestBankWithActiveBand() + 1));
+}
+
+void EqProcessor::ensureBankAvailable (int bankIndex) noexcept
+{
+    bankIndex = juce::jlimit (0, EqBand::kMaxBanks - 1, bankIndex);
+    const int need = bankIndex + 1;
+    int cur = banksOpened.load (std::memory_order_relaxed);
+    while (cur < need && ! banksOpened.compare_exchange_weak (cur, need, std::memory_order_relaxed))
+    {}
+}
+
+void EqProcessor::prepareExtendedSlots (const juce::dsp::ProcessSpec& spec, int blockSize)
+{
+    juce::dsp::ProcessSpec monoSpec = spec;
+    monoSpec.numChannels = 1;
+
+    for (auto& slot : extendedSlots)
+    {
+        for (auto& stage : slot.cascade)
+            stage.prepare (spec);
+        slot.single.prepare (spec);
+        slot.activeStages = 1;
+        slot.useCascade = false;
+        slot.lastCoeffs = {};
+    }
+
+    for (auto& dyn : extendedDyn)
+        dyn.prepare (monoSpec, blockSize);
+}
+
+void EqProcessor::appendExtendedLinearPhaseSpecs (LinearPhaseEqEngine::BandSpec* specs, int& count) const
+{
+    if (specs == nullptr || extendedOnCount.load (std::memory_order_relaxed) <= 0)
+        return;
+
+    for (int ei = 0; ei < kNumExtended && count < LinearPhaseEqEngine::maxBands; ++ei)
+    {
+        const auto& p = extendedParams[(size_t) ei];
+        if (p.on == nullptr || p.on->load() <= 0.5f)
+            continue;
+
+        auto& s = specs[count++];
+        s.enabled = true;
+        // Use current smoothed values (already advanced in processBlock via take/skip).
+        s.frequency = smoothExtFreq[(size_t) ei].getCurrentValue();
+        s.q = smoothExtQ[(size_t) ei].getCurrentValue();
+        s.gainDb = smoothExtGain[(size_t) ei].getCurrentValue();
+        s.type = p.type != nullptr ? (int) std::lround (p.type->load()) : FilterType::bell;
+        s.slope = p.slope != nullptr ? (int) std::lround (p.slope->load()) : FilterSlope::db12;
+        s.isHighpass = (s.type == FilterType::highpass);
+        s.isLowpass = (s.type == FilterType::lowpass);
+    }
+}
+
+void EqProcessor::processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock,
+                                        const float* dryL, const float* dryR, int numSamples,
+                                        bool proportionalQOn)
+{
+    if (extendedOnCount.load (std::memory_order_relaxed) <= 0)
+        return;
+
+    const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+    if (sr <= 0.0)
+        return;
+
+    for (int ei = 0; ei < kNumExtended; ++ei)
+    {
+        const auto& p = extendedParams[(size_t) ei];
+        if (p.on == nullptr || p.on->load() <= 0.5f)
+        {
+            // Keep idle smoothers advancing so re-enable doesn't jump.
+            smoothExtFreq[(size_t) ei].skip (numSamples);
+            smoothExtQ[(size_t) ei].skip (numSamples);
+            smoothExtGain[(size_t) ei].skip (numSamples);
+            continue;
+        }
+
+        auto& slot = extendedSlots[(size_t) ei];
+        auto& dyn = extendedDyn[(size_t) ei];
+
+        smoothExtFreq[(size_t) ei].skip (numSamples);
+        smoothExtQ[(size_t) ei].skip (numSamples);
+        smoothExtGain[(size_t) ei].skip (numSamples);
+
+        const float freq = smoothExtFreq[(size_t) ei].getCurrentValue();
+        const float q = smoothExtQ[(size_t) ei].getCurrentValue();
+        float gainDb = smoothExtGain[(size_t) ei].getCurrentValue();
+        const int type = p.type != nullptr ? (int) std::lround (p.type->load()) : FilterType::bell;
+        const int slope = p.slope != nullptr ? (int) std::lround (p.slope->load()) : FilterSlope::db12;
+        const int channel = p.channel != nullptr ? (int) std::lround (p.channel->load()) : BandChannel::stereo;
+        const bool dynOn = p.dynamic != nullptr && p.dynamic->load() > 0.5f;
+
+        if (dynOn && FilterType::usesGain (type) && dryL != nullptr
+            && p.dynThreshold != nullptr && p.attackMs != nullptr && p.releaseMs != nullptr)
+        {
+            const float thresh = p.dynThreshold->load();
+            const float atk = p.attackMs->load();
+            const float rel = p.releaseMs->load();
+            dyn.updateEnvelopeCoeffs (atk, rel, sr, numSamples);
+            const float amount = dyn.detectAmount (dryL, dryR, numSamples, sr, freq, q, thresh);
+            gainDb = DynamicEq::effectiveGainDb (true, gainDb, amount);
+            dyn.publishEffectiveGain (gainDb);
+        }
+        else
+        {
+            dyn.publishEffectiveGain (gainDb);
+        }
+
+        const float effQ = FilterType::effectiveBellQ (type, q, gainDb, proportionalQOn);
+
+        if (FilterType::isHpLp (type))
+        {
+            const int cacheKey = slope + (type == FilterType::highpass ? 0 : 100);
+            if (coeffsNeedUpdate (slot.lastCoeffs, freq, effQ, 0.0f, cacheKey))
+            {
+                auto coeffs = (type == FilterType::highpass)
+                    ? FilterSlope::makeHighpassCoeffs (sr, freq, effQ, slope)
+                    : FilterSlope::makeLowpassCoeffs (sr, freq, effQ, slope);
+                slot.activeStages = juce::jmin ((int) coeffs.size(), FilterSlope::maxBiquadStages);
+                for (int i = 0; i < slot.activeStages; ++i)
+                    *slot.cascade[(size_t) i].state = *coeffs.getUnchecked (i);
+                slot.useCascade = true;
+                storeCoeffs (slot.lastCoeffs, freq, effQ, 0.0f, cacheKey);
+            }
+
+            BandChannel::process (audioBlock, channel, [&] (juce::dsp::AudioBlock<float>& block)
+            {
+                for (int i = 0; i < slot.activeStages; ++i)
+                    slot.cascade[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
+            });
+        }
+        else
+        {
+            const int cacheKey = type + 1000;
+            if (coeffsNeedUpdate (slot.lastCoeffs, freq, effQ, gainDb, cacheKey))
+            {
+                if (auto coeffs = FilterType::makeCoefficients (type, sr, freq, effQ, gainDb))
+                    *slot.single.state = *coeffs;
+                slot.useCascade = false;
+                storeCoeffs (slot.lastCoeffs, freq, effQ, gainDb, cacheKey);
+            }
+
+            BandChannel::process (audioBlock, channel, [&] (juce::dsp::AudioBlock<float>& block)
+            {
+                slot.single.process (juce::dsp::ProcessContextReplacing<float> (block));
+            });
+        }
+    }
 }
 
 
@@ -1771,6 +2128,7 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     sideCheck.prepare (sampleRate, samplesPerBlock);
     for (auto& sat : bandSatEngines)
         sat.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
+    prepareExtendedSlots (spec, samplesPerBlock);
     spectralSatEngine.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
     linearPhaseEngine.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
     // Headroom for hosts that occasionally exceed the prepare block size.
@@ -1825,6 +2183,21 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     smoothknob20.reset(sampleRate, 0.00025);
     smoothknob21.reset(sampleRate, 0.001);
     smoothknob22.reset(sampleRate, 0.0002);
+
+    // Extended banks — same slews as Bank 1 peaking slots.
+    for (int ei = 0; ei < kNumExtended; ++ei)
+    {
+        smoothExtFreq[(size_t) ei].reset (sampleRate, 0.00025);
+        smoothExtQ[(size_t) ei].reset (sampleRate, 0.001);
+        smoothExtGain[(size_t) ei].reset (sampleRate, 0.0002);
+        const auto& p = extendedParams[(size_t) ei];
+        if (p.frequency != nullptr)
+            smoothExtFreq[(size_t) ei].setCurrentAndTargetValue (p.frequency->load());
+        if (p.q != nullptr)
+            smoothExtQ[(size_t) ei].setCurrentAndTargetValue (p.q->load());
+        if (p.gain != nullptr)
+            smoothExtGain[(size_t) ei].setCurrentAndTargetValue (p.gain->load());
+    }
 
     smoothOutputGain.reset (sampleRate, 0.0002);
     if (auto* v = treeState.getRawParameterValue ("outputGain"))
@@ -1967,6 +2340,12 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         take (smoothknob13); take (smoothknob14); take (smoothknob15); take (smoothknob16);
         take (smoothknob17); take (smoothknob18); take (smoothknob19); take (smoothknob20);
         take (smoothknob21); take (smoothknob22);
+        for (int ei = 0; ei < kNumExtended; ++ei)
+        {
+            take (smoothExtFreq[(size_t) ei]);
+            take (smoothExtQ[(size_t) ei]);
+            take (smoothExtGain[(size_t) ei]);
+        }
 
         // Keep host PDC unchanged vs active processing (Linear Phase ~512 samples).
         // Zeroing latency on bypass forces Ableton/etc. to rebuffer → skip/stutter.
@@ -2135,6 +2514,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         const float* envR = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : envL;
         const float envAmount = modEnvFollower.process (envL, envR, numSamples, envThresh);
         publishedEnvAmount.store (envAmount, std::memory_order_relaxed);
+        publishedEnvDb.store (modEnvFollower.envelopeDb, std::memory_order_relaxed);
         const float envBipolar = LfoMod::envAmountToBipolar (envAmount);
 
         // Shape modulator — same rate/sync/phase/retrig model as LFOs.
@@ -2459,7 +2839,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     // Linear Phase = single FIR matching the same magnitude response, then S as today.
     if (useLinearPhase)
     {
-        LinearPhaseEqEngine::BandSpec specs[8] {};
+        LinearPhaseEqEngine::BandSpec specs[LinearPhaseEqEngine::maxBands] {};
+        int specCount = 0;
 
         // Cascade whenever a slot is typed HP/LP (any band).
         auto fillHpLpFlags = [] (LinearPhaseEqEngine::BandSpec& s, int type, int slope)
@@ -2518,7 +2899,19 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         specs[7].gainDb = effBand4Gain;
         fillHpLpFlags (specs[7], b4Type, BandChannel::readChoiceIndex (treeState, "band4Slope"));
 
-        linearPhaseEngine.setBands (specs, 8);
+        specCount = 8;
+        // Advance extended smoothers here (min-phase advances them inside processExtendedBands).
+        if (extendedOnCount.load (std::memory_order_relaxed) > 0)
+        {
+            for (int ei = 0; ei < kNumExtended; ++ei)
+            {
+                smoothExtFreq[(size_t) ei].skip (numSamples);
+                smoothExtQ[(size_t) ei].skip (numSamples);
+                smoothExtGain[(size_t) ei].skip (numSamples);
+            }
+        }
+        appendExtendedLinearPhaseSpecs (specs, specCount);
+        linearPhaseEngine.setBands (specs, specCount);
         linearPhaseEngine.process (audioBlock);
     }
     else
@@ -2733,6 +3126,15 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                            FilterType::effectiveBellQ (b4Type, smoothedBand4Q, effBand4Gain, proportionalQOn),
                            effBand4Gain, "band4Slope", "band4Channel", lastBand4, band4,
                            "band4Sat", "band4SatPost", "band4SatModel", "band4SatDriveDb", 3);
+
+        // Banks 2–8 (Band 9–64) — agnostic IIR slots after Bank 1.
+        {
+            const float* dryL = spectralDetectBuffer.getNumChannels() > 0
+                                    ? spectralDetectBuffer.getReadPointer (0) : nullptr;
+            const float* dryR = spectralDetectBuffer.getNumChannels() > 1
+                                    ? spectralDetectBuffer.getReadPointer (1) : dryL;
+            processExtendedBands (audioBlock, dryL, dryR, numSamples, proportionalQOn);
+        }
     }
 
     // Spectral dynamics (S): ONE shared coarse IIR bandpass bank after the EQ chain.
@@ -3277,6 +3679,23 @@ bool EqProcessor::hasEditor() const
 juce::AudioProcessorEditor* EqProcessor::createEditor()
 {
     return new EqEditor(*this, treeState, m_analyser);  // Assuming `parameters` and `analyser` are member variables of EqProcessor
+}
+
+void EqProcessor::storeSessionUiTheme (const SharedColors& colours, const juce::ValueTree& colourRamps)
+{
+    sessionUiColors = colours;
+    sessionColourRamps = colourRamps.createCopy();
+    sessionUiThemeValid = true;
+}
+
+bool EqProcessor::tryRestoreSessionUiTheme (SharedColors& colours, juce::ValueTree& colourRampsOut) const
+{
+    if (! sessionUiThemeValid)
+        return false;
+
+    colours = sessionUiColors;
+    colourRampsOut = sessionColourRamps.createCopy();
+    return true;
 }
 
 

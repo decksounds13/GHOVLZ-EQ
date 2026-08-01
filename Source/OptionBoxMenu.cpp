@@ -11,6 +11,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
 
     setSize (designWidth, designHeight);
+    setPaintingIsUnclipped (true);
 
     // ComboBox is populated per-band in setupFilterModelMenu().
     // Same pattern as working Level Meters / Spectrum combos (stock ComboBox + colour LAF).
@@ -75,9 +76,10 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     addChildComponent (spectralSatDriveKnob);
 
     // Initialize the label for the current band name
-    bandNameLabel.setFont(juce::Font("Lato Black", 18.0f, juce::Font::plain));
-    bandNameLabel.setJustificationType(juce::Justification::centredLeft);
-    bandNameLabel.setColour(juce::Label::textColourId, colors().optionText);
+    bandNameLabel.setFont(juce::Font("Lato Black", 15.0f, juce::Font::plain));
+    bandNameLabel.setJustificationType(juce::Justification::centred);
+    bandNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    bandNameLabel.setMinimumHorizontalScale (0.5f);
     bandNameLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible(bandNameLabel);
 
@@ -395,7 +397,8 @@ void OptionBoxMenu::applyThemeToChildControls()
     {
         lab.setColour (juce::Label::textColourId, c.optionText);
     };
-    styleLabel (bandNameLabel);
+    // Band title stays high-contrast white so "Band 12" remains readable on the header.
+    bandNameLabel.setColour (juce::Label::textColourId, juce::Colours::white);
     styleLabel (frequencyLabel);
     styleLabel (gainLabel);
     styleLabel (qLabel);
@@ -486,8 +489,13 @@ void OptionBoxMenu::paint(juce::Graphics& g)
     const float borderWidth = 8.0f;
     const float thinOutlineWidth = 2.0f;
 
+    juce::Path panelPath;
+    panelPath.addRoundedRectangle (0.0f, 0.0f, width, height, cornerRadius);
+    if (SharedResources::glowShadowEffectsEnabled())
+        panelShadow.render (g, panelPath);
+
     g.setGradientFill (bodyGrad);
-    g.fillRoundedRectangle (0.0f, 0.0f, width, height, cornerRadius);
+    g.fillPath (panelPath);
 
     juce::Path borderPath;
     const float offset = borderWidth * 0.5f;
@@ -526,9 +534,10 @@ void OptionBoxMenu::resized()
     juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
 
     // Top-left gold < > cycle bands without moving the box.
-    constexpr int navSize = 20;
-    constexpr int navGap = 3;
-    constexpr int navLeft = 14;
+    constexpr int navSize = 18;
+    constexpr int navGap = 2;
+    constexpr int navLeft = 12;
+    onOffButton1Size = 28;
     const int navY = labelY + (onOffButton1Size - navSize) / 2;
     prevBandButton.setBounds (navLeft, navY, navSize, navSize);
     nextBandButton.setBounds (navLeft + navSize + navGap, navY, navSize, navSize);
@@ -537,11 +546,13 @@ void OptionBoxMenu::resized()
     prevBandButton.toFront (false);
     nextBandButton.toFront (false);
 
-    onOffButton1->setBounds (getWidth() * .92 - onOffButton1Size, labelY, onOffButton1Size, onOffButton1Size);
+    onOffButton1->setBounds (getWidth() - onOffButton1Size - 10, labelY, onOffButton1Size, onOffButton1Size);
 
-    const int nameLeft = nextBandButton.getRight() + 5;
-    const int nameRight = onOffButton1->getX() - 2;
-    bandNameLabel.setBounds (nameLeft, labelY, juce::jmax (20, nameRight - nameLeft), labelHeight);
+    // Give "Band 12" / "Band 64" room — was ~44px and clipped to ellipsis.
+    const int nameLeft = nextBandButton.getRight() + 4;
+    const int nameRight = onOffButton1->getX() - 3;
+    bandNameLabel.setBounds (nameLeft, labelY, juce::jmax (36, nameRight - nameLeft), labelHeight);
+    bandNameLabel.toFront (false);
 
     const int satBtnW = 28;
     const int prePostW = 32;
@@ -1012,6 +1023,9 @@ void OptionBoxMenu::setInteractionFaded (bool shouldFade)
 
 juce::String OptionBoxMenu::getOnOffParamIDForBand (int bandIndex) const
 {
+    if (bandIndex >= EqBand::kBankSize && bandIndex < EqBand::kMaxBands)
+        return EqBand::onOffParamIDForGlobal (bandIndex);
+
     switch (bandIndex)
     {
         case 0: return "band1OnOff";
@@ -1053,10 +1067,44 @@ void OptionBoxMenu::cycleBand (int delta)
     // Switching bands should only reload that band's settings — clear any drag-fade.
     interactionFaded = false;
 
-    // Cycle in Band 1→8 display order (not raw internal indices).
-    const int display = EqBand::displayFromInternal (currentBandIndex);
-    const int nextDisplay = (display + delta + EqBand::kCount * 8) % EqBand::kCount;
-    const int next = EqBand::internalFromDisplay (nextDisplay);
+    // currentBandIndex is internal 0–7 or global display 8–63.
+    const int currentGlobal = (currentBandIndex < EqBand::kBankSize)
+                                  ? EqBand::displayFromInternal (currentBandIndex)
+                                  : currentBandIndex;
+
+    auto isGlobalOn = [this] (int globalDisplay) -> bool
+    {
+        const auto id = EqBand::onOffParamIDForGlobal (globalDisplay);
+        if (id.isEmpty())
+            return false;
+        if (auto* v = treeState.getRawParameterValue (id))
+            return v->load() > 0.5f;
+        return false;
+    };
+
+    int onCount = 0;
+    for (int g = 0; g < EqBand::kMaxBands; ++g)
+        if (isGlobalOn (g))
+            ++onCount;
+
+    // Prefer ON bands when at least two are enabled; otherwise walk every slot.
+    const bool preferOn = onCount >= 2;
+    const int numSlots = EqBand::kMaxBands;
+    int nextGlobal = currentGlobal;
+
+    for (int step = 1; step <= numSlots; ++step)
+    {
+        const int candidate = ((currentGlobal + delta * step) % numSlots + numSlots) % numSlots;
+        if (! preferOn || isGlobalOn (candidate))
+        {
+            nextGlobal = candidate;
+            break;
+        }
+    }
+
+    const int next = (nextGlobal < EqBand::kBankSize)
+                         ? EqBand::internalFromDisplay (nextGlobal)
+                         : nextGlobal;
     setCurrentBandIndex (next, cachedBandNames.data());
 
     // Stay put — do not call setInitialPosition.
@@ -1089,7 +1137,9 @@ void OptionBoxMenu::listenToCurrentBandDynamic (bool shouldListen)
     if (! shouldListen)
         return;
 
-    currentDynamicParamID = DynamicEq::dynamicParamIDForBandIndex (currentBandIndex);
+    currentDynamicParamID = (currentBandIndex >= EqBand::kBankSize)
+                                ? DynamicEq::dynamicParamIDForGlobal (currentBandIndex)
+                                : DynamicEq::dynamicParamIDForBandIndex (currentBandIndex);
     if (currentDynamicParamID.isNotEmpty())
         treeState.addParameterListener (currentDynamicParamID, this);
 }
@@ -1105,6 +1155,10 @@ void OptionBoxMenu::listenToCurrentBandSpectral (bool shouldListen)
     currentSpectralPackParamID = {};
 
     if (! shouldListen)
+        return;
+
+    // Spectral lattice is Bank 1 only — do not bind for extended bands.
+    if (! SpectralDynamics::supportsSpectral (currentBandIndex))
         return;
 
     currentSpectralParamID = SpectralDynamics::spectralParamIDForBandIndex (currentBandIndex);
@@ -1325,18 +1379,35 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     spectralAmountSlider.onValueChange = nullptr;
     spectralAmountAttachment.reset();
 
-    const auto dynID = DynamicEq::dynamicParamIDForBandIndex (bandIndex);
-    const auto spectralID = SpectralDynamics::spectralParamIDForBandIndex (bandIndex);
-    const auto threshID = DynamicEq::thresholdParamIDForBandIndex (bandIndex);
-    const auto attackID = DynamicEq::attackMsParamIDForBandIndex (bandIndex);
-    const auto releaseID = DynamicEq::releaseMsParamIDForBandIndex (bandIndex);
-    const auto amountID = SpectralDynamics::spectralAmountParamIDForBandIndex (bandIndex);
-    const auto expandID = SpectralDynamics::spectralExpandParamIDForBandIndex (bandIndex);
-    const auto satID = BandSaturation::satParamIDForBandIndex (bandIndex);
-    const auto satPostID = BandSaturation::satPostParamIDForBandIndex (bandIndex);
-    const auto satDriveID = BandSaturation::satDriveDbParamIDForBandIndex (bandIndex);
-    const auto scID = BandSidechain::sidechainParamIDForBandIndex (bandIndex);
-    const auto scMidiID = BandSidechain::midiParamIDForBandIndex (bandIndex);
+    const bool extended = bandIndex >= EqBand::kBankSize;
+    const auto dynID = extended ? DynamicEq::dynamicParamIDForGlobal (bandIndex)
+                                : DynamicEq::dynamicParamIDForBandIndex (bandIndex);
+    // Spectral is Bank 1 only — leave IDs empty for extended slots.
+    const auto spectralID = (! extended && SpectralDynamics::supportsSpectral (bandIndex))
+                                ? SpectralDynamics::spectralParamIDForBandIndex (bandIndex)
+                                : juce::String();
+    const auto threshID = extended ? DynamicEq::thresholdParamIDForGlobal (bandIndex)
+                                   : DynamicEq::thresholdParamIDForBandIndex (bandIndex);
+    const auto attackID = extended ? DynamicEq::attackMsParamIDForGlobal (bandIndex)
+                                   : DynamicEq::attackMsParamIDForBandIndex (bandIndex);
+    const auto releaseID = extended ? DynamicEq::releaseMsParamIDForGlobal (bandIndex)
+                                    : DynamicEq::releaseMsParamIDForBandIndex (bandIndex);
+    const auto amountID = spectralID.isNotEmpty()
+                              ? SpectralDynamics::spectralAmountParamIDForBandIndex (bandIndex)
+                              : juce::String();
+    const auto expandID = spectralID.isNotEmpty()
+                              ? SpectralDynamics::spectralExpandParamIDForBandIndex (bandIndex)
+                              : juce::String();
+    const auto satID = extended ? BandSaturation::satParamIDForGlobal (bandIndex)
+                                : BandSaturation::satParamIDForBandIndex (bandIndex);
+    const auto satPostID = extended ? BandSaturation::satPostParamIDForGlobal (bandIndex)
+                                    : BandSaturation::satPostParamIDForBandIndex (bandIndex);
+    const auto satDriveID = extended ? BandSaturation::satDriveDbParamIDForGlobal (bandIndex)
+                                     : BandSaturation::satDriveDbParamIDForBandIndex (bandIndex);
+    const auto scID = extended ? BandSidechain::sidechainParamIDForGlobal (bandIndex)
+                               : BandSidechain::sidechainParamIDForBandIndex (bandIndex);
+    const auto scMidiID = extended ? BandSidechain::midiParamIDForGlobal (bandIndex)
+                                   : BandSidechain::midiParamIDForBandIndex (bandIndex);
 
     if (threshID.isEmpty())
     {
@@ -1513,6 +1584,9 @@ void OptionBoxMenu::bindSpectralResSlider (int bandIndex)
 {
     spectralBandwidthAttachment.reset();
 
+    if (! SpectralDynamics::supportsSpectral (bandIndex))
+        return;
+
     const auto resHzID = isPerBandLatticeEnabled()
         ? SpectralDynamics::spectralResHzParamIDForBandIndex (bandIndex)
         : juce::String (SpectralDynamics::spectralResHzParamId());
@@ -1539,12 +1613,14 @@ void OptionBoxMenu::setupFilterModelMenu (int bandIndex)
     filterModelAttachment.reset();
     customComboBox.clear (juce::dontSendNotification);
 
-    // All eight bands share the same type menu (Bell / shelves / notch / BP / HP / LP).
+    // All bands share the same type menu (Bell / shelves / notch / BP / HP / LP).
     const auto names = FilterType::getChoiceNames();
     for (int i = 0; i < names.size(); ++i)
         customComboBox.addItem (names[i], i + 1);
 
-    const auto typeID = FilterType::paramIDForBandIndex (bandIndex);
+    const auto typeID = (bandIndex >= EqBand::kBankSize)
+                            ? FilterType::paramIDForGlobal (bandIndex)
+                            : FilterType::paramIDForBandIndex (bandIndex);
     if (typeID.isNotEmpty())
         filterModelAttachment = std::make_unique<ComboBoxAttachment> (treeState, typeID, customComboBox);
 
@@ -1556,7 +1632,9 @@ void OptionBoxMenu::setupFilterSlopeMenu (int bandIndex)
     filterSlopeAttachment.reset();
     filterSlopeComboBox.clear (juce::dontSendNotification);
 
-    const auto slopeID = FilterSlope::paramIDForBandIndex (bandIndex);
+    const auto slopeID = (bandIndex >= EqBand::kBankSize)
+                             ? FilterSlope::paramIDForGlobal (bandIndex)
+                             : FilterSlope::paramIDForBandIndex (bandIndex);
     if (slopeID.isEmpty())
     {
         filterSlopeComboBox.setVisible (false);
@@ -1683,6 +1761,16 @@ void OptionBoxMenu::bindKnobsToBand (int index)
             onOffButton1->setParameterID ("lowShelfOnOff");
             break;
         default:
+            if (index >= EqBand::kBankSize && index < EqBand::kMaxBands)
+            {
+                attachFloat (frequencyAttachment, EqBand::frequencyParamIDForGlobal (index),
+                             rotaryImageKnobForOptionBox1);
+                attachFloat (gainAttachment, EqBand::gainParamIDForGlobal (index),
+                             rotaryImageKnobForOptionBox2);
+                attachFloat (qAttachment, EqBand::qParamIDForGlobal (index),
+                             rotaryImageKnobForOptionBox3);
+                onOffButton1->setParameterID (EqBand::onOffParamIDForGlobal (index));
+            }
             break;
     }
 
@@ -1692,28 +1780,41 @@ void OptionBoxMenu::bindKnobsToBand (int index)
 
 void OptionBoxMenu::setCurrentBandIndex(int index, const std::string bandNames[])
 {
-    if (index >= 0 && index < 8)
-    {
-        if (bandNames != nullptr)
-        {
-            for (int i = 0; i < 8; ++i)
-                cachedBandNames[(size_t) i] = bandNames[i];
-        }
+    if (index < 0 || index >= EqBand::kMaxBands)
+        return;
 
-        listenToCurrentBandOnOff (false);
-        listenToCurrentBandDynamic (false);
-        listenToCurrentBandSpectral (false);
-        currentBandIndex = index;
-        currentBandName = cachedBandNames[(size_t) index];
-        bandNameLabel.setText(juce::String(currentBandName), juce::NotificationType::dontSendNotification);
-        bindKnobsToBand (index);
-        syncChannelModeButtons();
-        listenToCurrentBandOnOff (true);
-        listenToCurrentBandDynamic (true);
-        listenToCurrentBandSpectral (true);
-        updateDisplayAlpha();
-        resized();
+    if (bandNames != nullptr)
+    {
+        for (int i = 0; i < 8; ++i)
+            cachedBandNames[(size_t) i] = bandNames[i];
     }
+
+    listenToCurrentBandOnOff (false);
+    listenToCurrentBandDynamic (false);
+    listenToCurrentBandSpectral (false);
+    currentBandIndex = index;
+
+    // Always use global display name so Bank 9–64 stay readable ("Band 12").
+    const int globalDisplay = (index < EqBand::kBankSize)
+                                  ? EqBand::displayFromInternal (index)
+                                  : index;
+    currentBandName = EqBand::displayNameForGlobal (globalDisplay).toStdString();
+
+    const auto title = juce::String (currentBandName);
+    bandNameLabel.setText (title, juce::NotificationType::dontSendNotification);
+    bandNameLabel.setTooltip (title);
+    // Two-digit band numbers need a slightly smaller face to avoid "…".
+    bandNameLabel.setFont (juce::Font ("Lato Black",
+                                       globalDisplay >= 9 ? 13.0f : 15.0f,
+                                       juce::Font::plain));
+    bandNameLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+    bindKnobsToBand (index);
+    syncChannelModeButtons();
+    listenToCurrentBandOnOff (true);
+    listenToCurrentBandDynamic (true);
+    listenToCurrentBandSpectral (true);
+    updateDisplayAlpha();
+    resized();
 }
 
 void OptionBoxMenu::setCurrentBandName(const std::string& name) {
@@ -1723,7 +1824,9 @@ void OptionBoxMenu::setCurrentBandName(const std::string& name) {
 
 void OptionBoxMenu::syncChannelModeButtons()
 {
-    const auto paramID = BandChannel::paramIDForBandIndex (currentBandIndex);
+    const auto paramID = (currentBandIndex >= EqBand::kBankSize)
+                             ? BandChannel::paramIDForGlobal (currentBandIndex)
+                             : BandChannel::paramIDForBandIndex (currentBandIndex);
     const int mode = paramID.isNotEmpty()
                          ? BandChannel::readChoiceIndex (treeState, paramID, BandChannel::stereo)
                          : BandChannel::stereo;
@@ -1830,7 +1933,9 @@ void OptionBoxMenu::showSpectralSatContextMenu()
 
 void OptionBoxMenu::showSatContextMenu()
 {
-    const auto modelID = BandSaturation::satModelParamIDForBandIndex (currentBandIndex);
+    const auto modelID = (currentBandIndex >= EqBand::kBankSize)
+                             ? BandSaturation::satModelParamIDForGlobal (currentBandIndex)
+                             : BandSaturation::satModelParamIDForBandIndex (currentBandIndex);
     if (modelID.isEmpty())
         return;
 
@@ -1878,7 +1983,9 @@ void OptionBoxMenu::showSatContextMenu()
 
 void OptionBoxMenu::setChannelMode (int mode)
 {
-    const auto paramID = BandChannel::paramIDForBandIndex (currentBandIndex);
+    const auto paramID = (currentBandIndex >= EqBand::kBankSize)
+                             ? BandChannel::paramIDForGlobal (currentBandIndex)
+                             : BandChannel::paramIDForBandIndex (currentBandIndex);
     if (paramID.isEmpty())
         return;
 
@@ -1925,7 +2032,9 @@ void OptionBoxMenu::buttonClicked(juce::Button* button)
     else
         return;
 
-    const auto paramID = BandChannel::paramIDForBandIndex (currentBandIndex);
+    const auto paramID = (currentBandIndex >= EqBand::kBankSize)
+                             ? BandChannel::paramIDForGlobal (currentBandIndex)
+                             : BandChannel::paramIDForBandIndex (currentBandIndex);
     const int current = paramID.isNotEmpty()
                             ? BandChannel::readChoiceIndex (treeState, paramID, BandChannel::stereo)
                             : BandChannel::stereo;

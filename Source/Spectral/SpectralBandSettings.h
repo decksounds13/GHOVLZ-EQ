@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "../DynamicEq.h"
 #include "../FilterType.h"
+#include "../EqBand.h"
 #include "SpectralBinning.h"
 
 /**
@@ -63,7 +64,11 @@ namespace SpectralDynamics
     constexpr float kMaxSpectralDepth = kMaxSpectralAmount;
     constexpr float kDefaultSpectralDepth = kDefaultSpectralAmount;
 
-    /** Slots in the shared SpectralDynamicsProcessor (one bandpass bank for all). */
+    /**
+        Slots in the shared SpectralDynamicsProcessor.
+        Bank 1 (8) remains fully wired; extended banks register S params for state
+        but arm only when slot < kNumSlots (Bank 1) until the lattice is scaled.
+    */
     constexpr int kNumSlots = 8;
 
     inline juce::String spectralParamIDForBandIndex (int bandIndex)
@@ -152,6 +157,34 @@ namespace SpectralDynamics
         }
     }
 
+    inline juce::String spectralParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return spectralParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "Spectral");
+    }
+
+    inline juce::String spectralResHzParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return spectralResHzParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "SpectralResHz");
+    }
+
+    inline juce::String spectralAmountParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return spectralAmountParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "SpectralDepth");
+    }
+
+    inline juce::String spectralExpandParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return spectralExpandParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "SpectralExpand");
+    }
+
     /** Global lattice pack (one for all spectral bands): Flat / LF / HF. */
     inline constexpr const char* spectralPackParamId() noexcept { return "spectralPack"; }
 
@@ -187,10 +220,10 @@ namespace SpectralDynamics
         return (juce::jlimit (0, 2, current) + 1) % 3;
     }
 
-    /** Same bands as DynamicEq (all eight Band 1–8 slots). */
+    /** Spectral lattice is Bank 1 only (internal indices 0–7). Extended bands hide S. */
     inline bool supportsSpectral (int bandIndex)
     {
-        return DynamicEq::supportsDynamic (bandIndex);
+        return bandIndex >= 0 && bandIndex < EqBand::kBankSize;
     }
 
     /** Map UI bandIndex → engine slot, or -1 if unsupported. */

@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <vector>
+#include "EqBand.h"
 
 namespace BandChannel
 {
@@ -34,6 +35,11 @@ namespace BandChannel
             case 7: return "lowShelfChannel";
             default: return {};
         }
+    }
+
+    inline juce::String paramIDForGlobal (int globalDisplay)
+    {
+        return EqBand::channelParamIDForGlobal (globalDisplay);
     }
 
     /** Safely read an AudioParameterChoice as its integer index. */

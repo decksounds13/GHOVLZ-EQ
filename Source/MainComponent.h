@@ -47,6 +47,11 @@ public:
     /** Call after wordmark bounds change so the preset bar sits under the logo. */
     void relayoutPresetChrome();
     bool isMenuVisible() const noexcept { return menu.isVisible(); }
+    /** Place/clamp the floating Settings panel (fixed content size, free outer aspect). */
+    void layoutSettingsMenu();
+
+    /** Select a ramp target, close Settings if open, then start UI path sampling. */
+    void beginRampSamplingForTarget (ColourRampBank::Target target);
 
     FrequencyResponseComponent& getFrequencyResponseComponent() noexcept { return frequencyResponseComponent; }
 
@@ -57,6 +62,7 @@ public:
     void textEditorFocusLost (juce::TextEditor&) override;
 
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+    void componentMovedOrResized (juce::Component& component, bool wasMoved, bool wasResized) override;
 
     /** Eco mode (FFT/analyser off + all scopes off). Persisted via EqEditor ui_prefs. Default off. */
     void setEcoMode (bool shouldEnable, bool notifyPrefs = true);
@@ -115,6 +121,8 @@ private:
     void showRandomizeDiceMenu();
     void randomizeColourRamps();
     void disableCustomColourRamps();
+    void persistSessionUiTheme();
+    void restoreSessionUiThemeIfAny();
     void cycleEqPreset (int delta);
     void saveCurrentEqPreset();
     void layoutPresetChrome (float scale);
@@ -283,6 +291,10 @@ private:
     SharedResources sharedResources;
     ColourRampBank colourRamps;
     Menu menu;
+    /** Last user-placed settings panel bounds (empty until first layout / user move). */
+    juce::Rectangle<int> settingsMenuBounds;
+    bool settingsMenuBoundsFromUser = false;
+    bool updatingSettingsMenuBounds = false;
     std::unique_ptr<EqPresetStore> eqPresets;
 
     MeterClipState inputMeterClip;

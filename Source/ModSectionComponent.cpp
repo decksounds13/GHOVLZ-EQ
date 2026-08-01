@@ -20,15 +20,6 @@ namespace
         s.setCompactNoValueBox (true);
     }
 
-    void styleTimeImageRotary (RotaryImageKnobForOptionBox& s)
-    {
-        // Attack / Release — hover readout in milliseconds.
-        s.setCompactNoValueBox (false);
-        s.setTextValueSuffix (" ms");
-        s.setNumDecimalPlacesToDisplay (1);
-        s.setTextBoxIsEditable (true);
-    }
-
     /** Place a 1:1 knob inside area (centred). Optional cap keeps LFO knobs consistent. */
     juce::Rectangle<int> squareKnobBounds (juce::Rectangle<int> area, int maxSide = 48)
     {
@@ -64,13 +55,47 @@ namespace
         s.setSliderStyle (juce::Slider::LinearVertical);
         s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 44, 12);
         s.setTextValueSuffix (" dB");
-        s.setTooltip ("Envelope follower threshold in dB");
-        s.setColour (juce::Slider::trackColourId, juce::Colour::fromRGB (50, 40, 28));
-        s.setColour (juce::Slider::backgroundColourId, juce::Colour::fromRGB (20, 14, 10));
+        s.setTooltip ("Envelope follower threshold in dB. Signal fills from the bottom — processing engages when the level reaches the thumb.");
+        // Transparent track so the level meter painted underneath is visible.
+        s.setColour (juce::Slider::trackColourId, juce::Colours::transparentBlack);
+        s.setColour (juce::Slider::backgroundColourId, juce::Colours::transparentBlack);
         s.setColour (juce::Slider::thumbColourId, juce::Colour::fromRGB (220, 180, 90));
         s.setColour (juce::Slider::textBoxTextColourId, juce::Colours::whitesmoke.withAlpha (0.85f));
         s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+        s.setOpaque (false);
+    }
+
+    void paintEnvThresholdMeter (juce::Graphics& g,
+                                 juce::Rectangle<float> meterBounds,
+                                 float envDb,
+                                 float threshDb,
+                                 const SharedColors& c)
+    {
+        constexpr float kFloorDb = -60.0f;
+        constexpr float kCeilDb = 0.0f;
+
+        auto r = meterBounds.reduced (2.0f, 1.0f);
+        if (r.getWidth() < 2.0f || r.getHeight() < 4.0f)
+            return;
+
+        g.setColour (c.modBackground.darker (0.35f).withAlpha (0.95f));
+        g.fillRoundedRectangle (r, 2.5f);
+        g.setColour (c.modBorder.withAlpha (0.55f));
+        g.drawRoundedRectangle (r, 2.5f, 1.0f);
+
+        const float levelNorm = juce::jlimit (0.0f, 1.0f, (envDb - kFloorDb) / (kCeilDb - kFloorDb));
+        auto fill = r.removeFromBottom (r.getHeight() * levelNorm);
+        const bool triggered = envDb >= threshDb;
+        g.setColour (triggered ? c.modAccent.withAlpha (0.92f)
+                               : c.modAccent.withAlpha (0.45f));
+        g.fillRoundedRectangle (fill, 2.0f);
+
+        // Threshold hairline so the thumb position is easy to read against the meter.
+        const float threshNorm = juce::jlimit (0.0f, 1.0f, (threshDb - kFloorDb) / (kCeilDb - kFloorDb));
+        const float y = meterBounds.getBottom() - 1.0f - threshNorm * (meterBounds.getHeight() - 2.0f);
+        g.setColour (juce::Colours::whitesmoke.withAlpha (triggered ? 0.75f : 0.35f));
+        g.drawLine (meterBounds.getX() + 1.0f, y, meterBounds.getRight() - 1.0f, y, 1.0f);
     }
 
     void setupTinyLabel (juce::Label& lab, const juce::String& text, float fontSize = 9.0f)
@@ -539,9 +564,10 @@ void ModSectionComponent::ShapeColumn::resized()
 }
 
 //==============================================================================
-ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (juce::AudioProcessorValueTreeState& state,
-                                                              ModSectionComponent& ownerRef)
-    : ownerSection (ownerRef)
+ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (EqProcessor& proc,
+                                                           ModSectionComponent& ownerRef)
+    : processor (proc),
+      ownerSection (ownerRef)
 {
     title.setText ("Env", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centred);
@@ -551,8 +577,9 @@ ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (juce::AudioProcessorV
     addAndMakeVisible (title);
 
     styleVerticalThresh (thresholdSlider);
-    styleTimeImageRotary (attackSlider);
-    styleTimeImageRotary (releaseSlider);
+    // Match LFO Rate/Phase: square image face, no text-box that shrinks the knob art.
+    styleImageRotary (attackSlider);
+    styleImageRotary (releaseSlider);
     attackSlider.setTooltip ("Envelope follower attack time in milliseconds");
     releaseSlider.setTooltip ("Envelope follower release time in milliseconds");
     addAndMakeVisible (thresholdSlider);
@@ -566,12 +593,21 @@ ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (juce::AudioProcessorV
     addAndMakeVisible (attackLabel);
     addAndMakeVisible (releaseLabel);
 
+    auto& state = processor.treeState;
     threshAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         state, LfoMod::envThresholdParamId(), thresholdSlider);
     attackAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         state, LfoMod::envAttackParamId(), attackSlider);
     releaseAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         state, LfoMod::envReleaseParamId(), releaseSlider);
+}
+
+void ModSectionComponent::EnvFollowerColumn::refreshMeter()
+{
+    displayedEnvDb = processor.getPublishedEnvDb();
+    attackSlider.setTooltip ("Attack: " + juce::String (attackSlider.getValue(), 1) + " ms");
+    releaseSlider.setTooltip ("Release: " + juce::String (releaseSlider.getValue(), 1) + " ms");
+    repaint();
 }
 
 void ModSectionComponent::EnvFollowerColumn::paint (juce::Graphics& g)
@@ -582,6 +618,11 @@ void ModSectionComponent::EnvFollowerColumn::paint (juce::Graphics& g)
     g.fillRoundedRectangle (bounds.reduced (1.0f), 4.0f);
     g.setColour (c.modBorder.withAlpha (180.0f / 255.0f));
     g.drawRoundedRectangle (bounds.reduced (1.0f), 4.0f, 1.0f);
+
+    // Level meter behind the vertical threshold slider (track is transparent).
+    auto meter = thresholdSlider.getBounds().toFloat();
+    meter.removeFromBottom (14.0f); // TextBoxBelow
+    paintEnvThresholdMeter (g, meter, displayedEnvDb, (float) thresholdSlider.getValue(), c);
 }
 
 void ModSectionComponent::EnvFollowerColumn::resized()
@@ -590,35 +631,18 @@ void ModSectionComponent::EnvFollowerColumn::resized()
     title.setBounds (r.removeFromTop (16));
     r.removeFromTop (2);
 
-    auto left = r.removeFromLeft (juce::jmax (36, r.getWidth() / 2));
-    threshLabel.setBounds (left.removeFromTop (12));
-    thresholdSlider.setBounds (left.withTrimmedBottom (10));
+    // Same bottom knob row proportions as LFO Rate/Phase.
+    auto knobs = r.removeFromBottom (74);
+    const int colW = knobs.getWidth() / 2;
+    auto k0 = knobs.removeFromLeft (colW);
+    auto k1 = knobs;
+    attackLabel.setBounds (k0.removeFromTop (14));
+    releaseLabel.setBounds (k1.removeFromTop (14));
+    attackSlider.setBounds (squareKnobBounds (k0, 40));
+    releaseSlider.setBounds (squareKnobBounds (k1, 40));
 
-    const int labelH = 14;
-    const int knobGap = 20;
-
-    // Size knobs from remaining column width (1:1, same cap as LFO).
-    const int knobSize = juce::jmin (r.getWidth(), 48);
-
-    // Release sits near the bottom; Attack sits 20px above it.
-    auto releaseKnob = juce::Rectangle<int> (r.getCentreX() - knobSize / 2,
-                                             r.getBottom() - knobSize,
-                                             knobSize,
-                                             knobSize);
-    auto attackKnob = releaseKnob.translated (0, -(knobSize + knobGap));
-
-    // Keep both knobs inside the column if the stack is taller than available space.
-    if (attackKnob.getY() < r.getY() + labelH)
-    {
-        const int shift = (r.getY() + labelH) - attackKnob.getY();
-        attackKnob.translate (0, shift);
-        releaseKnob.translate (0, shift);
-    }
-
-    attackLabel.setBounds (attackKnob.getX(), attackKnob.getY() - labelH, knobSize, labelH);
-    attackSlider.setBounds (attackKnob);
-    releaseLabel.setBounds (releaseKnob.getX(), releaseKnob.getY() - labelH, knobSize, labelH);
-    releaseSlider.setBounds (releaseKnob);
+    threshLabel.setBounds (r.removeFromTop (12));
+    thresholdSlider.setBounds (r.withTrimmedBottom (2));
 }
 
 //==============================================================================
@@ -747,7 +771,7 @@ ModSectionComponent::ModSectionComponent (EqProcessor& proc)
     shapeColumn = std::make_unique<ShapeColumn> (processor, *this);
     addAndMakeVisible (*shapeColumn);
 
-    envColumn = std::make_unique<EnvFollowerColumn> (treeState, *this);
+    envColumn = std::make_unique<EnvFollowerColumn> (processor, *this);
     addAndMakeVisible (*envColumn);
 
     matrixTitle.setText ("Mod Matrix", juce::dontSendNotification);
@@ -814,6 +838,9 @@ void ModSectionComponent::timerCallback()
 
     if (shapeColumn != nullptr)
         shapeColumn->refreshPlayhead();
+
+    if (envColumn != nullptr)
+        envColumn->refreshMeter();
 }
 
 void ModSectionComponent::paint (juce::Graphics& g)
@@ -918,7 +945,7 @@ void ModSectionComponent::resized()
 
     // Left: narrower LFOs + Shape (wider for graph) + compact Env.
     const int colGap = 3;
-    const int envW = juce::jmax (64, area.getWidth() * 12 / 100);
+    const int envW = juce::jmax (88, area.getWidth() * 18 / 100);
     const int shapeW = juce::jmax (110, area.getWidth() * 22 / 100);
     auto envArea = area.removeFromRight (envW);
     area.removeFromRight (colGap);

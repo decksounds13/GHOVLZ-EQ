@@ -132,18 +132,21 @@ private:
 
     struct EnvFollowerColumn : public juce::Component
     {
-        explicit EnvFollowerColumn (juce::AudioProcessorValueTreeState& state, ModSectionComponent& ownerSection);
+        EnvFollowerColumn (EqProcessor& processor, ModSectionComponent& ownerSection);
         void resized() override;
         void paint (juce::Graphics& g) override;
+        void refreshMeter();
 
+        EqProcessor& processor;
+        ModSectionComponent& ownerSection;
         juce::Label title;
         juce::Slider thresholdSlider;
-        ModSectionComponent& ownerSection;
         RotaryImageKnobForOptionBox attackSlider;
         RotaryImageKnobForOptionBox releaseSlider;
         juce::Label threshLabel;
         juce::Label attackLabel;
         juce::Label releaseLabel;
+        float displayedEnvDb = -60.0f;
 
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> threshAttach;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attackAttach;

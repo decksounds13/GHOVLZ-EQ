@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <array>
+#include "EqBand.h"
 
 /** Shared HP/LP slope helpers: 6 / 12 / 24 / 48 / 96 dB per octave. */
 namespace FilterSlope
@@ -42,6 +43,11 @@ namespace FilterSlope
             case 7: return "lowShelfSlope";
             default: return {};
         }
+    }
+
+    inline juce::String paramIDForGlobal (int globalDisplay)
+    {
+        return EqBand::slopeParamIDForGlobal (globalDisplay);
     }
 
     inline constexpr int maxBiquadStages = 8;

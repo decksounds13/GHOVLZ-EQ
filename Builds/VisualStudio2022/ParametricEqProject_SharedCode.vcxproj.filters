@@ -1165,6 +1165,9 @@
     <ClCompile Include="..\..\Source\OnOffButton1.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\BandNumberButton.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\OptionBoxMenu.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
@@ -5020,6 +5023,9 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OnOffButton1.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\BandNumberButton.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OptionBoxMenu.h">

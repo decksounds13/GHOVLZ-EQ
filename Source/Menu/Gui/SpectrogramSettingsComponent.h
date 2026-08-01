@@ -2,6 +2,8 @@
 
 #include <JuceHeader.h>
 
+#include "../../ColourRamp/ColourRampBank.h"
+#include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../../SpectrogramComponent.h"
 #include "../SharedResources.h"
@@ -32,10 +34,13 @@ public:
                                    SpectrogramComponent::ColourScheme scheme);
 };
 
-class SpectrogramSettingsComponent : public juce::Component
+class SpectrogramSettingsComponent : public juce::Component,
+                                     private juce::ChangeListener
 {
 public:
-    SpectrogramSettingsComponent (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+    SpectrogramSettingsComponent (SharedResources& resources,
+                                  juce::AudioProcessorValueTreeState& state,
+                                  ColourRampBank& colourRamps);
     ~SpectrogramSettingsComponent() override;
 
     void paint (juce::Graphics& g) override;
@@ -46,14 +51,19 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
     class Content : public juce::Component
     {
     public:
-        Content (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+        Content (SharedResources& resources,
+                 juce::AudioProcessorValueTreeState& state,
+                 ColourRampBank& colourRamps);
         ~Content() override;
 
         void resized() override;
         int getPreferredHeight() const;
+        void syncGradientFromBank();
 
     private:
         void styleSlider (juce::Slider& slider);
@@ -68,6 +78,7 @@ private:
 
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
+        ColourRampBank& colourRamps;
         ComboBoxLookAndFeel comboLookAndFeel;
         ColourSchemeComboLookAndFeel colourSchemeLookAndFeel;
 
@@ -136,9 +147,13 @@ private:
 
         juce::ToggleButton freezeToggle { "Freeze" };
         std::unique_ptr<ButtonAttachment> freezeAttachment;
+
+        juce::Label gradientLabel;
+        GradientStripEditor gradientEditor;
     };
 
     SharedResources& sharedResources;
+    ColourRampBank& colourRamps;
     Content content;
     juce::Viewport viewport;
     std::unique_ptr<CustomScrollBar> customScrollBar;

@@ -271,7 +271,8 @@ void GoniometerComponent::fadeAndPlotTrail()
     if (! trailImage.isValid())
         return;
 
-    const float lineOpacity = juce::jlimit (0.0f, 1.0f, loadFloatParam ("GON_LINE_OPACITY_ID", 100.0f) * 0.01f);
+    // Shared with oscilloscope (Osc/Gon Line theme + OSC line opacity).
+    const float lineOpacity = juce::jlimit (0.0f, 1.0f, loadFloatParam ("OSC_LINE_OPACITY_ID", 100.0f) * 0.01f);
     const float lineWidth = juce::jmax (0.5f,
                                         loadFloatParam (expanded ? "GON_EXPANDED_LINE_WIDTH_ID" : "GON_LINE_WIDTH_ID",
                                                         expanded ? 2.6f : 1.6f));
@@ -297,7 +298,6 @@ void GoniometerComponent::fadeAndPlotTrail()
     const float scale = size * 0.42f;
     const float point = juce::jmax (1.0f, lineWidth * (highQuality ? 0.85f : 0.7f));
 
-    // Match oscilloscope stroke colour.
     const auto& theme = colors();
     const auto ink = theme.oscLine.withMultipliedAlpha (lineOpacity);
     tg.setColour (ink);
@@ -341,7 +341,7 @@ void GoniometerComponent::paint (juce::Graphics& g)
     if (plot.isEmpty())
         return;
 
-    const float lineOpacity = juce::jlimit (0.0f, 1.0f, loadFloatParam ("GON_LINE_OPACITY_ID", 100.0f) * 0.01f);
+    const float lineOpacity = juce::jlimit (0.0f, 1.0f, loadFloatParam ("OSC_LINE_OPACITY_ID", 100.0f) * 0.01f);
     const float lineWidth = juce::jmax (0.5f,
                                         loadFloatParam (expanded ? "GON_EXPANDED_LINE_WIDTH_ID" : "GON_LINE_WIDTH_ID",
                                                         expanded ? 2.6f : 1.6f));

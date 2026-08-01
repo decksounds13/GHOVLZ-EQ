@@ -27,6 +27,7 @@ public:
     static constexpr int fftSize = 1 << fftOrder;
     static constexpr int irLength = (fftSize / 2) + 1; // 1025 (odd)
     static constexpr int groupDelay = (irLength - 1) / 2; // 512
+    static constexpr int maxBands = 64; // EqBand::kMaxBanks * kBankSize
 
     struct BandSpec
     {
@@ -70,7 +71,6 @@ private:
     std::vector<std::complex<float>> timeDomain;
     std::vector<std::complex<float>> freqDomain;
 
-    static constexpr int maxBands = 8;
     std::array<BandSpec, maxBands> bands {};
     int bandCount = 0;
 

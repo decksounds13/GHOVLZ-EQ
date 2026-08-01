@@ -347,6 +347,10 @@
       <FILE id="zaTGFn" name="OnOffButton1.cpp" compile="1" resource="0"
             file="Source/OnOffButton1.cpp"/>
       <FILE id="DAN5Qz" name="OnOffButton1.h" compile="0" resource="0" file="Source/OnOffButton1.h"/>
+      <FILE id="BdNumBt" name="BandNumberButton.cpp" compile="1" resource="0"
+            file="Source/BandNumberButton.cpp"/>
+      <FILE id="BdNumBh" name="BandNumberButton.h" compile="0" resource="0"
+            file="Source/BandNumberButton.h"/>
       <FILE id="VsOoGx" name="OptionBoxMenu.cpp" compile="1" resource="0"
             file="Source/OptionBoxMenu.cpp"/>
       <FILE id="RQoGLs" name="OptionBoxMenu.h" compile="0" resource="0" file="Source/OptionBoxMenu.h"/>

@@ -1,5 +1,6 @@
 ﻿#include "FftComponent.h"
 
+#include "../../MainComponent.h"
 #include "../AnalyserDefaults.h"
 
 namespace
@@ -19,9 +20,13 @@ namespace
     }
 }
 
-FftComponent::Content::Content (SharedResources& resources, juce::AudioProcessorValueTreeState& state)
+FftComponent::Content::Content (SharedResources& resources,
+                                juce::AudioProcessorValueTreeState& state,
+                                ColourRampBank& ramps)
     : sharedResources (resources),
-      treeState (state)
+      treeState (state),
+      colourRamps (ramps),
+      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
 {
     titleLabel.setText ("FFT", juce::dontSendNotification);
     titleLabel.setFont (juce::Font ("Lato Black", 20.0f, juce::Font::plain));
@@ -146,6 +151,28 @@ FftComponent::Content::Content (SharedResources& resources, juce::AudioProcessor
     addAndMakeVisible (glowOpacityLabel);
     addAndMakeVisible (glowOffsetXLabel);
     addAndMakeVisible (glowOffsetYLabel);
+
+    gradientLabel.setText ("Bar Gradient", juce::dontSendNotification);
+    styleLabel (gradientLabel);
+    gradientLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
+    addAndMakeVisible (gradientLabel);
+
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::fftBars));
+    gradientEditor.onRampChanged = [this] { colourRamps.notifyEdited(); };
+    gradientEditor.onRampPreview = [this] { colourRamps.notifyPreview(); };
+    gradientEditor.onSamplePath = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->beginRampSamplingForTarget (ColourRampBank::Target::fftBars);
+    };
+    gradientEditor.onPreferredHeightChanged = [this]
+    {
+        if (auto* parent = findParentComponentOfClass<FftComponent>())
+            parent->resized();
+        else
+            resized();
+    };
+    addAndMakeVisible (gradientEditor);
 }
 
 FftComponent::Content::~Content()
@@ -249,9 +276,15 @@ void FftComponent::Content::layoutComboRow (juce::Rectangle<int>& area, juce::La
     area.removeFromTop (kRowGap);
 }
 
+void FftComponent::Content::syncGradientFromBank()
+{
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::fftBars));
+    gradientEditor.repaint();
+}
+
 int FftComponent::Content::getPreferredHeight() const
 {
-    // title + show bars + show bins + full height + block + refresh + 4 sliders + glow toggle + 5 glow sliders
+    // title + show bars + show bins + full height + block + refresh + 4 sliders + glow toggle + 5 glow sliders + gradient
     return kContentPadY * 2
            + 24 + 8
            + 22 + 6
@@ -260,7 +293,8 @@ int FftComponent::Content::getPreferredHeight() const
            + (2 * (kLabelH + kLabelGap + kSliderH + kRowGap))
            + (4 * (kLabelH + kLabelGap + kSliderH + kRowGap))
            + 22 + 6
-           + (5 * (kLabelH + kLabelGap + kSliderH + kRowGap));
+           + (5 * (kLabelH + kLabelGap + kSliderH + kRowGap))
+           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
 }
 
 void FftComponent::Content::resized()
@@ -271,6 +305,12 @@ void FftComponent::Content::resized()
     saveDefaultButton.setBounds (titleRow.removeFromRight (108).withHeight (22).withY (titleRow.getY() + 1));
     titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
+
+    gradientLabel.setBounds (area.removeFromTop (kLabelH));
+    area.removeFromTop (kLabelGap);
+    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                  .removeFromLeft (juce::jmin (520, area.getWidth())));
+    area.removeFromTop (kRowGap);
 
     showBarsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
     area.removeFromTop (6);
@@ -298,10 +338,15 @@ void FftComponent::Content::resized()
     layoutSliderRow (area, glowOffsetYLabel, glowOffsetYSlider);
 }
 
-FftComponent::FftComponent (SharedResources& resources, juce::AudioProcessorValueTreeState& state)
+FftComponent::FftComponent (SharedResources& resources,
+                            juce::AudioProcessorValueTreeState& state,
+                            ColourRampBank& ramps)
     : sharedResources (resources),
-      content (resources, state)
+      colourRamps (ramps),
+      content (resources, state, ramps)
 {
+    colourRamps.addChangeListener (this);
+
     viewport.setViewedComponent (&content, false);
     viewport.setScrollBarsShown (false, false);
     viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
@@ -316,7 +361,13 @@ FftComponent::FftComponent (SharedResources& resources, juce::AudioProcessorValu
 
 FftComponent::~FftComponent()
 {
+    colourRamps.removeChangeListener (this);
     viewport.setViewedComponent (nullptr, false);
+}
+
+void FftComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    content.syncGradientFromBank();
 }
 
 void FftComponent::syncScrollBarColours()

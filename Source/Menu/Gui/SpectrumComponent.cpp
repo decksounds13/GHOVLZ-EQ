@@ -1,5 +1,6 @@
 ﻿#include "SpectrumComponent.h"
 
+#include "../../MainComponent.h"
 #include "../AnalyserDefaults.h"
 
 namespace
@@ -20,9 +21,13 @@ namespace
     }
 }
 
-SpectrumComponent::Content::Content (SharedResources& resources, juce::AudioProcessorValueTreeState& state)
+SpectrumComponent::Content::Content (SharedResources& resources,
+                                     juce::AudioProcessorValueTreeState& state,
+                                     ColourRampBank& ramps)
     : sharedResources (resources),
-      treeState (state)
+      treeState (state),
+      colourRamps (ramps),
+      gradientEditor (resources, GradientStripEditor::ModeFamily::spatial, &ramps.getPresets())
 {
     titleLabel.setText ("Spectrum", juce::dontSendNotification);
     titleLabel.setFont (juce::Font ("Lato Black", 20.0f, juce::Font::plain));
@@ -245,6 +250,28 @@ SpectrumComponent::Content::Content (SharedResources& resources, juce::AudioProc
     addAndMakeVisible (spectrumGlowSpreadLabel);
     addAndMakeVisible (spectrumGlowOpacityLabel);
     addAndMakeVisible (holdTimeLabel);
+
+    gradientLabel.setText ("Fill Gradient", juce::dontSendNotification);
+    styleLabel (gradientLabel);
+    gradientLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
+    addAndMakeVisible (gradientLabel);
+
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrumFill));
+    gradientEditor.onRampChanged = [this] { colourRamps.notifyEdited(); };
+    gradientEditor.onRampPreview = [this] { colourRamps.notifyPreview(); };
+    gradientEditor.onSamplePath = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->beginRampSamplingForTarget (ColourRampBank::Target::spectrumFill);
+    };
+    gradientEditor.onPreferredHeightChanged = [this]
+    {
+        if (auto* parent = findParentComponentOfClass<SpectrumComponent>())
+            parent->resized();
+        else
+            resized();
+    };
+    addAndMakeVisible (gradientEditor);
 }
 
 SpectrumComponent::Content::~Content()
@@ -369,10 +396,16 @@ void SpectrumComponent::Content::layoutTogglePair (juce::Rectangle<int>& area, j
     area.removeFromTop (4);
 }
 
+void SpectrumComponent::Content::syncGradientFromBank()
+{
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrumFill));
+    gradientEditor.repaint();
+}
+
 int SpectrumComponent::Content::getPreferredHeight() const
 {
     // title + show bins + enable + block/refresh/avg + curve smooth + multicolor + crosshair + layers + scale
-    // + opacity/fill/path/band/sum + sumGlow toggle + 3 sum glow + postGlow toggle + 3 post glow + hold
+    // + opacity/fill/path/band/sum + sumGlow toggle + 3 sum glow + postGlow toggle + 3 post glow + hold + gradient
     return kSpectrumPadY * 2
            + 24 + 8
            + 22 + 6
@@ -388,7 +421,8 @@ int SpectrumComponent::Content::getPreferredHeight() const
            + (3 * (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap))
            + 22 + 6
            + (3 * (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap))
-           + (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap);
+           + (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap)
+           + kSpectrumLabelH + kSpectrumLabelGap + gradientEditor.getPreferredHeight() + kSpectrumRowGap;
 }
 
 void SpectrumComponent::Content::resized()
@@ -399,6 +433,12 @@ void SpectrumComponent::Content::resized()
     saveDefaultButton.setBounds (titleRow.removeFromRight (108).withHeight (22).withY (titleRow.getY() + 1));
     titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
+
+    gradientLabel.setBounds (area.removeFromTop (kSpectrumLabelH));
+    area.removeFromTop (kSpectrumLabelGap);
+    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                  .removeFromLeft (juce::jmin (520, area.getWidth())));
+    area.removeFromTop (kSpectrumRowGap);
 
     showBinsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
     area.removeFromTop (6);
@@ -459,10 +499,15 @@ void SpectrumComponent::Content::resized()
     layoutSliderRow (area, holdTimeLabel, holdTimeSlider);
 }
 
-SpectrumComponent::SpectrumComponent (SharedResources& resources, juce::AudioProcessorValueTreeState& state)
+SpectrumComponent::SpectrumComponent (SharedResources& resources,
+                                      juce::AudioProcessorValueTreeState& state,
+                                      ColourRampBank& ramps)
     : sharedResources (resources),
-      content (resources, state)
+      colourRamps (ramps),
+      content (resources, state, ramps)
 {
+    colourRamps.addChangeListener (this);
+
     viewport.setViewedComponent (&content, false);
     viewport.setScrollBarsShown (false, false);
     viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
@@ -477,7 +522,13 @@ SpectrumComponent::SpectrumComponent (SharedResources& resources, juce::AudioPro
 
 SpectrumComponent::~SpectrumComponent()
 {
+    colourRamps.removeChangeListener (this);
     viewport.setViewedComponent (nullptr, false);
+}
+
+void SpectrumComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    content.syncGradientFromBank();
 }
 
 void SpectrumComponent::syncScrollBarColours()

@@ -6,6 +6,7 @@
 #include <JuceHeader.h>
 #include "BinaryData.h"
 #include "MelatoninBlur/melatonin/shadows.h"
+#include <array>
 
 class EqProcessor; // Forward declaration
 class EqEditor;    // Forward declaration
@@ -77,10 +78,16 @@ public:
     OptionBoxMenu* getOptionBoxMenu() noexcept { return optionBoxMenu.get(); }
     void setOptionBoxVisible (bool shouldBeVisible);
 
-    /** Called with band index 0-7 while handle/OptionBox knobs are manipulated; -1 to clear. */
+    /** Called with band index (Bank1 internal 0–7, or global display 8–63); -1 to clear. */
     std::function<void(int)> onBandManipulationHighlight;
     /** Fired when the OptionBox is shown/hidden so the host can fix overlay z-order. */
     std::function<void()> onOptionBoxVisibilityChanged;
+    /** Jump faceplate pager to this bank (0-based) after create/grow. */
+    std::function<void(int)> onFaceplateBankJump;
+    /** Soft-max (64) reached — show brief UI feedback. */
+    std::function<void()> onBandsFullSoftMax;
+    /** Faceplate bank used as preferred create target (banks 2+). */
+    void setPreferredCreateBank (int bank) noexcept { preferredCreateBank = juce::jlimit (0, EqBand::kMaxBanks - 1, bank); }
 
     /** Sync ▲/▼ minimize control with editor compact state (lives on the graph, not faceplate). */
     void syncUiModeButton (bool isCompact);
@@ -316,8 +323,31 @@ private:
     std::vector<float> responseBand1, responseBand2, responseBand3, responseBand4;
     std::vector<float> responseHighpass, responseLowpass, responseHighShelf, responseLowShelf;
     std::vector<float> responseCombined;
+    /** Per extended-band magnitude (dB) for individual curves + sum. */
+    std::array<std::vector<float>, EqBand::kMaxBands - EqBand::kBankSize> responseExtended {};
+    std::array<juce::Path, EqBand::kMaxBands - EqBand::kBankSize> extendedResponsePaths {};
+    bool needsUpdateExtended = true;
+
+    static constexpr int kNumExtended = EqBand::kMaxBands - EqBand::kBankSize;
+    struct ExtendedHandleState
+    {
+        float x = -1000.0f;
+        float y = -1000.0f;
+        bool hovering = false;
+        bool dragging = false;
+        float dragOffsetX = 0.0f;
+        float dragOffsetY = 0.0f;
+    };
+    std::array<ExtendedHandleState, kNumExtended> extendedHandles {};
+    int activeExtendedGlobal = -1;
+    int preferredCreateBank = 0;
     /** Scratch buffer for sampling published spectral GR onto display frequencies. */
     std::vector<float> spectralGrScratch;
+    /** Per-frame summed spectral GR target (all S bands) before UI temporal smooth. */
+    std::vector<float> spectralGrTarget;
+    /** Temporally smoothed spectral GR added into responseCombined. */
+    std::vector<float> spectralGrSmoothed;
+    bool spectralGrSmoothedValid = false;
     /** Scratch buffer for sampling published Side Check GR onto display frequencies. */
     std::vector<float> sideCheckGrScratch;
 
@@ -339,6 +369,7 @@ private:
     /** Per-band fill: multicolor palette when on; mono golden boost/cut when off. */
     juce::Colour resolveBandFillColour (juce::Colour multicolorFill, bool isBoostOrPass) const;
     bool bandGainIsBoost (const char* gainParamId, const char* typeParamId) const;
+    bool bandGainIsBoost (const juce::String& gainParamId, const juce::String& typeParamId) const;
 
     void syncEqRangeControls();
     void adjustEqDisplayRange (int delta);

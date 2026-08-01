@@ -4,6 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <atomic>
 #include <cmath>
+#include "EqBand.h"
 
 /**
     Per-band dynamic EQ (FabFilter Pro-Q style), v1.
@@ -147,10 +148,38 @@ namespace DynamicEq
         }
     }
 
-    /** All eight Band 1–8 slots (D only engages when filter type uses gain). */
+    /** Any slot that can use gain (D only engages when filter type uses gain). */
     inline bool supportsDynamic (int bandIndex)
     {
-        return bandIndex >= 0 && bandIndex <= 7;
+        return bandIndex >= 0 && bandIndex < EqBand::kMaxBands;
+    }
+
+    inline juce::String dynamicParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return dynamicParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "Dynamic");
+    }
+
+    inline juce::String thresholdParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return thresholdParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "DynThreshold");
+    }
+
+    inline juce::String attackMsParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return attackMsParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "AttackMs");
+    }
+
+    inline juce::String releaseMsParamIDForGlobal (int globalDisplay)
+    {
+        if (globalDisplay < EqBand::kBankSize)
+            return releaseMsParamIDForBandIndex (EqBand::internalFromDisplay (globalDisplay));
+        return EqBand::extendedParamID (globalDisplay, "ReleaseMs");
     }
 
     struct BandState

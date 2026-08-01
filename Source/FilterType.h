@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "FilterSlope.h"
+#include "EqBand.h"
 
 /** Filter models for all eight Band 1–8 slots (HP/LP inclusive). */
 namespace FilterType
@@ -89,6 +90,12 @@ namespace FilterType
             case 7: return "lowShelfType";
             default: return {};
         }
+    }
+
+    /** Global display index (0 = Band 1 … 63 = Band 64). */
+    inline juce::String paramIDForGlobal (int globalDisplay)
+    {
+        return EqBand::typeParamIDForGlobal (globalDisplay);
     }
 
     /**

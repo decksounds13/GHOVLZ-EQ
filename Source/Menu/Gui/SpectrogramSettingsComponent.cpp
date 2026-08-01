@@ -1,5 +1,6 @@
 #include "SpectrogramSettingsComponent.h"
 
+#include "../../MainComponent.h"
 #include "../AnalyserDefaults.h"
 
 namespace
@@ -147,9 +148,12 @@ void ColourSchemeComboLookAndFeel::positionComboBoxText (juce::ComboBox& box, ju
 }
 
 SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
-                                                juce::AudioProcessorValueTreeState& state)
+                                                juce::AudioProcessorValueTreeState& state,
+                                                ColourRampBank& ramps)
     : sharedResources (resources),
-      treeState (state)
+      treeState (state),
+      colourRamps (ramps),
+      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
     colourSchemeLookAndFeel.setThemeColors (&sharedResources);
@@ -185,6 +189,28 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (brightnessLabel);
     addAndMakeVisible (brightnessSlider);
     brightnessAttachment = std::make_unique<SliderAttachment> (treeState, "SPEC_BRIGHTNESS_ID", brightnessSlider);
+
+    gradientLabel.setText ("Custom Gradient", juce::dontSendNotification);
+    styleLabel (gradientLabel);
+    gradientLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
+    addAndMakeVisible (gradientLabel);
+
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrogram));
+    gradientEditor.onRampChanged = [this] { colourRamps.notifyEdited(); };
+    gradientEditor.onRampPreview = [this] { colourRamps.notifyPreview(); };
+    gradientEditor.onSamplePath = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->beginRampSamplingForTarget (ColourRampBank::Target::spectrogram);
+    };
+    gradientEditor.onPreferredHeightChanged = [this]
+    {
+        if (auto* parent = findParentComponentOfClass<SpectrogramSettingsComponent>())
+            parent->resized();
+        else
+            resized();
+    };
+    addAndMakeVisible (gradientEditor);
 
     behaviourSectionLabel.setText ("Behaviour", juce::dontSendNotification);
     styleSectionLabel (behaviourSectionLabel);
@@ -408,6 +434,12 @@ void SpectrogramSettingsComponent::Content::layoutComboRow (juce::Rectangle<int>
     area.removeFromTop (kRowGap);
 }
 
+void SpectrogramSettingsComponent::Content::syncGradientFromBank()
+{
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrogram));
+    gradientEditor.repaint();
+}
+
 int SpectrogramSettingsComponent::Content::getPreferredHeight() const
 {
     const int comboRows = 5;   // colour, fft, display, channel, enhanced LF detail
@@ -419,7 +451,8 @@ int SpectrogramSettingsComponent::Content::getPreferredHeight() const
            + 2 * (kSectionH + kLabelGap + kSectionGap)
            + comboRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
            + sliderRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
-           + toggles * (22 + 6);
+           + toggles * (22 + 6)
+           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
 }
 
 void SpectrogramSettingsComponent::Content::resized()
@@ -430,6 +463,12 @@ void SpectrogramSettingsComponent::Content::resized()
     saveDefaultButton.setBounds (titleRow.removeFromRight (108).withHeight (22).withY (titleRow.getY() + 1));
     titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
+
+    gradientLabel.setBounds (area.removeFromTop (kLabelH));
+    area.removeFromTop (kLabelGap);
+    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                  .removeFromLeft (juce::jmin (520, area.getWidth())));
+    area.removeFromTop (kSectionGap);
 
     lookSectionLabel.setBounds (area.removeFromTop (kSectionH));
     area.removeFromTop (kLabelGap);
@@ -459,10 +498,14 @@ void SpectrogramSettingsComponent::Content::resized()
 }
 
 SpectrogramSettingsComponent::SpectrogramSettingsComponent (SharedResources& resources,
-                                                            juce::AudioProcessorValueTreeState& state)
+                                                            juce::AudioProcessorValueTreeState& state,
+                                                            ColourRampBank& ramps)
     : sharedResources (resources),
-      content (resources, state)
+      colourRamps (ramps),
+      content (resources, state, ramps)
 {
+    colourRamps.addChangeListener (this);
+
     viewport.setViewedComponent (&content, false);
     viewport.setScrollBarsShown (false, false);
     viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
@@ -477,7 +520,13 @@ SpectrogramSettingsComponent::SpectrogramSettingsComponent (SharedResources& res
 
 SpectrogramSettingsComponent::~SpectrogramSettingsComponent()
 {
+    colourRamps.removeChangeListener (this);
     viewport.setViewedComponent (nullptr, false);
+}
+
+void SpectrogramSettingsComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    content.syncGradientFromBank();
 }
 
 void SpectrogramSettingsComponent::syncScrollBarColours()

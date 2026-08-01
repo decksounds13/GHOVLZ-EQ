@@ -2,14 +2,19 @@
 
 #include <JuceHeader.h>
 
+#include "../../ColourRamp/ColourRampBank.h"
+#include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
 #include "CustomScrollBar.h"
 
-class SpectrumComponent : public juce::Component
+class SpectrumComponent : public juce::Component,
+                          private juce::ChangeListener
 {
 public:
-    SpectrumComponent (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+    SpectrumComponent (SharedResources& resources,
+                       juce::AudioProcessorValueTreeState& state,
+                       ColourRampBank& colourRamps);
     ~SpectrumComponent() override;
 
     void paint (juce::Graphics& g) override;
@@ -20,15 +25,20 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
     class Content : public juce::Component,
                     private juce::AudioProcessorValueTreeState::Listener
     {
     public:
-        Content (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+        Content (SharedResources& resources,
+                 juce::AudioProcessorValueTreeState& state,
+                 ColourRampBank& colourRamps);
         ~Content() override;
 
         void resized() override;
         int getPreferredHeight() const;
+        void syncGradientFromBank();
 
     private:
         void parameterChanged (const juce::String& parameterID, float newValue) override;
@@ -49,6 +59,7 @@ private:
 
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
+        ColourRampBank& colourRamps;
 
         juce::Label titleLabel;
         juce::TextButton saveDefaultButton { "Save Default" };
@@ -157,10 +168,14 @@ private:
         juce::Slider holdTimeSlider;
         std::unique_ptr<SliderAttachment> holdTimeAttachment;
 
+        juce::Label gradientLabel;
+        GradientStripEditor gradientEditor;
+
         enum { scaleRadioGroup = 0x5c41e };
     };
 
     SharedResources& sharedResources;
+    ColourRampBank& colourRamps;
     Content content;
     juce::Viewport viewport;
     std::unique_ptr<CustomScrollBar> customScrollBar;

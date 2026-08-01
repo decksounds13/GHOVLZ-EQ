@@ -6,8 +6,39 @@ namespace
     constexpr float kStripH = 24.0f;
     constexpr float kArrowH = 7.0f;
     constexpr float kArrowHalf = 3.2f;
-    constexpr int kToolbarH = 24;
+    constexpr int kToolbarRowH = 26;
+    constexpr int kToolbarGap = 4;
+    constexpr int kToolbarH = kToolbarRowH * 2 + kToolbarGap; // two rows: controls + preset/sample
     constexpr int kStripBlockH = 36;
+
+    bool rampsMatchVisually (const GradientRamp& a, const GradientRamp& b) noexcept
+    {
+        if (a.stops.size() != b.stops.size() || a.stops.size() < 2)
+            return false;
+
+        for (size_t i = 0; i < a.stops.size(); ++i)
+        {
+            if (std::abs (a.stops[i].position - b.stops[i].position) > 0.03f)
+                return false;
+
+            const auto ca = a.stops[i].colour;
+            const auto cb = b.stops[i].colour;
+            if (std::abs ((int) ca.getRed() - (int) cb.getRed()) > 4
+                || std::abs ((int) ca.getGreen() - (int) cb.getGreen()) > 4
+                || std::abs ((int) ca.getBlue() - (int) cb.getBlue()) > 4)
+                return false;
+        }
+
+        return true;
+    }
+
+    int textButtonWidth (const juce::String& text, float uiScale, int minW = 44)
+    {
+        const juce::Font f (juce::FontOptions (12.0f * uiScale));
+        const float textW = juce::GlyphArrangement::getStringWidth (f, text);
+        return juce::jmax (juce::roundToInt ((float) minW * uiScale),
+                           juce::roundToInt (textW + 14.0f * uiScale));
+    }
 
     /** Mini gradient preview row for the preset CallOutBox. */
     class RampPresetRow final : public juce::Component
@@ -161,6 +192,59 @@ namespace
     };
 }
 
+GradientStripEditor::PresetFieldButton::PresetFieldButton()
+    : juce::Button ("preset")
+{
+    setTooltip ("Load a gradient preset");
+}
+
+void GradientStripEditor::PresetFieldButton::setDisplay (const GradientRamp* r, juce::String name)
+{
+    displayName = name.isNotEmpty() ? std::move (name) : juce::String ("Choose preset...");
+    hasRamp = r != nullptr && r->stops.size() >= 2;
+    if (hasRamp)
+        displayRamp = *r;
+    repaint();
+}
+
+void GradientStripEditor::PresetFieldButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (juce::Colours::black.withAlpha (highlighted || down ? 0.5f : 0.35f));
+    g.fillRoundedRectangle (bounds, 3.0f);
+    g.setColour (juce::Colours::whitesmoke.withAlpha (0.22f));
+    g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
+
+    auto inner = bounds.reduced (4.0f, 3.0f);
+    auto arrow = inner.removeFromRight (14.0f);
+    auto swatch = inner.removeFromLeft (juce::jmin (72.0f, inner.getWidth() * 0.42f));
+    inner.removeFromLeft (6.0f);
+
+    g.setColour (juce::Colours::black.withAlpha (0.45f));
+    g.fillRoundedRectangle (swatch, 2.5f);
+
+    if (hasRamp)
+    {
+        juce::ColourGradient grad (displayRamp.colourAt (0.0f), swatch.getX(), swatch.getCentreY(),
+                                   displayRamp.colourAt (1.0f), swatch.getRight(), swatch.getCentreY(), false);
+        for (size_t i = 1; i + 1 < displayRamp.stops.size(); ++i)
+            grad.addColour ((double) displayRamp.stops[i].position, displayRamp.stops[i].colour);
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (swatch.reduced (1.0f), 2.5f);
+    }
+
+    g.setColour (juce::Colours::whitesmoke.withAlpha (0.92f));
+    g.setFont (juce::FontOptions (12.5f));
+    g.drawFittedText (displayName, inner.toNearestIntEdges(), juce::Justification::centredLeft, 1);
+
+    juce::Path chev;
+    const float cx = arrow.getCentreX();
+    const float cy = arrow.getCentreY();
+    chev.addTriangle (cx - 4.0f, cy - 2.0f, cx + 4.0f, cy - 2.0f, cx, cy + 3.0f);
+    g.setColour (juce::Colours::whitesmoke.withAlpha (0.75f));
+    g.fillPath (chev);
+}
+
 GradientStripEditor::GradientStripEditor (SharedResources& resources,
                                           ModeFamily family,
                                           RampPresetStore* presetStore)
@@ -209,6 +293,7 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
     {
         b.setColour (juce::TextButton::buttonColourId, juce::Colours::black.withAlpha (0.35f));
         b.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
+        b.setConnectedEdges (0);
     };
 
     simplifyButton.setButtonText ("Less");
@@ -246,14 +331,19 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
     savePresetButton.onClick = [this] { savePresetClicked(); };
     addAndMakeVisible (savePresetButton);
 
-    presetMenuButton.setButtonText ("Load");
-    presetMenuButton.setTooltip ("Load a saved ramp preset");
-    styleTiny (presetMenuButton);
-    presetMenuButton.onClick = [this] { showPresetMenu(); };
-    addAndMakeVisible (presetMenuButton);
+    presetField.onClick = [this] { showPresetMenu(); };
+    addAndMakeVisible (presetField);
+
+    samplePathButton.setButtonText ("Sample Path");
+    samplePathButton.setTooltip ("Drag across the plugin UI to sample colours into this gradient");
+    styleTiny (samplePathButton);
+    samplePathButton.onClick = [this] { samplePathClicked(); };
+    addAndMakeVisible (samplePathButton);
 
     if (presets != nullptr)
         presets->addChangeListener (this);
+
+    syncPresetField();
 }
 
 GradientStripEditor::~GradientStripEditor()
@@ -273,7 +363,7 @@ void GradientStripEditor::setPresetStore (RampPresetStore* store)
 
 void GradientStripEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // Preset list changed — nothing to redraw on the strip itself.
+    syncPresetField();
 }
 
 void GradientStripEditor::setCompact (bool shouldBeCompact) noexcept
@@ -296,7 +386,7 @@ void GradientStripEditor::setUiScale (float scale) noexcept
 
 int GradientStripEditor::getPreferredHeight() const noexcept
 {
-    int h = juce::roundToInt ((6 + kToolbarH + 4 + kStripBlockH + 4) * uiScale);
+    int h = juce::roundToInt ((6 + (float) kToolbarH + 4 + kStripBlockH + 4) * uiScale);
     if (polePicker != nullptr)
         h += juce::roundToInt (4.0f * uiScale) + RampColorPickerPanel::kPreferredHeight;
     return h;
@@ -347,6 +437,42 @@ void GradientStripEditor::syncControlsFromRamp()
     simplifyButton.setEnabled (n > 2);
     densifyButton.setEnabled (n >= 2 && n < GradientRamp::kMaxStops);
     savePresetButton.setEnabled (ramp->stops.size() >= 2);
+    samplePathButton.setEnabled (true);
+    syncPresetField();
+}
+
+int GradientStripEditor::findMatchingPresetIndex() const
+{
+    if (presets == nullptr || ramp == nullptr || ramp->stops.size() < 2)
+        return -1;
+
+    const auto& list = presets->getPresets();
+    for (int i = 0; i < list.size(); ++i)
+        if (rampsMatchVisually (list.getReference (i).ramp, *ramp))
+            return i;
+
+    return -1;
+}
+
+void GradientStripEditor::syncPresetField()
+{
+    selectedPresetIndex = findMatchingPresetIndex();
+
+    if (ramp == nullptr || ramp->stops.size() < 2)
+    {
+        presetField.setDisplay (nullptr, "Choose preset...");
+        return;
+    }
+
+    if (selectedPresetIndex >= 0 && presets != nullptr)
+    {
+        const auto& p = presets->getPresets().getReference (selectedPresetIndex);
+        presetField.setDisplay (ramp, p.name);
+    }
+    else
+    {
+        presetField.setDisplay (ramp, "Custom");
+    }
 }
 
 void GradientStripEditor::setRamp (GradientRamp* r)
@@ -402,9 +528,16 @@ void GradientStripEditor::savePresetClicked()
                 if (name.isEmpty())
                     name = "Ramp";
                 safe->presets->savePreset (name, *safe->ramp);
+                safe->syncPresetField();
             }
             delete aw;
         }));
+}
+
+void GradientStripEditor::samplePathClicked()
+{
+    if (onSamplePath != nullptr)
+        onSamplePath();
 }
 
 void GradientStripEditor::showPresetMenu()
@@ -431,6 +564,7 @@ void GradientStripEditor::showPresetMenu()
 
             safe->ramp->enabled = true;
             ++safe->ramp->revision;
+            safe->selectedPresetIndex = index;
             safe->syncControlsFromRamp();
             safe->notifyChanged();
             safe->repaint();
@@ -443,12 +577,13 @@ void GradientStripEditor::showPresetMenu()
             if (safe == nullptr || safe->presets == nullptr)
                 return;
             safe->presets->deletePreset (index);
+            safe->syncPresetField();
             if (*pickerBox != nullptr)
                 (*pickerBox)->dismiss();
         });
 
     auto& box = juce::CallOutBox::launchAsynchronously (std::unique_ptr<juce::Component> (picker),
-                                                        presetMenuButton.getScreenBounds(),
+                                                        presetField.getScreenBounds(),
                                                         nullptr);
     *pickerBox = &box;
     box.setDismissalMouseClicksAreAlwaysConsumed (true);
@@ -468,20 +603,32 @@ void GradientStripEditor::resized()
     auto px = [s] (float v) { return juce::roundToInt (v * s); };
 
     auto area = getLocalBounds().reduced (px (4), px (2));
-    auto bar = area.removeFromTop (px ((float) kToolbarH));
+    auto bar1 = area.removeFromTop (px ((float) kToolbarRowH));
+    area.removeFromTop (px ((float) kToolbarGap));
+    auto bar2 = area.removeFromTop (px ((float) kToolbarRowH));
 
-    enableToggle.setBounds (bar.removeFromLeft (px (40)));
-    bar.removeFromLeft (px (2));
-    mapLabel.setBounds (bar.removeFromLeft (px (28)));
-    mapCombo.setBounds (bar.removeFromLeft (juce::jmin (px (96), bar.getWidth() - px (150))));
-    bar.removeFromLeft (px (3));
-    simplifyButton.setBounds (bar.removeFromLeft (px (36)));
-    stopCountButton.setBounds (bar.removeFromLeft (px (28)));
-    densifyButton.setBounds (bar.removeFromLeft (px (36)));
-    bar.removeFromLeft (px (4));
-    savePresetButton.setBounds (bar.removeFromLeft (px (36)));
-    bar.removeFromLeft (px (2));
-    presetMenuButton.setBounds (bar.removeFromLeft (px (36)));
+    const int lessW = textButtonWidth ("Less", s);
+    const int moreW = textButtonWidth ("More", s);
+    const int saveW = textButtonWidth ("Save", s);
+    const int countW = juce::jmax (px (32), textButtonWidth (stopCountButton.getButtonText(), s, 28));
+    const int useW = juce::jmax (px (52), textButtonWidth ("Use", s, 52));
+    const int sampleW = textButtonWidth ("Sample Path", s, 96);
+
+    enableToggle.setBounds (bar1.removeFromLeft (useW));
+    bar1.removeFromLeft (px (4));
+    mapLabel.setBounds (bar1.removeFromLeft (px (30)));
+    const int trailing = lessW + countW + moreW + saveW + px (14);
+    mapCombo.setBounds (bar1.removeFromLeft (juce::jmax (px (110), bar1.getWidth() - trailing)));
+    bar1.removeFromLeft (px (4));
+    simplifyButton.setBounds (bar1.removeFromLeft (lessW));
+    stopCountButton.setBounds (bar1.removeFromLeft (countW));
+    densifyButton.setBounds (bar1.removeFromLeft (moreW));
+    bar1.removeFromLeft (px (4));
+    savePresetButton.setBounds (bar1.removeFromLeft (saveW));
+
+    samplePathButton.setBounds (bar2.removeFromRight (sampleW));
+    bar2.removeFromRight (px (6));
+    presetField.setBounds (bar2);
 
     if (polePicker != nullptr)
     {

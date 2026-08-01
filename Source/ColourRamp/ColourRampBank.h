@@ -51,6 +51,10 @@ public:
     void load();
     void save() const;
 
+    /** Session snapshot (keeps Use/enabled flags). Disk load forces Use off. */
+    juce::ValueTree toValueTree() const;
+    void applyFromValueTree (const juce::ValueTree& tree, bool forceCustomRampsOff);
+
     RampPresetStore& getPresets() noexcept { return presets; }
     const RampPresetStore& getPresets() const noexcept { return presets; }
 

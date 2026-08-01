@@ -9,7 +9,7 @@
 #include "RotaryImageKnob1.h"
 #include "RotaryImageKnob2.h"
 #include "RotaryImageKnob3.h"
-#include "OnOffButton1.h"
+#include "BandNumberButton.h"
 #include "EqEditor.h"
 #include "KnobBandHighlight.h"
 #include "ComboBoxLookAndFeel.h"
@@ -34,14 +34,14 @@ using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState, Analyser& analyser)
     : AudioProcessorEditor(&p),
     audioProcessor(p),
-    onOffButton1(std::make_unique<OnOffButton1>(treeState, "highpassOnOff")),
-    onOffButton2(std::make_unique<OnOffButton1>(treeState, "lowpassOnOff")),
-    onOffButton3(std::make_unique<OnOffButton1>(treeState, "highShelfOnOff")),
-    onOffButton4(std::make_unique<OnOffButton1>(treeState, "lowShelfOnOff")),
-    onOffButton5(std::make_unique<OnOffButton1>(treeState, "band1OnOff")),
-    onOffButton6(std::make_unique<OnOffButton1>(treeState, "band2OnOff")),
-    onOffButton7(std::make_unique<OnOffButton1>(treeState, "band3OnOff")),
-    onOffButton8(std::make_unique<OnOffButton1>(treeState, "band4OnOff")),
+    onOffButton1(std::make_unique<BandNumberButton>(treeState, "highpassOnOff")),
+    onOffButton2(std::make_unique<BandNumberButton>(treeState, "lowpassOnOff")),
+    onOffButton3(std::make_unique<BandNumberButton>(treeState, "highShelfOnOff")),
+    onOffButton4(std::make_unique<BandNumberButton>(treeState, "lowShelfOnOff")),
+    onOffButton5(std::make_unique<BandNumberButton>(treeState, "band1OnOff")),
+    onOffButton6(std::make_unique<BandNumberButton>(treeState, "band2OnOff")),
+    onOffButton7(std::make_unique<BandNumberButton>(treeState, "band3OnOff")),
+    onOffButton8(std::make_unique<BandNumberButton>(treeState, "band4OnOff")),
     phaseModeCombo (treeState, PhaseMode::paramId())
 
 {
@@ -491,7 +491,38 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
     loadUiPrefs();
     applyTooltipsEnabled();
-   
+
+    // Faceplate bank pager: chevron left of band 1, right of band 8 (no readout).
+    faceplateBankPrevButton.setTooltip ("Previous band bank");
+    faceplateBankNextButton.setTooltip ("Next band bank");
+    faceplateBankPrevButton.onClick = [this] { setFaceplateBank (faceplateBank - 1); };
+    faceplateBankNextButton.onClick = [this]
+    {
+        const int maxBank = audioProcessor.getFaceplateBankCount() - 1;
+        if (faceplateBank >= maxBank && faceplateBank + 1 < EqBand::kMaxBanks)
+            audioProcessor.ensureBankAvailable (faceplateBank + 1);
+        setFaceplateBank (faceplateBank + 1);
+    };
+    addAndMakeVisible (faceplateBankPrevButton);
+    addAndMakeVisible (faceplateBankNextButton);
+
+    bandsFullToastLabel.setJustificationType (juce::Justification::centred);
+    bandsFullToastLabel.setColour (juce::Label::textColourId, juce::Colour (218, 165, 32));
+    bandsFullToastLabel.setColour (juce::Label::backgroundColourId, juce::Colours::black.withAlpha (0.65f));
+    bandsFullToastLabel.setText ("Max 64 bands", juce::dontSendNotification);
+    bandsFullToastLabel.setInterceptsMouseClicks (false, false);
+    addChildComponent (bandsFullToastLabel);
+
+    if (mainComponent != nullptr)
+    {
+        auto& frc = mainComponent->getFrequencyResponseComponent();
+        frc.onFaceplateBankJump = [this] (int bank) { setFaceplateBank (bank, true); };
+        frc.onBandsFullSoftMax = [this] { showBandsFullSoftMaxFeedback(); };
+        frc.setPreferredCreateBank (faceplateBank);
+    }
+
+    rebindFaceplateAttachments();
+    updateFaceplateBankChrome();
 
     //addAndMakeVisible(testButton);
     //testButton.setButtonText("Test");
@@ -758,7 +789,7 @@ void EqEditor::paint(juce::Graphics& g)
     // Match resized() stack: top band → graph → optional mod → faceplate → trim.
     const int titleBarHeight = getTopBandHeight();
     const int trimH = getBottomTrimHeight();
-    const int faceplateStripH = getFaceplateHeightForWidth (getWidth());
+    const int faceplateStripH = isFaceplateSuppressed() ? 0 : getFaceplateHeightForWidth (getWidth());
     const int modStripH = modPanelOpen ? getModPanelHeightForGraphHeight (0) : 0;
     const int availableBelowTop = juce::jmax (1, getHeight() - titleBarHeight - trimH);
     int graphH = availableBelowTop - faceplateStripH - modStripH;
@@ -864,10 +895,12 @@ void EqEditor::resized()
     const int padding = px (10.0f);
 
     // Stack: graph (fills leftover) → mod (optional, 3/4 faceplate) → faceplate → bottom trim.
+    // Scope mode suppresses the faceplate strip (knobs parked); bottom chrome stays.
     const int graphTop = getTopBandHeight();
     const int trimH = getBottomTrimHeight();
     const int faceplateTopTrimH = getTopBandHeight(); // painted trim strip above knobs
-    const int faceplateStripH = getFaceplateHeightForWidth (getWidth());
+    const bool suppressFaceplate = isFaceplateSuppressed();
+    const int faceplateStripH = suppressFaceplate ? 0 : getFaceplateHeightForWidth (getWidth());
     const int modStripH = modPanelOpen ? getModPanelHeightForGraphHeight (0) : 0;
     const int availableBelowTop = juce::jmax (1, getHeight() - graphTop - trimH);
     int graphH = availableBelowTop - faceplateStripH - modStripH;
@@ -879,18 +912,21 @@ void EqEditor::resized()
         const int remaining = juce::jmax (1, availableBelowTop - graphH);
         if (modPanelOpen)
         {
-            faceplateH = juce::jmax (1, (remaining * 4) / 7);
+            faceplateH = suppressFaceplate ? 0 : juce::jmax (1, (remaining * 4) / 7);
             modHForLayout = juce::jmax (1, remaining - faceplateH);
         }
         else
         {
-            faceplateH = remaining;
+            faceplateH = suppressFaceplate ? 0 : remaining;
             modHForLayout = 0;
         }
     }
     const int faceplateMinTop = graphTop + graphH + modHForLayout;
     const int bottomLimit = getHeight() - trimH - 2;
-    faceplateH = juce::jmax (1, juce::jmin (faceplateH, bottomLimit - faceplateMinTop));
+    if (suppressFaceplate)
+        faceplateH = 0;
+    else
+        faceplateH = juce::jmax (1, juce::jmin (faceplateH, bottomLimit - faceplateMinTop));
     const int faceplateBottom = faceplateMinTop + faceplateH;
 
     const int totalWidth = getWidth();
@@ -965,26 +1001,30 @@ void EqEditor::resized()
         }
     }
 
-    auto typeIsHpLp = [this] (const char* typeId, int fallbackType) -> bool
+    auto typeIsHpLpForGlobal = [this] (int globalDisplay, int fallbackType) -> bool
     {
-        const int t = [&]() -> int
-        {
-            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
-                    audioProcessor.treeState.getParameter (typeId)))
-                return choice->getIndex();
-            return fallbackType;
-        }();
+        const auto typeId = FilterType::paramIDForGlobal (globalDisplay);
+        const int t = BandChannel::readChoiceIndex (audioProcessor.treeState, typeId, fallbackType);
         return FilterType::isHpLp (t);
     };
 
-    const bool band1HpLp = typeIsHpLp ("highpassType", FilterType::highpass);
-    const bool band2HpLp = typeIsHpLp ("lowShelfType", FilterType::lowShelf);
-    const bool band3HpLp = typeIsHpLp ("band1Type", FilterType::bell);
-    const bool band4HpLp = typeIsHpLp ("band2Type", FilterType::bell);
-    const bool band5HpLp = typeIsHpLp ("band3Type", FilterType::bell);
-    const bool band6HpLp = typeIsHpLp ("band4Type", FilterType::bell);
-    const bool band7HpLp = typeIsHpLp ("highShelfType", FilterType::highShelf);
-    const bool band8HpLp = typeIsHpLp ("lowpassType", FilterType::lowpass);
+    const int g0 = EqBand::globalFromBankSlot (faceplateBank, 0);
+    const int g1 = EqBand::globalFromBankSlot (faceplateBank, 1);
+    const int g2 = EqBand::globalFromBankSlot (faceplateBank, 2);
+    const int g3 = EqBand::globalFromBankSlot (faceplateBank, 3);
+    const int g4 = EqBand::globalFromBankSlot (faceplateBank, 4);
+    const int g5 = EqBand::globalFromBankSlot (faceplateBank, 5);
+    const int g6 = EqBand::globalFromBankSlot (faceplateBank, 6);
+    const int g7 = EqBand::globalFromBankSlot (faceplateBank, 7);
+
+    const bool band1HpLp = typeIsHpLpForGlobal (g0, FilterType::highpass);
+    const bool band2HpLp = typeIsHpLpForGlobal (g1, FilterType::lowShelf);
+    const bool band3HpLp = typeIsHpLpForGlobal (g2, FilterType::bell);
+    const bool band4HpLp = typeIsHpLpForGlobal (g3, FilterType::bell);
+    const bool band5HpLp = typeIsHpLpForGlobal (g4, FilterType::bell);
+    const bool band6HpLp = typeIsHpLpForGlobal (g5, FilterType::bell);
+    const bool band7HpLp = typeIsHpLpForGlobal (g6, FilterType::highShelf);
+    const bool band8HpLp = typeIsHpLpForGlobal (g7, FilterType::lowpass);
 
     // Place shelf/band Freq (left) and Q (right) equally spaced about the gain centre.
     // Does not advance startX — caller controls column X (keeps bands 2–7 fixed).
@@ -1209,34 +1249,92 @@ void EqEditor::resized()
     placeOnOffCentered (*onOffButton8, band6HpLp ? static_cast<juce::Component&> (knob22) : knob21);
     placeOnOffCentered (*onOffButton3, band7HpLp ? static_cast<juce::Component&> (knob7)  : knob6);
     placeOnOffCentered (*onOffButton2, band8HpLp ? static_cast<juce::Component&> (knob4)  : knobLpGain);
+
+    // Bank pager: centre each arrow in the gap between window edge and end power buttons.
+    {
+        const int pagerW = juce::jmax (18, px (20.0f));
+        const int pagerH = juce::jmax (18, juce::jmin (onOffButtonSize, px (22.0f)));
+        const int pagerY = onOffY + (onOffButtonSize - pagerH) / 2;
+        const int edgePad = 2;
+
+        if (onOffButton1 != nullptr)
+        {
+            const int gapStart = edgePad;
+            const int gapEnd = onOffButton1->getX();
+            const int gap = juce::jmax (pagerW, gapEnd - gapStart);
+            const int prevX = gapStart + (gap - pagerW) / 2;
+            faceplateBankPrevButton.setBounds (prevX, pagerY, pagerW, pagerH);
+        }
+        if (onOffButton2 != nullptr)
+        {
+            const int gapStart = onOffButton2->getRight();
+            const int gapEnd = getWidth() - edgePad;
+            const int gap = juce::jmax (pagerW, gapEnd - gapStart);
+            const int nextX = gapStart + (gap - pagerW) / 2;
+            faceplateBankNextButton.setBounds (nextX, pagerY, pagerW, pagerH);
+        }
+
+        faceplateBankPrevButton.setVisible (true);
+        faceplateBankNextButton.setVisible (true);
+        updateFaceplateBankChrome();
+    }
+
+    // Scope under band 6 once power buttons have final bounds (avoids logo overlap).
+    layoutScopeModeButton();
+
+    if (suppressFaceplate)
+    {
+        setFaceplateVisible (false);
+        juce::Slider* faceplateKnobs[] = {
+            &knob1, &knobHpGain, &knob2,
+            &knob3, &knobLpGain, &knob4,
+            &knob5, &knob6, &knob7,
+            &knob8, &knob9, &knob10,
+            &knob11, &knob12, &knob13,
+            &knob14, &knob15, &knob16,
+            &knob17, &knob18, &knob19,
+            &knob20, &knob21, &knob22,
+            &outputGainKnob
+        };
+        for (auto* k : faceplateKnobs)
+            k->setBounds ({});
+    }
+
+    if (bandsFullToastLabel.isVisible())
+    {
+        const int tw = juce::jmax (120, px (140.0f));
+        const int th = juce::jmax (22, px (24.0f));
+        bandsFullToastLabel.setBounds ((getWidth() - tw) / 2, graphTop + px (8.0f), tw, th);
+        bandsFullToastLabel.toFront (false);
+    }
 }
 
 void EqEditor::updateBandFaceplateGainVisibility()
 {
-    // Compact: setFaceplateVisible(false) already hid everything — don't fight it here.
-    if (uiCompact)
+    // Compact / Scope: faceplate is suppressed — don't fight visibility here.
+    if (isFaceplateSuppressed())
     {
         updateFaceplateSlopeWheelMode();
         return;
     }
 
-    auto typeUsesGain = [this] (const char* typeId, int fallbackType) -> bool
+    // Same rule for all 8 columns: show gain only when the filter type uses gain.
+    auto typeUsesGainGlobal = [this] (int col, int fallback) -> bool
     {
-        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
-                audioProcessor.treeState.getParameter (typeId)))
-            return FilterType::usesGain (choice->getIndex());
-        return FilterType::usesGain (fallbackType);
+        const int g = EqBand::globalFromBankSlot (faceplateBank, col);
+        return FilterType::usesGain (
+            BandChannel::readChoiceIndex (audioProcessor.treeState,
+                                          FilterType::paramIDForGlobal (g), fallback));
     };
 
-    // Same rule for all 8 columns: show gain only when the filter type uses gain.
-    knobHpGain.setVisible (typeUsesGain ("highpassType", FilterType::highpass));
-    knob9.setVisible (typeUsesGain ("lowShelfType", FilterType::lowShelf));
-    knob12.setVisible (typeUsesGain ("band1Type", FilterType::bell));
-    knob15.setVisible (typeUsesGain ("band2Type", FilterType::bell));
-    knob18.setVisible (typeUsesGain ("band3Type", FilterType::bell));
-    knob21.setVisible (typeUsesGain ("band4Type", FilterType::bell));
-    knob6.setVisible (typeUsesGain ("highShelfType", FilterType::highShelf));
-    knobLpGain.setVisible (typeUsesGain ("lowpassType", FilterType::lowpass));
+    knobHpGain.setVisible (typeUsesGainGlobal (0, FilterType::highpass));
+    knob9.setVisible (typeUsesGainGlobal (1, FilterType::lowShelf));
+    knob12.setVisible (typeUsesGainGlobal (2, FilterType::bell));
+    knob15.setVisible (typeUsesGainGlobal (3, FilterType::bell));
+    knob18.setVisible (typeUsesGainGlobal (4, FilterType::bell));
+    knob21.setVisible (typeUsesGainGlobal (5, FilterType::bell));
+    knob6.setVisible (typeUsesGainGlobal (6, FilterType::highShelf));
+    knobLpGain.setVisible (typeUsesGainGlobal (7, FilterType::lowpass));
 
     updateFaceplateSlopeWheelMode();
 }
@@ -1393,12 +1491,19 @@ void EqEditor::layoutScopeModeButton()
     const int btnSize = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
     const int btnW = juce::jmax (btnSize, px (uiCompact ? 52.0f : 58.0f));
     const int gap = px (6.0f);
-
-    // Sit just right of SideCheck (and its open controls when enabled).
-    int x = sideCheckButton.getRight() + gap;
-    if (sideCheckAmountSlider.isVisible())
-        x = juce::jmax (x, sideCheckLpKnob.getRight() + gap);
     const int y = sideCheckButton.getY() + (sideCheckButton.getHeight() - btnSize) / 2;
+
+    int x = sideCheckButton.getRight() + gap;
+    if (! uiCompact && onOffButton8 != nullptr && onOffButton8->getWidth() > 0)
+    {
+        // Expanded faceplate: under band 6 (column of onOffButton8) so it clears the logo.
+        x = onOffButton8->getBounds().getCentreX() - btnW / 2;
+    }
+    else if (sideCheckAmountSlider.isVisible())
+    {
+        x = juce::jmax (x, sideCheckLpKnob.getRight() + gap);
+    }
+
     scopeModeButton.setBounds (x, y, btnW, btnSize);
     scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
                                     juce::dontSendNotification);
@@ -1451,12 +1556,14 @@ void EqEditor::layoutSideCheckButton()
         sideCheckHqButton.toFront (false);
 
         // Compact rotary knobs (OptionBox A/R style), labels left of each knob.
+        // Tight cluster just after HQ with a few pixels of padding.
         const int knobSize = btnSize;
-        const int labelW = juce::jmax (px (16.0f), 14);
-        const int labelGap = px (2.0f);
-        const int pairGap = gap;
+        const int labelW = juce::jmax (px (14.0f), 12);
+        const int labelGap = px (1.0f);
+        const int pairGap = px (2.0f);
+        const int afterHqPad = px (4.0f);
 
-        int cx = sideCheckHqButton.getRight() + gap;
+        int cx = sideCheckHqButton.getRight() + afterHqPad;
         sideCheckHpLabel.setBounds (cx, y, labelW, btnSize);
         cx += labelW + labelGap;
         sideCheckHpKnob.setBounds (cx, y, knobSize, knobSize);
@@ -1576,10 +1683,32 @@ void EqEditor::syncScopeModeButton()
     scopeModeButton.setTooltip (tip);
 }
 
+bool EqEditor::isScopeModeActive() const noexcept
+{
+    return mainComponent != nullptr && mainComponent->isScopeMode();
+}
+
+bool EqEditor::isFaceplateSuppressed() const noexcept
+{
+    return uiCompact || isScopeModeActive();
+}
+
 void EqEditor::syncScopeModeLayout()
 {
     if (getWidth() <= 0 || getHeight() <= 0)
         return;
+
+    // Scope mode hides the faceplate (same as compact) and collapses its strip height.
+    const bool showFaceplate = ! isFaceplateSuppressed();
+    setFaceplateVisible (showFaceplate);
+    if (showFaceplate)
+        updateBandFaceplateGainVisibility();
+
+    if (! uiCompact)
+    {
+        const int w = getWidth() > 0 ? getWidth() : designWidth;
+        setSize (w, getExpandedEditorHeight (w, modPanelOpen));
+    }
 
     layoutBrandWordmark (-1);
     layoutHelpTooltipsButton();
@@ -1639,6 +1768,8 @@ void EqEditor::loadUiPrefs()
                 randRampFft = xml->getBoolAttribute ("randRampFft", true);
                 randRampSpec = xml->getBoolAttribute ("randRampSpec", true);
                 randRampFill = xml->getBoolAttribute ("randRampFill", true);
+                faceplateBank = juce::jlimit (0, EqBand::kMaxBanks - 1,
+                                              xml->getIntAttribute ("faceplateBank", 0));
             }
         }
     }
@@ -1682,6 +1813,7 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("randRampFill", c.randomizeRampSpectrumFill);
     }
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
+    xml->setAttribute ("faceplateBank", faceplateBank);
 
     auto file = getUiPrefsFile();
     file.getParentDirectory().createDirectory();
@@ -1695,17 +1827,158 @@ void EqEditor::wireFaceplateKnobInteraction (juce::Slider& knob)
     knob.addMouseListener (static_cast<juce::Component*> (this), false);
 }
 
+int EqEditor::faceplateColumnForSlider (const juce::Slider* slider) const noexcept
+{
+    if (slider == &knob1 || slider == &knobHpGain || slider == &knob2) return 0; // Band 1 / col0
+    if (slider == &knob8 || slider == &knob9 || slider == &knob10) return 1;
+    if (slider == &knob11 || slider == &knob12 || slider == &knob13) return 2;
+    if (slider == &knob14 || slider == &knob15 || slider == &knob16) return 3;
+    if (slider == &knob17 || slider == &knob18 || slider == &knob19) return 4;
+    if (slider == &knob20 || slider == &knob21 || slider == &knob22) return 5;
+    if (slider == &knob5 || slider == &knob6 || slider == &knob7) return 6;
+    if (slider == &knob3 || slider == &knobLpGain || slider == &knob4) return 7;
+    return -1;
+}
+
 int EqEditor::faceplateBandIndexForSlider (const juce::Slider* slider) const noexcept
 {
-    if (slider == &knob1 || slider == &knobHpGain || slider == &knob2) return 4; // Band 1
-    if (slider == &knob3 || slider == &knobLpGain || slider == &knob4) return 5; // Band 8
-    if (slider == &knob5 || slider == &knob6 || slider == &knob7) return 6;     // Band 7
-    if (slider == &knob8 || slider == &knob9 || slider == &knob10) return 7;    // Band 2
-    if (slider == &knob11 || slider == &knob12 || slider == &knob13) return 0;  // Band 3
-    if (slider == &knob14 || slider == &knob15 || slider == &knob16) return 1;  // Band 4
-    if (slider == &knob17 || slider == &knob18 || slider == &knob19) return 2;  // Band 5
-    if (slider == &knob20 || slider == &knob21 || slider == &knob22) return 3;  // Band 6
-    return -1;
+    const int col = faceplateColumnForSlider (slider);
+    if (col < 0)
+        return -1;
+
+    if (faceplateBank <= 0)
+    {
+        // Bank 1: OptionBox / highlight still use internal indices.
+        constexpr int internalByCol[8] = { 4, 7, 0, 1, 2, 3, 6, 5 };
+        return internalByCol[col];
+    }
+
+    return EqBand::globalFromBankSlot (faceplateBank, col);
+}
+
+void EqEditor::setFaceplateBank (int bankIndex, bool savePrefs)
+{
+    const int maxBank = juce::jmax (0, audioProcessor.getFaceplateBankCount() - 1);
+    bankIndex = juce::jlimit (0, juce::jmax (maxBank, EqBand::kMaxBanks - 1), bankIndex);
+    bankIndex = juce::jmin (bankIndex, EqBand::kMaxBanks - 1);
+
+    if (bankIndex == faceplateBank)
+    {
+        updateFaceplateBankChrome();
+        return;
+    }
+
+    faceplateBank = bankIndex;
+    audioProcessor.ensureBankAvailable (faceplateBank);
+    rebindFaceplateAttachments();
+    updateFaceplateBandNumbers();
+    updateFaceplateBankChrome();
+    updateBandFaceplateGainVisibility();
+
+    if (mainComponent != nullptr)
+        mainComponent->getFrequencyResponseComponent().setPreferredCreateBank (faceplateBank);
+
+    resized();
+    if (savePrefs)
+        saveUiPrefs();
+}
+
+void EqEditor::rebindFaceplateAttachments()
+{
+    auto bindColumn = [this] (int col,
+                              juce::Slider& freqKnob,
+                              juce::Slider& gainKnob,
+                              juce::Slider& qKnob,
+                              std::unique_ptr<SliderAttachment>& freqAtt,
+                              std::unique_ptr<SliderAttachment>& gainAtt,
+                              std::unique_ptr<SliderAttachment>& qAtt,
+                              BandNumberButton& onOff)
+    {
+        const int global = EqBand::globalFromBankSlot (faceplateBank, col);
+        const auto freqId = EqBand::frequencyParamIDForGlobal (global);
+        const auto gainId = EqBand::gainParamIDForGlobal (global);
+        const auto qId = EqBand::qParamIDForGlobal (global);
+        const auto onId = EqBand::onOffParamIDForGlobal (global);
+
+        auto attach = [this] (std::unique_ptr<SliderAttachment>& att,
+                              const juce::String& id,
+                              juce::Slider& slider)
+        {
+            att.reset();
+            if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (audioProcessor.treeState.getParameter (id)))
+            {
+                const auto range = param->getNormalisableRange();
+                slider.setNormalisableRange (juce::NormalisableRange<double> (
+                    (double) range.start, (double) range.end,
+                    (double) range.interval, (double) range.skew, range.symmetricSkew));
+            }
+            att = std::make_unique<SliderAttachment> (audioProcessor.treeState, id, slider);
+        };
+
+        attach (freqAtt, freqId, freqKnob);
+        attach (gainAtt, gainId, gainKnob);
+        attach (qAtt, qId, qKnob);
+        onOff.setParameterID (onId);
+    };
+
+    // Display columns L→R: Band1 HP, Band2 LS, Band3–6, Band7 HS, Band8 LP
+    bindColumn (0, knob1,  knobHpGain, knob2,  highpassCutoffAttachment, highpassGainAttachment, highpassQAttachment, *onOffButton1);
+    bindColumn (1, knob8,  knob9,      knob10, lowShelfFrequencyAttachment, lowShelfGainAttachment, lowShelfQAttachment, *onOffButton4);
+    bindColumn (2, knob11, knob12,     knob13, band1FrequencyAttachment, band1GainAttachment, band1QAttachment, *onOffButton5);
+    bindColumn (3, knob14, knob15,     knob16, band2FrequencyAttachment, band2GainAttachment, band2QAttachment, *onOffButton6);
+    bindColumn (4, knob17, knob18,     knob19, band3FrequencyAttachment, band3GainAttachment, band3QAttachment, *onOffButton7);
+    bindColumn (5, knob20, knob21,     knob22, band4FrequencyAttachment, band4GainAttachment, band4QAttachment, *onOffButton8);
+    bindColumn (6, knob5,  knob6,      knob7,  highShelfFrequencyAttachment, highShelfGainAttachment, highShelfQAttachment, *onOffButton3);
+    bindColumn (7, knob3,  knobLpGain, knob4,  lowpassCutoffAttachment, lowpassGainAttachment, lowpassQAttachment, *onOffButton2);
+
+    updateFaceplateBandNumbers();
+}
+
+void EqEditor::updateFaceplateBandNumbers()
+{
+    // Display columns L→R match bindColumn / placeOnOffCentered mapping.
+    BandNumberButton* buttons[8] = {
+        onOffButton1.get(), onOffButton4.get(), onOffButton5.get(), onOffButton6.get(),
+        onOffButton7.get(), onOffButton8.get(), onOffButton3.get(), onOffButton2.get()
+    };
+
+    for (int col = 0; col < 8; ++col)
+    {
+        if (buttons[col] == nullptr)
+            continue;
+        const int global = EqBand::globalFromBankSlot (faceplateBank, col);
+        const int bandNum = global + 1;
+        buttons[col]->setBandNumber (bandNum);
+        buttons[col]->setTooltip ("Band " + juce::String (bandNum)
+                                  + " - click to turn this band on or off");
+    }
+}
+
+void EqEditor::updateFaceplateBankChrome()
+{
+    const int count = audioProcessor.getFaceplateBankCount();
+    faceplateBankPrevButton.setEnabled (faceplateBank > 0);
+    faceplateBankNextButton.setEnabled (faceplateBank + 1 < EqBand::kMaxBanks
+                                        || faceplateBank + 1 < count);
+
+    const int bankShown = faceplateBank + 1;
+    const int first = faceplateBank * EqBand::kBankSize + 1;
+    const int last = first + EqBand::kBankSize - 1;
+    faceplateBankPrevButton.setTooltip (
+        "Previous band bank (currently bank " + juce::String (bankShown)
+        + ", bands " + juce::String (first) + "-" + juce::String (last) + ")");
+    faceplateBankNextButton.setTooltip (
+        "Next band bank (currently bank " + juce::String (bankShown)
+        + ", bands " + juce::String (first) + "-" + juce::String (last) + ")");
+}
+
+void EqEditor::showBandsFullSoftMaxFeedback()
+{
+    bandsFullToastLabel.setVisible (true);
+    bandsFullToastTicks = 40; // ~2s at 50ms timer
+    if (! isTimerRunning())
+        startTimer (50);
+    resized();
 }
 
 void EqEditor::openOptionBoxForFaceplateBand (int bandIndex)
@@ -1717,13 +1990,26 @@ void EqEditor::openOptionBoxForFaceplateBand (int bandIndex)
 
 bool EqEditor::cycleFilterSlopeForBand (int bandIndex, int delta)
 {
-    const auto slopeID = FilterSlope::paramIDForBandIndex (bandIndex);
+    juce::String slopeID, typeID;
+    int fallbackType = FilterType::bell;
+
+    if (bandIndex >= EqBand::kBankSize)
+    {
+        slopeID = EqBand::slopeParamIDForGlobal (bandIndex);
+        typeID = FilterType::paramIDForGlobal (bandIndex);
+        fallbackType = FilterType::bell;
+    }
+    else
+    {
+        slopeID = FilterSlope::paramIDForBandIndex (bandIndex);
+        typeID = FilterType::paramIDForBandIndex (bandIndex);
+        fallbackType = FilterType::defaultTypeForBandIndex (bandIndex);
+    }
+
     if (slopeID.isEmpty())
         return false;
 
-    const auto typeID = FilterType::paramIDForBandIndex (bandIndex);
-    const int type = BandChannel::readChoiceIndex (
-        audioProcessor.treeState, typeID, FilterType::defaultTypeForBandIndex (bandIndex));
+    const int type = BandChannel::readChoiceIndex (audioProcessor.treeState, typeID, fallbackType);
     if (! FilterType::isHpLp (type))
         return false;
 
@@ -1745,32 +2031,34 @@ bool EqEditor::cycleFilterSlopeForBand (int bandIndex, int delta)
 
 void EqEditor::updateFaceplateSlopeWheelMode()
 {
-    auto typeIsHpLp = [this] (const juce::String& typeId, int fallback) -> bool
+    auto typeIsHpLpCol = [this] (int col, int fallback) -> bool
     {
+        const int g = EqBand::globalFromBankSlot (faceplateBank, col);
         return FilterType::isHpLp (
-            BandChannel::readChoiceIndex (audioProcessor.treeState, typeId, fallback));
+            BandChannel::readChoiceIndex (audioProcessor.treeState,
+                                          FilterType::paramIDForGlobal (g), fallback));
     };
 
     auto setWheel = [] (juce::Slider& s, bool enable) { s.setScrollWheelEnabled (enable); };
 
     // When HP/LP, disable knob-value wheel so mouseWheelMove can cycle slope instead.
-    const bool b1 = typeIsHpLp ("highpassType", FilterType::highpass);
-    const bool b8 = typeIsHpLp ("lowpassType", FilterType::lowpass);
-    const bool hs = typeIsHpLp ("highShelfType", FilterType::highShelf);
-    const bool ls = typeIsHpLp ("lowShelfType", FilterType::lowShelf);
-    const bool p1 = typeIsHpLp ("band1Type", FilterType::bell);
-    const bool p2 = typeIsHpLp ("band2Type", FilterType::bell);
-    const bool p3 = typeIsHpLp ("band3Type", FilterType::bell);
-    const bool p4 = typeIsHpLp ("band4Type", FilterType::bell);
+    const bool b1 = typeIsHpLpCol (0, FilterType::highpass);
+    const bool b2 = typeIsHpLpCol (1, FilterType::lowShelf);
+    const bool p1 = typeIsHpLpCol (2, FilterType::bell);
+    const bool p2 = typeIsHpLpCol (3, FilterType::bell);
+    const bool p3 = typeIsHpLpCol (4, FilterType::bell);
+    const bool p4 = typeIsHpLpCol (5, FilterType::bell);
+    const bool hs = typeIsHpLpCol (6, FilterType::highShelf);
+    const bool b8 = typeIsHpLpCol (7, FilterType::lowpass);
 
     setWheel (knob1, ! b1); setWheel (knobHpGain, ! b1); setWheel (knob2, ! b1);
-    setWheel (knob3, ! b8); setWheel (knobLpGain, ! b8); setWheel (knob4, ! b8);
-    setWheel (knob5, ! hs); setWheel (knob6, ! hs); setWheel (knob7, ! hs);
-    setWheel (knob8, ! ls); setWheel (knob9, ! ls); setWheel (knob10, ! ls);
+    setWheel (knob8, ! b2); setWheel (knob9, ! b2); setWheel (knob10, ! b2);
     setWheel (knob11, ! p1); setWheel (knob12, ! p1); setWheel (knob13, ! p1);
     setWheel (knob14, ! p2); setWheel (knob15, ! p2); setWheel (knob16, ! p2);
     setWheel (knob17, ! p3); setWheel (knob18, ! p3); setWheel (knob19, ! p3);
     setWheel (knob20, ! p4); setWheel (knob21, ! p4); setWheel (knob22, ! p4);
+    setWheel (knob5, ! hs); setWheel (knob6, ! hs); setWheel (knob7, ! hs);
+    setWheel (knob3, ! b8); setWheel (knobLpGain, ! b8); setWheel (knob4, ! b8);
 }
 
 void EqEditor::mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
@@ -1811,6 +2099,15 @@ void EqEditor::setBandManipulationHighlight (int bandIndex)
     {
         KnobBandHighlight::setActive (slider, on);
     };
+
+    if (bandIndex >= EqBand::kBankSize)
+    {
+        setFaceplateBank (EqBand::bankFromGlobal (bandIndex), false);
+        const int col = EqBand::slotInBankFromGlobal (bandIndex);
+        // Map display column → highlight using Bank1 internal indices for the switch below.
+        constexpr int internalByCol[8] = { 4, 7, 0, 1, 2, 3, 6, 5 };
+        bandIndex = internalByCol[juce::jlimit (0, 7, col)];
+    }
 
     // Clear all first
     setHighlight (knob1, false);
@@ -1883,223 +2180,11 @@ void EqEditor::setBandManipulationHighlight (int bandIndex)
 
 void EqEditor::sliderValueChanged(juce::Slider* slider)
 {
-    //DBG("Slider value changed"); // Add this line for debugging
-
+    // Faceplate knobs are APVTS-attached. Do NOT call updateBand*/updateHighpass here —
+    // those snap IIR coeffs on the message thread and fight processBlock smoothing (zipper).
     if (slider == &sideCheckHpKnob || slider == &sideCheckLpKnob)
         enforceSideCheckHpLpOrder (slider);
-
-    //Highpass
-    if (slider == &knob1)
-    {
-        float cutoff = knob1.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("highpassQ");
-        const int slope = (int) audioProcessor.treeState.getRawParameterValue ("highpassSlope")->load();
-       audioProcessor.updateHighpass(cutoff, q, slope);
-    }
-
-    if (slider == &knob2)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("highpassCutoff");
-        float q = knob2.getValue();
-        const int slope = (int) audioProcessor.treeState.getRawParameterValue ("highpassSlope")->load();
-        audioProcessor.updateHighpass(cutoff, q, slope);
-    }
-
-
-
-    // Lowpass
-    if (slider == &knob3)
-    {
-        float cutoff = knob3.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("lowpassQ");
-        const int slope = (int) audioProcessor.treeState.getRawParameterValue ("lowpassSlope")->load();
-        audioProcessor.updateLowpass(cutoff, q, slope);
-    }
-
-    if (slider == &knob4)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("lowpassCutoff");
-        float q = knob4.getValue();
-        const int slope = (int) audioProcessor.treeState.getRawParameterValue ("lowpassSlope")->load();
-        audioProcessor.updateLowpass(cutoff, q, slope);
-    }
-
-
-
-    // High Shelf
-    if (slider == &knob5)
-    {
-        float cutoff = knob5.getValue();
-        float gain = *audioProcessor.treeState.getRawParameterValue("highShelfGain");
-        float q = *audioProcessor.treeState.getRawParameterValue("highShelfQ");
-        audioProcessor.updateHighShelf(cutoff, q, gain);
-    }
-
-    if (slider == &knob6)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("highShelfFrequency");
-        float gain = knob6.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("highShelfQ");
-        audioProcessor.updateHighShelf(cutoff, q, gain);
-    }
-
-    if (slider == &knob7)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("highShelfFrequency");
-        float gain = *audioProcessor.treeState.getRawParameterValue("highShelfGain");
-        float q = knob7.getValue();
-        audioProcessor.updateHighShelf(cutoff, q, gain);
-    }
-
-
-
-
-   // Low Shelf
-    if (slider == &knob8)
-    {
-        float cutoff = knob8.getValue();
-        float gain = *audioProcessor.treeState.getRawParameterValue("lowShelfGain");
-        float q = *audioProcessor.treeState.getRawParameterValue("lowShelfQ");
-        audioProcessor.updateLowShelf(cutoff, q, gain);
-    }
-
-    if (slider == &knob9)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("lowShelfFrequency");
-        float gain = knob9.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("lowShelfQ");
-        audioProcessor.updateLowShelf(cutoff, q, gain);
-    }
-
-    if (slider == &knob10)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("lowShelfFrequency");
-        float gain = *audioProcessor.treeState.getRawParameterValue("lowShelfGain");
-        float q = knob10.getValue();
-        audioProcessor.updateLowShelf(cutoff, q, gain);
-    }
-
-
-
-    // Band 1
-    if (slider == &knob11)
-    {
-        float cutoff = knob11.getValue();
-        float gain = *audioProcessor.treeState.getRawParameterValue("band1Gain");
-        float q = *audioProcessor.treeState.getRawParameterValue("band1Q");
-        audioProcessor.updateBand1(cutoff, q, gain);
-
-        juce::dsp::IIR::Coefficients<float> updatedCoefficients = audioProcessor.getBand1Coefficients();
-        double sampleRate = audioProcessor.getSampleRate();
-        frequencyResponseComponent->setCoefficients(updatedCoefficients, sampleRate);
-    }
-
-    if (slider == &knob12)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band1Frequency");
-        float gain = knob12.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("band1Q");
-        audioProcessor.updateBand1(cutoff, q, gain);
-
-        juce::dsp::IIR::Coefficients<float> updatedCoefficients = audioProcessor.getBand1Coefficients();
-        double sampleRate = audioProcessor.getSampleRate();
-        frequencyResponseComponent->setCoefficients(updatedCoefficients, sampleRate);
-    }
-
-    if (slider == &knob13)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band1Frequency");
-        float gain = *audioProcessor.treeState.getRawParameterValue("band1Gain");
-        float q = knob13.getValue();
-        audioProcessor.updateBand1(cutoff, q, gain);
-
-        juce::dsp::IIR::Coefficients<float> updatedCoefficients = audioProcessor.getBand1Coefficients();
-        double sampleRate = audioProcessor.getSampleRate();
-        frequencyResponseComponent->setCoefficients(updatedCoefficients, sampleRate);
-    }
-
-
-
-    // Band 2
-    if (slider == &knob14)
-    {
-        float cutoff = knob14.getValue();
-        float gain = *audioProcessor.treeState.getRawParameterValue("band2Gain");
-        float q = *audioProcessor.treeState.getRawParameterValue("band2Q");
-        audioProcessor.updateBand2(cutoff, q, gain);
-    }
-
-    if (slider == &knob15)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band2Frequency");
-        float gain = knob15.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("band2Q");
-        audioProcessor.updateBand2(cutoff, q, gain);
-    }
-
-    if (slider == &knob16)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band2Frequency");
-        float gain = *audioProcessor.treeState.getRawParameterValue("band2Gain");
-        float q = knob16.getValue();
-        audioProcessor.updateBand2(cutoff, q, gain);
-    }
-
-
-
-    // Band 3
-    if (slider == &knob17)
-    {
-        float cutoff = knob17.getValue();
-        float gain = *audioProcessor.treeState.getRawParameterValue("band3Gain");
-        float q = *audioProcessor.treeState.getRawParameterValue("band3Q");
-        audioProcessor.updateBand3(cutoff, q, gain);
-    }
-
-    if (slider == &knob18)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band3Frequency");
-        float gain = knob18.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("band3Q");
-        audioProcessor.updateBand3(cutoff, q, gain);
-    }
-
-    if (slider == &knob19)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band3Frequency");
-        float gain = *audioProcessor.treeState.getRawParameterValue("band3Gain");
-        float q = knob19.getValue();
-        audioProcessor.updateBand3(cutoff, q, gain);
-    }
-
-
-    // Band 4
-    if (slider == &knob20)
-    {
-        float cutoff = knob20.getValue();
-        float gain = *audioProcessor.treeState.getRawParameterValue("band4Gain");
-        float q = *audioProcessor.treeState.getRawParameterValue("band4Q");
-        audioProcessor.updateBand4(cutoff, q, gain);
-    }
-
-    if (slider == &knob21)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band4Frequency");
-        float gain = knob21.getValue();
-        float q = *audioProcessor.treeState.getRawParameterValue("band4Q");
-        audioProcessor.updateBand4(cutoff, q, gain);
-    }
-
-    if (slider == &knob22)
-    {
-        float cutoff = *audioProcessor.treeState.getRawParameterValue("band4Frequency");
-        float gain = *audioProcessor.treeState.getRawParameterValue("band4Gain");
-        float q = knob22.getValue();
-        audioProcessor.updateBand4(cutoff, q, gain);
-    }
-
 }
-
 
 
 
@@ -2143,7 +2228,7 @@ void EqEditor::initializeSharedImages()
 
 void EqEditor::buttonClicked(juce::Button* button)
 {
-    // On/off buttons update their own APVTS parameter in OnOffButton1::clicked().
+    // On/off buttons update their own APVTS parameter in BandNumberButton::clicked().
     // Here we only need to refresh the editor after a toggle.
     if (button == onOffButton1.get()
         || button == onOffButton2.get()
@@ -2159,12 +2244,22 @@ void EqEditor::buttonClicked(juce::Button* button)
 }
 void EqEditor::timerCallback()
 {
-    if (!hasForcedRepaint)
+    if (! hasForcedRepaint)
     {
         hasForcedRepaint = true;
-        stopTimer();  // Stop the timer
-        repaint();    // Force a repaint
+        repaint();
     }
+
+    if (bandsFullToastTicks > 0)
+    {
+        --bandsFullToastTicks;
+        if (bandsFullToastTicks == 0)
+            bandsFullToastLabel.setVisible (false);
+        return;
+    }
+
+    if (hasForcedRepaint)
+        stopTimer();
 }
 
 void EqEditor::toggleCompactUi()
@@ -2200,8 +2295,14 @@ void EqEditor::applyFaceplateTheme()
     styleChrome (helpTooltipsButton);
     styleChrome (autoGainButton);
     styleChrome (sideCheckButton);
+    styleChrome (scopeModeButton);
     styleChrome (sideCheckSpeedButton);
     styleChrome (sideCheckHqButton);
+
+    faceplateBankPrevButton.setChromeColours (c.pluginButtonBackground,
+                                              c.pluginButtonText.withAlpha (0.9f));
+    faceplateBankNextButton.setChromeColours (c.pluginButtonBackground,
+                                              c.pluginButtonText.withAlpha (0.9f));
 
     const auto labelColour = c.pluginButtonText.withAlpha (0.85f);
     auto themeLabel = [labelColour] (juce::Label& lab)
@@ -2210,20 +2311,12 @@ void EqEditor::applyFaceplateTheme()
         lab.repaint();
     };
 
-    themeLabel (bandNumberLabel1);
-    themeLabel (bandNumberLabel2);
-    themeLabel (bandNumberLabel3);
-    themeLabel (bandNumberLabel4);
-    themeLabel (bandNumberLabel5);
-    themeLabel (bandNumberLabel6);
-    themeLabel (bandNumberLabel7);
-    themeLabel (bandNumberLabel8);
     themeLabel (sideCheckHpLabel);
     themeLabel (sideCheckLpLabel);
 
-    // Power buttons: off = dimmed knob arc; on = brighter (OnOffButton paint).
+    // Band number buttons: off = dimmed knob arc; on = brighter ring + number.
     const auto powerColour = c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f);
-    auto themePower = [powerColour] (std::unique_ptr<OnOffButton1>& b)
+    auto themePower = [powerColour] (std::unique_ptr<BandNumberButton>& b)
     {
         if (b != nullptr)
         {
@@ -2336,7 +2429,7 @@ int EqEditor::getExpandedEditorHeight (int width, bool includeModPanel) const
     const float scale = (float) width / (float) designWidth;
     const int graphTop = juce::jmax (22, juce::roundToInt (30.0f * scale));
     const int graphH = getGraphHeightForWidth (width);
-    const int stripH = getFaceplateHeightForWidth (width);
+    const int stripH = isFaceplateSuppressed() ? 0 : getFaceplateHeightForWidth (width);
     const int modH = includeModPanel ? getModPanelHeightForGraphHeight (graphH) : 0;
     const int trimH = juce::jmax (22, juce::roundToInt (30.0f * scale));
     return graphTop + graphH + modH + stripH + trimH;
@@ -2364,9 +2457,8 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
     setVis (border21); setVis (border22);
     setVis (borderOutputGain);
 
-    setVis (bandNumberLabel1); setVis (bandNumberLabel2); setVis (bandNumberLabel3);
-    setVis (bandNumberLabel4); setVis (bandNumberLabel5); setVis (bandNumberLabel6);
-    setVis (bandNumberLabel7); setVis (bandNumberLabel8);
+    setVis (faceplateBankPrevButton);
+    setVis (faceplateBankNextButton);
 
     if (onOffButton1) setVis (*onOffButton1);
     if (onOffButton2) setVis (*onOffButton2);
@@ -2391,8 +2483,8 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
 
 void EqEditor::applyCompactUi()
 {
-    setFaceplateVisible (! uiCompact);
-    if (! uiCompact)
+    setFaceplateVisible (! isFaceplateSuppressed());
+    if (! isFaceplateSuppressed())
         updateBandFaceplateGainVisibility(); // restore per-type gain knobs after unhide
 
     if (mainComponent != nullptr)
