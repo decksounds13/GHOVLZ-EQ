@@ -5,7 +5,6 @@
 
 namespace
 {
-    constexpr int kScrollBarWidth = 11;
     constexpr int kPadX = 16;
     constexpr int kPadY = 10;
     constexpr int kLabelH = 18;
@@ -505,39 +504,17 @@ SpectrogramSettingsComponent::SpectrogramSettingsComponent (SharedResources& res
       content (resources, state, ramps)
 {
     colourRamps.addChangeListener (this);
-
-    viewport.setViewedComponent (&content, false);
-    viewport.setScrollBarsShown (false, false);
-    viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
-    viewport.setScrollBarThickness (0);
-    addAndMakeVisible (viewport);
-
-    customScrollBar = std::make_unique<CustomScrollBar> (viewport.getVerticalScrollBar());
-    addAndMakeVisible (*customScrollBar);
-    customScrollBar->toFront (false);
-    syncScrollBarColours();
+    addAndMakeVisible (content);
 }
 
 SpectrogramSettingsComponent::~SpectrogramSettingsComponent()
 {
     colourRamps.removeChangeListener (this);
-    viewport.setViewedComponent (nullptr, false);
 }
 
 void SpectrogramSettingsComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     content.syncGradientFromBank();
-}
-
-void SpectrogramSettingsComponent::syncScrollBarColours()
-{
-    if (customScrollBar == nullptr)
-        return;
-
-    customScrollBar->setTrackBackgroundColour (sharedResources.sharedColors.menuScrollBarTrackColor1);
-    customScrollBar->setThumbBackgroundColour (sharedResources.sharedColors.menuScrollBarThumbColor1);
-    customScrollBar->setThumbOutlineColour (sharedResources.sharedColors.menuScrollBarOutlineColor1);
-    customScrollBar->repaint();
 }
 
 void SpectrogramSettingsComponent::paint (juce::Graphics& g)
@@ -547,21 +524,6 @@ void SpectrogramSettingsComponent::paint (juce::Graphics& g)
 
 void SpectrogramSettingsComponent::resized()
 {
-    syncScrollBarColours();
-
-    auto bounds = getLocalBounds();
-
-    if (customScrollBar != nullptr)
-    {
-        customScrollBar->setVisible (true);
-        customScrollBar->setBounds (bounds.removeFromRight (kScrollBarWidth));
-    }
-
-    viewport.setBounds (bounds);
-    content.setSize (viewport.getWidth(), juce::jmax (viewport.getHeight(), content.getPreferredHeight()));
+    content.setBounds (0, 0, getWidth(), content.getPreferredHeight());
     content.resized();
-    viewport.setViewPosition (viewport.getViewPosition());
-
-    if (customScrollBar != nullptr)
-        customScrollBar->updateThumbPosition();
 }

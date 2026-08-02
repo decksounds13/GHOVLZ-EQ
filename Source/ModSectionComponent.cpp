@@ -55,7 +55,7 @@ namespace
         s.setSliderStyle (juce::Slider::LinearVertical);
         s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 44, 12);
         s.setTextValueSuffix (" dB");
-        s.setTooltip ("Envelope follower threshold in dB. Signal fills from the bottom — processing engages when the level reaches the thumb.");
+        s.setTooltip ("Envelope follower threshold in dB. Signal fills from the bottom - processing engages when the level reaches the thumb.");
         // Transparent track so the level meter painted underneath is visible.
         s.setColour (juce::Slider::trackColourId, juce::Colours::transparentBlack);
         s.setColour (juce::Slider::backgroundColourId, juce::Colours::transparentBlack);

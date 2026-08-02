@@ -1036,12 +1036,12 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     wireScopeMenu (spectrogram, ScopeModuleId::spectrogram);
     wireScopeMenu (m_visualizer, ScopeModuleId::spectrum);
 
-    // Default: scope on at load (summed stereo). Gon on. Spec on.
+    // Default: scope on at load (summed stereo). Gon off (glow trail is expensive). Spec on.
     oscButton.setToggleState (true, juce::dontSendNotification);
     oscilloscope.setEnabled (true);
     oscilloscope.setChannelMode (OscilloscopeComponent::ChannelMode::summedStereo);
     syncOscToolButtons();
-    applyGoniometerActive (true);
+    applyGoniometerActive (false);
     syncGonToolButtons();
     syncSpecToolButtons();
     specButton.setToggleState (true, juce::dontSendNotification);

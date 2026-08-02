@@ -25,7 +25,8 @@ Menu::Menu (SharedResources& resources,
             TextButtonLookAndFeel& lookAndFeel,
             ColourRampBank& colourRamps)
     : sharedResources (resources),
-      textButtonLookAndFeel (lookAndFeel)
+      textButtonLookAndFeel (lookAndFeel),
+      tabBar (*this)
 {
     juce::Colour menuBorderColor = sharedResources.sharedColors.menuTabBarBorderColor;
 
@@ -314,9 +315,41 @@ void Menu::paint (juce::Graphics& g)
     g.drawRoundedRectangle (0.5f, 0.5f, (float) getWidth() - 1.0f, (float) getHeight() - 1.0f, 14.0f, 1.5f);
 }
 
-void Menu::resized()
+int Menu::getActiveTabPreferredContentHeight() const
 {
-    contentPanel.setSize (kContentWidth, kContentHeight);
+    constexpr int tabBarDepth = 35;
+    auto* c = tabBar.getCurrentContentComponent();
+    if (c == nullptr)
+        return kContentHeight - tabBarDepth;
+
+    if (auto* t = dynamic_cast<SpectrumComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<FftComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<OscilloscopeSettingsComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<GoniometerSettingsComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<SpectrogramSettingsComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<LevelMetersComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<LoudnessSettingsComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<StereogramSettingsComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<HistogramSettingsComponent*> (c))
+        return t->getPreferredContentHeight();
+
+    // Appearance (and any future tabs without preferred-height API).
+    return kContentHeight - tabBarDepth;
+}
+
+void Menu::refreshContentPanelSize()
+{
+    constexpr int tabBarDepth = 35;
+    const int preferred = getActiveTabPreferredContentHeight();
+    contentPanel.setSize (kContentWidth, juce::jmax (kContentHeight, tabBarDepth + preferred));
     tabBar.setBounds (contentPanel.getLocalBounds());
 
     // Page arrows sit on the tab strip (right), clear of tab labels on each page.
@@ -324,16 +357,21 @@ void Menu::resized()
     constexpr int arrowH = 22;
     constexpr int arrowPad = 6;
     constexpr int arrowGap = 3;
-    const int arrowY = (35 - arrowH) / 2;
+    const int arrowY = (tabBarDepth - arrowH) / 2;
     tabNextButton.setBounds (kContentWidth - arrowPad - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.setBounds (tabNextButton.getX() - arrowGap - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.toFront (false);
     tabNextButton.toFront (false);
 
+    layoutScrollBars();
+}
+
+void Menu::resized()
+{
+    refreshContentPanelSize();
+
     tabBar.setColour (juce::TabbedComponent::outlineColourId,
                       sharedResources.sharedColors.menuTabBarBorderColor);
-
-    layoutScrollBars();
 
     if (resizer != nullptr)
     {

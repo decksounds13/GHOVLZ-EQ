@@ -22,8 +22,9 @@
 
     Side Check is untouched (separate processor / global lattice).
 
-    Easy remove later: delete this file, the APVTS bool, the OptionBox "PB"
-    button, and the `if (perBandLatticeEnabled)` branch in rebuildBank/setBand.
+    Easy remove later: delete this file, the APVTS bool, the OptionBox Spectral
+    S right-click "Per-band lattice" item, and the `if (perBandLatticeEnabled)`
+    branch in rebuildBank/setBand.
 */
 namespace SpectralPerBandLattice
 {

@@ -7,6 +7,7 @@
 #include "FilterType.h"
 #include "BandChannel.h"
 #include "DynamicEq.h"
+#include "Match/MatchSettings.h"
 #include "BandSidechain.h"
 #include "EqBand.h"
 #include "LfoMod.h"
@@ -338,6 +339,93 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     proportionalQAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         parameters, "PROPORTIONAL_Q_ID", proportionalQButton);
 
+    styleRangeButton (matchButton);
+    matchButton.setClickingTogglesState (true);
+    matchButton.setTooltip (
+        "Match - pull the signal toward the selected target curve. "
+        "Turning on asks whether to disable active EQ bands first.");
+    matchButton.onClick = [this]
+    {
+        if (matchButton.getToggleState())
+            requestMatchEnable();
+        else
+            disableMatch();
+    };
+    addAndMakeVisible (matchButton);
+
+    // Extras stay hidden until Match is enabled (see syncMatchChrome).
+    styleRangeButton (matchCurveButton);
+    matchCurveButton.setClickingTogglesState (false);
+    matchCurveButton.setTooltip ("Match curve - factory noise slopes, capture, placement, and saved curves");
+    matchCurveButton.onClick = [this] { showMatchCurveMenu(); };
+    addChildComponent (matchCurveButton);
+
+    matchAmountKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    matchAmountKnob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    matchAmountKnob.setTooltip ("Match Amount - how strongly to pull toward the target curve");
+    matchAmountKnob.setColour (juce::Slider::rotarySliderFillColourId, colors().pluginButtonAccent);
+    matchAmountKnob.setColour (juce::Slider::rotarySliderOutlineColourId, colors().pluginButtonBackground);
+    matchAmountKnob.setColour (juce::Slider::thumbColourId, colors().pluginButtonText);
+    addChildComponent (matchAmountKnob);
+    matchAmountAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        parameters, MatchEq::amountParamId(), matchAmountKnob);
+
+    styleRangeButton (matchFreezeButton);
+    matchFreezeButton.setClickingTogglesState (true);
+    matchFreezeButton.setTooltip (
+        "Freeze - hold the current match target. Right-click or use the curve menu to save it.");
+    addChildComponent (matchFreezeButton);
+    matchFreezeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        parameters, MatchEq::frozenParamId(), matchFreezeButton);
+    matchFreezeButton.addMouseListener (this, false);
+
+    parameters.addParameterListener (MatchEq::enabledParamId(), this);
+    parameters.addParameterListener (MatchEq::curveParamId(), this);
+    parameters.addParameterListener (MatchEq::frozenParamId(), this);
+    processor.syncMatchFactoryTargetFromParam();
+    syncMatchChrome();
+
+    styleRangeButton (splitSoloTButton);
+    styleRangeButton (splitSoloSButton);
+    splitSoloTButton.setClickingTogglesState (true);
+    splitSoloSButton.setClickingTogglesState (true);
+    splitSoloTButton.setTooltip ("Solo Transient stream (tune Separation)");
+    splitSoloSButton.setTooltip ("Solo Sustain stream (tune Separation)");
+    splitSoloTButton.onClick = [this]
+    {
+        if (splitSoloTButton.getToggleState())
+            setStructuralSplitSolo (StructuralSplit::Solo::transient);
+        else
+            setStructuralSplitSolo (StructuralSplit::Solo::off);
+    };
+    splitSoloSButton.onClick = [this]
+    {
+        if (splitSoloSButton.getToggleState())
+            setStructuralSplitSolo (StructuralSplit::Solo::sustain);
+        else
+            setStructuralSplitSolo (StructuralSplit::Solo::off);
+    };
+    addChildComponent (splitSoloTButton);
+    addChildComponent (splitSoloSButton);
+
+    splitSeparationKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+    splitSeparationKnob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    splitSeparationKnob.setTooltip ("Separation - how aggressively material is classed as transient vs sustain");
+    splitSeparationKnob.setColour (juce::Slider::rotarySliderFillColourId, colors().pluginButtonAccent);
+    splitSeparationKnob.setColour (juce::Slider::rotarySliderOutlineColourId, colors().pluginButtonBackground);
+    splitSeparationKnob.setColour (juce::Slider::thumbColourId, colors().pluginButtonText);
+    addChildComponent (splitSeparationKnob);
+    splitSeparationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        parameters, StructuralSplit::separationParamId(), splitSeparationKnob);
+
+    for (int bi = 0; bi < 8; ++bi)
+    {
+        const auto id = StructuralSplit::splitModeParamIDForBandIndex (bi);
+        if (id.isNotEmpty())
+            parameters.addParameterListener (id, this);
+    }
+    parameters.addParameterListener (StructuralSplit::soloParamId(), this);
+
     styleRangeButton (autoGainButton);
     autoGainButton.setClickingTogglesState (true);
     autoGainButton.setTooltip ("Auto Gain - match output loudness to pre-EQ level");
@@ -396,6 +484,18 @@ void FrequencyResponseComponent::applyThemeToChildControls()
     styleRangeButton (uiModeButton);
     styleRangeButton (proportionalQButton);
     styleRangeButton (autoGainButton);
+    styleRangeButton (splitSoloTButton);
+    styleRangeButton (splitSoloSButton);
+
+    splitSeparationKnob.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
+    splitSeparationKnob.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
+    splitSeparationKnob.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
+    matchAmountKnob.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
+    matchAmountKnob.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
+    matchAmountKnob.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
+    styleRangeButton (matchButton);
+    styleRangeButton (matchCurveButton);
+    styleRangeButton (matchFreezeButton);
 
     eqRangeLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
 
@@ -481,6 +581,20 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener("EQ_MULTICOLOR_BAND_FILL_ID", this);
     parameters.removeParameterListener("EQ_SHOW_CROSSHAIR_ID", this);
     parameters.removeParameterListener("PROPORTIONAL_Q_ID", this);
+    for (int bi = 0; bi < 8; ++bi)
+    {
+        const auto id = StructuralSplit::splitModeParamIDForBandIndex (bi);
+        if (id.isNotEmpty())
+            parameters.removeParameterListener (id, this);
+    }
+    parameters.removeParameterListener (StructuralSplit::soloParamId(), this);
+    parameters.removeParameterListener (MatchEq::enabledParamId(), this);
+    parameters.removeParameterListener (MatchEq::curveParamId(), this);
+    parameters.removeParameterListener (MatchEq::frozenParamId(), this);
+    matchFreezeButton.removeMouseListener (this);
+    matchAmountAttachment.reset();
+    matchFreezeAttachment.reset();
+    splitSeparationAttachment.reset();
     parameters.removeParameterListener("band1Dynamic", this);
     parameters.removeParameterListener("band2Dynamic", this);
     parameters.removeParameterListener("band3Dynamic", this);
@@ -931,6 +1045,19 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
             responseCombined[(size_t) i] += sideCheckGrScratch[(size_t) i];
     };
 
+    auto applyMatchGrToCombined = [&] (bool matchOn)
+    {
+        if (! matchOn || (int) responseCombined.size() != width || (int) logFrequencies.size() != width)
+            return;
+
+        if ((int) matchGrScratch.size() != width)
+            matchGrScratch.resize ((size_t) width);
+
+        processor.sampleMatchGrDb (logFrequencies.data(), matchGrScratch.data(), width);
+        for (int i = 0; i < width; ++i)
+            responseCombined[(size_t) i] += matchGrScratch[(size_t) i];
+    };
+
     // Rebuild only dirty bands. needsUpdateCombined alone (e.g. band on/off / spectral GR)
     // just re-sums the cached per-band magnitude buffers below.
     auto fillBandResponse = [&] (int type, float freq, float qBase, float gain,
@@ -1250,6 +1377,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
 
     // Side Check GR after spectral — sum curve only (per-band curves stay static).
     applySideCheckGrToCombined (raw (SideCheck::enabledParamId()) > 0.5f);
+    applyMatchGrToCombined (raw (MatchEq::enabledParamId()) > 0.5f);
 }
 
 //=======================================================================================================//
@@ -2463,6 +2591,90 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
+    // Match target curve overlay — only while Match is enabled.
+    {
+        const bool matchOn = parameters.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
+                             && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
+        if (matchOn && (int) logFrequencies.size() == w)
+        {
+            if ((int) matchTargetScratch.size() != w)
+                matchTargetScratch.assign ((size_t) w, 0.0f);
+            processor.sampleMatchTargetDb (logFrequencies.data(), matchTargetScratch.data(), w);
+
+            matchTargetPath.clear();
+            bool started = false;
+            for (int i = 0; i < w; ++i)
+            {
+                const float db = matchTargetScratch[(size_t) i];
+                const float y = dbToY (db, (float) h);
+                const float x = (float) i;
+                if (! started)
+                {
+                    matchTargetPath.startNewSubPath (x, y);
+                    started = true;
+                }
+                else
+                {
+                    matchTargetPath.lineTo (x, y);
+                }
+            }
+            if (! matchTargetPath.isEmpty())
+            {
+                constexpr juce::uint32 kMatchGrey = 0xffb0b0b0;
+                g.setColour (juce::Colour (kMatchGrey).withAlpha (0.85f));
+                g.strokePath (matchTargetPath, juce::PathStrokeType (1.5f));
+            }
+        }
+    }
+
+    //=======================================================================================================//
+    // Alt+drag bandpass audition: dim outside the passband; hardwired light-middle-grey BP curve.
+    if (processor.isAuditionBandpassActive())
+    {
+        const float freq = processor.getAuditionBandpassFreqHz();
+        const float q = juce::jmax (0.05f, processor.getAuditionBandpassQ());
+        const float halfBw = 0.5f * freq / q;
+        const float fLo = juce::jmax (20.0f, freq - halfBw);
+        const float fHi = juce::jmin (20000.0f, freq + halfBw);
+
+        auto freqToX = [w, logMin, logMax] (float fHz) -> float
+        {
+            const float f = juce::jlimit (20.0f, 20000.0f, fHz);
+            return (float) (w - 1) * (float) ((std::log10 (f) - logMin) / (logMax - logMin));
+        };
+
+        const float xLo = freqToX (fLo);
+        const float xHi = freqToX (fHi);
+        constexpr float kOutsideDimAlpha = 0.38f;
+        g.setColour (juce::Colours::black.withAlpha (kOutsideDimAlpha));
+        if (xLo > 0.5f)
+            g.fillRect (0.0f, 0.0f, xLo, (float) h);
+        if (xHi < (float) w - 0.5f)
+            g.fillRect (xHi, 0.0f, (float) w - xHi, (float) h);
+
+        if ((int) logFrequencies.size() == w)
+        {
+            if ((int) responseAuditionBp.size() != w)
+                responseAuditionBp.assign ((size_t) w, 0.0f);
+
+            const double sr = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : sampleRate;
+            if (auto coeffs = FilterType::makeCoefficients (FilterType::bandPass, sr, freq, q, 0.0f))
+            {
+                fillMagnitudeResponse (coeffs, logFrequencies, sr, responseAuditionBp, responseSampleStep);
+                auditionBandpassPath.clear();
+                auditionBandpassPath = intelligentDownsample (auditionBandpassPath, responseAuditionBp, w, h);
+
+                // Hardwired light-middle grey isolation curve (not theme-driven).
+                constexpr juce::uint32 kAuditionBpGrey = 0xffb0b0b0;
+                g.setColour (juce::Colour (kAuditionBpGrey).withAlpha (0.35f));
+                g.fillPath (closeShelfFillPath (auditionBandpassPath, (float) h));
+                g.setColour (juce::Colour (kAuditionBpGrey));
+                g.strokePath (auditionBandpassPath, juce::PathStrokeType (getBandPathWidth()));
+            }
+        }
+    }
+
+    //=======================================================================================================//
     // Crosshairs //
 
 
@@ -3016,6 +3228,10 @@ void FrequencyResponseComponent::setOptionBoxVisible (bool shouldBeVisible)
     const bool wasVisible = optionBoxMenu->isVisible();
     optionBoxMenu->setVisible (shouldBeVisible);
 
+    // Band headphones monitor is OptionBox-scoped — clear when the box closes.
+    if (! shouldBeVisible && wasVisible)
+        optionBoxMenu->setBandListening (false);
+
     // Always notify when visible so the host can repair z-order (setInitialPosition may
     // have already called setVisible(true) before we get here).
     if (onOptionBoxVisibilityChanged != nullptr
@@ -3410,6 +3626,18 @@ float FrequencyResponseComponent::xToFrequency (float x) const
     return juce::jlimit (20.0f, 20000.0f, static_cast<float> (std::pow (10.0, logF)));
 }
 
+void FrequencyResponseComponent::updateAuditionBandpassFromMouse (const juce::MouseEvent& event)
+{
+    const float freq = xToFrequency (event.position.x);
+    const float h = juce::jmax (1.0f, (float) getHeight());
+    // Top of graph = tight Q, bottom = wide (avoids whistling via processor clamp 0.55–8).
+    const float t = 1.0f - juce::jlimit (0.0f, 1.0f, event.position.y / h);
+    const float q = juce::jmap (t, 0.55f, 8.0f);
+    auditionBandpassDragging = true;
+    processor.setAuditionBandpass (true, freq, q);
+    repaint();
+}
+
 int FrequencyResponseComponent::bandIndexForFrequencyZone (float frequencyHz) const
 {
     // Zones: HP <50 | LS 50–150 | 4 bells (log) 150–8k | HS 8–12k | LP 12–20k
@@ -3724,6 +3952,46 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
 //=======================================================================================================//
 void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
 {
+    if (event.eventComponent == &matchFreezeButton && event.mods.isPopupMenu())
+    {
+        if (auto* f = dynamic_cast<juce::AudioParameterBool*> (
+                parameters.getParameter (MatchEq::frozenParamId())))
+            *f = true;
+
+        juce::PopupMenu menu;
+        menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+        menu.addItem (1, "Save frozen curve...");
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&matchFreezeButton),
+            [this] (int result)
+            {
+                if (result != 1)
+                    return;
+                auto* aw = new juce::AlertWindow (
+                    "Save match curve",
+                    "Name for this frozen target curve:",
+                    juce::AlertWindow::NoIcon,
+                    this);
+                aw->addTextEditor ("name", "Match curve " + juce::String (processor.getMatchEngine().getNumUserPresets() + 1));
+                aw->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this), aw] (int r)
+                    {
+                        if (safe == nullptr || r != 1)
+                            return;
+                        safe->processor.getMatchEngine().saveUserPreset (aw->getTextEditorContents ("name"));
+                    }), true);
+            });
+        return;
+    }
+
+    // Alt+drag: temporary dry bandpass isolate (freq = X, Q = Y). Takes priority over handles.
+    if (event.mods.isAltDown() && ! event.mods.isPopupMenu())
+    {
+        updateAuditionBandpassFromMouse (event);
+        return;
+    }
+
     processor.getUndoManager().beginNewTransaction ("EQ edit");
 
     float distanceToHandle1 = std::hypot(event.position.x - handleX, event.position.y - handleY);
@@ -4109,6 +4377,12 @@ void FrequencyResponseComponent::mouseDoubleClick (const juce::MouseEvent& event
 //=======================================================================================================//
 void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 {
+    if (auditionBandpassDragging)
+    {
+        updateAuditionBandpassFromMouse (event);
+        return;
+    }
+
     auto area = getLocalBounds();
     auto w = area.getWidth();
     auto h = area.getHeight();
@@ -4780,6 +5054,16 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
 {
     juce::ignoreUnused(event);
 
+    if (auditionBandpassDragging || processor.isAuditionBandpassActive())
+    {
+        auditionBandpassDragging = false;
+        processor.setAuditionBandpass (false,
+                                       processor.getAuditionBandpassFreqHz(),
+                                       processor.getAuditionBandpassQ());
+        repaint();
+        return;
+    }
+
     if (activeSpectralAmountSlot >= 0
         && activeSpectralAmountSlot < kNumSpectralSlots
         && spectralAmountHandles[(size_t) activeSpectralAmountSlot].dragging)
@@ -5120,7 +5404,7 @@ void FrequencyResponseComponent::resized()
         uiModeButton.toFront (false);
     }
 
-    // Proportional Q — bottom-left (same size vibe as Range +/- buttons).
+    // Proportional Q — bottom-left (unchanged).
     {
         constexpr int btnW = 22;
         constexpr int btnH = 18;
@@ -5132,6 +5416,10 @@ void FrequencyResponseComponent::resized()
         proportionalQButton.setBounds (area.removeFromBottom (btnH).removeFromLeft (btnW));
         proportionalQButton.toFront (false);
     }
+
+    // Transient / Sustain strip — bottom center between P (left) and Mod/Range (right).
+    syncStructuralSplitChrome();
+    layoutStructuralSplitChrome();
 
     // Vertical scale controls — bottom-right (intercept mouse so +/- work over the graph)
     {
@@ -5176,6 +5464,427 @@ void FrequencyResponseComponent::resized()
         modButton.toFront (false);
     }
 
+    // Match — graph bottom, right of Scope (EqEditor refreshes anchor after Scope layout).
+    layoutMatchChrome();
+    syncMatchChrome();
+
+    repaint();
+}
+
+bool FrequencyResponseComponent::anyStructuralSplitArmed() const
+{
+    // Fast reject when every split mode is Off (common case).
+    bool anyMode = false;
+    for (int bi = 0; bi < 8; ++bi)
+    {
+        const auto id = StructuralSplit::splitModeParamIDForBandIndex (bi);
+        if (auto* v = parameters.getRawParameterValue (id))
+        {
+            if (v->load() > 0.001f)
+            {
+                anyMode = true;
+                break;
+            }
+        }
+    }
+    if (! anyMode)
+        return false;
+
+    auto on = [this] (const char* id) -> bool
+    {
+        if (auto* v = parameters.getRawParameterValue (id))
+            return v->load() > 0.5f;
+        return false;
+    };
+    auto modeArmed = [this] (int bandIndex) -> bool
+    {
+        const auto id = StructuralSplit::splitModeParamIDForBandIndex (bandIndex);
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (parameters.getParameter (id)))
+            return StructuralSplit::clampMode (choice->getIndex()) != StructuralSplit::Mode::off;
+        return false;
+    };
+    auto usesGainType = [this] (const char* typeId, int fallbackType) -> bool
+    {
+        return FilterType::usesGain (BandChannel::readChoiceIndex (parameters, typeId, fallbackType));
+    };
+
+    return (on ("band1OnOff") && usesGainType ("band1Type", FilterType::bell) && modeArmed (0))
+        || (on ("band2OnOff") && usesGainType ("band2Type", FilterType::bell) && modeArmed (1))
+        || (on ("band3OnOff") && usesGainType ("band3Type", FilterType::bell) && modeArmed (2))
+        || (on ("band4OnOff") && usesGainType ("band4Type", FilterType::bell) && modeArmed (3))
+        || (on ("highpassOnOff") && usesGainType ("highpassType", FilterType::highpass) && modeArmed (4))
+        || (on ("lowpassOnOff") && usesGainType ("lowpassType", FilterType::lowpass) && modeArmed (5))
+        || (on ("highShelfOnOff") && usesGainType ("highShelfType", FilterType::highShelf) && modeArmed (6))
+        || (on ("lowShelfOnOff") && usesGainType ("lowShelfType", FilterType::lowShelf) && modeArmed (7));
+}
+
+void FrequencyResponseComponent::setStructuralSplitSolo (StructuralSplit::Solo solo)
+{
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+            parameters.getParameter (StructuralSplit::soloParamId())))
+        *choice = (int) solo;
+
+    const bool t = solo == StructuralSplit::Solo::transient;
+    const bool s = solo == StructuralSplit::Solo::sustain;
+    splitSoloTButton.setToggleState (t, juce::dontSendNotification);
+    splitSoloSButton.setToggleState (s, juce::dontSendNotification);
+}
+
+void FrequencyResponseComponent::layoutStructuralSplitChrome()
+{
+    if (! splitSoloTButton.isVisible())
+        return;
+
+    constexpr int btnW = 22;
+    constexpr int btnH = 18;
+    constexpr int knob = 28;
+    constexpr int gap = 4;
+    constexpr int marginBottom = 14;
+    const int stripW = btnW + gap + knob + gap + btnW;
+    const int x = (getWidth() - stripW) / 2;
+    const int y = getHeight() - marginBottom - juce::jmax (btnH, knob);
+    splitSoloTButton.setBounds (x, y + (knob - btnH) / 2, btnW, btnH);
+    splitSeparationKnob.setBounds (x + btnW + gap, y, knob, knob);
+    splitSoloSButton.setBounds (x + btnW + gap + knob + gap, y + (knob - btnH) / 2, btnW, btnH);
+    splitSoloTButton.toFront (false);
+    splitSeparationKnob.toFront (false);
+    splitSoloSButton.toFront (false);
+}
+
+void FrequencyResponseComponent::syncStructuralSplitChrome()
+{
+    const bool show = anyStructuralSplitArmed();
+    splitSoloTButton.setVisible (show);
+    splitSoloSButton.setVisible (show);
+    splitSeparationKnob.setVisible (show);
+
+    if (! show)
+    {
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                parameters.getParameter (StructuralSplit::soloParamId())))
+        {
+            if (choice->getIndex() != (int) StructuralSplit::Solo::off)
+                *choice = (int) StructuralSplit::Solo::off;
+        }
+        splitSoloTButton.setToggleState (false, juce::dontSendNotification);
+        splitSoloSButton.setToggleState (false, juce::dontSendNotification);
+        return;
+    }
+
+    StructuralSplit::Solo solo = StructuralSplit::Solo::off;
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+            parameters.getParameter (StructuralSplit::soloParamId())))
+        solo = StructuralSplit::clampSolo (choice->getIndex());
+
+    splitSoloTButton.setToggleState (solo == StructuralSplit::Solo::transient, juce::dontSendNotification);
+    splitSoloSButton.setToggleState (solo == StructuralSplit::Solo::sustain, juce::dontSendNotification);
+}
+
+void FrequencyResponseComponent::layoutMatchChromeAfterScope (juce::Rectangle<int> scopeInLocal)
+{
+    matchChromeScopeAnchor = scopeInLocal;
+    matchChromeHasScopeAnchor = scopeInLocal.getWidth() > 0 && scopeInLocal.getHeight() > 0;
+    layoutMatchChrome();
+}
+
+void FrequencyResponseComponent::layoutMatchChrome()
+{
+    // Bottom of the graph, immediately right of Scope (? / Phase / SideCheck / Scope row).
+    // Only free strip left under the preset field — between Scope and Mod/Range.
+    constexpr int btnH = 18;
+    constexpr int matchW = 48;
+    constexpr int curveW = 22;
+    constexpr int freezeW = 22;
+    constexpr int knob = 52; // 2× prior size so Amount reads clearly in the bottom strip
+    constexpr int gap = 4;
+    constexpr int scopeGap = 6;
+    constexpr int marginBottom = 18;
+    constexpr int marginSide = 8;
+
+    const bool extrasOn = parameters.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
+                          && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
+
+    const int stripW = extrasOn
+        ? (matchW + gap + curveW + gap + knob + gap + freezeW)
+        : matchW;
+    const int rowH = juce::jmax (btnH, knob);
+
+    // Stay left of Mod / Range / Out cluster.
+    int rightLimit = getWidth() - marginSide;
+    if (modButton.isVisible() && modButton.getWidth() > 0)
+        rightLimit = juce::jmin (rightLimit, modButton.getX() - gap);
+
+    int x0 = 0;
+    int y0 = getHeight() - rowH - marginBottom;
+
+    if (matchChromeHasScopeAnchor)
+    {
+        x0 = matchChromeScopeAnchor.getRight() + scopeGap;
+
+        // Scope on the graph: share its vertical center. Scope in editor trim: pin to graph bottom.
+        if (matchChromeScopeAnchor.getY() < getHeight() && matchChromeScopeAnchor.getBottom() > 0)
+            y0 = matchChromeScopeAnchor.getCentreY() - rowH / 2;
+    }
+    else
+    {
+        // Fallback before EqEditor has laid out Scope: center of free bottom strip.
+        x0 = juce::jmax (marginSide, (rightLimit - stripW) / 2);
+    }
+
+    x0 = juce::jlimit (marginSide, juce::jmax (marginSide, rightLimit - stripW), x0);
+    y0 = juce::jlimit (0, juce::jmax (0, getHeight() - rowH), y0);
+
+    int x = x0;
+    const int btnY = y0 + (rowH - btnH) / 2;
+    const int knobY = y0 + (rowH - knob) / 2;
+
+    matchButton.setBounds (x, btnY, matchW, btnH);
+    x += matchW + gap;
+
+    if (extrasOn)
+    {
+        matchCurveButton.setBounds (x, btnY, curveW, btnH);
+        x += curveW + gap;
+        matchAmountKnob.setBounds (x, knobY, knob, knob);
+        x += knob + gap;
+        matchFreezeButton.setBounds (x, btnY, freezeW, btnH);
+    }
+    else
+    {
+        matchCurveButton.setBounds ({});
+        matchAmountKnob.setBounds ({});
+        matchFreezeButton.setBounds ({});
+    }
+
+    matchButton.toFront (false);
+    if (extrasOn)
+    {
+        matchCurveButton.toFront (false);
+        matchAmountKnob.toFront (false);
+        matchFreezeButton.toFront (false);
+    }
+}
+
+void FrequencyResponseComponent::syncMatchChrome()
+{
+    const bool on = parameters.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
+                    && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
+    matchButton.setToggleState (on, juce::dontSendNotification);
+    matchButton.setVisible (true);
+
+    matchCurveButton.setVisible (on);
+    matchAmountKnob.setVisible (on);
+    matchFreezeButton.setVisible (on);
+
+    const bool frozen = parameters.getRawParameterValue (MatchEq::frozenParamId()) != nullptr
+                        && parameters.getRawParameterValue (MatchEq::frozenParamId())->load() > 0.5f;
+    matchFreezeButton.setToggleState (frozen, juce::dontSendNotification);
+
+    layoutMatchChrome();
+}
+
+void FrequencyResponseComponent::requestMatchEnable()
+{
+    if (matchEnableDialogOpen)
+    {
+        matchButton.setToggleState (false, juce::dontSendNotification);
+        return;
+    }
+
+    matchEnableDialogOpen = true;
+    matchButton.setToggleState (false, juce::dontSendNotification);
+
+    auto* aw = new juce::AlertWindow (
+        "Spectral Match",
+        "Disable all active EQ bands for matching?\n\n"
+        "Recommended so Match hears the dry source cleanly. "
+        "You can turn bands back on afterward (Match before EQ by default).",
+        juce::AlertWindow::QuestionIcon,
+        this);
+
+    aw->addButton ("Yes", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("No", 2);
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this)] (int result)
+        {
+            if (safe == nullptr)
+                return;
+
+            safe->matchEnableDialogOpen = false;
+            if (result == 0)
+            {
+                safe->matchButton.setToggleState (false, juce::dontSendNotification);
+                return;
+            }
+
+            safe->processor.getUndoManager().beginNewTransaction ("Match on");
+
+            if (result == 1)
+                safe->processor.applyMatchBandDisable();
+
+            if (auto* p = dynamic_cast<juce::AudioParameterBool*> (
+                    safe->parameters.getParameter (MatchEq::enabledParamId())))
+                *p = true;
+
+            safe->syncMatchChrome();
+            safe->needsUpdateCombined = true;
+            safe->repaint();
+        }), true);
+}
+
+void FrequencyResponseComponent::disableMatch()
+{
+    processor.getUndoManager().beginNewTransaction ("Match off");
+
+    if (auto* p = dynamic_cast<juce::AudioParameterBool*> (
+            parameters.getParameter (MatchEq::enabledParamId())))
+        *p = false;
+
+    processor.restoreMatchBandDisable();
+    syncMatchChrome(); // hides curve / amount / freeze; leaves Match button only
+    needsUpdateCombined = true;
+    repaint();
+}
+
+void FrequencyResponseComponent::showMatchCurveMenu()
+{
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+
+    const int curve = MatchEq::readChoiceIndex (
+        parameters, MatchEq::curveParamId(), MatchEq::pink, MatchEq::numFactoryCurves - 1);
+    const auto names = MatchEq::getCurveChoiceNames();
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (10 + i, names[i], true, curve == i);
+
+    const bool eco = processor.getAnalyser().isEcoMode();
+    menu.addItem (50, "Capture spectrum", ! eco, curve == MatchEq::capture);
+
+    menu.addSeparator();
+    juce::PopupMenu placeMenu;
+    const int place = MatchEq::readChoiceIndex (
+        parameters, MatchEq::placementParamId(), MatchEq::beforeEq, MatchEq::numPlacements - 1);
+    const auto placeNames = MatchEq::getPlacementChoiceNames();
+    for (int i = 0; i < placeNames.size(); ++i)
+        placeMenu.addItem (60 + i, placeNames[i], true, place == i);
+    menu.addSubMenu ("Match placement", placeMenu);
+
+    juce::PopupMenu speedMenu;
+    const int speed = MatchEq::readChoiceIndex (
+        parameters, MatchEq::speedParamId(), MatchEq::med, MatchEq::numSpeeds - 1);
+    const auto speedNames = MatchEq::getSpeedChoiceNames();
+    for (int i = 0; i < speedNames.size(); ++i)
+        speedMenu.addItem (70 + i, speedNames[i], true, speed == i);
+    menu.addSubMenu ("Match speed", speedMenu);
+
+    menu.addSeparator();
+    menu.addItem (80, "Save frozen curve...");
+    auto& matchEng = processor.getMatchEngine();
+    const int nUser = matchEng.getNumUserPresets();
+    if (nUser > 0)
+    {
+        juce::PopupMenu userMenu;
+        for (int i = 0; i < nUser; ++i)
+            userMenu.addItem (100 + i, matchEng.getUserPresetName (i));
+        menu.addSubMenu ("Saved curves", userMenu);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&matchCurveButton),
+        [this] (int result)
+        {
+            if (result <= 0)
+                return;
+
+            processor.getUndoManager().beginNewTransaction ("Match curve");
+
+            if (result >= 10 && result < 10 + MatchEq::numFactoryCurves)
+            {
+                const int idx = result - 10;
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                        parameters.getParameter (MatchEq::curveParamId())))
+                    *p = idx;
+                if (idx != MatchEq::capture)
+                    processor.syncMatchFactoryTargetFromParam();
+                else
+                    processor.captureMatchSpectrumFromAnalyser();
+            }
+            else if (result == 50)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                        parameters.getParameter (MatchEq::curveParamId())))
+                    *p = MatchEq::capture;
+                if (auto* f = dynamic_cast<juce::AudioParameterBool*> (
+                        parameters.getParameter (MatchEq::frozenParamId())))
+                    *f = false;
+                processor.captureMatchSpectrumFromAnalyser();
+            }
+            else if (result >= 60 && result < 60 + MatchEq::numPlacements)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                        parameters.getParameter (MatchEq::placementParamId())))
+                    *p = result - 60;
+            }
+            else if (result >= 70 && result < 70 + MatchEq::numSpeeds)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                        parameters.getParameter (MatchEq::speedParamId())))
+                    *p = result - 70;
+            }
+            else if (result == 80)
+            {
+                if (auto* f = dynamic_cast<juce::AudioParameterBool*> (
+                        parameters.getParameter (MatchEq::frozenParamId())))
+                    *f = true;
+
+                auto* aw = new juce::AlertWindow (
+                    "Save match curve",
+                    "Name for this frozen target curve:",
+                    juce::AlertWindow::NoIcon,
+                    this);
+                aw->addTextEditor ("name", "Match curve " + juce::String (processor.getMatchEngine().getNumUserPresets() + 1));
+                aw->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this), aw] (int r)
+                    {
+                        if (safe == nullptr || r != 1)
+                            return;
+                        const auto name = aw->getTextEditorContents ("name");
+                        safe->processor.getMatchEngine().saveUserPreset (name);
+                    }), true);
+            }
+            else if (result >= 100 && result < 100 + MatchEq::kMaxUserPresets)
+            {
+                processor.getMatchEngine().loadUserPreset (result - 100);
+                if (auto* f = dynamic_cast<juce::AudioParameterBool*> (
+                        parameters.getParameter (MatchEq::frozenParamId())))
+                    *f = true;
+            }
+
+            syncMatchChrome();
+            needsUpdateCombined = true;
+            repaint();
+        });
+}
+
+void FrequencyResponseComponent::updateLiveMatchCaptureIfNeeded()
+{
+    const int curve = MatchEq::readChoiceIndex (
+        parameters, MatchEq::curveParamId(), MatchEq::pink, MatchEq::numFactoryCurves - 1);
+    if (curve != MatchEq::capture)
+        return;
+
+    const bool frozen = parameters.getRawParameterValue (MatchEq::frozenParamId()) != nullptr
+                        && parameters.getRawParameterValue (MatchEq::frozenParamId())->load() > 0.5f;
+    if (frozen)
+        return;
+
+    if (processor.getAnalyser().isEcoMode())
+        return;
+
+    processor.captureMatchSpectrumFromAnalyser();
     repaint();
 }
 
@@ -5216,10 +5925,15 @@ bool FrequencyResponseComponent::anyActiveDynamicEq() const
         || (on ("lowShelfOnOff") && on ("lowShelfSpectral"));
 
     const bool sideCheckOn = on (SideCheck::enabledParamId());
+    const bool matchOn = on (MatchEq::enabledParamId());
+    const bool matchLiveCapture = MatchEq::readChoiceIndex (
+                                      parameters, MatchEq::curveParamId(), MatchEq::pink,
+                                      MatchEq::numFactoryCurves - 1) == MatchEq::capture
+                                  && ! on (MatchEq::frozenParamId());
 
     const bool anyLfo = LfoMod::anyActiveRouting (parameters);
 
-    return anyDyn || anySc || anySpec || sideCheckOn || anyLfo;
+    return anyDyn || anySc || anySpec || sideCheckOn || matchOn || matchLiveCapture || anyLfo;
 }
 
 void FrequencyResponseComponent::markActiveDynamicBandsDirty()
@@ -5281,6 +5995,8 @@ void FrequencyResponseComponent::syncDynamicCurveTimer()
 
 void FrequencyResponseComponent::timerCallback()
 {
+    updateLiveMatchCaptureIfNeeded();
+
     if (! anyActiveDynamicEq())
     {
         stopTimer();
@@ -5310,8 +6026,23 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
                           || parameterID.startsWith ("modEnv");
     const bool isBandOnOff = parameterID.endsWith ("OnOff");
     const bool isSideCheckToggle = parameterID == SideCheck::enabledParamId();
-    if (isDynToggle || isBandOnOff || isSideCheckToggle)
+    const bool isMatchToggle = parameterID == MatchEq::enabledParamId()
+                               || parameterID == MatchEq::curveParamId()
+                               || parameterID == MatchEq::frozenParamId();
+    if (isDynToggle || isBandOnOff || isSideCheckToggle || isMatchToggle)
         syncDynamicCurveTimer();
+
+    if (parameterID == MatchEq::enabledParamId()
+        || parameterID == MatchEq::curveParamId()
+        || parameterID == MatchEq::frozenParamId()
+        || parameterID == MatchEq::amountParamId())
+    {
+        if (parameterID == MatchEq::curveParamId())
+            processor.syncMatchFactoryTargetFromParam();
+        syncMatchChrome();
+        needsUpdateCombined = true;
+        repaint();
+    }
 
     // Static ↔ dynamic-range gain memory when the user toggles D (not Spectral*Dynamic).
     if (parameterID.endsWith ("Dynamic") && ! parameterID.contains ("Spectral"))
@@ -5348,6 +6079,32 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
         needsUpdateCombined = true;
         repaint();
         return;
+    }
+
+    // Split chrome only — never call full resized() here (state restore / OnOff storms were lagging the UI).
+    if (parameterID.endsWith ("SplitMode")
+        || parameterID == StructuralSplit::soloParamId()
+        || parameterID == StructuralSplit::separationParamId()
+        || parameterID == "band1OnOff" || parameterID == "band2OnOff"
+        || parameterID == "band3OnOff" || parameterID == "band4OnOff"
+        || parameterID == "highpassOnOff" || parameterID == "lowpassOnOff"
+        || parameterID == "highShelfOnOff" || parameterID == "lowShelfOnOff"
+        || parameterID == "band1Type" || parameterID == "band2Type"
+        || parameterID == "band3Type" || parameterID == "band4Type"
+        || parameterID == "highpassType" || parameterID == "lowpassType"
+        || parameterID == "highShelfType" || parameterID == "lowShelfType")
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<FrequencyResponseComponent> (this)]
+        {
+            if (safe == nullptr)
+                return;
+            safe->syncStructuralSplitChrome();
+            safe->layoutStructuralSplitChrome();
+        });
+        if (parameterID.endsWith ("SplitMode")
+            || parameterID == StructuralSplit::soloParamId()
+            || parameterID == StructuralSplit::separationParamId())
+            return;
     }
 
     if (parameterID.startsWith ("eqB"))

@@ -347,6 +347,10 @@
       <FILE id="zaTGFn" name="OnOffButton1.cpp" compile="1" resource="0"
             file="Source/OnOffButton1.cpp"/>
       <FILE id="DAN5Qz" name="OnOffButton1.h" compile="0" resource="0" file="Source/OnOffButton1.h"/>
+      <FILE id="BdMonBt" name="BandMonitorButton.cpp" compile="1" resource="0"
+            file="Source/BandMonitorButton.cpp"/>
+      <FILE id="BdMonBh" name="BandMonitorButton.h" compile="0" resource="0"
+            file="Source/BandMonitorButton.h"/>
       <FILE id="BdNumBt" name="BandNumberButton.cpp" compile="1" resource="0"
             file="Source/BandNumberButton.cpp"/>
       <FILE id="BdNumBh" name="BandNumberButton.h" compile="0" resource="0"
@@ -364,6 +368,22 @@
               file="Source/Spectral/SpectralDynamicsProcessor.h"/>
         <FILE id="SpDynC" name="SpectralDynamicsProcessor.cpp" compile="1"
               resource="0" file="Source/Spectral/SpectralDynamicsProcessor.cpp"/>
+      </GROUP>
+      <GROUP id="SplitGrp" name="StructuralSplit">
+        <FILE id="SsSetH" name="StructuralSplitSettings.h" compile="0" resource="0"
+              file="Source/StructuralSplit/StructuralSplitSettings.h"/>
+        <FILE id="SsEngH" name="StructuralSplitEngine.h" compile="0" resource="0"
+              file="Source/StructuralSplit/StructuralSplitEngine.h"/>
+        <FILE id="SsEngC" name="StructuralSplitEngine.cpp" compile="1" resource="0"
+              file="Source/StructuralSplit/StructuralSplitEngine.cpp"/>
+      </GROUP>
+      <GROUP id="MatchGrp" name="Match">
+        <FILE id="MtSetH" name="MatchSettings.h" compile="0" resource="0"
+              file="Source/Match/MatchSettings.h"/>
+        <FILE id="MtEngH" name="MatchProcessor.h" compile="0" resource="0"
+              file="Source/Match/MatchProcessor.h"/>
+        <FILE id="MtEngC" name="MatchProcessor.cpp" compile="1" resource="0"
+              file="Source/Match/MatchProcessor.cpp"/>
       </GROUP>
       <FILE id="QUHsxC" name="RotaryImageKnob1.cpp" compile="1" resource="0"
             file="Source/RotaryImageKnob1.cpp"/>

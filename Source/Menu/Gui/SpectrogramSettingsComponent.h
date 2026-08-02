@@ -7,7 +7,6 @@
 #include "../../ComboBoxLookAndFeel.h"
 #include "../../SpectrogramComponent.h"
 #include "../SharedResources.h"
-#include "CustomScrollBar.h"
 
 /** Colour-scheme combo: ramp swatch + name (matches Gradients Load preset rows). */
 class ColourSchemeComboLookAndFeel : public ComboBoxLookAndFeel
@@ -45,6 +44,8 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+
+    int getPreferredContentHeight() const { return content.getPreferredHeight(); }
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -155,10 +156,6 @@ private:
     SharedResources& sharedResources;
     ColourRampBank& colourRamps;
     Content content;
-    juce::Viewport viewport;
-    std::unique_ptr<CustomScrollBar> customScrollBar;
-
-    void syncScrollBarColours();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SpectrogramSettingsComponent)
 };

@@ -5,7 +5,6 @@
 
 namespace
 {
-    constexpr int kScrollBarWidth = 11;
     constexpr int kContentPadX = 16;
     constexpr int kContentPadY = 10;
     constexpr int kLabelH = 18;
@@ -346,39 +345,17 @@ FftComponent::FftComponent (SharedResources& resources,
       content (resources, state, ramps)
 {
     colourRamps.addChangeListener (this);
-
-    viewport.setViewedComponent (&content, false);
-    viewport.setScrollBarsShown (false, false);
-    viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
-    viewport.setScrollBarThickness (0);
-    addAndMakeVisible (viewport);
-
-    customScrollBar = std::make_unique<CustomScrollBar> (viewport.getVerticalScrollBar());
-    addAndMakeVisible (*customScrollBar);
-    customScrollBar->toFront (false);
-    syncScrollBarColours();
+    addAndMakeVisible (content);
 }
 
 FftComponent::~FftComponent()
 {
     colourRamps.removeChangeListener (this);
-    viewport.setViewedComponent (nullptr, false);
 }
 
 void FftComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     content.syncGradientFromBank();
-}
-
-void FftComponent::syncScrollBarColours()
-{
-    if (customScrollBar == nullptr)
-        return;
-
-    customScrollBar->setTrackBackgroundColour (sharedResources.sharedColors.menuScrollBarTrackColor1);
-    customScrollBar->setThumbBackgroundColour (sharedResources.sharedColors.menuScrollBarThumbColor1);
-    customScrollBar->setThumbOutlineColour (sharedResources.sharedColors.menuScrollBarOutlineColor1);
-    customScrollBar->repaint();
 }
 
 void FftComponent::paint (juce::Graphics& g)
@@ -388,25 +365,6 @@ void FftComponent::paint (juce::Graphics& g)
 
 void FftComponent::resized()
 {
-    syncScrollBarColours();
-
-    auto bounds = getLocalBounds();
-
-    // Always reserve the gutter so content width / right margin stay stable.
-    if (customScrollBar != nullptr)
-    {
-        customScrollBar->setVisible (true);
-        customScrollBar->setBounds (bounds.removeFromRight (kScrollBarWidth));
-    }
-
-    viewport.setBounds (bounds);
-
-    content.setSize (viewport.getWidth(), juce::jmax (viewport.getHeight(), content.getPreferredHeight()));
+    content.setBounds (0, 0, getWidth(), content.getPreferredHeight());
     content.resized();
-
-    // Force the viewport scrollbar range to refresh before syncing the thumb.
-    viewport.setViewPosition (viewport.getViewPosition());
-
-    if (customScrollBar != nullptr)
-        customScrollBar->updateThumbPosition();
 }

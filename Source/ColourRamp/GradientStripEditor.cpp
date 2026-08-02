@@ -353,7 +353,7 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
     addAndMakeVisible (densifyButton);
 
     invertButton.setButtonText ("Invert");
-    invertButton.setTooltip ("Reverse the ramp colours (high ↔ low)");
+    invertButton.setTooltip ("Reverse the ramp colours (high <-> low)");
     invertButton.onClick = [this] { invertClicked(); };
     styleTiny (invertButton);
     addAndMakeVisible (invertButton);

@@ -3,6 +3,7 @@
 #include "FilterType.h"
 #include "EqBand.h"
 #include "EqProcessor.h"
+#include "Match/MatchSettings.h"
 
 namespace
 {
@@ -45,6 +46,11 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
       processor (proc)
 {
     onOffButton1 = std::make_unique<OnOffButton1>(treeState, "highpassOnOff");
+    bandMonitorButton = std::make_unique<BandMonitorButton>();
+    bandMonitorButton->onClick = [this]
+    {
+        setBandListening (bandMonitorButton->getToggleState());
+    };
 
     juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
 
@@ -88,25 +94,11 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     // Post-mode drive — compact face matching Side Check HP/LP knobs (~chrome btnSize).
     satDriveKnob.setCompactNoValueBox (true);
     satDriveKnob.setTooltip (
-        "Drive - pre-gain into post saturation (−12…+12 dB). Center = 0 dB. "
+        "Drive - pre-gain into post saturation (-12 to +12 dB). Center = 0 dB. "
         "Use this to push Post harder when band gain is not emphasizing the EQ difference.");
     satDriveKnob.setTextValueSuffix (" dB");
     satDriveKnob.addListener (this);
     addChildComponent (satDriveKnob);
-
-    // Stage 2 - post-Spectral sat (global). Plain ">" so UI fonts don't show missing-glyph boxes.
-    spectralSatButton.setButtonText (">");
-    spectralSatButton.setClickingTogglesState (true);
-    spectralSatButton.setTooltip (
-        "Post-spectral saturation - after Spectral, so Expand and resonance peaks can drive the grit. Right-click for model or oversampling.");
-    spectralSatButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
-    spectralSatButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
-    spectralSatButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
-    spectralSatButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-    spectralSatButton.setLookAndFeel (&myTextButtonLookAndFeel);
-    spectralSatButton.addListener (this);
-    spectralSatButton.addMouseListener (this, false);
-    addChildComponent (spectralSatButton);
 
     spectralSatDriveKnob.setCompactNoValueBox (true);
     spectralSatDriveKnob.setTooltip ("Drive - how hard post-spectral saturation is pushed");
@@ -145,7 +137,8 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     rotaryImageKnobForOptionBox2.addListener (this);
     rotaryImageKnobForOptionBox3.addListener (this);
 
-    addAndMakeVisible(*onOffButton1);
+    addAndMakeVisible (*onOffButton1);
+    addAndMakeVisible (*bandMonitorButton);
 
     // Initialize channel-mode buttons (radio-style; none selected = stereo)
     midSelectorButton.setButtonText("M");
@@ -198,19 +191,35 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     dynamicButton.addListener (this);
     addChildComponent (dynamicButton);
 
-    // Spectral "S" — same size as D; sits below threshold (not the channel Side "S").
+    // Transient / Sustain mode — above D, centered under frequency knob.
+    transientModeButton.setButtonText ("Transient");
+    transientModeButton.setClickingTogglesState (false);
+    transientModeButton.setTooltip (
+        "Transient / Sustain - apply this band's EQ to the transient or sustain stream. "
+        "Click cycles Off -> Transient -> Sustain.");
+    transientModeButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
+    transientModeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
+    transientModeButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.45f));
+    transientModeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    transientModeButton.setLookAndFeel (&transientModeButtonLookAndFeel);
+    transientModeButton.addListener (this);
+    addChildComponent (transientModeButton);
+
     spectralButton.setButtonText ("S");
     spectralButton.setClickingTogglesState (true);
-    spectralButton.setTooltip ("Spectral - process resonances inside the band Q; Amount + Res + Expand + A/R");
+    spectralButton.setTooltip (
+        "Spectral - process resonances inside the band Q; Amount + Res + Expand + A/R. "
+        "Right-click for post-spectral saturation, lattice pack, and per-band lattice.");
     spectralButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
     spectralButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
     spectralButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
     spectralButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     spectralButton.setLookAndFeel (&myTextButtonLookAndFeel);
     spectralButton.addListener (this);
+    spectralButton.addMouseListener (this, false);
     addChildComponent (spectralButton);
 
-    // Expand invert — directly below Amount when S is on; on = boost resonances.
+    // Expand invert - directly below S when S is on; on = boost resonances.
     spectralExpandButton.setButtonText ("E");
     spectralExpandButton.setClickingTogglesState (true);
     spectralExpandButton.setTooltip ("Expand - exaggerate resonances instead of suppressing them");
@@ -221,29 +230,6 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     spectralExpandButton.setLookAndFeel (&myTextButtonLookAndFeel);
     spectralExpandButton.addListener (this);
     addChildComponent (spectralExpandButton);
-
-    // Lattice pack — global Flat / LF / HF under Res+Amt (shared by all S bands).
-    spectralPackButton.setClickingTogglesState (false);
-    spectralPackButton.setTooltip (
-        "Pack (global) - FL is an even lattice, LP packs more slices toward the lows, HP toward the highs. Applies to all spectral bands.");
-    spectralPackButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
-    spectralPackButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
-    spectralPackButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
-    spectralPackButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-    spectralPackButton.setLookAndFeel (&myTextButtonLookAndFeel);
-    spectralPackButton.addListener (this);
-    addChildComponent (spectralPackButton);
-
-    // Per-band local lattice — same footprint as Pack; sits above Res when S is on.
-    spectralPerBandLatticeButton.setClickingTogglesState (true);
-    spectralPerBandLatticeButton.setTooltip (
-        "Per-band (default on) - each S band has its own local lattice and independent Res. Off: all S bands share the old global linked lattice (like Side Check). Amount is always per-band.");
-    spectralPerBandLatticeButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
-    spectralPerBandLatticeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
-    spectralPerBandLatticeButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
-    spectralPerBandLatticeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-    spectralPerBandLatticeButton.setLookAndFeel (&myTextButtonLookAndFeel);
-    addChildComponent (spectralPerBandLatticeButton);
 
     dynThresholdSlider.setSliderStyle (juce::Slider::LinearVertical);
     dynThresholdSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
@@ -260,7 +246,8 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     spectralBandwidthSlider.setSliderStyle (juce::Slider::LinearVertical);
     spectralBandwidthSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     spectralBandwidthSlider.setTooltip (
-        "Res - bandpass density. Global lattice: denser shared grid. With PB on: ~4 filters (broad) up to 128 (surgical) inside each band's Q.");
+        "Res - bandpass density. Global lattice: denser shared grid. "
+        "With per-band lattice on: about 4 filters (broad) up to 128 (surgical) inside each band's Q.");
     spectralBandwidthSlider.setColour (juce::Slider::backgroundColourId, juce::Colour::fromRGBA (40, 35, 28, 255));
     spectralBandwidthSlider.setColour (juce::Slider::trackColourId, juce::Colour::fromRGBA (180, 150, 55, 220));
     spectralBandwidthSlider.setColour (juce::Slider::thumbColourId, juce::Colour::fromRGBA (220, 200, 120, 255));
@@ -324,6 +311,8 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     bool isDraggable = true;
 
     treeState.addParameterListener (SpectralPerBandLattice::enabledParamId(), this);
+    treeState.addParameterListener (BandSaturation::spectralSatParamId(), this);
+    treeState.addParameterListener (MatchEq::enabledParamId(), this);
 
     applyThemeToChildControls();
     resized();
@@ -333,6 +322,8 @@ OptionBoxMenu::~OptionBoxMenu()
 {
     stopTimer();
     treeState.removeParameterListener (SpectralPerBandLattice::enabledParamId(), this);
+    treeState.removeParameterListener (BandSaturation::spectralSatParamId(), this);
+    treeState.removeParameterListener (MatchEq::enabledParamId(), this);
     listenToCurrentBandOnOff (false);
     listenToCurrentBandDynamic (false);
     listenToCurrentBandSpectral (false);
@@ -357,16 +348,15 @@ OptionBoxMenu::~OptionBoxMenu()
     sidechainButton.removeListener (this);
     sidechainMidiButton.removeListener (this);
     dynamicButton.removeListener (this);
+    transientModeButton.removeListener (this);
     spectralButton.removeListener (this);
+    spectralButton.removeMouseListener (this);
+    setBandListening (false);
     spectralExpandButton.removeListener (this);
-    spectralPackButton.removeListener (this);
-    spectralPerBandLatticeAttachment.reset();
     satButton.removeListener (this);
     satButton.removeMouseListener (this);
     satPrePostButton.removeListener (this);
     satDriveKnob.removeListener (this);
-    spectralSatButton.removeListener (this);
-    spectralSatButton.removeMouseListener (this);
     spectralSatDriveKnob.removeListener (this);
     dynThresholdSlider.removeListener (this);
     spectralBandwidthSlider.removeListener (this);
@@ -380,13 +370,11 @@ OptionBoxMenu::~OptionBoxMenu()
     sidechainButton.setLookAndFeel (nullptr);
     sidechainMidiButton.setLookAndFeel (nullptr);
     dynamicButton.setLookAndFeel (nullptr);
+    transientModeButton.setLookAndFeel (nullptr);
     spectralButton.setLookAndFeel (nullptr);
     spectralExpandButton.setLookAndFeel (nullptr);
-    spectralPackButton.setLookAndFeel (nullptr);
-    spectralPerBandLatticeButton.setLookAndFeel (nullptr);
     satButton.setLookAndFeel (nullptr);
     satPrePostButton.setLookAndFeel (nullptr);
-    spectralSatButton.setLookAndFeel (nullptr);
 }
 
 
@@ -466,13 +454,12 @@ void OptionBoxMenu::applyThemeToChildControls()
     styleChrome (sidechainButton);
     styleChrome (sidechainMidiButton);
     styleChrome (dynamicButton);
+    styleChrome (transientModeButton);
+    transientModeButton.setColour (juce::TextButton::textColourOffId, c.optionText.withAlpha (0.45f));
     styleChrome (spectralButton);
     styleChrome (spectralExpandButton);
-    styleChrome (spectralPackButton);
-    styleChrome (spectralPerBandLatticeButton);
     styleChrome (satButton);
     styleChrome (satPrePostButton);
-    styleChrome (spectralSatButton);
 
     // Sidechain idle stays quieter than other chrome.
     sidechainButton.setColour (juce::TextButton::buttonColourId,
@@ -507,6 +494,11 @@ void OptionBoxMenu::applyThemeToChildControls()
     {
         onOffButton1->setBaseColor (c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f));
         onOffButton1->repaint();
+    }
+    if (bandMonitorButton != nullptr)
+    {
+        bandMonitorButton->setBaseColor (c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f));
+        bandMonitorButton->repaint();
     }
 
     repaint();
@@ -613,6 +605,14 @@ void OptionBoxMenu::resized()
     nextBandButton.toFront (false);
 
     onOffButton1->setBounds (getWidth() - onOffButton1Size - 10, labelY, onOffButton1Size, onOffButton1Size);
+    if (bandMonitorButton != nullptr)
+    {
+        bandMonitorButton->setBounds (onOffButton1->getX(),
+                                      onOffButton1->getBottom() + 3,
+                                      onOffButton1Size,
+                                      onOffButton1Size);
+        bandMonitorButton->toFront (false);
+    }
 
     // Give "Band 12" / "Band 64" room — was ~44px and clipped to ellipsis.
     const int nameLeft = nextBandButton.getRight() + 4;
@@ -749,15 +749,21 @@ void OptionBoxMenu::resized()
         addAndMakeVisible(rightSelectorButton);
     }
 
-    // D + S + E column under the frequency knob.
-    // S on: vertical Res (closest to D/S/E), then Amount; Expand under D/S.
-    // D on (no S): horizontal threshold beside D. D+S: threshold below Expand.
+    // Transient/Sustain sits above D, centered under the frequency knob (clear of D/S).
+    // D + S + E column under that, left-aligned. Extra spectral options live on S right-click.
     const int dynBtnW = 15;
     const int dynBtnH = 18;
-    const int dynRowY = knob1Bounds.getBottom() + 2 - bottomStackLift;
+    const int modeBtnW = juce::roundToInt (15.0f * 2.25f); // ~34
+    const int modeY = knob1Bounds.getBottom() + 2 - bottomStackLift;
+    const int dynRowY = modeY + dynBtnH + 2; // D under Transient
     const int optionBoxRight = getWidth() - padding * 2;
     const int dynRowX = knob1Bounds.getX() + 2;
-    const bool sOn = spectralButton.isVisible() && spectralButton.getToggleState();
+    const bool sOn = isCurrentBandSpectralOn();
+
+    transientModeButton.setBounds (knob1Bounds.getCentreX() - modeBtnW / 2,
+                                   modeY,
+                                   modeBtnW,
+                                   dynBtnH);
 
     dynamicButton.setBounds (dynRowX, dynRowY, dynBtnW, dynBtnH);
 
@@ -768,12 +774,6 @@ void OptionBoxMenu::resized()
     const int expandY = spectralY + dynBtnH + 2;
     spectralExpandButton.setBounds (dynRowX, expandY, dynBtnW, dynBtnH);
 
-    // Post-Spectral sat: identical footprint to D / S / E, directly under Expand.
-    spectralSatButton.setBounds (dynRowX,
-                                 spectralExpandButton.getBottom() + 2,
-                                 spectralExpandButton.getWidth(),
-                                 spectralExpandButton.getHeight());
-
     // Base 26px face, then +20% then +10%.
     const int arSize = juce::roundToInt (32.0f * 0.8f * 1.2f * 1.1f); // ~34
     const int ssDriveSize = juce::jmax (1, arSize / 2);
@@ -781,16 +781,13 @@ void OptionBoxMenu::resized()
     const int sliderColW = 18;
     const int sliderLabelH = 12;
     const int sliderGap = 4;
-    const int sliderH = 44;
-    const int packBtnH = 14;
-    const int packBtnW = sliderColW; // narrow — under one slider column
     const int resX = dynamicButton.getRight() + 4;
     const int amountX = resX + sliderColW + sliderGap;
-    // PB sits above Res (same size as Pack); Res/Amt shift down to make room.
-    const int pbY = dynRowY;
-    spectralPerBandLatticeButton.setBounds (resX, pbY, packBtnW, packBtnH);
-    const int sliderTop = pbY + packBtnH + 2;
+    const int sliderTop = dynRowY;
     const int sliderTrackY = sliderTop + sliderLabelH;
+    // Stretch Res/Amt tracks down to Expand bottom + 3 (labels stay at top).
+    const int sliderBottom = spectralExpandButton.getBottom() + 3;
+    const int sliderH = juce::jmax (24, sliderBottom - sliderTrackY);
 
     spectralResLabel.setBounds (resX - 2, sliderTop, sliderColW + 4, sliderLabelH);
     spectralBandwidthSlider.setBounds (resX, sliderTrackY, sliderColW, sliderH);
@@ -798,24 +795,12 @@ void OptionBoxMenu::resized()
     spectralAmountLabel.setBounds (amountX - 2, sliderTop, sliderColW + 4, sliderLabelH);
     spectralAmountSlider.setBounds (amountX, sliderTrackY, sliderColW, sliderH);
 
-    // Pack FL/LP/HP under Res by default; when → sat on, pack shifts under Amt
-    // and Drive knob takes the Res slot.
-    const int packY = sliderTrackY + sliderH; // 2px higher than prior (+2)
-    const bool ssOn = spectralSatButton.isVisible() && spectralSatButton.getToggleState();
-    if (ssOn)
-    {
-        spectralPackButton.setBounds (amountX, packY, packBtnW, packBtnH);
-        spectralSatDriveKnob.setBounds (resX + (sliderColW - ssDriveSize) / 2,
-                                        packY + (packBtnH - ssDriveSize) / 2,
-                                        ssDriveSize,
-                                        ssDriveSize);
-    }
-    else
-    {
-        spectralPackButton.setBounds (resX, packY, packBtnW, packBtnH);
-        // Park off-layout; visibility gated in syncSpectralSatControls.
-        spectralSatDriveKnob.setBounds (resX, packY, ssDriveSize, ssDriveSize);
-    }
+    // Post-spectral drive under Res when enabled from the S right-click menu.
+    const int driveY = sliderBottom + 2;
+    spectralSatDriveKnob.setBounds (resX + (sliderColW - ssDriveSize) / 2,
+                                    driveY,
+                                    ssDriveSize,
+                                    ssDriveSize);
 
     // Vertical threshold: top at the old D-row Y, bottom of the OptionBox with padding.
     // Narrow (~10px) so it reads as a compressor-style meter+thumb.
@@ -826,7 +811,7 @@ void OptionBoxMenu::resized()
     int threshX = dynamicButton.getRight() + 4;
     if (sOn)
         threshX = amountX + sliderColW + 4;
-    threshX += 5; // nudge right of the D / spectral pack column
+    threshX += 5; // nudge right of the D / spectral column
     threshX = juce::jmin (threshX, optionBoxRight - kThreshW);
     dynThresholdSlider.setBounds (threshX, threshTop, kThreshW, threshH);
 
@@ -863,9 +848,9 @@ void OptionBoxMenu::mouseDown(const juce::MouseEvent& event)
         return;
     }
 
-    if (event.eventComponent == &spectralSatButton && event.mods.isPopupMenu())
+    if (event.eventComponent == &spectralButton && event.mods.isPopupMenu())
     {
-        showSpectralSatContextMenu();
+        showSpectralContextMenu();
         return;
     }
 
@@ -1210,9 +1195,12 @@ void OptionBoxMenu::listenToCurrentBandSpectral (bool shouldListen)
         treeState.removeParameterListener (currentSpectralParamID, this);
     if (currentSpectralPackParamID.isNotEmpty())
         treeState.removeParameterListener (currentSpectralPackParamID, this);
+    if (currentSplitModeParamID.isNotEmpty())
+        treeState.removeParameterListener (currentSplitModeParamID, this);
 
     currentSpectralParamID = {};
     currentSpectralPackParamID = {};
+    currentSplitModeParamID = {};
 
     if (! shouldListen)
         return;
@@ -1227,6 +1215,10 @@ void OptionBoxMenu::listenToCurrentBandSpectral (bool shouldListen)
 
     currentSpectralPackParamID = SpectralDynamics::spectralPackParamId();
     treeState.addParameterListener (currentSpectralPackParamID, this);
+
+    currentSplitModeParamID = StructuralSplit::splitModeParamIDForBandIndex (currentBandIndex);
+    if (currentSplitModeParamID.isNotEmpty())
+        treeState.addParameterListener (currentSplitModeParamID, this);
 }
 
 void OptionBoxMenu::parameterChanged (const juce::String& parameterID, float newValue)
@@ -1242,23 +1234,17 @@ void OptionBoxMenu::parameterChanged (const juce::String& parameterID, float new
         });
     }
     else if (parameterID == currentDynamicParamID
-             || parameterID == currentSpectralParamID)
+             || parameterID == currentSpectralParamID
+             || parameterID == currentSplitModeParamID)
     {
         juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
         {
             if (safe != nullptr)
             {
+                safe->syncTransientModeButton();
                 safe->updateDynamicControlsVisibility();
                 safe->resized();
             }
-        });
-    }
-    else if (parameterID == currentSpectralPackParamID)
-    {
-        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
-        {
-            if (safe != nullptr)
-                safe->syncSpectralPackButton();
         });
     }
     else if (parameterID == SpectralPerBandLattice::enabledParamId())
@@ -1267,9 +1253,29 @@ void OptionBoxMenu::parameterChanged (const juce::String& parameterID, float new
         {
             if (safe == nullptr)
                 return;
-            // PB on/off switches Res between per-band and linked global.
+            // Per-band lattice on/off switches Res between per-band and linked global.
             safe->bindSpectralResSlider (safe->currentBandIndex);
             safe->updateDynamicControlsVisibility();
+        });
+    }
+    else if (parameterID == BandSaturation::spectralSatParamId())
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
+        {
+            if (safe == nullptr)
+                return;
+            safe->syncSpectralSatControls();
+            safe->resized();
+        });
+    }
+    else if (parameterID == MatchEq::enabledParamId())
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
+        {
+            if (safe == nullptr)
+                return;
+            safe->updateDynamicControlsVisibility();
+            safe->resized();
         });
     }
 }
@@ -1310,13 +1316,11 @@ void OptionBoxMenu::clearAttachments()
     dynamicButtonAttachment.reset();
     spectralButtonAttachment.reset();
     spectralExpandButtonAttachment.reset();
-    spectralPerBandLatticeAttachment.reset();
     satButtonAttachment.reset();
     satPostButtonAttachment.reset();
     satDriveAttachment.reset();
     sidechainButtonAttachment.reset();
     sidechainMidiButtonAttachment.reset();
-    spectralSatButtonAttachment.reset();
     spectralSatDriveAttachment.reset();
     filterModelAttachment.reset();
     filterSlopeAttachment.reset();
@@ -1346,6 +1350,17 @@ bool OptionBoxMenu::currentBandSupportsSpectral() const
     return FilterType::usesGain (type);
 }
 
+bool OptionBoxMenu::currentBandSupportsSplitMode() const
+{
+    // Same eligibility as Spectral (Bank 1 gain-using bands).
+    return currentBandSupportsSpectral();
+}
+
+bool OptionBoxMenu::isCurrentBandSpectralOn() const
+{
+    return currentBandSupportsSpectral() && spectralButton.getToggleState();
+}
+
 bool OptionBoxMenu::currentBandSupportsSidechain() const
 {
     return currentBandSupportsDynamic();
@@ -1364,13 +1379,23 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
 {
     const bool showD = currentBandSupportsDynamic();
     const bool showS = currentBandSupportsSpectral();
+    const bool showSplit = currentBandSupportsSplitMode();
     const bool showSc = currentBandSupportsSidechain();
+    const bool matchOwnsSpectral = treeState.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
+                                   && treeState.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
     dynamicButton.setVisible (showD);
+    transientModeButton.setVisible (showSplit);
     spectralButton.setVisible (showS);
+    spectralButton.setEnabled (! matchOwnsSpectral);
+    spectralButton.setTooltip (matchOwnsSpectral
+        ? "Spectral - unavailable while Match is on (Match owns global spectral shaping)"
+        : "Spectral - process resonances inside the band Q; Amount + Res + Expand + A/R. "
+          "Right-click for post-spectral saturation, lattice pack, and per-band lattice.");
     sidechainButton.setVisible (showSc);
+    syncTransientModeButton();
 
     const bool dOn = showD && dynamicButton.getToggleState();
-    const bool sOn = showS && spectralButton.getToggleState();
+    const bool sOn = showS && spectralButton.getToggleState() && ! matchOwnsSpectral;
     const bool scOn = showSc && sidechainButton.getToggleState();
     sidechainMidiButton.setVisible (scOn);
 
@@ -1389,21 +1414,15 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
     attackLabel.setVisible (showAR);
     releaseLabel.setVisible (showAR);
 
-    // S exposes Res + Amount + Expand + Pack + PB. Keep these hidden until S is on.
+    // S exposes Res + Amount + Expand. Pack / per-band lattice / post-sat live on S right-click.
     spectralBandwidthSlider.setVisible (sOn);
     spectralResLabel.setVisible (sOn);
     spectralAmountSlider.setVisible (sOn);
     spectralAmountLabel.setVisible (sOn);
     spectralExpandButton.setVisible (sOn);
-    spectralPackButton.setVisible (sOn);
-    spectralPerBandLatticeButton.setVisible (sOn);
     if (! sOn)
     {
-        // Belt-and-suspenders: never leave Stage-2 / pack chrome up when S is off.
-        spectralSatButton.setVisible (false);
         spectralSatDriveKnob.setVisible (false);
-        spectralPackButton.setBounds ({});
-        spectralPerBandLatticeButton.setBounds ({});
         spectralBandwidthSlider.setBounds ({});
         spectralAmountSlider.setBounds ({});
         spectralResLabel.setBounds ({});
@@ -1413,13 +1432,12 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
 
     if (sOn)
     {
-        syncSpectralPackButton();
         spectralAmountSlider.setTooltip (spectralExpandButton.getToggleState()
             ? "Amount - pull down for more spectral resonance expansion"
             : "Amount - pull down for more spectral resonance attenuation");
-        spectralBandwidthSlider.setTooltip (spectralPerBandLatticeButton.getToggleState()
-            ? "Res (this band) - independent per-band density: ~4 BPs coarse (broad) up to 128 fine (surgical) inside this band's Q"
-            : "Res (global / linked) - one density for every S band on the shared lattice. Turn PB on for per-band Res");
+        spectralBandwidthSlider.setTooltip (isPerBandLatticeEnabled()
+            ? "Res (this band) - independent per-band density: about 4 BPs coarse (broad) up to 128 fine (surgical) inside this band's Q"
+            : "Res (global / linked) - one density for every S band on the shared lattice. Enable per-band lattice from the S right-click menu for per-band Res");
     }
 
     syncSatControls();
@@ -1499,11 +1517,6 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
         spectralExpandButtonAttachment = std::make_unique<ButtonAttachment> (
             treeState, expandID, spectralExpandButton);
 
-    // Global PB toggle — keep attachment across band switches.
-    if (spectralPerBandLatticeAttachment == nullptr)
-        spectralPerBandLatticeAttachment = std::make_unique<ButtonAttachment> (
-            treeState, SpectralPerBandLattice::enabledParamId(), spectralPerBandLatticeButton);
-
     if (satID.isNotEmpty())
         satButtonAttachment = std::make_unique<ButtonAttachment> (treeState, satID, satButton);
 
@@ -1537,10 +1550,6 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
         satDriveAttachment = std::make_unique<SliderAttachment> (
             treeState, satDriveID, satDriveKnob);
     }
-
-    if (spectralSatButtonAttachment == nullptr)
-        spectralSatButtonAttachment = std::make_unique<ButtonAttachment> (
-            treeState, BandSaturation::spectralSatParamId(), spectralSatButton);
 
     if (spectralSatDriveAttachment == nullptr)
     {
@@ -1880,6 +1889,11 @@ void OptionBoxMenu::setCurrentBandIndex(int index, const std::string bandNames[]
     listenToCurrentBandOnOff (true);
     listenToCurrentBandDynamic (true);
     listenToCurrentBandSpectral (true);
+    // Keep monitor armed on the newly selected band if headphones were already on.
+    if (bandMonitorButton != nullptr && bandMonitorButton->getToggleState())
+        setBandListening (true);
+    else
+        syncBandMonitorButton();
     updateDisplayAlpha();
     resized();
 }
@@ -1904,36 +1918,6 @@ void OptionBoxMenu::syncChannelModeButtons()
     rightSelectorButton.setToggleState (mode == BandChannel::right, juce::dontSendNotification);
 }
 
-void OptionBoxMenu::syncSpectralPackButton()
-{
-    int idx = 0;
-    if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
-            treeState.getParameter (SpectralDynamics::spectralPackParamId())))
-        idx = p->getIndex();
-
-    // Compact labels: Flat→FL, LF→LP (low pack), HF→HP (high pack).
-    const char* label = "FL";
-    switch (idx)
-    {
-        case 1:  label = "LP"; break;
-        case 2:  label = "HP"; break;
-        default: label = "FL"; break;
-    }
-    spectralPackButton.setButtonText (label);
-    // Lit when packing LF or HF (not Flat).
-    spectralPackButton.setToggleState (idx != 0, juce::dontSendNotification);
-}
-
-void OptionBoxMenu::cycleSpectralPackMode()
-{
-    if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
-            treeState.getParameter (SpectralDynamics::spectralPackParamId())))
-    {
-        *p = SpectralDynamics::nextPackChoiceIndex (p->getIndex());
-        syncSpectralPackButton();
-    }
-}
-
 void OptionBoxMenu::syncSatControls()
 {
     const bool show = currentBandSupportsSat();
@@ -1943,58 +1927,185 @@ void OptionBoxMenu::syncSatControls()
     satPrePostButton.setVisible (satOn);
     const bool satPost = satOn && satPrePostButton.getToggleState();
     satPrePostButton.setButtonText (satPost ? "Post" : "Pre");
-    // Drive only in Post — Pre uses band gain as emphasis into the shaper.
+    // Drive only in Post - Pre uses band gain as emphasis into the shaper.
     satDriveKnob.setVisible (satPost);
+}
+
+bool OptionBoxMenu::isSpectralSatEnabled() const
+{
+    if (auto* v = treeState.getRawParameterValue (BandSaturation::spectralSatParamId()))
+        return v->load() > 0.5f;
+    return false;
 }
 
 void OptionBoxMenu::syncSpectralSatControls()
 {
-    const bool showS = currentBandSupportsSpectral();
-    const bool sOn = showS && spectralButton.getToggleState();
-    spectralSatButton.setVisible (sOn);
-
-    const bool ssOn = sOn && spectralSatButton.getToggleState();
+    const bool ssOn = isCurrentBandSpectralOn() && isSpectralSatEnabled();
     spectralSatDriveKnob.setVisible (ssOn);
 }
 
-void OptionBoxMenu::showSpectralSatContextMenu()
+void OptionBoxMenu::syncTransientModeButton()
 {
+    if (! currentBandSupportsSplitMode())
+    {
+        transientModeButton.setToggleState (false, juce::dontSendNotification);
+        transientModeButton.setButtonText ("Transient");
+        return;
+    }
+
+    const auto id = StructuralSplit::splitModeParamIDForBandIndex (currentBandIndex);
+    int modeIdx = 0;
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter (id)))
+        modeIdx = choice->getIndex();
+
+    const auto mode = StructuralSplit::clampMode (modeIdx);
+    const bool armed = mode != StructuralSplit::Mode::off;
+    transientModeButton.setToggleState (armed, juce::dontSendNotification);
+    transientModeButton.setButtonText (mode == StructuralSplit::Mode::sustain ? "Sustain" : "Transient");
+}
+
+void OptionBoxMenu::cycleTransientMode()
+{
+    if (! currentBandSupportsSplitMode())
+        return;
+
+    const auto id = StructuralSplit::splitModeParamIDForBandIndex (currentBandIndex);
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter (id));
+    if (choice == nullptr)
+        return;
+
+    const int next = (choice->getIndex() + 1) % 3; // Off → Transient → Sustain → Off
+    *choice = next;
+    syncTransientModeButton();
+}
+
+void OptionBoxMenu::syncBandMonitorButton()
+{
+    if (bandMonitorButton == nullptr)
+        return;
+
+    const bool listening = processor.getBandListenIndex() == currentBandIndex
+                           && currentBandIndex >= 0;
+    bandMonitorButton->setListening (listening);
+}
+
+void OptionBoxMenu::setBandListening (bool shouldListen)
+{
+    if (shouldListen && currentBandIndex >= 0)
+        processor.setBandListenIndex (currentBandIndex);
+    else
+        processor.setBandListenIndex (-1);
+
+    syncBandMonitorButton();
+}
+
+void OptionBoxMenu::showSpectralContextMenu()
+{
+    auto* ssParam = dynamic_cast<juce::AudioParameterBool*> (
+        treeState.getParameter (BandSaturation::spectralSatParamId()));
     auto* modelParam = dynamic_cast<juce::AudioParameterChoice*> (
         treeState.getParameter (BandSaturation::spectralSatModelParamId()));
     auto* osParam = dynamic_cast<juce::AudioParameterChoice*> (
         treeState.getParameter (BandSaturation::spectralSatOversampleParamId()));
-    if (modelParam == nullptr)
-        return;
+    auto* pbParam = dynamic_cast<juce::AudioParameterBool*> (
+        treeState.getParameter (SpectralPerBandLattice::enabledParamId()));
+    auto* packParam = dynamic_cast<juce::AudioParameterChoice*> (
+        treeState.getParameter (SpectralDynamics::spectralPackParamId()));
 
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
-    const auto modelNames = BandSaturation::getModelChoiceNames();
-    for (int i = 0; i < modelNames.size(); ++i)
-        menu.addItem (i + 1, modelNames[i], true, modelParam->getIndex() == i);
+
+    constexpr int kIdPostSat = 1;
+    constexpr int kIdPerBand = 2;
+    constexpr int kIdModelBase = 10;
+    constexpr int kIdOsBase = 100;
+    constexpr int kIdPackBase = 200;
+
+    const bool ssOn = isSpectralSatEnabled();
+    menu.addItem (kIdPostSat, "Post-spectral saturation", ssParam != nullptr, ssOn);
+
+    if (modelParam != nullptr)
+    {
+        juce::PopupMenu modelMenu;
+        const auto modelNames = BandSaturation::getModelChoiceNames();
+        for (int i = 0; i < modelNames.size(); ++i)
+            modelMenu.addItem (kIdModelBase + i, modelNames[i], true, modelParam->getIndex() == i);
+        menu.addSubMenu ("Saturation model", modelMenu);
+    }
 
     if (osParam != nullptr)
     {
-        menu.addSeparator();
         juce::PopupMenu osMenu;
         const auto osNames = BandSaturation::getOversampleChoiceNames();
         for (int i = 0; i < osNames.size(); ++i)
-            osMenu.addItem (100 + i, osNames[i], true, osParam->getIndex() == i);
+            osMenu.addItem (kIdOsBase + i, osNames[i], true, osParam->getIndex() == i);
         menu.addSubMenu ("Oversample", osMenu);
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&spectralSatButton),
-        [this, modelParam, osParam] (int result)
+    menu.addSeparator();
+
+    menu.addItem (kIdPerBand,
+                  "Per-band lattice",
+                  pbParam != nullptr,
+                  isPerBandLatticeEnabled());
+
+    if (packParam != nullptr)
+    {
+        juce::PopupMenu packMenu;
+        const auto packNames = SpectralDynamics::getPackModeChoiceNames();
+        for (int i = 0; i < packNames.size(); ++i)
+            packMenu.addItem (kIdPackBase + i, packNames[i], true, packParam->getIndex() == i);
+        menu.addSubMenu ("Lattice pack", packMenu);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&spectralButton),
+        [this, ssParam, modelParam, osParam, pbParam, packParam,
+         kIdPostSat, kIdPerBand, kIdModelBase, kIdOsBase, kIdPackBase] (int result)
         {
             if (result <= 0)
                 return;
 
             if (undoManager != nullptr)
-                undoManager->beginNewTransaction ("SS model");
+                undoManager->beginNewTransaction ("Spectral options");
 
-            if (result >= 1 && result <= BandSaturation::numModels)
-                *modelParam = result - 1;
-            else if (osParam != nullptr && result >= 100 && result < 100 + BandSaturation::numOversample)
-                *osParam = result - 100;
+            if (result == kIdPostSat && ssParam != nullptr)
+            {
+                *ssParam = ! ssParam->get();
+                syncSpectralSatControls();
+                resized();
+                return;
+            }
+
+            if (result == kIdPerBand && pbParam != nullptr)
+            {
+                *pbParam = ! pbParam->get();
+                bindSpectralResSlider (currentBandIndex);
+                updateDynamicControlsVisibility();
+                return;
+            }
+
+            if (modelParam != nullptr
+                && result >= kIdModelBase
+                && result < kIdModelBase + BandSaturation::numModels)
+            {
+                *modelParam = result - kIdModelBase;
+                return;
+            }
+
+            if (osParam != nullptr
+                && result >= kIdOsBase
+                && result < kIdOsBase + BandSaturation::numOversample)
+            {
+                *osParam = result - kIdOsBase;
+                return;
+            }
+
+            if (packParam != nullptr
+                && result >= kIdPackBase
+                && result < kIdPackBase + SpectralDynamics::getPackModeChoiceNames().size())
+            {
+                *packParam = result - kIdPackBase;
+            }
         });
 }
 
@@ -2073,20 +2184,20 @@ void OptionBoxMenu::buttonClicked(juce::Button* button)
     if (undoManager != nullptr)
         undoManager->beginNewTransaction ("Band option");
 
+    if (button == &transientModeButton)
+    {
+        cycleTransientMode();
+        return;
+    }
+
     if (button == &dynamicButton || button == &spectralButton
         || button == &spectralExpandButton || button == &satButton
-        || button == &satPrePostButton || button == &spectralSatButton
+        || button == &satPrePostButton
         || button == &sidechainButton || button == &sidechainMidiButton)
     {
         updateDynamicControlsVisibility();
         // Threshold / A-R anchors shift when S turns on (vertical Res+Amount cluster).
         resized();
-        return;
-    }
-
-    if (button == &spectralPackButton)
-    {
-        cycleSpectralPackMode();
         return;
     }
 

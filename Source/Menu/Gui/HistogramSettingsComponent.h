@@ -5,7 +5,6 @@
 #include "../../ColourRamp/ColourRampBank.h"
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../SharedResources.h"
-#include "CustomScrollBar.h"
 
 class HistogramSettingsComponent : public juce::Component,
                                    private juce::ChangeListener
@@ -18,6 +17,8 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+
+    int getPreferredContentHeight() const { return content.getPreferredHeight(); }
 
 private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -99,10 +100,6 @@ private:
     SharedResources& sharedResources;
     ColourRampBank& colourRamps;
     Content content;
-    juce::Viewport viewport;
-    std::unique_ptr<CustomScrollBar> customScrollBar;
-
-    void syncScrollBarColours();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HistogramSettingsComponent)
 };

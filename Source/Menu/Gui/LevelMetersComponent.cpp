@@ -4,7 +4,6 @@
 
 namespace
 {
-    constexpr int kMeterScrollBarWidth = 11;
     constexpr int kMeterPadX = 16;
     constexpr int kMeterPadY = 10;
     constexpr int kMeterLabelH = 18;
@@ -194,33 +193,10 @@ LevelMetersComponent::LevelMetersComponent (SharedResources& resources, juce::Au
     : sharedResources (resources),
       content (resources, state)
 {
-    viewport.setViewedComponent (&content, false);
-    viewport.setScrollBarsShown (false, false);
-    viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
-    viewport.setScrollBarThickness (0);
-    addAndMakeVisible (viewport);
-
-    customScrollBar = std::make_unique<CustomScrollBar> (viewport.getVerticalScrollBar());
-    addAndMakeVisible (*customScrollBar);
-    customScrollBar->toFront (false);
-    syncScrollBarColours();
+    addAndMakeVisible (content);
 }
 
-LevelMetersComponent::~LevelMetersComponent()
-{
-    viewport.setViewedComponent (nullptr, false);
-}
-
-void LevelMetersComponent::syncScrollBarColours()
-{
-    if (customScrollBar == nullptr)
-        return;
-
-    customScrollBar->setTrackBackgroundColour (sharedResources.sharedColors.menuScrollBarTrackColor1);
-    customScrollBar->setThumbBackgroundColour (sharedResources.sharedColors.menuScrollBarThumbColor1);
-    customScrollBar->setThumbOutlineColour (sharedResources.sharedColors.menuScrollBarOutlineColor1);
-    customScrollBar->repaint();
-}
+LevelMetersComponent::~LevelMetersComponent() = default;
 
 void LevelMetersComponent::paint (juce::Graphics& g)
 {
@@ -229,22 +205,6 @@ void LevelMetersComponent::paint (juce::Graphics& g)
 
 void LevelMetersComponent::resized()
 {
-    syncScrollBarColours();
-
-    auto bounds = getLocalBounds();
-
-    if (customScrollBar != nullptr)
-    {
-        customScrollBar->setVisible (true);
-        customScrollBar->setBounds (bounds.removeFromRight (kMeterScrollBarWidth));
-    }
-
-    viewport.setBounds (bounds);
-    content.setSize (viewport.getWidth(), juce::jmax (viewport.getHeight(), content.getPreferredHeight()));
+    content.setBounds (0, 0, getWidth(), content.getPreferredHeight());
     content.resized();
-
-    viewport.setViewPosition (viewport.getViewPosition());
-
-    if (customScrollBar != nullptr)
-        customScrollBar->updateThumbPosition();
 }

@@ -36,9 +36,21 @@ void GoniometerComponent::prepare (double sampleRate)
     const double sr = sampleRate > 0.0 ? sampleRate : 48000.0;
     sampleRateHz.store (sr, std::memory_order_relaxed);
 
-    const int newCap = juce::jmax (1024, (int) std::ceil (sr * (double) kMaxBufferSeconds));
-    ringL.assign ((size_t) newCap, 0.0f);
-    ringR.assign ((size_t) newCap, 0.0f);
+    const int newCap = juce::jmax (kMaxPlotSamplesPerTick,
+                                   (int) std::ceil (sr * (double) kMaxBufferSeconds));
+    // Skip zero-fill realloc when capacity is unchanged (prepareToPlay can re-enter).
+    if (newCap != capacity.load (std::memory_order_relaxed)
+        || (int) ringL.size() != newCap
+        || (int) ringR.size() != newCap)
+    {
+        ringL.assign ((size_t) newCap, 0.0f);
+        ringR.assign ((size_t) newCap, 0.0f);
+    }
+    else
+    {
+        std::fill (ringL.begin(), ringL.end(), 0.0f);
+        std::fill (ringR.begin(), ringR.end(), 0.0f);
+    }
     writePos.store (0, std::memory_order_relaxed);
     capacity.store (newCap, std::memory_order_release);
     resetDisplay();
@@ -47,6 +59,7 @@ void GoniometerComponent::prepare (double sampleRate)
 void GoniometerComponent::resetDisplay()
 {
     ringReadPos = writePos.load (std::memory_order_acquire);
+    plotReadPos = ringReadPos;
     corrSumLR = corrSumLL = corrSumRR = 0.0;
     correlation = 0.0f;
     correlationDisplay = 0.0f;
@@ -64,7 +77,8 @@ void GoniometerComponent::setEnabled (bool shouldEnable) noexcept
     if (shouldEnable)
     {
         resetDisplay();
-        startTimerHz (30);
+        // Compact stays light; expanded can afford a bit more.
+        startTimerHz (expanded ? 30 : 20);
     }
     else
     {
@@ -80,6 +94,10 @@ void GoniometerComponent::setExpanded (bool shouldExpand) noexcept
     expanded = shouldExpand;
     setInterceptsMouseClicks (! expanded, ! expanded);
     resetDisplay();
+
+    if (enabled.load (std::memory_order_relaxed))
+        startTimerHz (expanded ? 30 : 20);
+
     resized();
     repaint();
 }
@@ -98,12 +116,12 @@ float GoniometerComponent::loadFloatParam (const char* id, float fallback) const
 bool GoniometerComponent::isHighQuality() const
 {
     if (valueTree == nullptr)
-        return true;
+        return false;
 
     if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (valueTree->getParameter ("GON_QUALITY_ID")))
         return choice->getIndex() >= 1;
 
-    return true;
+    return false;
 }
 
 void GoniometerComponent::pushSamples (const float* left, const float* right, int numSamples) noexcept
@@ -195,10 +213,12 @@ void GoniometerComponent::updateCorrelationFromRing()
     if (available < 0)
         available += cap;
 
-    if (available > kMaxPlotSamplesPerTick)
+    // Correlation only needs a short window — keep this cheap on the message thread.
+    constexpr int kMaxCorrSamplesPerTick = 512;
+    if (available > kMaxCorrSamplesPerTick)
     {
-        ringReadPos = (w - kMaxPlotSamplesPerTick + cap) % cap;
-        available = kMaxPlotSamplesPerTick;
+        ringReadPos = (w - kMaxCorrSamplesPerTick + cap) % cap;
+        available = kMaxCorrSamplesPerTick;
     }
 
     const double sr = sampleRateHz.load (std::memory_order_relaxed);
@@ -243,17 +263,15 @@ void GoniometerComponent::buildGlowPath (juce::Path& outPath, float pointRadius)
     if (cap <= 0)
         return;
 
-    const bool highQuality = isHighQuality();
-    const int n = juce::jmin (highQuality ? kMaxPlotSamplesPerTick : kMaxPlotSamplesPerTick / 3, cap);
+    // Sparse cloud only — Melatonin re-blurs whenever the path changes.
+    const int maxGlow = expanded ? (isHighQuality() ? 96 : 48) : (isHighQuality() ? 48 : 24);
+    const int n = juce::jmin (maxGlow * 2, cap);
     const int w = writePos.load (std::memory_order_acquire);
-
+    const int step = juce::jmax (1, n / maxGlow);
     const float cx = plot.getCentreX();
     const float cy = plot.getCentreY();
     const float scale = plot.getWidth() * 0.42f;
-    // Cap glow primitives — Melatonin caches per-path; a 2k-point Lissajous stroke was unusable.
-    constexpr int kMaxGlowPoints = 280;
-    const int step = juce::jmax (highQuality ? 2 : 4, n / kMaxGlowPoints);
-    const float r = juce::jmax (1.25f, pointRadius);
+    const float r = juce::jmax (1.1f, pointRadius);
 
     int pos = (w - n + cap) % cap;
     for (int i = 0; i < n; i += step)
@@ -286,9 +304,9 @@ void GoniometerComponent::fadeAndPlotTrail()
                                                         expanded ? 2.6f : 1.6f));
     const bool highQuality = isHighQuality();
 
-    // Lighter fade than before so the trail stays as bright as the oscilloscope.
     juce::Graphics tg (trailImage);
-    tg.setColour (juce::Colours::black.withAlpha (highQuality ? 0.10f : 0.14f));
+    // Persistence fade — trail image holds history, so we only ink NEW samples below.
+    tg.setColour (juce::Colours::black.withAlpha (highQuality ? 0.12f : 0.18f));
     tg.fillAll();
     tg.setOpacity (1.0f);
 
@@ -297,60 +315,100 @@ void GoniometerComponent::fadeAndPlotTrail()
         return;
 
     const int w = writePos.load (std::memory_order_acquire);
-    const int n = juce::jmin (highQuality ? kMaxPlotSamplesPerTick : kMaxPlotSamplesPerTick / 2, cap);
-    int pos = (w - n + cap) % cap;
+    int available = w - plotReadPos;
+    if (available < 0)
+        available += cap;
 
-    const float size = (float) trailImage.getWidth();
-    const float cx = size * 0.5f;
-    const float cy = size * 0.5f;
-    const float scale = size * 0.42f;
-    const float point = juce::jmax (1.0f, lineWidth * (highQuality ? 0.85f : 0.7f));
-
-    const auto& theme = colors();
-    const bool useRamp = loadFloatParam ("GON_USE_RAMP_ID", 1.0f) > 0.5f
-                         && hasCustomRamp && colourRamp.isUsable();
-    const auto solidInk = theme.oscLine.withMultipliedAlpha (lineOpacity);
-
-    const int step = highQuality ? 1 : 2;
-    for (int i = 0; i < n; i += step)
+    if (available <= 0)
     {
-        const float L = ringL[(size_t) pos];
-        const float R = ringR[(size_t) pos];
-        const float mid = 0.70710678f * (L + R);
-        const float side = 0.70710678f * (L - R);
-        const float x = cx + side * scale;
-        const float y = cy - mid * scale;
-        if (useRamp)
+        // Still rebuild sparse glow from recent ring so bloom tracks motion.
+    }
+    else
+    {
+        // Hard cap so one timer tick never rasterizes thousands of ellipses.
+        const int maxPts = expanded
+                               ? (highQuality ? 384 : 192)
+                               : (highQuality ? 192 : 96);
+        int step = 1;
+        if (available > maxPts)
         {
-            float driver = 0.0f;
-            switch (colourRamp.mapMode)
+            step = (available + maxPts - 1) / maxPts;
+            // Drop backlog — keep the newest window.
+            plotReadPos = (w - maxPts * step + cap) % cap;
+            available = maxPts * step;
+        }
+
+        const float size = (float) trailImage.getWidth();
+        const float cx = size * 0.5f;
+        const float cy = size * 0.5f;
+        const float scale = size * 0.42f;
+        const float point = juce::jmax (1.0f, lineWidth * (highQuality ? 0.85f : 0.7f));
+        const bool useRect = point <= 2.25f; // fillRect is much cheaper than fillEllipse
+
+        const auto& theme = colors();
+        const bool useRamp = loadFloatParam ("GON_USE_RAMP_ID", 1.0f) > 0.5f
+                             && hasCustomRamp && colourRamp.isUsable();
+        const auto solidInk = theme.oscLine.withMultipliedAlpha (lineOpacity);
+
+        int pos = plotReadPos;
+        int drawn = 0;
+        while (drawn < available)
+        {
+            const float L = ringL[(size_t) pos];
+            const float R = ringR[(size_t) pos];
+            const float mid = 0.70710678f * (L + R);
+            const float side = 0.70710678f * (L - R);
+            const float x = cx + side * scale;
+            const float y = cy - mid * scale;
+
+            if (useRamp)
             {
-                case GradientRamp::MapMode::gonDiversionX:
-                    driver = juce::jlimit (0.0f, 1.0f, std::abs (side));
-                    break;
-                case GradientRamp::MapMode::gonDiversionY:
-                    driver = juce::jlimit (0.0f, 1.0f, std::abs (mid));
-                    break;
-                case GradientRamp::MapMode::gonDiversionXY:
-                    driver = juce::jlimit (0.0f, 1.0f, std::sqrt (mid * mid + side * side));
-                    break;
-                case GradientRamp::MapMode::gonLoudness:
-                default:
-                    // Loudness (and legacy intensity maps): sample amplitude.
-                    driver = juce::jlimit (0.0f, 1.0f, std::sqrt (L * L + R * R));
-                    break;
+                float driver = 0.0f;
+                switch (colourRamp.mapMode)
+                {
+                    case GradientRamp::MapMode::gonDiversionX:
+                        driver = juce::jlimit (0.0f, 1.0f, std::abs (side));
+                        break;
+                    case GradientRamp::MapMode::gonDiversionY:
+                        driver = juce::jlimit (0.0f, 1.0f, std::abs (mid));
+                        break;
+                    case GradientRamp::MapMode::gonDiversionXY:
+                        driver = juce::jlimit (0.0f, 1.0f, std::sqrt (mid * mid + side * side));
+                        break;
+                    case GradientRamp::MapMode::gonLoudness:
+                    default:
+                        driver = juce::jlimit (0.0f, 1.0f, std::sqrt (L * L + R * R));
+                        break;
+                }
+                tg.setColour (colourRamp.colourForDriver (driver).withMultipliedAlpha (lineOpacity));
             }
-            tg.setColour (colourRamp.colourForDriver (driver).withMultipliedAlpha (lineOpacity));
+            else
+            {
+                tg.setColour (solidInk);
+            }
+
+            if (useRect)
+                tg.fillRect (x - point * 0.5f, y - point * 0.5f, point, point);
+            else
+                tg.fillEllipse (x - point * 0.5f, y - point * 0.5f, point, point);
+
+            pos = (pos + step) % cap;
+            drawn += step;
         }
-        else
-        {
-            tg.setColour (solidInk);
-        }
-        tg.fillEllipse (x - point * 0.5f, y - point * 0.5f, point, point);
-        pos = (pos + step) % cap;
+        plotReadPos = w;
     }
 
-    buildGlowPath (lastGlowPath, point);
+    const bool glowEnabled = loadFloatParam (expanded ? "GON_EXPANDED_GLOW_ENABLE_ID" : "GON_GLOW_ENABLE_ID",
+                                             0.0f) > 0.5f;
+    if (glowEnabled && SharedResources::glowShadowEffectsEnabled())
+    {
+        const float point = juce::jmax (1.0f, lineWidth * (highQuality ? 0.85f : 0.7f));
+        buildGlowPath (lastGlowPath, point);
+    }
+    else
+    {
+        lastGlowPath.clear();
+    }
 }
 
 void GoniometerComponent::timerCallback()
@@ -382,7 +440,7 @@ void GoniometerComponent::paint (juce::Graphics& g)
     if (plot.isEmpty())
         return;
 
-    const bool glowEnabled = loadFloatParam (expanded ? "GON_EXPANDED_GLOW_ENABLE_ID" : "GON_GLOW_ENABLE_ID", 1.0f) > 0.5f;
+    const bool glowEnabled = loadFloatParam (expanded ? "GON_EXPANDED_GLOW_ENABLE_ID" : "GON_GLOW_ENABLE_ID", 0.0f) > 0.5f;
     const float glowOpacity = juce::jlimit (0.0f, 1.0f,
                                             loadFloatParam (expanded ? "GON_EXPANDED_GLOW_OPACITY_ID" : "GON_GLOW_OPACITY_ID", 75.0f) * 0.01f);
     const float glowRadius = juce::jmax (0.0f,
@@ -424,8 +482,9 @@ void GoniometerComponent::paint (juce::Graphics& g)
         plotGlow.setOffset (0, 0, 1);
         plotGlow.setColor (core, 1);
 
-        // Fast path: glow path changes every frame (same as stereogram / expanded osc).
-        plotGlow.render (g, lastGlowPath, true);
+        // Compact High-quality: allow Melatonin cache; expanded always refreshes.
+        const bool forceLowQuality = expanded || ! isHighQuality();
+        plotGlow.render (g, lastGlowPath, forceLowQuality);
     }
 
     if (trailImage.isValid())

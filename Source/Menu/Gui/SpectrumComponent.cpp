@@ -5,7 +5,6 @@
 
 namespace
 {
-    constexpr int kSpectrumScrollBarWidth = 11;
     constexpr int kSpectrumPadX = 16;
     constexpr int kSpectrumPadY = 10;
     constexpr int kSpectrumLabelH = 18;
@@ -507,39 +506,17 @@ SpectrumComponent::SpectrumComponent (SharedResources& resources,
       content (resources, state, ramps)
 {
     colourRamps.addChangeListener (this);
-
-    viewport.setViewedComponent (&content, false);
-    viewport.setScrollBarsShown (false, false);
-    viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
-    viewport.setScrollBarThickness (0);
-    addAndMakeVisible (viewport);
-
-    customScrollBar = std::make_unique<CustomScrollBar> (viewport.getVerticalScrollBar());
-    addAndMakeVisible (*customScrollBar);
-    customScrollBar->toFront (false);
-    syncScrollBarColours();
+    addAndMakeVisible (content);
 }
 
 SpectrumComponent::~SpectrumComponent()
 {
     colourRamps.removeChangeListener (this);
-    viewport.setViewedComponent (nullptr, false);
 }
 
 void SpectrumComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     content.syncGradientFromBank();
-}
-
-void SpectrumComponent::syncScrollBarColours()
-{
-    if (customScrollBar == nullptr)
-        return;
-
-    customScrollBar->setTrackBackgroundColour (sharedResources.sharedColors.menuScrollBarTrackColor1);
-    customScrollBar->setThumbBackgroundColour (sharedResources.sharedColors.menuScrollBarThumbColor1);
-    customScrollBar->setThumbOutlineColour (sharedResources.sharedColors.menuScrollBarOutlineColor1);
-    customScrollBar->repaint();
 }
 
 void SpectrumComponent::paint (juce::Graphics& g)
@@ -549,22 +526,6 @@ void SpectrumComponent::paint (juce::Graphics& g)
 
 void SpectrumComponent::resized()
 {
-    syncScrollBarColours();
-
-    auto bounds = getLocalBounds();
-
-    if (customScrollBar != nullptr)
-    {
-        customScrollBar->setVisible (true);
-        customScrollBar->setBounds (bounds.removeFromRight (kSpectrumScrollBarWidth));
-    }
-
-    viewport.setBounds (bounds);
-    content.setSize (viewport.getWidth(), juce::jmax (viewport.getHeight(), content.getPreferredHeight()));
+    content.setBounds (0, 0, getWidth(), content.getPreferredHeight());
     content.resized();
-
-    viewport.setViewPosition (viewport.getViewPosition());
-
-    if (customScrollBar != nullptr)
-        customScrollBar->updateThumbPosition();
 }

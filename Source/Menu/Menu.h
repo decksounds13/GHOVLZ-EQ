@@ -13,7 +13,7 @@
 
 /**
     Floating settings panel: outer frame is freely movable/resizable (any aspect).
-    Tab content stays at a fixed design size; a Viewport clips and scrolls.
+    Tab content grows to the active tab's preferred height; one outer Viewport scrolls.
 */
 class Menu : public juce::Component,
              public juce::Button::Listener
@@ -137,6 +137,28 @@ private:
     void rebuildTabsForCurrentPage();
     void setTabPage (int page);
     int getNumTabPages() const noexcept;
+    void refreshContentPanelSize();
+    int getActiveTabPreferredContentHeight() const;
+
+    /** Notifies Menu when the active settings tab changes so contentPanel can resize. */
+    class MenuTabbedComponent : public juce::TabbedComponent
+    {
+    public:
+        explicit MenuTabbedComponent (Menu& ownerIn)
+            : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop),
+              owner (ownerIn)
+        {
+        }
+
+        void currentTabChanged (int newCurrentTabIndex, const juce::String& newTabName) override
+        {
+            juce::ignoreUnused (newCurrentTabIndex, newTabName);
+            owner.refreshContentPanelSize();
+        }
+
+    private:
+        Menu& owner;
+    };
 
     SharedResources& sharedResources;
     TextButtonLookAndFeel& textButtonLookAndFeel;
@@ -146,7 +168,7 @@ private:
 
     juce::Viewport viewport;
     juce::Component contentPanel;
-    juce::TabbedComponent tabBar { juce::TabbedButtonBar::TabsAtTop };
+    MenuTabbedComponent tabBar;
     std::unique_ptr<CustomScrollBar> verticalScrollBar;
     std::unique_ptr<CustomScrollBar> horizontalScrollBar;
 

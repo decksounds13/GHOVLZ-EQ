@@ -35,6 +35,12 @@
     <Filter Include="ParametricEqProject\Source\Spectral">
       <UniqueIdentifier>{069880E3-DEEB-3CBE-9DAD-2D22E0B80C82}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ParametricEqProject\Source\Match">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\StructuralSplit">
+      <UniqueIdentifier>{A8C3E1F2-4B5D-6E7F-8091-A2B3C4D5E6F7}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ParametricEqProject\Source\Controls\Categories">
       <UniqueIdentifier>{7EFDE8D3-7793-B6C7-C284-26939B297B82}</UniqueIdentifier>
     </Filter>
@@ -1165,6 +1171,9 @@
     <ClCompile Include="..\..\Source\OnOffButton1.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\BandMonitorButton.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\BandNumberButton.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
@@ -1173,6 +1182,12 @@
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectral\SpectralDynamicsProcessor.cpp">
       <Filter>ParametricEqProject\Source\Spectral</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\StructuralSplit\StructuralSplitEngine.cpp">
+      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Match\MatchProcessor.cpp">
+      <Filter>ParametricEqProject\Source\Match</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob1.cpp">
       <Filter>ParametricEqProject\Source</Filter>
@@ -5022,6 +5037,9 @@
     <ClInclude Include="..\..\Source\MainComponent.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\BandMonitorButton.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\OnOffButton1.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
@@ -5042,6 +5060,18 @@
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralDynamicsProcessor.h">
       <Filter>ParametricEqProject\Source\Spectral</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitSettings.h">
+      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitEngine.h">
+      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Match\MatchSettings.h">
+      <Filter>ParametricEqProject\Source\Match</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Match\MatchProcessor.h">
+      <Filter>ParametricEqProject\Source\Match</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob1.h">
       <Filter>ParametricEqProject\Source</Filter>

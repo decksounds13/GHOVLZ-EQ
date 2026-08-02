@@ -4,12 +4,14 @@
 #include "ComboBoxLookAndFeel.h"
 #include "RotaryImageKnobForOptionBox.h"
 #include "OnOffButton1.h"
+#include "BandMonitorButton.h"
 #include "TextButtonLookAndFeel.h"
 #include "FilterSlope.h"
 #include "BandChannel.h"
 #include "DynamicEq.h"
 #include "Spectral/SpectralBandSettings.h"
 #include "Spectral/SpectralPerBandLattice.h"
+#include "StructuralSplit/StructuralSplitSettings.h"
 #include "BandSaturation.h"
 #include "BandSidechain.h"
 #include "Menu/SharedResources.h"
@@ -57,6 +59,8 @@ public:
     void updateUiScaleFromParent();
     /** Internal 0–7, or global display 8–63 for extended bands. */
     int getCurrentBandIndex() const { return currentBandIndex; }
+    /** Headphones solo-monitor for the current OptionBox band. */
+    void setBandListening (bool shouldListen);
 
     static constexpr int designWidth = 150;
     /** Spectral + A/R room; shorter header/Q share a row (see topCrop in resized). */
@@ -85,13 +89,18 @@ private:
     void clearAttachments();
     void setupFilterModelMenu (int bandIndex);
     void syncChannelModeButtons();
-    void syncSpectralPackButton();
     void syncSatControls();
     void showSatContextMenu();
-    void showSpectralSatContextMenu();
+    /** Right-click on Spectral S: post-sat, lattice pack, per-band lattice, models. */
+    void showSpectralContextMenu();
     void syncSpectralSatControls();
+    void syncTransientModeButton();
+    void cycleTransientMode();
+    void syncBandMonitorButton();
+    bool currentBandSupportsSplitMode() const;
+    bool isCurrentBandSpectralOn() const;
+    bool isSpectralSatEnabled() const;
     void setChannelMode (int mode);
-    void cycleSpectralPackMode();
     void cycleBand (int delta);
     void updateDisplayAlpha();
     void updateDynamicControlsVisibility();
@@ -138,6 +147,7 @@ private:
     juce::String currentDynamicParamID;
     juce::String currentSpectralParamID;
     juce::String currentSpectralPackParamID;
+    juce::String currentSplitModeParamID;
 
     juce::ComboBox customComboBox;
     /** HP/LP slope — visible whenever the band's filter model is Highpass/Lowpass. */
@@ -159,6 +169,8 @@ private:
     ComboBoxLookAndFeel customLookAndFeel;
 
     std::unique_ptr<OnOffButton1> onOffButton1;
+    /** Solo-monitor current band processing (independent of OnOff). */
+    std::unique_ptr<BandMonitorButton> bandMonitorButton;
 
     RotaryImageKnobForOptionBox rotaryImageKnobForOptionBox1;
     RotaryImageKnobForOptionBox rotaryImageKnobForOptionBox2;
@@ -178,11 +190,9 @@ private:
     std::unique_ptr<ButtonAttachment> dynamicButtonAttachment;
     std::unique_ptr<ButtonAttachment> spectralButtonAttachment;
     std::unique_ptr<ButtonAttachment> spectralExpandButtonAttachment;
-    std::unique_ptr<ButtonAttachment> spectralPerBandLatticeAttachment;
     std::unique_ptr<ButtonAttachment> satButtonAttachment;
     std::unique_ptr<ButtonAttachment> satPostButtonAttachment;
     std::unique_ptr<SliderAttachment> satDriveAttachment;
-    std::unique_ptr<ButtonAttachment> spectralSatButtonAttachment;
     std::unique_ptr<ButtonAttachment> sidechainButtonAttachment;
     std::unique_ptr<ButtonAttachment> sidechainMidiButtonAttachment;
     std::unique_ptr<SliderAttachment> spectralSatDriveAttachment;
@@ -207,20 +217,15 @@ private:
 
     /** Dynamic EQ toggle (Pro-Q style); matches M/S/L/R button look. */
     juce::TextButton dynamicButton;
-    /** Spectral dynamics toggle (Pro-Q Spectral style). */
+    /**
+        Transient / Sustain targeting. Left-click cycles Off → Transient → Sustain.
+        Sits above D, centered under the frequency knob.
+    */
+    juce::TextButton transientModeButton;
+    /** Spectral dynamics toggle. Right-click: post-sat, lattice pack, per-band lattice. */
     juce::TextButton spectralButton;
     /** Invert Amount direction: expand (boost) resonances instead of suppress. */
     juce::TextButton spectralExpandButton;
-    /**
-        Global lattice pack (shared by all S bands). Label: Flat / LF / HF.
-        Click cycles Flat → LF → HF → Flat.
-    */
-    juce::TextButton spectralPackButton { "FL" };
-    /**
-        Optional per-band local lattice (sandboxed). Off = legacy global grid.
-        Visible only while S is on; sits above the Res slider.
-    */
-    juce::TextButton spectralPerBandLatticeButton { "PB" };
     /**
         Per-band sat enable (right of filter model). Orange glow when on.
         Right-click: model + oversample menu. Pre/Post appears when enabled.
@@ -228,16 +233,11 @@ private:
     juce::TextButton satButton { "Sat" };
     juce::TextButton satPrePostButton { "Pre" };
     /**
-        Post-mode drive (−12…+12 dB into the shaper on EQ−dry).
+        Post-mode drive (-12 to +12 dB into the shaper on EQ-dry).
         Same compact size as Side Check HP/LP; only when Sat + Post.
     */
     RotaryImageKnobForOptionBox satDriveKnob;
-    /**
-        Stage 2 — global post-Spectral sat. Visible when S is on.
-        Right-click: model + oversample. Drive knob (½ A/R) only when → is on.
-    */
-    juce::TextButton spectralSatButton;
-    /** Post-Spectral drive — half the size of A/R knobs; only when → sat is on. */
+    /** Post-spectral drive - half A/R size; only when post-spectral sat is on (S menu). */
     RotaryImageKnobForOptionBox spectralSatDriveKnob;
     juce::Slider dynThresholdSlider;
     /** Spectral resolution / target BP bandwidth (Hz); vertical, closest to D/S when S is on. */
@@ -274,6 +274,28 @@ private:
     };
 
     SidechainTextButtonLookAndFeel sidechainButtonLookAndFeel;
+
+    /** Compact label for Transient / Sustain mode button. */
+    class TransientModeButtonLookAndFeel : public TextButtonLookAndFeel
+    {
+    public:
+        TransientModeButtonLookAndFeel() : TextButtonLookAndFeel (9.0f) {}
+
+        void drawButtonText (juce::Graphics& g, juce::TextButton& button,
+                             bool shouldDrawButtonAsHighlighted,
+                             bool shouldDrawButtonAsDown) override
+        {
+            juce::ignoreUnused (shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+            g.setColour (button.getToggleState()
+                             ? button.findColour (juce::TextButton::textColourOnId)
+                             : button.findColour (juce::TextButton::textColourOffId));
+            g.setFont (juce::Font ("Lato Black", 9.0f, juce::Font::plain));
+            g.drawText (button.getButtonText(), button.getLocalBounds().reduced (1, 0),
+                        juce::Justification::centred, false);
+        }
+    };
+
+    TransientModeButtonLookAndFeel transientModeButtonLookAndFeel;
 
     juce::AudioProcessorValueTreeState& treeState;
     EqProcessor& processor;

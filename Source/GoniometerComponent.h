@@ -68,7 +68,8 @@ private:
     juce::Rectangle<int> getPlotBounds() const noexcept;
     juce::Rectangle<int> getCorrelationBounds() const noexcept;
 
-    static constexpr int kMaxBufferSeconds = 2;
+    /** Ring only needs ~plot window + correlation headroom (not seconds of audio). */
+    static constexpr float kMaxBufferSeconds = 0.25f;
     static constexpr int kMaxPlotSamplesPerTick = 2048;
 
     juce::AudioProcessorValueTreeState* valueTree = nullptr;
@@ -97,6 +98,8 @@ private:
     float correlationDisplay = 0.0f;
 
     int ringReadPos = 0;
+    /** Message-thread cursor for incremental trail inking (separate from correlation). */
+    int plotReadPos = 0;
     bool expanded = false;
 
     juce::Image trailImage;

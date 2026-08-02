@@ -340,6 +340,24 @@ HistogramComponent* EqProcessor::getHistogramTarget() const noexcept
     return histogramTarget.load (std::memory_order_acquire);
 }
 
+void EqProcessor::setBandListenIndex (int bandIndex) noexcept
+{
+    if (bandIndex < 0)
+        bandListenIndex.store (-1, std::memory_order_release);
+    else
+        bandListenIndex.store (juce::jlimit (0, EqBand::kMaxBands - 1, bandIndex),
+                               std::memory_order_release);
+}
+
+void EqProcessor::setAuditionBandpass (bool active, float frequencyHz, float q) noexcept
+{
+    auditionBandpassFreqHz.store (juce::jlimit (20.0f, 20000.0f, frequencyHz),
+                                  std::memory_order_relaxed);
+    // Soft ceiling — avoids near-sine whistling on Alt+drag isolate.
+    auditionBandpassQ.store (juce::jlimit (0.55f, 8.0f, q), std::memory_order_relaxed);
+    auditionBandpassActive.store (active, std::memory_order_release);
+}
+
 void EqProcessor::setEcoMode (bool shouldEnable) noexcept
 {
     ecoMode.store (shouldEnable);
@@ -991,7 +1009,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         analyserDefaults.getFloat ("GON_LINE_WIDTH_ID", 1.6f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "GON_GLOW_ENABLE_ID", "GonGlowEnable",
-        analyserDefaults.getBool ("GON_GLOW_ENABLE_ID", true)));
+        analyserDefaults.getBool ("GON_GLOW_ENABLE_ID", false)));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "GON_GLOW_RADIUS_ID", "GonGlowRadius",
         juce::NormalisableRange<float> (0.0f, 40.0f, 0.1f),
@@ -1026,7 +1044,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "GON_QUALITY_ID", "GonQuality",
         juce::StringArray { "Draft", "High" },
-        juce::jlimit (0, 1, analyserDefaults.getInt ("GON_QUALITY_ID", 1))));
+        juce::jlimit (0, 1, analyserDefaults.getInt ("GON_QUALITY_ID", 0))));
     // Spectrogram strip — look + behaviour.
     {
         const auto specSchemes = SpectrogramComponent::getColourSchemeNames();
@@ -1283,6 +1301,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "autoGain", "Auto Gain", true));
 
+    // Spectral Match — global shape match toward a target curve (noise / capture).
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        MatchEq::enabledParamId(), "Match", false));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        MatchEq::amountParamId(), "Match Amount",
+        juce::NormalisableRange<float> (MatchEq::kMinAmount, MatchEq::kMaxAmount, 0.01f),
+        MatchEq::kDefaultAmount));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        MatchEq::curveParamId(), "Match Curve",
+        MatchEq::getCurveChoiceNames(),
+        MatchEq::pink));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        MatchEq::speedParamId(), "Match Speed",
+        MatchEq::getSpeedChoiceNames(),
+        MatchEq::med));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        MatchEq::frozenParamId(), "Match Frozen", true));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        MatchEq::placementParamId(), "Match Placement",
+        MatchEq::getPlacementChoiceNames(),
+        MatchEq::beforeEq));
+
     // Side Check (S<=M): global post-EQ BP-lattice bus — tuck Side when louder than Mid per slice.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         SideCheck::enabledParamId(), "Side Check", false));
@@ -1505,6 +1545,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back(std::move(pSpectralResHz));
     params.push_back(std::move(pSpectralPack));
     params.push_back(std::move(pSpectralPerBandLattice));
+
+    // Transient / Sustain split (Bank 1) + global separator / solo.
+    for (int bi = 0; bi < 8; ++bi)
+    {
+        const auto id = StructuralSplit::splitModeParamIDForBandIndex (bi);
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (
+            id, id, StructuralSplit::modeChoiceNames(), 0));
+    }
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        StructuralSplit::separationParamId(), "StructuralSplitSeparation",
+        juce::NormalisableRange<float> (StructuralSplit::kMinSeparation,
+                                        StructuralSplit::kMaxSeparation, 0.1f),
+        StructuralSplit::kDefaultSeparation));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        StructuralSplit::soloParamId(), "StructuralSplitSolo",
+        StructuralSplit::soloChoiceNames(), 0));
 
     params.push_back(std::move(pHighShelfOnOff));
     params.push_back(std::move(pLowShelfOnOff));
@@ -2117,7 +2173,12 @@ void EqProcessor::processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock
                                         const float* dryL, const float* dryR, int numSamples,
                                         bool proportionalQOn)
 {
-    if (extendedOnCount.load (std::memory_order_relaxed) <= 0)
+    const int listenIdx = bandListenIndex.load (std::memory_order_acquire);
+    // Headphones on a Bank-1 band: skip all extended slots.
+    if (listenIdx >= 0 && listenIdx < EqBand::kBankSize)
+        return;
+
+    if (listenIdx < 0 && extendedOnCount.load (std::memory_order_relaxed) <= 0)
         return;
 
     const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
@@ -2126,10 +2187,19 @@ void EqProcessor::processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock
 
     for (int ei = 0; ei < kNumExtended; ++ei)
     {
+        const int global = ei + EqBand::kBankSize;
         const auto& p = extendedParams[(size_t) ei];
-        if (p.on == nullptr || p.on->load() <= 0.5f)
+        const bool forceListen = (listenIdx == global);
+        if (! forceListen && (p.on == nullptr || p.on->load() <= 0.5f))
         {
             // Keep idle smoothers advancing so re-enable doesn't jump.
+            smoothExtFreq[(size_t) ei].skip (numSamples);
+            smoothExtQ[(size_t) ei].skip (numSamples);
+            smoothExtGain[(size_t) ei].skip (numSamples);
+            continue;
+        }
+        if (listenIdx >= EqBand::kBankSize && ! forceListen)
+        {
             smoothExtFreq[(size_t) ei].skip (numSamples);
             smoothExtQ[(size_t) ei].skip (numSamples);
             smoothExtGain[(size_t) ei].skip (numSamples);
@@ -2348,16 +2418,26 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     midiNotesHeld = 0;
 
     spectralEngine.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
+    structuralSplitEngine.prepare (sampleRate, samplesPerBlock);
     sideCheck.prepare (sampleRate, samplesPerBlock);
+    matchEngine.prepare (sampleRate, samplesPerBlock);
+    syncMatchFactoryTargetFromParam();
     for (auto& sat : bandSatEngines)
         sat.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
     prepareExtendedSlots (spec, samplesPerBlock);
     spectralSatEngine.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
     linearPhaseEngine.prepare (sampleRate, samplesPerBlock, juce::jmax (1, (int) spec.numChannels));
+    auditionBandpassFilter.prepare (spec);
     // Headroom for hosts that occasionally exceed the prepare block size.
+    const int splitCap = juce::jmax (samplesPerBlock * 2, 8192);
     spectralDetectBuffer.setSize (juce::jmax (1, (int) spec.numChannels),
-                                  juce::jmax (samplesPerBlock * 2, 8192),
+                                  splitCap,
                                   false, false, false);
+    splitDryBuffer.setSize (juce::jmax (1, (int) spec.numChannels), splitCap, false, false, false);
+    splitTGainBuffer.setSize (1, splitCap, false, false, false);
+    splitSGainBuffer.setSize (1, splitCap, false, false, false);
+    auditionDryBuffer.setSize (juce::jmax (1, (int) spec.numChannels), splitCap, false, false, false);
+    matchDetectBuffer.setSize (juce::jmax (1, (int) spec.numChannels), splitCap, false, false, false);
 
     bypassCompBuffer.setSize (2, kMaxBypassCompDelay, false, true, false);
     bypassCompBuffer.clear();
@@ -3005,6 +3085,59 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         return fallback;
     };
 
+    // Headphones monitor: solo one band's full chain (force-on even if OnOff is off).
+    const int listenIdx = bandListenIndex.load (std::memory_order_acquire);
+    const bool bandListenActive = listenIdx >= 0;
+    const bool savedHP = isHighpassOn, savedLP = isLowpassOn;
+    const bool savedHS = isHighShelfOn, savedLS = isLowShelfOn;
+    const bool savedB1 = isBand1On, savedB2 = isBand2On;
+    const bool savedB3 = isBand3On, savedB4 = isBand4On;
+    if (bandListenActive)
+    {
+        isHighpassOn = (listenIdx == 4);
+        isLowpassOn = (listenIdx == 5);
+        isHighShelfOn = (listenIdx == 6);
+        isLowShelfOn = (listenIdx == 7);
+        isBand1On = (listenIdx == 0);
+        isBand2On = (listenIdx == 1);
+        isBand3On = (listenIdx == 2);
+        isBand4On = (listenIdx == 3);
+    }
+    struct RestoreBandOnFlags
+    {
+        EqProcessor& p;
+        bool active;
+        bool hp, lp, hs, ls, b1, b2, b3, b4;
+        ~RestoreBandOnFlags()
+        {
+            if (! active)
+                return;
+            p.isHighpassOn = hp;
+            p.isLowpassOn = lp;
+            p.isHighShelfOn = hs;
+            p.isLowShelfOn = ls;
+            p.isBand1On = b1;
+            p.isBand2On = b2;
+            p.isBand3On = b3;
+            p.isBand4On = b4;
+        }
+    } restoreBandOn { *this, bandListenActive,
+                      savedHP, savedLP, savedHS, savedLS,
+                      savedB1, savedB2, savedB3, savedB4 };
+    juce::ignoreUnused (restoreBandOn);
+
+    const bool auditionBp = auditionBandpassActive.load (std::memory_order_acquire);
+    {
+        const int nChDry = juce::jmin (2, mainBuffer.getNumChannels());
+        if (auditionBp && nChDry > 0 && numSamples > 0
+            && auditionDryBuffer.getNumChannels() >= nChDry
+            && auditionDryBuffer.getNumSamples() >= numSamples)
+        {
+            for (int ch = 0; ch < nChDry; ++ch)
+                auditionDryBuffer.copyFrom (ch, 0, mainBuffer, ch, 0, numSamples);
+        }
+    }
+
     const bool anySpectralArmed =
         (isBand1On && rawBool ("band1Spectral"))
         || (isBand2On && rawBool ("band2Spectral"))
@@ -3015,19 +3148,140 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         || (isHighShelfOn && rawBool ("highShelfSpectral"))
         || (isLowShelfOn && rawBool ("lowShelfSpectral"));
 
+    auto rawChoiceIndex = [this] (const juce::String& id) -> int
+    {
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter (id)))
+            return choice->getIndex();
+        return 0;
+    };
+    auto splitModeForBand = [&] (int bandIndex) -> StructuralSplit::Mode
+    {
+        const auto id = StructuralSplit::splitModeParamIDForBandIndex (bandIndex);
+        if (id.isEmpty())
+            return StructuralSplit::Mode::off;
+        return StructuralSplit::clampMode (rawChoiceIndex (id));
+    };
+    // Cheap early-out: choice raw value is 0 when Off. Skip type/on reads when nothing is armed.
+    bool anySplitModeNonOff = false;
+    for (int bi = 0; bi < 8; ++bi)
+    {
+        const auto id = StructuralSplit::splitModeParamIDForBandIndex (bi);
+        if (auto* v = treeState.getRawParameterValue (id))
+        {
+            if (v->load() > 0.001f)
+            {
+                anySplitModeNonOff = true;
+                break;
+            }
+        }
+    }
+    // Same eligibility as Spectral (S): band on + gain-using type + mode ≠ Off.
+    const bool anySplitArmed = anySplitModeNonOff
+        && ((isBand1On && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "band1Type", FilterType::bell))
+             && splitModeForBand (0) != StructuralSplit::Mode::off)
+            || (isBand2On && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "band2Type", FilterType::bell))
+                && splitModeForBand (1) != StructuralSplit::Mode::off)
+            || (isBand3On && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "band3Type", FilterType::bell))
+                && splitModeForBand (2) != StructuralSplit::Mode::off)
+            || (isBand4On && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "band4Type", FilterType::bell))
+                && splitModeForBand (3) != StructuralSplit::Mode::off)
+            || (isHighpassOn && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "highpassType", FilterType::highpass))
+                && splitModeForBand (4) != StructuralSplit::Mode::off)
+            || (isLowpassOn && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "lowpassType", FilterType::lowpass))
+                && splitModeForBand (5) != StructuralSplit::Mode::off)
+            || (isHighShelfOn && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "highShelfType", FilterType::highShelf))
+                && splitModeForBand (6) != StructuralSplit::Mode::off)
+            || (isLowShelfOn && FilterType::usesGain (BandChannel::readChoiceIndex (treeState, "lowShelfType", FilterType::lowShelf))
+                && splitModeForBand (7) != StructuralSplit::Mode::off));
+
+    const int nChMain = juce::jmin (2, mainBuffer.getNumChannels());
     if (anySpectralArmed)
     {
         // Never allocate here (Ableton crash). prepareToPlay sizes this buffer;
         // if a host block is larger, skip the detect copy for this block.
-        const int nCh = juce::jmin (2, mainBuffer.getNumChannels());
-        if (nCh > 0 && numSamples > 0
-            && spectralDetectBuffer.getNumChannels() >= nCh
+        if (nChMain > 0 && numSamples > 0
+            && spectralDetectBuffer.getNumChannels() >= nChMain
             && spectralDetectBuffer.getNumSamples() >= numSamples)
         {
-            for (int ch = 0; ch < nCh; ++ch)
+            for (int ch = 0; ch < nChMain; ++ch)
                 spectralDetectBuffer.copyFrom (ch, 0, mainBuffer, ch, 0, numSamples);
         }
     }
+
+    bool splitActive = false;
+    const float* splitTGain = nullptr;
+    const float* splitSGain = nullptr;
+    const float* splitPreEqL = nullptr;
+    const float* splitPreEqR = nullptr;
+    // Min-phase only: dual-stream delta mix. Linear-phase keeps a single path.
+    if (anySplitArmed && ! useLinearPhase
+        && nChMain > 0 && numSamples > 0
+        && splitDryBuffer.getNumChannels() >= nChMain
+        && splitDryBuffer.getNumSamples() >= numSamples
+        && splitTGainBuffer.getNumSamples() >= numSamples
+        && splitSGainBuffer.getNumSamples() >= numSamples)
+    {
+        for (int ch = 0; ch < nChMain; ++ch)
+            splitDryBuffer.copyFrom (ch, 0, mainBuffer, ch, 0, numSamples);
+
+        // Keep a pre-EQ copy for T/S solo monitoring (reuse spectralDetectBuffer).
+        if (spectralDetectBuffer.getNumChannels() >= nChMain
+            && spectralDetectBuffer.getNumSamples() >= numSamples)
+        {
+            if (! anySpectralArmed)
+            {
+                for (int ch = 0; ch < nChMain; ++ch)
+                    spectralDetectBuffer.copyFrom (ch, 0, mainBuffer, ch, 0, numSamples);
+            }
+            splitPreEqL = spectralDetectBuffer.getReadPointer (0);
+            splitPreEqR = nChMain > 1 ? spectralDetectBuffer.getReadPointer (1) : splitPreEqL;
+        }
+
+        // Mid detect into T-gain scratch, then compute complementary gains.
+        float* detect = splitTGainBuffer.getWritePointer (0);
+        const float* dL = splitDryBuffer.getReadPointer (0);
+        const float* dR = nChMain > 1 ? splitDryBuffer.getReadPointer (1) : dL;
+        for (int i = 0; i < numSamples; ++i)
+            detect[i] = 0.5f * (dL[i] + dR[i]);
+
+        const float sep01 = juce::jlimit (0.0f, 1.0f,
+            rawFloat (StructuralSplit::separationParamId(), StructuralSplit::kDefaultSeparation)
+                / StructuralSplit::kMaxSeparation);
+        structuralSplitEngine.computeGains (detect, numSamples, sep01,
+                                            splitTGainBuffer.getWritePointer (0),
+                                            splitSGainBuffer.getWritePointer (0));
+        splitTGain = splitTGainBuffer.getReadPointer (0);
+        splitSGain = splitSGainBuffer.getReadPointer (0);
+        splitActive = true;
+    }
+
+    auto applySplitDeltaIfArmed = [&] (int bandIndex, int filterType)
+    {
+        if (! splitActive || ! FilterType::usesGain (filterType))
+            return;
+        const auto mode = splitModeForBand (bandIndex);
+        if (mode == StructuralSplit::Mode::off)
+            return;
+        const float* mask = (mode == StructuralSplit::Mode::transient) ? splitTGain : splitSGain;
+        if (mask == nullptr)
+            return;
+
+        // Capture wet; mix against pre-band dry snapshot taken just before this band.
+        // Caller must have copied dry into splitDryBuffer immediately before processing.
+        float* wetL = mainBuffer.getWritePointer (0);
+        float* wetR = nChMain > 1 ? mainBuffer.getWritePointer (1) : nullptr;
+        const float* dryL = splitDryBuffer.getReadPointer (0);
+        const float* dryR = nChMain > 1 ? splitDryBuffer.getReadPointer (1) : dryL;
+        StructuralSplitEngine::mixDeltaWithMask (wetL, wetR, dryL, dryR, mask, numSamples, nChMain);
+    };
+
+    auto captureSplitDry = [&]()
+    {
+        if (! splitActive)
+            return;
+        for (int ch = 0; ch < nChMain; ++ch)
+            splitDryBuffer.copyFrom (ch, 0, mainBuffer, ch, 0, numSamples);
+    };
 
     auto resolveDynamicGain = [&] (bool bandOn,
                                    bool typeUsesGain,
@@ -3166,6 +3420,33 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const bool proportionalQOn = treeState.getRawParameterValue ("PROPORTIONAL_Q_ID") != nullptr
                                  && treeState.getRawParameterValue ("PROPORTIONAL_Q_ID")->load() > 0.5f;
 
+    const bool matchOn = rawBool (MatchEq::enabledParamId());
+    const int matchPlacement = MatchEq::readChoiceIndex (
+        treeState, MatchEq::placementParamId(), MatchEq::beforeEq, MatchEq::numPlacements - 1);
+    const float matchAmount = rawFloat (MatchEq::amountParamId(), MatchEq::kDefaultAmount);
+    const int matchSpeed = MatchEq::readChoiceIndex (
+        treeState, MatchEq::speedParamId(), MatchEq::med, MatchEq::numSpeeds - 1);
+
+    auto runMatchStage = [&] (bool enabledHere)
+    {
+        if (nChMain <= 0 || numSamples <= 0)
+            return;
+        if (matchDetectBuffer.getNumChannels() < nChMain
+            || matchDetectBuffer.getNumSamples() < numSamples)
+            return;
+
+        for (int ch = 0; ch < nChMain; ++ch)
+            matchDetectBuffer.copyFrom (ch, 0, mainBuffer, ch, 0, numSamples);
+
+        const float* dL = matchDetectBuffer.getReadPointer (0);
+        const float* dR = nChMain > 1 ? matchDetectBuffer.getReadPointer (1) : dL;
+        matchEngine.process (mainBuffer, dL, dR, enabledHere, matchAmount, matchSpeed);
+    };
+
+    // Match before EQ (default): shape dry, then static bands sculpt on top.
+    if (matchPlacement == MatchEq::beforeEq)
+        runMatchStage (matchOn);
+
     // Static / dynamic EQ: Minimum Phase = cascaded IIR (current path).
     // Linear Phase = single FIR matching the same magnitude response, then S as today.
     if (useLinearPhase)
@@ -3255,6 +3536,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const int hpChannel = BandChannel::readChoiceIndex (treeState, "highpassChannel");
             const float hpGain = rawFloat ("highpassGain");
             const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+            captureSplitDry();
 
             if (FilterType::isHpLp (hpType))
             {
@@ -3285,6 +3567,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                     highpassBandFilter.process (juce::dsp::ProcessContextReplacing<float> (block));
                 });
             }
+            applySplitDeltaIfArmed (4, hpType);
         }
 
         if (isLowpassOn)
@@ -3294,6 +3577,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const int lpChannel = BandChannel::readChoiceIndex (treeState, "lowpassChannel");
             const float lpGain = rawFloat ("lowpassGain");
             const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+            captureSplitDry();
 
             if (FilterType::isHpLp (lpType))
             {
@@ -3324,6 +3608,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                     lowpassBandFilter.process (juce::dsp::ProcessContextReplacing<float> (block));
                 });
             }
+            applySplitDeltaIfArmed (5, lpType);
         }
 
         // Sync juce oversampling factor on all sat engines (min-phase path).
@@ -3383,10 +3668,13 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                                       const char* satPostId,
                                       const char* satModelId,
                                       const char* satDriveId,
-                                      int satEngineIndex)
+                                      int satEngineIndex,
+                                      int splitBandIndex)
         {
             if (! enabled)
                 return;
+
+            captureSplitDry();
 
             const int channelMode = BandChannel::readChoiceIndex (treeState, channelId);
             if (FilterType::isHpLp (type))
@@ -3405,6 +3693,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                         flexibleHpLpStages[(size_t) flexIndex][(size_t) i]
                             .process (juce::dsp::ProcessContextReplacing<float> (block));
                 });
+                applySplitDeltaIfArmed (splitBandIndex, type);
                 return;
             }
 
@@ -3433,30 +3722,31 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             {
                 applyBandEqAndSat (singleFilter, block, satOn, satPost, satModel, satEngineIndex, satDriveDb);
             });
+            applySplitDeltaIfArmed (splitBandIndex, type);
         };
 
         processMidOrShelf (isHighShelfOn, 4, hsType, smoothedHighShelfFrequency, smoothedHighShelfQ, effHighShelfGain,
                            "highShelfSlope", "highShelfChannel", lastHighShelf, highShelf,
-                           "highShelfSat", "highShelfSatPost", "highShelfSatModel", "highShelfSatDriveDb", 6);
+                           "highShelfSat", "highShelfSatPost", "highShelfSatModel", "highShelfSatDriveDb", 6, 6);
         processMidOrShelf (isLowShelfOn, 5, lsType, smoothedLowShelfFrequency, smoothedLowShelfQ, effLowShelfGain,
                            "lowShelfSlope", "lowShelfChannel", lastLowShelf, lowShelf,
-                           "lowShelfSat", "lowShelfSatPost", "lowShelfSatModel", "lowShelfSatDriveDb", 7);
+                           "lowShelfSat", "lowShelfSatPost", "lowShelfSatModel", "lowShelfSatDriveDb", 7, 7);
         processMidOrShelf (isBand1On, 0, b1Type, smoothedBand1Frequency,
                            FilterType::effectiveBellQ (b1Type, smoothedBand1Q, effBand1Gain, proportionalQOn),
                            effBand1Gain, "band1Slope", "band1Channel", lastBand1, band1,
-                           "band1Sat", "band1SatPost", "band1SatModel", "band1SatDriveDb", 0);
+                           "band1Sat", "band1SatPost", "band1SatModel", "band1SatDriveDb", 0, 0);
         processMidOrShelf (isBand2On, 1, b2Type, smoothedBand2Frequency,
                            FilterType::effectiveBellQ (b2Type, smoothedBand2Q, effBand2Gain, proportionalQOn),
                            effBand2Gain, "band2Slope", "band2Channel", lastBand2, band2,
-                           "band2Sat", "band2SatPost", "band2SatModel", "band2SatDriveDb", 1);
+                           "band2Sat", "band2SatPost", "band2SatModel", "band2SatDriveDb", 1, 1);
         processMidOrShelf (isBand3On, 2, b3Type, smoothedBand3Frequency,
                            FilterType::effectiveBellQ (b3Type, smoothedBand3Q, effBand3Gain, proportionalQOn),
                            effBand3Gain, "band3Slope", "band3Channel", lastBand3, band3,
-                           "band3Sat", "band3SatPost", "band3SatModel", "band3SatDriveDb", 2);
+                           "band3Sat", "band3SatPost", "band3SatModel", "band3SatDriveDb", 2, 2);
         processMidOrShelf (isBand4On, 3, b4Type, smoothedBand4Frequency,
                            FilterType::effectiveBellQ (b4Type, smoothedBand4Q, effBand4Gain, proportionalQOn),
                            effBand4Gain, "band4Slope", "band4Channel", lastBand4, band4,
-                           "band4Sat", "band4SatPost", "band4SatModel", "band4SatDriveDb", 3);
+                           "band4Sat", "band4SatPost", "band4SatModel", "band4SatDriveDb", 3, 3);
 
         // Banks 2–8 (Band 9–64) — agnostic IIR slots after Bank 1.
         {
@@ -3536,6 +3826,9 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     spectralEngine.setPerBandLatticeEnabled (perBandLattice);
 
     spectralEngine.clearBands();
+    // Match owns global spectral shaping — skip per-band S while Match is on.
+    if (! matchOn)
+    {
     armSpectral (isHighShelfOn, FilterType::usesGain (hsType), rawBool ("highShelfSpectral"),
                  rawBool ("highShelfSidechain"),
                  SpectralDynamics::slotForBandIndex (6),
@@ -3624,6 +3917,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                  rawFloat ("lowpassAttackMs", DynamicEq::attackMs),
                  rawFloat ("lowpassReleaseMs", DynamicEq::releaseMs),
                  SpectralDynamics::shapeFromFilterType (lpType));
+    }
 
     // Always call process: hard-bypasses (no filters) when idle, and clears UI GR on S→off.
     {
@@ -3637,6 +3931,10 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         }
         spectralEngine.process (audioBlock, detL, detR, scL, scR);
     }
+
+    // Match after EQ: shape the EQ'd signal toward the target.
+    if (matchPlacement == MatchEq::afterEq)
+        runMatchStage (matchOn);
 
     // Stage 2 — post-Spectral bus sat (Expand / S peaks drive the grit).
     // Only when SS is on and at least one S band is armed.
@@ -3682,9 +3980,55 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         sideCheck.process (mainBuffer, scOn, scAmount, scHp, scLp, scMode, scHq);
     }
 
+    // T/S solo: unity isolation of pre-EQ dry (mask ≤ 1 so level cannot exceed dry).
+    // Must run before Out/AG, and AG must not meter or compensate the quieter solo.
+    const auto splitSolo = (splitActive && splitPreEqL != nullptr
+                            && splitTGain != nullptr && splitSGain != nullptr)
+                               ? StructuralSplit::clampSolo (rawChoiceIndex (StructuralSplit::soloParamId()))
+                               : StructuralSplit::Solo::off;
+    const bool splitSoloActive = splitSolo != StructuralSplit::Solo::off;
+    if (splitSoloActive && ! auditionBp)
+    {
+        const float* mask = (splitSolo == StructuralSplit::Solo::transient) ? splitTGain : splitSGain;
+        float* outL = mainBuffer.getWritePointer (0);
+        float* outR = nChMain > 1 ? mainBuffer.getWritePointer (1) : nullptr;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float m = mask[i];
+            outL[i] = splitPreEqL[i] * m;
+            if (outR != nullptr && splitPreEqR != nullptr)
+                outR[i] = splitPreEqR[i] * m;
+        }
+    }
+
+    // Alt+drag bandpass audition — isolate dry through a temporary BP (replaces output).
+    if (auditionBp
+        && nChMain > 0 && numSamples > 0
+        && auditionDryBuffer.getNumChannels() >= nChMain
+        && auditionDryBuffer.getNumSamples() >= numSamples)
+    {
+        for (int ch = 0; ch < nChMain; ++ch)
+            mainBuffer.copyFrom (ch, 0, auditionDryBuffer, ch, 0, numSamples);
+
+        const float freq = auditionBandpassFreqHz.load (std::memory_order_relaxed);
+        const float q = auditionBandpassQ.load (std::memory_order_relaxed);
+        const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+        if (sr > 0.0)
+        {
+            if (auto coeffs = FilterType::makeCoefficients (FilterType::bandPass, sr, freq, q, 0.0f))
+            {
+                *auditionBandpassFilter.state = *coeffs;
+                juce::dsp::AudioBlock<float> block (mainBuffer);
+                auditionBandpassFilter.process (juce::dsp::ProcessContextReplacing<float> (block));
+            }
+        }
+    }
+
     // Autogain: match post-EQ loudness to pre-EQ via an internal offset (Out knob stays manual).
     {
-        const bool autoGainOn = treeState.getRawParameterValue ("autoGain") != nullptr
+        const bool isolateMonitor = splitSoloActive || auditionBp || bandListenActive;
+        const bool autoGainOn = ! isolateMonitor
+                                && treeState.getRawParameterValue ("autoGain") != nullptr
                                 && treeState.getRawParameterValue ("autoGain")->load() > 0.5f;
 
         auto blockRmsDb = [&mainBuffer, numSamples] (int channel) -> float
@@ -3694,31 +4038,35 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             return juce::Decibels::gainToDecibels (mainBuffer.getRMSLevel (channel, 0, numSamples), -100.0f);
         };
 
-        const float blockPreDb = juce::jmax (preLeftDb, preRightDb);
-        const float blockPostDb = juce::jmax (blockRmsDb (0),
-                                              mainBuffer.getNumChannels() > 1 ? blockRmsDb (1) : blockRmsDb (0));
-
-        // ~450 ms ballistics on the detector so block RMS noise doesn't yank the target.
-        constexpr float detectorTauSec = 0.45f;
-        const float detectorAlpha = 1.0f - std::exp (
-            -(float) juce::jmax (1, numSamples) / (detectorTauSec * (float) juce::jmax (1.0, sampleRate)));
-        autoGainPreDbSmooth += detectorAlpha * (blockPreDb - autoGainPreDbSmooth);
-        autoGainPostDbSmooth += detectorAlpha * (blockPostDb - autoGainPostDbSmooth);
-
         constexpr float silenceFloorDb = -60.0f;
 
-        if (! autoGainOn)
+        if (! splitSoloActive)
         {
-            smoothAutoGainOffset.setTargetValue (0.0f);
-        }
-        else if (autoGainPreDbSmooth > silenceFloorDb && autoGainPostDbSmooth > silenceFloorDb)
-        {
-            // Hold last target during silence so the offset doesn't pump out/in.
-            smoothAutoGainOffset.setTargetValue (
-                juce::jlimit (-24.0f, 24.0f, autoGainPreDbSmooth - autoGainPostDbSmooth));
+            const float blockPreDb = juce::jmax (preLeftDb, preRightDb);
+            const float blockPostDb = juce::jmax (blockRmsDb (0),
+                                                  mainBuffer.getNumChannels() > 1 ? blockRmsDb (1) : blockRmsDb (0));
+
+            // ~450 ms ballistics on the detector so block RMS noise doesn't yank the target.
+            constexpr float detectorTauSec = 0.45f;
+            const float detectorAlpha = 1.0f - std::exp (
+                -(float) juce::jmax (1, numSamples) / (detectorTauSec * (float) juce::jmax (1.0, sampleRate)));
+            autoGainPreDbSmooth += detectorAlpha * (blockPreDb - autoGainPreDbSmooth);
+            autoGainPostDbSmooth += detectorAlpha * (blockPostDb - autoGainPostDbSmooth);
+
+            if (! autoGainOn)
+            {
+                smoothAutoGainOffset.setTargetValue (0.0f);
+            }
+            else if (autoGainPreDbSmooth > silenceFloorDb && autoGainPostDbSmooth > silenceFloorDb)
+            {
+                // Hold last target during silence so the offset doesn't pump out/in.
+                smoothAutoGainOffset.setTargetValue (
+                    juce::jlimit (-24.0f, 24.0f, autoGainPreDbSmooth - autoGainPostDbSmooth));
+            }
         }
 
         // Per-sample Out + autogain — avoids zipper steps at block boundaries.
+        // Solo monitoring: Out only (never AG), so isolation stays ≤ dry.
         const int nCh = mainBuffer.getNumChannels();
         if (nCh > 0 && numSamples > 0)
         {
@@ -3729,8 +4077,11 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 
             for (int i = 0; i < numSamples; ++i)
             {
-                const float g = juce::Decibels::decibelsToGain (
-                    smoothOutputGain.getNextValue() + smoothAutoGainOffset.getNextValue());
+                const float outDb = smoothOutputGain.getNextValue();
+                float agDb = smoothAutoGainOffset.getNextValue();
+                if (splitSoloActive)
+                    agDb = 0.0f; // advance smoother, but never boost/cut isolation
+                const float g = juce::Decibels::decibelsToGain (outDb + agDb);
 
                 for (int ch = 0; ch < useCh; ++ch)
                     chans[ch][i] *= g;
@@ -4351,6 +4702,12 @@ void EqProcessor::getStateInformation(juce::MemoryBlock& destData)
     storeAbSnapshotsInState (state);
     attachShapeCurveToState (state, shapeEngine);
 
+    {
+        auto matchTree = matchEngine.toUserPresetsTree();
+        if (matchTree.isValid())
+            state.appendChild (matchTree, nullptr);
+    }
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -4369,6 +4726,16 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
     // Keep A/B/C/D + Shape curve aside, then load APVTS (without those extras as params).
     const auto abProps = state.createCopy();
     const auto shapeTree = takeShapeCurveFromState (state);
+    juce::ValueTree matchUserTree;
+    for (int i = 0; i < state.getNumChildren(); ++i)
+    {
+        if (state.getChild (i).hasType ("matchUserCurves"))
+        {
+            matchUserTree = state.getChild (i).createCopy();
+            state.removeChild (i, nullptr);
+            break;
+        }
+    }
     state.removeProperty ("abActiveSlot", nullptr);
     state.removeProperty ("abSnapshotA", nullptr);
     state.removeProperty ("abSnapshotB", nullptr);
@@ -4379,6 +4746,7 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
     treeState.replaceState (state);
     updateParameters();
     migrateSpectralResHzFromLegacyParams();
+    syncMatchFactoryTargetFromParam();
 
     // replaceState can clear pending FFT readiness; keep Analyser block size in sync
     // the same way the factory-state path does after ctor replaceState.
@@ -4390,6 +4758,9 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
 
     if (shapeTree.isValid())
         shapeEngine.fromValueTree (shapeTree);
+
+    if (matchUserTree.isValid())
+        matchEngine.fromUserPresetsTree (matchUserTree);
 }
 
 
@@ -4595,6 +4966,77 @@ void EqProcessor::sampleSideCheckGrDb (const float* frequenciesHz, float* destDb
         return;
 
     sideCheck.samplePublishedGrDb (frequenciesHz, destDb, numPoints);
+}
+
+void EqProcessor::sampleMatchTargetDb (const float* frequenciesHz, float* destDb, int numPoints) const
+{
+    if (destDb == nullptr || numPoints <= 0)
+        return;
+    matchEngine.sampleTargetDb (frequenciesHz, destDb, numPoints);
+}
+
+void EqProcessor::sampleMatchGrDb (const float* frequenciesHz, float* destDb, int numPoints) const
+{
+    if (destDb == nullptr || numPoints <= 0)
+        return;
+    matchEngine.samplePublishedGrDb (frequenciesHz, destDb, numPoints);
+}
+
+void EqProcessor::applyMatchBandDisable()
+{
+    for (int g = 0; g < EqBand::kMaxBands; ++g)
+    {
+        const auto id = EqBand::onOffParamIDForGlobal (g);
+        bool wasOn = false;
+        if (auto* v = treeState.getRawParameterValue (id))
+            wasOn = v->load() > 0.5f;
+        matchBandOnSnapshot[(size_t) g] = wasOn;
+
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*> (treeState.getParameter (id)))
+            *p = false;
+    }
+    matchBandDisableActive = true;
+    refreshExtendedOnCount();
+}
+
+void EqProcessor::restoreMatchBandDisable()
+{
+    if (! matchBandDisableActive)
+        return;
+
+    for (int g = 0; g < EqBand::kMaxBands; ++g)
+    {
+        const auto id = EqBand::onOffParamIDForGlobal (g);
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*> (treeState.getParameter (id)))
+            *p = matchBandOnSnapshot[(size_t) g];
+    }
+    matchBandDisableActive = false;
+    refreshExtendedOnCount();
+}
+
+void EqProcessor::syncMatchFactoryTargetFromParam()
+{
+    const int curve = MatchEq::readChoiceIndex (
+        treeState, MatchEq::curveParamId(), MatchEq::pink, MatchEq::numFactoryCurves - 1);
+    if (curve != MatchEq::capture)
+        matchEngine.setFactoryTarget (curve);
+}
+
+void EqProcessor::captureMatchSpectrumFromAnalyser()
+{
+    auto& analyser = getAnalyser();
+    const int n = (int) analyser.getScopeSize();
+    if (n <= 0)
+        return;
+
+    std::vector<float> mags ((size_t) n);
+    std::vector<float> freqs ((size_t) n);
+    for (int i = 0; i < n; ++i)
+    {
+        mags[(size_t) i] = juce::jmax (1.0e-6f, analyser.getScopeData ((size_t) i));
+        freqs[(size_t) i] = analyser.getBinFrequencyHz ((size_t) i);
+    }
+    matchEngine.setCaptureTargetFromSpectrum (mags.data(), freqs.data(), n);
 }
 
 void EqProcessor::setFrequencyResponseComponent (FrequencyResponseComponent* component)

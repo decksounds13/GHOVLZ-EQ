@@ -73,6 +73,7 @@ public:
     void activateOrSelectBandAtFrequency (float frequencyHz);
     int bandIndexForFrequencyZone (float frequencyHz) const;
     float xToFrequency (float x) const;
+    void updateAuditionBandpassFromMouse (const juce::MouseEvent& event);
     void setOptionBoxInteractionFaded (bool shouldFade);
 
     OptionBoxMenu* getOptionBoxMenu() noexcept { return optionBoxMenu.get(); }
@@ -121,6 +122,8 @@ public:
         editor = newEditor;
     }
 
+    /** Place Match cluster at graph bottom, just right of Scope (bounds in FRC local space). */
+    void layoutMatchChromeAfterScope (juce::Rectangle<int> scopeInLocal);
 
     float currentBandGain = 0.0f;
     float currentBandFrequency = 0.0f;
@@ -313,6 +316,16 @@ private:
 
     /** True when any on band has Dynamic (D) or Spectral (S), or Side Check is on — drives the curve animation timer. */
     bool anyActiveDynamicEq() const;
+    bool anyStructuralSplitArmed() const;
+    void syncStructuralSplitChrome();
+    void layoutStructuralSplitChrome();
+    void setStructuralSplitSolo (StructuralSplit::Solo solo);
+    void layoutMatchChrome();
+    void syncMatchChrome();
+    void requestMatchEnable();
+    void disableMatch();
+    void showMatchCurveMenu();
+    void updateLiveMatchCaptureIfNeeded();
     /** While any D/S+On band is active: disable image buffer, run ~45 Hz force-rebuild timer.
         When idle: restore buffering and stop the timer. */
     void syncDynamicCurveTimer();
@@ -325,6 +338,10 @@ private:
     std::vector<float> responseBand1, responseBand2, responseBand3, responseBand4;
     std::vector<float> responseHighpass, responseLowpass, responseHighShelf, responseLowShelf;
     std::vector<float> responseCombined;
+    /** Alt+drag bandpass audition magnitude (dB) + path. */
+    bool auditionBandpassDragging = false;
+    std::vector<float> responseAuditionBp;
+    juce::Path auditionBandpassPath;
     /** Scratch for sum-only IIR when a band's display curve is at target/range but D/SC is live. */
     std::vector<float> responseDynSumScratch;
     /** Per extended-band magnitude (dB) for individual curves + sum. */
@@ -372,6 +389,10 @@ private:
     bool spectralGrSmoothedValid = false;
     /** Scratch buffer for sampling published Side Check GR onto display frequencies. */
     std::vector<float> sideCheckGrScratch;
+    /** Match target curve (dB) + GR for graph overlay / sum. */
+    std::vector<float> matchTargetScratch;
+    std::vector<float> matchGrScratch;
+    juce::Path matchTargetPath;
 
     void ensureResponseBufferSize (int width);
     void rebuildMagnitudeResponsesIfNeeded (int width);
@@ -510,7 +531,23 @@ private:
     juce::TextButton modButton { "Mod" };
     juce::TextButton proportionalQButton { "P" };
     juce::TextButton autoGainButton { "A" };
+    /** Graph-bottom Match cluster (right of Scope): Match | v | Amount | freeze. */
+    juce::TextButton matchButton { "Match" };
+    juce::TextButton matchCurveButton { "v" };
+    juce::TextButton matchFreezeButton { "*" };
+    juce::Slider matchAmountKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchAmountAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> matchFreezeAttachment;
+    bool matchEnableDialogOpen = false;
+    /** Last Scope bounds in FRC local space (may be below FRC when Scope sits in editor trim). */
+    juce::Rectangle<int> matchChromeScopeAnchor;
+    bool matchChromeHasScopeAnchor = false;
+    /** Bottom-center Transient / Sustain solo + Separation (visible when any split mode != Off). */
+    juce::TextButton splitSoloTButton { "T" };
+    juce::TextButton splitSoloSButton { "S" };
+    juce::Slider splitSeparationKnob;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> proportionalQAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoGainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> splitSeparationAttachment;
     OutputGainScrubber outputGainScrubber;
 };

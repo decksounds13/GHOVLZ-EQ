@@ -1537,6 +1537,12 @@ void EqEditor::layoutScopeModeButton()
                                         juce::dontSendNotification);
         scopeModeButton.setIdleAlpha (0.5f);
         scopeModeButton.toFront (false);
+
+        if (mainComponent != nullptr)
+        {
+            auto& frc = mainComponent->getFrequencyResponseComponent();
+            frc.layoutMatchChromeAfterScope (frc.getLocalArea (this, scopeModeButton.getBounds()));
+        }
         return;
     }
     else
@@ -1566,6 +1572,13 @@ void EqEditor::layoutScopeModeButton()
                                     juce::dontSendNotification);
     scopeModeButton.setIdleAlpha (stripOverlay ? 0.5f : 1.0f);
     scopeModeButton.toFront (false);
+
+    // Match cluster lives on the graph, immediately right of Scope.
+    if (mainComponent != nullptr)
+    {
+        auto& frc = mainComponent->getFrequencyResponseComponent();
+        frc.layoutMatchChromeAfterScope (frc.getLocalArea (this, scopeModeButton.getBounds()));
+    }
 }
 
 void EqEditor::layoutSideCheckButton()

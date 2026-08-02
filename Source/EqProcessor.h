@@ -12,9 +12,12 @@
 #include "DynamicEq.h"
 #include "Spectral/SpectralDynamicsProcessor.h"
 #include "Spectral/SpectralBandSettings.h"
+#include "StructuralSplit/StructuralSplitSettings.h"
+#include "StructuralSplit/StructuralSplitEngine.h"
 #include "PhaseMode.h"
 #include "LinearPhaseEqEngine.h"
 #include "SideCheck.h"
+#include "Match/MatchProcessor.h"
 #include "BandSaturation.h"
 #include "LfoMod.h"
 #include "BandSidechain.h"
@@ -88,6 +91,22 @@ public:
     /** Eco: skip FFT/analyser visual work. Does not affect Dynamic (D) or Spectral (S) DSP. */
     void setEcoMode (bool shouldEnable) noexcept;
     bool isEcoMode() const noexcept { return ecoMode.load(); }
+
+    /**
+        Solo-monitor one band's full processing chain (Bank1 internal 0–7 or global 8–63).
+        -1 = off. Works even when that band's OnOff is false (force-enables only that band).
+    */
+    void setBandListenIndex (int bandIndex) noexcept;
+    int getBandListenIndex() const noexcept { return bandListenIndex.load (std::memory_order_acquire); }
+
+    /**
+        Temporary Alt+drag bandpass audition on the EQ graph (message thread → audio).
+        Q should stay modest (e.g. ≤ ~8) to avoid whistling.
+    */
+    void setAuditionBandpass (bool active, float frequencyHz, float q) noexcept;
+    bool isAuditionBandpassActive() const noexcept { return auditionBandpassActive.load (std::memory_order_acquire); }
+    float getAuditionBandpassFreqHz() const noexcept { return auditionBandpassFreqHz.load (std::memory_order_relaxed); }
+    float getAuditionBandpassQ() const noexcept { return auditionBandpassQ.load (std::memory_order_relaxed); }
 
     /** Scope mode: quad metering view. DSP bypass depends on Pre/Post tap (see setScopeTapPost). */
     void setScopeMode (bool shouldEnable) noexcept;
@@ -364,11 +383,29 @@ public:
     /** Sample published Side Check GR (dB) onto display freqs for the sum curve; zeros if idle. */
     void sampleSideCheckGrDb (const float* frequenciesHz, float* destDb, int numPoints) const;
 
+    /** Sample Match target curve (dB, mean-normalized shape) for graph overlay. */
+    void sampleMatchTargetDb (const float* frequenciesHz, float* destDb, int numPoints) const;
+    /** Sample Match GR onto display freqs for the sum curve; zeros if idle. */
+    void sampleMatchGrDb (const float* frequenciesHz, float* destDb, int numPoints) const;
+
     SpectralDynamicsProcessor& getSpectralEngine() noexcept { return spectralEngine; }
     const SpectralDynamicsProcessor& getSpectralEngine() const noexcept { return spectralEngine; }
 
+    MatchEq::Processor& getMatchEngine() noexcept { return matchEngine; }
+    const MatchEq::Processor& getMatchEngine() const noexcept { return matchEngine; }
+
     /** Last-block Side Check GR (dB, negative when pulling Side down). */
     float getSideCheckGrDb() const noexcept { return sideCheck.getPublishedGrDb(); }
+
+    /**
+        Message-thread helpers for Match activation.
+        disableActiveBands: store OnOff map and turn all bands off (restored by restoreMatchBandDisable).
+    */
+    void applyMatchBandDisable();
+    void restoreMatchBandDisable();
+    bool hasMatchBandDisableSnapshot() const noexcept { return matchBandDisableActive; }
+    void syncMatchFactoryTargetFromParam();
+    void captureMatchSpectrumFromAnalyser();
 
     /** Last-block spectral bank stats (armed / banked / gated / processing). */
     SpectralDynamicsProcessor::RuntimeStats getSpectralRuntimeStats() const noexcept
@@ -514,6 +551,14 @@ private:
     /** When Scope is on: true = Post (DSP on), false = Pre (analyzer / meteringOnly). */
     std::atomic<bool> scopeTapPost { false };
 
+    /** -1 = off; otherwise Bank1 internal 0–7 or global display 8–63. */
+    std::atomic<int> bandListenIndex { -1 };
+
+    std::atomic<bool> auditionBandpassActive { false };
+    std::atomic<float> auditionBandpassFreqHz { 1000.0f };
+    std::atomic<float> auditionBandpassQ { 1.0f };
+    juce::AudioBuffer<float> auditionDryBuffer;
+
     double sampleRate = 48000;
 
     bool timerActive = false;
@@ -584,8 +629,20 @@ private:
     /** One shared coarse bandpass bank for all S bands (GR on post-EQ; detect pre-EQ). Zero cost when no S is on. */
     SpectralDynamicsProcessor spectralEngine;
 
+    /** Complementary transient / sustain splitter (min-phase per-band delta mix). */
+    StructuralSplitEngine structuralSplitEngine;
+    juce::AudioBuffer<float> splitDryBuffer;
+    juce::AudioBuffer<float> splitTGainBuffer; // 1 ch: transient gains
+    juce::AudioBuffer<float> splitSGainBuffer; // 1 ch: sustain gains
+
     /** Global Side Check (S<=M): post-Spectral BP-lattice Mid/Side balance. */
     SideCheck::Processor sideCheck;
+
+    /** Spectral Match — isolated shape-match lattice (Pre or Post EQ). */
+    MatchEq::Processor matchEngine;
+    juce::AudioBuffer<float> matchDetectBuffer;
+    bool matchBandDisableActive = false;
+    std::array<bool, EqBand::kMaxBands> matchBandOnSnapshot {};
 
     /** Per-band sat engines — Bank 1 uses internal indices 0–7; extended use global 8–63. */
     std::array<BandSaturation::Engine, EqBand::kMaxBands> bandSatEngines;
@@ -645,6 +702,8 @@ private:
     /** Single-biquad path when Band 1 / Band 8 slots are not in HP/LP cascade mode. */
     StereoIIR highpassBandFilter;
     StereoIIR lowpassBandFilter;
+    /** Temporary Alt+drag isolate BP (post-EQ audition). */
+    StereoIIR auditionBandpassFilter;
 
     BandSaturation::Engine& satEngineForBandIndex (int bandIndex) noexcept
     {

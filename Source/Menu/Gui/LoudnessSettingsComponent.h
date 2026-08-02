@@ -4,7 +4,6 @@
 
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
-#include "CustomScrollBar.h"
 
 class LoudnessSettingsComponent : public juce::Component
 {
@@ -14,6 +13,8 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+
+    int getPreferredContentHeight() const { return content.getPreferredHeight(); }
 
 private:
     class Content : public juce::Component
@@ -43,10 +44,6 @@ private:
 
     SharedResources& sharedResources;
     Content content;
-    juce::Viewport viewport;
-    std::unique_ptr<CustomScrollBar> customScrollBar;
-
-    void syncScrollBarColours();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LoudnessSettingsComponent)
 };
