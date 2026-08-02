@@ -8,6 +8,8 @@
 #include "Menu/Gui/ThemeList.h"
 #include "ColourRamp/GradientStripEditor.h"
 #include <functional>
+#include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -695,7 +697,9 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     m_controls(treeState),
     processor(p),
     editor(editorRef),
-    menu (sharedResources, treeState, textButtonLookAndFeel, colourRamps)
+    menu (sharedResources, treeState, textButtonLookAndFeel, colourRamps),
+    levelMeterIn (p, treeState, ScopeLevelMeterModule::Tap::input, "Level Meter 1"),
+    levelMeterOut (p, treeState, ScopeLevelMeterModule::Tap::output, "Level Meter 2")
 {
     restoreSessionUiThemeIfAny();
     colourRamps.addChangeListener (this);
@@ -970,6 +974,23 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     scopeSplitOverlay.setVisible (false);
     addChildComponent (scopeSplitOverlay);
 
+    scopeArrangeOverlay.setAlwaysOnTop (true);
+    scopeArrangeOverlay.setVisible (false);
+    addChildComponent (scopeArrangeOverlay);
+
+    arrangeButton.setThemeResources (&sharedResources);
+    arrangeButton.setClickingTogglesState (true);
+    arrangeButton.setTooltip ("Arrange - Square = tiled grid; line = strip. Drag pane tops to reorder; drag strip bottom to resize.");
+    arrangeButton.setAlwaysOnTop (true);
+    arrangeButton.onClick = [this]
+    {
+        setScopeStripLayout (arrangeButton.getToggleState(), true);
+        arrangeButton.setGlyph (scopeStripLayout ? OscToolButton::Glyph::StripLayout
+                                                  : OscToolButton::Glyph::GridLayout);
+    };
+    arrangeButton.setVisible (false);
+    addChildComponent (arrangeButton);
+
     oscilloscope.setAlwaysOnTop (true);
     oscilloscope.setParameterTree (&processor.treeState);
     addChildComponent (oscilloscope);
@@ -984,13 +1005,43 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram.setParameterTree (&processor.treeState);
     addChildComponent (spectrogram);
     processor.setSpectrogramTarget (&spectrogram);
+
+    addChildComponent (levelMeterIn);
+    addChildComponent (levelMeterOut);
+    addChildComponent (loudnessMeter);
+    addChildComponent (stereogram);
+    addChildComponent (histogram);
+    loudnessMeter.setParameterTree (&processor.treeState);
+    stereogram.setParameterTree (&processor.treeState);
+    histogram.setParameterTree (&processor.treeState);
+    processor.setLoudnessTarget (&loudnessMeter);
+    processor.setStereogramTarget (&stereogram);
+    processor.setHistogramTarget (&histogram);
     applyColourRampsToMeters();
 
-    // Default: scope on at load (summed stereo). Gon off. Spec on.
+    auto wireScopeMenu = [this] (auto& component, ScopeModuleId id)
+    {
+        component.onShowContextMenu = [this, id, &component]
+        {
+            showScopeModuleContextMenu (id, &component);
+        };
+    };
+    wireScopeMenu (levelMeterIn, ScopeModuleId::levelIn);
+    wireScopeMenu (levelMeterOut, ScopeModuleId::levelOut);
+    wireScopeMenu (loudnessMeter, ScopeModuleId::loudness);
+    wireScopeMenu (stereogram, ScopeModuleId::stereogram);
+    wireScopeMenu (histogram, ScopeModuleId::histogram);
+    wireScopeMenu (oscilloscope, ScopeModuleId::oscilloscope);
+    wireScopeMenu (goniometer, ScopeModuleId::goniometer);
+    wireScopeMenu (spectrogram, ScopeModuleId::spectrogram);
+    wireScopeMenu (m_visualizer, ScopeModuleId::spectrum);
+
+    // Default: scope on at load (summed stereo). Gon on. Spec on.
     oscButton.setToggleState (true, juce::dontSendNotification);
     oscilloscope.setEnabled (true);
     oscilloscope.setChannelMode (OscilloscopeComponent::ChannelMode::summedStereo);
     syncOscToolButtons();
+    applyGoniometerActive (true);
     syncGonToolButtons();
     syncSpecToolButtons();
     specButton.setToggleState (true, juce::dontSendNotification);
@@ -1064,6 +1115,9 @@ MainComponent::~MainComponent()
     processor.setOscilloscopeTarget (nullptr);
     processor.setGoniometerTarget (nullptr);
     processor.setSpectrogramTarget (nullptr);
+    processor.setLoudnessTarget (nullptr);
+    processor.setStereogramTarget (nullptr);
+    processor.setHistogramTarget (nullptr);
 
     menuToggleButton.setLookAndFeel (nullptr);
     bypassAttachment.reset();
@@ -1121,12 +1175,18 @@ void MainComponent::applyThemeToChildComponents()
     specSpeedDownButton.setThemeResources (&sharedResources);
     specExpandButton.setThemeResources (&sharedResources);
     uiRandomizeButton.setThemeResources (&sharedResources);
+    arrangeButton.setThemeResources (&sharedResources);
 
     frequencyResponseComponent.setThemeColors (&sharedResources);
     m_visualizer.setThemeColors (&sharedResources);
     oscilloscope.setThemeColors (&sharedResources);
     goniometer.setThemeColors (&sharedResources);
     spectrogram.setThemeColors (&sharedResources);
+    levelMeterIn.setThemeColors (&sharedResources);
+    levelMeterOut.setThemeColors (&sharedResources);
+    loudnessMeter.setThemeColors (&sharedResources);
+    stereogram.setThemeColors (&sharedResources);
+    histogram.setThemeColors (&sharedResources);
     verticalGradientMeterL.setThemeColors (&sharedResources);
     verticalGradientMeterR.setThemeColors (&sharedResources);
     verticalGradientMeterPostL.setThemeColors (&sharedResources);
@@ -1412,10 +1472,34 @@ void MainComponent::applyColourRampsToMeters()
     const auto* fftRamp = &colourRamps.get (ColourRampBank::Target::fftBars);
     const auto* specRamp = &colourRamps.get (ColourRampBank::Target::spectrogram);
     const auto* fillRamp = &colourRamps.get (ColourRampBank::Target::spectrumFill);
+    const auto* oscRamp = &colourRamps.get (ColourRampBank::Target::oscilloscope);
+    const auto* gonRamp = &colourRamps.get (ColourRampBank::Target::goniometer);
+    const auto* stereoRamp = &colourRamps.get (ColourRampBank::Target::stereogram);
+    const auto* histRamp = &colourRamps.get (ColourRampBank::Target::histogram);
 
     m_visualizer.setBinOverlayColourRamp (fftRamp->isUsable() ? fftRamp : nullptr);
     m_visualizer.setSpectrumFillRamp (fillRamp->isUsable() ? fillRamp : nullptr);
     spectrogram.setCustomColourRamp (specRamp->isUsable() ? specRamp : nullptr);
+
+    if (oscRamp->isUsable())
+        oscilloscope.setColourRamp (*oscRamp);
+    else
+        oscilloscope.clearColourRamp();
+
+    if (gonRamp->isUsable())
+        goniometer.setColourRamp (*gonRamp);
+    else
+        goniometer.clearColourRamp();
+
+    if (stereoRamp->isUsable())
+        stereogram.setColourRamp (*stereoRamp);
+    else
+        stereogram.clearColourRamp();
+
+    if (histRamp->isUsable())
+        histogram.setColourRamp (*histRamp);
+    else
+        histogram.clearColourRamp();
 }
 
 void MainComponent::disableAllScopes()
@@ -1428,6 +1512,9 @@ void MainComponent::disableAllScopes()
     oscilloscope.setEnabled (false);
     applyGoniometerActive (false);
     applySpectrogramActive (false);
+    loudnessMeter.setEnabled (false);
+    stereogram.setEnabled (false);
+    histogram.setEnabled (false);
     syncOscToolButtons();
     syncGonToolButtons();
     syncSpecToolButtons();
@@ -1518,17 +1605,34 @@ void MainComponent::applyScopeMode (bool shouldEnable)
         goniometer.setExpanded (true);
         spectrogram.setExpanded (true);
 
+        syncScopeModuleEnabledStates();
+
         frequencyResponseComponent.setOptionBoxVisible (false);
+        // Scope mode never shows the EQ band graph (quad or strip).
         frequencyResponseComponent.setVisible (false);
-        scopeSplitOverlay.setVisible (true);
+        scopeSplitOverlay.setVisible (! scopeStripLayout);
+        scopeArrangeOverlay.setVisible (true);
+        arrangeButton.setToggleState (scopeStripLayout, juce::dontSendNotification);
+        arrangeButton.setGlyph (scopeStripLayout ? OscToolButton::Glyph::StripLayout
+                                                 : OscToolButton::Glyph::GridLayout);
     }
     else
     {
         oscilloscope.setExpanded (oscExpanded);
         goniometer.setExpanded (gonExpanded);
         spectrogram.setExpanded (specExpanded);
+        loudnessMeter.setEnabled (false);
+        stereogram.setEnabled (false);
+        histogram.setEnabled (false);
+        levelMeterIn.setVisible (false);
+        levelMeterOut.setVisible (false);
+        loudnessMeter.setVisible (false);
+        stereogram.setVisible (false);
+        histogram.setVisible (false);
         frequencyResponseComponent.setVisible (true);
         scopeSplitOverlay.setVisible (false);
+        scopeArrangeOverlay.setVisible (false);
+        arrangeButton.setVisible (false);
     }
 
     syncOscToolButtons();
@@ -1536,6 +1640,341 @@ void MainComponent::applyScopeMode (bool shouldEnable)
     syncSpecToolButtons();
     resized();
     syncExpandedOscOverlayStack();
+}
+
+void MainComponent::setScopeStripLayout (bool shouldUseStrip, bool notifyPrefs)
+{
+    if (scopeStripLayout == shouldUseStrip)
+    {
+        arrangeButton.setToggleState (scopeStripLayout, juce::dontSendNotification);
+        arrangeButton.setGlyph (scopeStripLayout ? OscToolButton::Glyph::StripLayout
+                                                 : OscToolButton::Glyph::GridLayout);
+        return;
+    }
+
+    scopeStripLayout = shouldUseStrip;
+    arrangeButton.setToggleState (scopeStripLayout, juce::dontSendNotification);
+    arrangeButton.setGlyph (scopeStripLayout ? OscToolButton::Glyph::StripLayout
+                                             : OscToolButton::Glyph::GridLayout);
+
+    if (scopeModeEnabled)
+    {
+        frequencyResponseComponent.setVisible (false);
+        scopeSplitOverlay.setVisible (! scopeStripLayout);
+        editor.syncScopeModeLayout();
+        resized();
+    }
+
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+ScopeLayoutPreset MainComponent::captureScopeLayoutPreset (const juce::String& name) const
+{
+    ScopeLayoutPreset p;
+    p.name = name;
+    p.strip = scopeStripLayout;
+    p.modules = scopeEnabledOrder;
+    p.stripFractions = scopeStripFractions;
+    p.stripHeightPx = scopeStripHeightPx;
+    p.splitX = scopeSplitOverlay.getSplitX();
+    p.splitY = scopeSplitOverlay.getSplitY();
+    // Inline colour snapshot only — never writes RampPresetStore / UI theme presets.
+    p.colourRamps = colourRamps.toValueTree();
+    return p;
+}
+
+void MainComponent::applyScopeLayoutPreset (const ScopeLayoutPreset& preset, bool notifyPrefs)
+{
+    scopeEnabledOrder = preset.modules.empty() ? ScopeModules::defaultEnabledOrder() : preset.modules;
+    scopeStripFractions = preset.stripFractions;
+    ensureScopeStripFractions();
+    scopeStripHeightPx = juce::jmax (kScopeStripHeightMinPx, preset.stripHeightPx);
+    scopeSplitOverlay.setSplitNorm (preset.splitX, preset.splitY);
+    setScopeStripLayout (preset.strip, false);
+    syncScopeModuleEnabledStates();
+
+    if (preset.colourRamps.isValid() && preset.colourRamps.hasType ("ColourRamps"))
+    {
+        // Apply snapshot to live bank (session); do not create named ramp presets.
+        colourRamps.applyFromValueTree (preset.colourRamps, false);
+        colourRamps.notifyPreview();
+        applyColourRampsToMeters();
+    }
+
+    editor.syncScopeModeLayout();
+    resized();
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+void MainComponent::setScopeStripHeightPx (int heightDesignPx, bool notifyPrefs)
+{
+    const int clamped = juce::jmax (kScopeStripHeightMinPx, heightDesignPx);
+    if (scopeStripHeightPx == clamped)
+        return;
+
+    scopeStripHeightPx = clamped;
+
+    if (scopeModeEnabled && scopeStripLayout)
+    {
+        editor.syncScopeModeLayout();
+        resized();
+    }
+
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+void MainComponent::syncStripHeightFromWindow (int windowW, int windowH) noexcept
+{
+    constexpr float designWidth = 1200.0f;
+    const float scale = juce::jmax (0.001f, (float) juce::jmax (1, windowW) / designWidth);
+    scopeStripHeightPx = juce::jmax (kScopeStripHeightMinPx,
+                                     juce::roundToInt ((float) juce::jmax (1, windowH) / scale));
+}
+
+void MainComponent::ensureScopeStripFractions()
+{
+    const int n = (int) scopeEnabledOrder.size();
+    if (n <= 0)
+    {
+        scopeStripFractions.clear();
+        return;
+    }
+
+    if ((int) scopeStripFractions.size() != n)
+    {
+        scopeStripFractions.assign ((size_t) n, 1.0f / (float) n);
+        return;
+    }
+
+    float sum = 0.0f;
+    for (float f : scopeStripFractions)
+        sum += f;
+    if (sum < 0.001f)
+    {
+        scopeStripFractions.assign ((size_t) n, 1.0f / (float) n);
+        return;
+    }
+    for (float& f : scopeStripFractions)
+        f /= sum;
+}
+
+void MainComponent::setScopeStripColumnFraction (int leftSlot, float leftFrac)
+{
+    ensureScopeStripFractions();
+    const int n = (int) scopeStripFractions.size();
+    if (leftSlot < 0 || leftSlot + 1 >= n)
+        return;
+
+    const float pair = scopeStripFractions[(size_t) leftSlot] + scopeStripFractions[(size_t) leftSlot + 1];
+    const float minF = juce::jmin (kScopeStripMinFrac, pair * 0.45f);
+    const float maxF = pair - minF;
+    leftFrac = juce::jlimit (minF, maxF, leftFrac);
+    scopeStripFractions[(size_t) leftSlot] = leftFrac;
+    scopeStripFractions[(size_t) leftSlot + 1] = pair - leftFrac;
+    resized();
+}
+
+void MainComponent::setScopeEnabledOrder (const std::vector<ScopeModuleId>& order, bool notifyPrefs)
+{
+    scopeEnabledOrder = order.empty() ? ScopeModules::defaultEnabledOrder() : order;
+    ensureScopeStripFractions();
+    if (scopeModeEnabled)
+    {
+        syncScopeModuleEnabledStates();
+        resized();
+    }
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+bool MainComponent::isScopeModuleEnabled (ScopeModuleId id) const noexcept
+{
+    return std::find (scopeEnabledOrder.begin(), scopeEnabledOrder.end(), id) != scopeEnabledOrder.end();
+}
+
+void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Component* anchor)
+{
+    if (! scopeModeEnabled || anchor == nullptr)
+        return;
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+
+    const int removeId = 900;
+    const int resetIntegId = 10;
+    const int tapInId = 20;
+    const int tapOutId = 21;
+    const int oscRedrawId = 30;
+    bool hasExtras = false;
+
+    switch (id)
+    {
+        case ScopeModuleId::loudness:
+        case ScopeModuleId::histogram:
+            menu.addItem (resetIntegId, "Reset Integrated");
+            hasExtras = true;
+            break;
+
+        case ScopeModuleId::levelIn:
+        case ScopeModuleId::levelOut:
+        {
+            auto& meter = (id == ScopeModuleId::levelOut) ? levelMeterOut : levelMeterIn;
+            menu.addSectionHeader ("Level Meter Tap");
+            menu.addItem (tapInId, "Input", true, meter.getTap() == ScopeLevelMeterModule::Tap::input);
+            menu.addItem (tapOutId, "Output", true, meter.getTap() == ScopeLevelMeterModule::Tap::output);
+            hasExtras = true;
+            break;
+        }
+
+        case ScopeModuleId::oscilloscope:
+            menu.addItem (oscRedrawId, "Redraw in place", true, ! oscilloscope.isScrollMode());
+            hasExtras = true;
+            break;
+
+        default:
+            break;
+    }
+
+    if (hasExtras)
+        menu.addSeparator();
+
+    const bool canRemove = scopeEnabledOrder.size() > 1;
+    menu.addItem (removeId, "Remove Module", canRemove);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
+                        [safe = juce::Component::SafePointer<MainComponent> (this), id,
+                         removeId, resetIntegId, tapInId, tapOutId, oscRedrawId] (int result)
+                        {
+                            if (safe == nullptr || result <= 0)
+                                return;
+
+                            if (result == removeId)
+                            {
+                                safe->setScopeModuleEnabled (id, false, true);
+                                return;
+                            }
+
+                            if (result == resetIntegId)
+                            {
+                                if (id == ScopeModuleId::histogram)
+                                    safe->histogram.resetIntegrated();
+                                else
+                                    safe->loudnessMeter.resetIntegrated();
+                                return;
+                            }
+
+                            if (result == tapInId || result == tapOutId)
+                            {
+                                auto& meter = (id == ScopeModuleId::levelOut) ? safe->levelMeterOut
+                                                                              : safe->levelMeterIn;
+                                meter.setTap (result == tapOutId ? ScopeLevelMeterModule::Tap::output
+                                                                 : ScopeLevelMeterModule::Tap::input);
+                                return;
+                            }
+
+                            if (result == oscRedrawId)
+                                safe->oscilloscope.setScrollMode (! safe->oscilloscope.isScrollMode());
+                        });
+}
+
+void MainComponent::setScopeModuleEnabled (ScopeModuleId id, bool enabled, bool notifyPrefs)
+{
+    auto order = scopeEnabledOrder;
+    const auto it = std::find (order.begin(), order.end(), id);
+
+    if (enabled)
+    {
+        if (it != order.end())
+            return;
+
+        const auto defaults = ScopeModules::defaultEnabledOrder();
+        const auto defIt = std::find (defaults.begin(), defaults.end(), id);
+        const int defIdx = defIt != defaults.end() ? (int) (defIt - defaults.begin()) : (int) defaults.size();
+
+        int insertAt = (int) order.size();
+        for (int i = 0; i < (int) order.size(); ++i)
+        {
+            const auto otherDefIt = std::find (defaults.begin(), defaults.end(), order[(size_t) i]);
+            const int otherDefIdx = otherDefIt != defaults.end() ? (int) (otherDefIt - defaults.begin()) : (int) defaults.size();
+            if (otherDefIdx > defIdx)
+            {
+                insertAt = i;
+                break;
+            }
+        }
+
+        order.insert (order.begin() + insertAt, id);
+    }
+    else
+    {
+        if (it == order.end())
+            return;
+        order.erase (it);
+    }
+
+    setScopeEnabledOrder (order, notifyPrefs);
+}
+
+void MainComponent::syncScopeModuleEnabledStates()
+{
+    if (! scopeModeEnabled)
+        return;
+
+    const auto enabled = [this] (ScopeModuleId id) { return isScopeModuleEnabled (id); };
+
+    oscilloscope.setEnabled (enabled (ScopeModuleId::oscilloscope));
+    applyGoniometerActive (enabled (ScopeModuleId::goniometer));
+    applySpectrogramActive (enabled (ScopeModuleId::spectrogram));
+    loudnessMeter.setEnabled (enabled (ScopeModuleId::loudness));
+    stereogram.setEnabled (enabled (ScopeModuleId::stereogram));
+    histogram.setEnabled (enabled (ScopeModuleId::histogram));
+}
+
+void MainComponent::applyScopePaneReorder (int fromSlot, int toSlot, bool insertBefore)
+{
+    const int n = (int) scopeEnabledOrder.size();
+    if (fromSlot < 0 || fromSlot >= n || toSlot < 0 || toSlot > n)
+        return;
+
+    ensureScopeStripFractions();
+
+    if (! scopeStripLayout || ! insertBefore)
+    {
+        if (toSlot >= n || fromSlot == toSlot)
+            return;
+        std::swap (scopeEnabledOrder[(size_t) fromSlot], scopeEnabledOrder[(size_t) toSlot]);
+        if ((int) scopeStripFractions.size() == n)
+            std::swap (scopeStripFractions[(size_t) fromSlot], scopeStripFractions[(size_t) toSlot]);
+    }
+    else
+    {
+        int insertAt = juce::jlimit (0, n, toSlot);
+        if (insertAt == fromSlot || insertAt == fromSlot + 1)
+            return;
+
+        const auto id = scopeEnabledOrder[(size_t) fromSlot];
+        auto order = scopeEnabledOrder;
+        auto fracs = scopeStripFractions;
+        const float movedFrac = (fromSlot < (int) fracs.size()) ? fracs[(size_t) fromSlot] : (1.0f / (float) n);
+        order.erase (order.begin() + fromSlot);
+        if (fromSlot < (int) fracs.size())
+            fracs.erase (fracs.begin() + fromSlot);
+        if (insertAt > fromSlot)
+            --insertAt;
+        insertAt = juce::jlimit (0, (int) order.size(), insertAt);
+        order.insert (order.begin() + insertAt, id);
+        if ((int) fracs.size() == (int) order.size() - 1)
+            fracs.insert (fracs.begin() + insertAt, movedFrac);
+        scopeEnabledOrder = std::move (order);
+        scopeStripFractions = std::move (fracs);
+        ensureScopeStripFractions();
+    }
+
+    editor.saveUiPrefs();
+    resized();
 }
 
 void MainComponent::setScopeMode (bool shouldEnable, bool notifyPrefs)
@@ -1565,6 +2004,8 @@ void MainComponent::setScopeTapPost (bool shouldTapPost, bool notifyPrefs)
     scopeTapPost = shouldTapPost;
     processor.setScopeTapPost (shouldTapPost);
     editor.syncScopeModeButton();
+    editor.syncScopeModeLayout();
+    resized();
 
     if (notifyPrefs)
         editor.saveUiPrefs();
@@ -1875,7 +2316,7 @@ void MainComponent::randomizeColourRamps()
         c.randomizeRampSpectrogram,
         c.randomizeRampSpectrumFill
     };
-    colourRamps.randomizeRamps (c, mask);
+    colourRamps.randomizeRamps (c, mask, 3);
     applyColourRampsToMeters();
     persistSessionUiTheme();
 }
@@ -2079,99 +2520,660 @@ void MainComponent::ScopeSplitOverlay::mouseUp (const juce::MouseEvent&)
 {
     drag = Drag::none;
     setMouseCursor (juce::MouseCursor::NormalCursor);
+    main.editor.saveUiPrefs();
+}
+
+void MainComponent::setScopeSplitNorm (float xNorm, float yNorm) noexcept
+{
+    scopeSplitOverlay.setSplitNorm (xNorm, yNorm);
+}
+
+void MainComponent::setScopeStripFractions (const std::vector<float>& fracs)
+{
+    scopeStripFractions = fracs;
+    ensureScopeStripFractions();
+}
+
+int MainComponent::ScopeArrangeOverlay::hitDragHandle (juce::Point<int> p) const noexcept
+{
+    for (int i = 0; i < (int) slotBounds.size(); ++i)
+    {
+        const auto& b = slotBounds[(size_t) i];
+        if (b.isEmpty())
+            continue;
+        auto handle = b.withHeight (kHandleH);
+        if (handle.contains (p))
+            return i;
+    }
+    return -1;
+}
+
+bool MainComponent::ScopeArrangeOverlay::hitResizeEdge (juce::Point<int> p) const noexcept
+{
+    if (! main.scopeStripLayout || stripBounds.isEmpty())
+        return false;
+
+    if (p.x < stripBounds.getX() || p.x > stripBounds.getRight())
+        return false;
+
+    return std::abs (p.y - stripBounds.getBottom()) <= kResizeHitPad;
+}
+
+int MainComponent::ScopeArrangeOverlay::hitColumnDivider (juce::Point<int> p) const noexcept
+{
+    if (! main.scopeStripLayout || slotBounds.size() < 2)
+        return -1;
+
+    for (int i = 0; i < (int) slotBounds.size() - 1; ++i)
+    {
+        const auto& a = slotBounds[(size_t) i];
+        const auto& b = slotBounds[(size_t) i + 1];
+        if (a.isEmpty() || b.isEmpty())
+            continue;
+        const int seamX = (a.getRight() + b.getX()) / 2;
+        if (std::abs (p.x - seamX) <= kResizeHitPad
+            && p.y >= juce::jmin (a.getY(), b.getY())
+            && p.y <= juce::jmax (a.getBottom(), b.getBottom()))
+            return i;
+    }
+    return -1;
+}
+
+int MainComponent::ScopeArrangeOverlay::hitPaneEdgeForHover (juce::Point<int> p) const noexcept
+{
+    for (int i = 0; i < (int) slotBounds.size(); ++i)
+    {
+        const auto& b = slotBounds[(size_t) i];
+        if (b.isEmpty())
+            continue;
+
+        const bool nearL = std::abs (p.x - b.getX()) <= kResizeHitPad;
+        const bool nearR = std::abs (p.x - b.getRight()) <= kResizeHitPad;
+        const bool nearT = std::abs (p.y - b.getY()) <= kResizeHitPad;
+        const bool nearB = std::abs (p.y - b.getBottom()) <= kResizeHitPad;
+        const bool inY = p.y >= b.getY() - kResizeHitPad && p.y <= b.getBottom() + kResizeHitPad;
+        const bool inX = p.x >= b.getX() - kResizeHitPad && p.x <= b.getRight() + kResizeHitPad;
+
+        if ((nearL || nearR) && inY)
+            return i;
+        if ((nearT || nearB) && inX)
+            return i;
+    }
+    return -1;
+}
+
+void MainComponent::ScopeArrangeOverlay::updateHoverCursor (juce::Point<int> p)
+{
+    auto setHoverVisuals = [this] (bool stripBottom, int colDiv, int paneOutline)
+    {
+        bool dirty = false;
+        if (hoverResize != stripBottom) { hoverResize = stripBottom; dirty = true; }
+        if (hoverColumnDivider != colDiv) { hoverColumnDivider = colDiv; dirty = true; }
+        if (hoverPaneOutline != paneOutline) { hoverPaneOutline = paneOutline; dirty = true; }
+        if (dirty)
+            repaint();
+    };
+
+    if (resizingStrip)
+    {
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        return;
+    }
+
+    if (resizingColumn >= 0)
+    {
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        return;
+    }
+
+    if (dragFromSlot >= 0)
+    {
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        return;
+    }
+
+    if (hitResizeEdge (p))
+    {
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        setHoverVisuals (true, -1, -1);
+        return;
+    }
+
+    const int colDiv = hitColumnDivider (p);
+    if (colDiv >= 0)
+    {
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        setHoverVisuals (false, colDiv, -1);
+        return;
+    }
+
+    const int paneEdge = hitPaneEdgeForHover (p);
+    if (paneEdge >= 0)
+    {
+        setMouseCursor (hitDragHandle (p) >= 0 ? juce::MouseCursor::DraggingHandCursor
+                                               : juce::MouseCursor::NormalCursor);
+        setHoverVisuals (false, -1, paneEdge);
+        return;
+    }
+
+    setHoverVisuals (false, -1, -1);
+    setMouseCursor (hitDragHandle (p) >= 0 ? juce::MouseCursor::DraggingHandCursor
+                                           : juce::MouseCursor::NormalCursor);
+}
+
+void MainComponent::ScopeArrangeOverlay::updateDropTarget (juce::Point<int> p) noexcept
+{
+    dropSlot = -1;
+    dropInsertBefore = false;
+
+    if (! main.scopeStripLayout)
+    {
+        for (int i = 0; i < (int) slotBounds.size(); ++i)
+        {
+            if (i == dragFromSlot)
+                continue;
+            if (slotBounds[(size_t) i].contains (p))
+            {
+                dropSlot = i;
+                return;
+            }
+        }
+        return;
+    }
+
+    // Strip: insertion index 0…N from pointer X (midpoints between pane centres).
+    dropInsertBefore = true;
+    dropSlot = (int) slotBounds.size();
+    for (int i = 0; i < (int) slotBounds.size(); ++i)
+    {
+        const auto& b = slotBounds[(size_t) i];
+        if (b.isEmpty())
+            continue;
+        if (p.x < b.getCentreX())
+        {
+            dropSlot = i;
+            break;
+        }
+    }
+}
+
+bool MainComponent::ScopeArrangeOverlay::hitTest (int x, int y)
+{
+    if (dragFromSlot >= 0 || resizingStrip || resizingColumn >= 0)
+        return true;
+    const juce::Point<int> p { x, y };
+    return hitResizeEdge (p) || hitColumnDivider (p) >= 0 || hitDragHandle (p) >= 0
+           || hitPaneEdgeForHover (p) >= 0;
+}
+
+void MainComponent::ScopeArrangeOverlay::mouseMove (const juce::MouseEvent& e)
+{
+    updateHoverCursor (e.getPosition());
+}
+
+void MainComponent::ScopeArrangeOverlay::mouseExit (const juce::MouseEvent&)
+{
+    if (dragFromSlot < 0 && ! resizingStrip && resizingColumn < 0)
+    {
+        if (hoverResize || hoverColumnDivider >= 0 || hoverPaneOutline >= 0)
+        {
+            hoverResize = false;
+            hoverColumnDivider = -1;
+            hoverPaneOutline = -1;
+            repaint();
+        }
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+    }
+}
+
+void MainComponent::ScopeArrangeOverlay::mouseDown (const juce::MouseEvent& e)
+{
+    dropSlot = -1;
+    dropInsertBefore = false;
+    dragPos = e.getPosition();
+    resizingStrip = false;
+    resizingColumn = -1;
+    dragFromSlot = -1;
+    dragGrabOffset = {};
+
+    if (e.mods.isPopupMenu())
+    {
+        for (int i = 0; i < (int) slotBounds.size(); ++i)
+        {
+            if (slotBounds[(size_t) i].contains (e.getPosition())
+                && i < (int) main.scopeEnabledOrder.size())
+            {
+                main.showScopeModuleContextMenu (main.scopeEnabledOrder[(size_t) i], &main);
+                return;
+            }
+        }
+    }
+
+    if (hitResizeEdge (e.getPosition()))
+    {
+        resizingStrip = true;
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        repaint();
+        return;
+    }
+
+    resizingColumn = hitColumnDivider (e.getPosition());
+    if (resizingColumn >= 0)
+    {
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        repaint();
+        return;
+    }
+
+    dragFromSlot = hitDragHandle (e.getPosition());
+    if (dragFromSlot >= 0)
+    {
+        const auto& b = slotBounds[(size_t) dragFromSlot];
+        dragGrabOffset = { (float) e.x - (float) b.getX(), (float) e.y - (float) b.getY() };
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        repaint();
+    }
+}
+
+void MainComponent::ScopeArrangeOverlay::mouseDrag (const juce::MouseEvent& e)
+{
+    if (resizingStrip)
+    {
+        constexpr float designWidth = 1200.0f;
+        const float scale = juce::jmax (0.001f, (float) main.getWidth() / designWidth);
+        const int stripTop = stripBounds.getY();
+        // Dragging the strip bottom edge resizes the editor (strip fills the window).
+        const int screenH = juce::jmax (juce::roundToInt ((float) MainComponent::kScopeStripHeightMinPx * scale),
+                                        e.y - stripTop);
+        const int designH = juce::jmax (MainComponent::kScopeStripHeightMinPx,
+                                        juce::roundToInt ((float) screenH / scale));
+        main.setScopeStripHeightPx (designH, false);
+        return;
+    }
+
+    if (resizingColumn >= 0 && ! stripBounds.isEmpty())
+    {
+        main.ensureScopeStripFractions();
+        const int n = (int) main.scopeStripFractions.size();
+        if (resizingColumn + 1 < n)
+        {
+            const float relX = (float) (e.x - stripBounds.getX()) / (float) juce::jmax (1, stripBounds.getWidth());
+            float leftEdge = 0.0f;
+            for (int i = 0; i < resizingColumn; ++i)
+                leftEdge += main.scopeStripFractions[(size_t) i];
+            main.setScopeStripColumnFraction (resizingColumn, relX - leftEdge);
+        }
+        return;
+    }
+
+    if (dragFromSlot < 0)
+        return;
+    dragPos = e.getPosition();
+    updateDropTarget (dragPos);
+    repaint();
+}
+
+void MainComponent::ScopeArrangeOverlay::mouseUp (const juce::MouseEvent& e)
+{
+    if (resizingStrip)
+    {
+        resizingStrip = false;
+        main.editor.saveUiPrefs();
+        updateHoverCursor (e.getPosition());
+        repaint();
+        return;
+    }
+
+    if (resizingColumn >= 0)
+    {
+        resizingColumn = -1;
+        main.editor.saveUiPrefs();
+        updateHoverCursor (e.getPosition());
+        repaint();
+        return;
+    }
+
+    if (dragFromSlot >= 0)
+    {
+        updateDropTarget (e.getPosition());
+        if (dropSlot >= 0 && dropSlot != dragFromSlot)
+            main.applyScopePaneReorder (dragFromSlot, dropSlot, dropInsertBefore);
+    }
+
+    dragFromSlot = -1;
+    dropSlot = -1;
+    dropInsertBefore = false;
+    dragGrabOffset = {};
+    updateHoverCursor (e.getPosition());
+    repaint();
+}
+
+void MainComponent::ScopeArrangeOverlay::paint (juce::Graphics& g)
+{
+    const auto outline = main.sharedResources.sharedColors.scopeDropOutline;
+
+    // Module titles: fixed padding from the window/pane top (not a % of pane height).
+    constexpr int kTitlePadTop = 6;
+    constexpr int kTitleH = 14;
+    for (int i = 0; i < (int) slotBounds.size() && i < (int) main.scopeEnabledOrder.size(); ++i)
+    {
+        const auto r = slotBounds[(size_t) i];
+        if (r.isEmpty())
+            continue;
+
+        // Strip: pin to window top. Tiled: fixed pad inside each pane.
+        const int titleY = main.scopeStripLayout ? kTitlePadTop : (r.getY() + kTitlePadTop);
+        auto titleArea = juce::Rectangle<int> (r.getX() + 4, titleY, r.getWidth() - 8, kTitleH);
+        g.setColour (juce::Colours::whitesmoke.withAlpha (0.8f));
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.drawText (ScopeModules::idToLabel (main.scopeEnabledOrder[(size_t) i]).toUpperCase(),
+                    titleArea, juce::Justification::centred, false);
+    }
+
+    // Hover / active edges — same outline colour in tiled and strip.
+    if (main.scopeStripLayout && ! stripBounds.isEmpty() && (hoverResize || resizingStrip))
+    {
+        const float y = (float) stripBounds.getBottom();
+        g.setColour (outline.withAlpha (resizingStrip ? 0.90f : 0.65f));
+        g.drawLine ((float) stripBounds.getX(), y, (float) stripBounds.getRight(), y, 1.5f);
+    }
+
+    const int activeCol = resizingColumn >= 0 ? resizingColumn : hoverColumnDivider;
+    if (main.scopeStripLayout && activeCol >= 0 && activeCol + 1 < (int) slotBounds.size())
+    {
+        const auto& a = slotBounds[(size_t) activeCol];
+        const float x = (float) a.getRight();
+        g.setColour (outline.withAlpha (resizingColumn >= 0 ? 0.95f : 0.70f));
+        g.drawLine (x, (float) a.getY(), x, (float) a.getBottom(), 2.0f);
+    }
+
+    if (hoverPaneOutline >= 0 && hoverPaneOutline < (int) slotBounds.size()
+        && dragFromSlot < 0)
+    {
+        auto r = slotBounds[(size_t) hoverPaneOutline].toFloat().reduced (0.5f);
+        g.setColour (outline.withAlpha (0.75f));
+        g.drawRoundedRectangle (r, 3.0f, 1.75f);
+    }
+
+    if (dragFromSlot < 0)
+        return;
+
+    // Detached ghost keeps the grab point (corner/handle), not recentered on the mouse.
+    if (dragFromSlot >= 0 && dragFromSlot < (int) slotBounds.size())
+    {
+        auto ghost = slotBounds[(size_t) dragFromSlot].toFloat();
+        ghost.setPosition ((float) dragPos.x - dragGrabOffset.x,
+                           (float) dragPos.y - dragGrabOffset.y);
+        g.setColour (outline.withAlpha (0.20f));
+        g.fillRoundedRectangle (ghost, 4.0f);
+        g.setColour (outline.withAlpha (0.85f));
+        g.drawRoundedRectangle (ghost, 4.0f, 2.0f);
+    }
+
+    if (dropSlot < 0)
+        return;
+
+    if (main.scopeStripLayout && dropInsertBefore)
+    {
+        // Insertion caret before dropSlot (or after last when dropSlot == N).
+        float x = 0.0f;
+        float y = 0.0f;
+        float h = 0.0f;
+        if (dropSlot >= (int) slotBounds.size())
+        {
+            const auto& b = slotBounds.back();
+            x = (float) b.getRight();
+            y = (float) b.getY();
+            h = (float) b.getHeight();
+        }
+        else
+        {
+            const auto& b = slotBounds[(size_t) dropSlot];
+            x = (float) b.getX();
+            y = (float) b.getY();
+            h = (float) b.getHeight();
+        }
+        g.setColour (outline);
+        g.fillRect (x - 2.0f, y, 4.0f, h);
+    }
+    else if (dropSlot < (int) slotBounds.size())
+    {
+        auto r = slotBounds[(size_t) dropSlot].toFloat().reduced (1.0f);
+        g.setColour (outline.withAlpha (0.35f));
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (outline);
+        g.drawRoundedRectangle (r, 4.0f, 2.5f);
+    }
+}
+
+void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int> pane,
+                                    int toolH, int toolSize, int toolGap)
+{
+    // Tool buttons overlay the pane bottom — module keeps the full tile height.
+    const auto overlayTools = (toolH > 0)
+                                  ? juce::Rectangle<int> (pane.getX() + 2,
+                                                          pane.getBottom() - toolH - 1,
+                                                          pane.getWidth() - 4,
+                                                          toolH)
+                                  : juce::Rectangle<int>{};
+
+    auto placeOverlayTool = [&] (OscToolButton& b, juce::Rectangle<int>& row)
+    {
+        b.setVisible (true);
+        b.setBounds (row.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
+        row.removeFromLeft (toolGap);
+        b.toFront (false);
+    };
+
+    switch (moduleId)
+    {
+        case ScopeModuleId::levelIn:
+            levelMeterIn.setTiledPresentation (! scopeStripLayout);
+            levelMeterIn.setBounds (pane);
+            levelMeterIn.setVisible (true);
+            break;
+
+        case ScopeModuleId::levelOut:
+            levelMeterOut.setTiledPresentation (! scopeStripLayout);
+            levelMeterOut.setBounds (pane);
+            levelMeterOut.setVisible (true);
+            break;
+
+        case ScopeModuleId::loudness:
+            loudnessMeter.setBounds (pane);
+            loudnessMeter.setVisible (true);
+            loudnessMeter.setEnabled (true);
+            break;
+
+        case ScopeModuleId::stereogram:
+            stereogram.setBounds (pane);
+            stereogram.setVisible (true);
+            stereogram.setEnabled (true);
+            break;
+
+        case ScopeModuleId::histogram:
+            histogram.setBounds (pane);
+            histogram.setVisible (true);
+            histogram.setEnabled (true);
+            break;
+
+        case ScopeModuleId::goniometer:
+            goniometer.setBounds (pane);
+            goniometer.setVisible (true);
+            // Scope panes need right-click menus (expanded overlay otherwise passes clicks through).
+            goniometer.setInterceptsMouseClicks (true, true);
+            if (toolH > 0)
+            {
+                auto row = overlayTools;
+                placeOverlayTool (gonExpandButton, row);
+            }
+            break;
+
+        case ScopeModuleId::spectrum:
+            m_visualizer.setBounds (pane);
+            m_visualizer.setVisible (true);
+            break;
+
+        case ScopeModuleId::oscilloscope:
+        {
+            oscilloscope.setBounds (pane);
+            oscilloscope.setVisible (true);
+            oscilloscope.setInterceptsMouseClicks (true, true);
+            if (toolH > 0)
+            {
+                auto row = overlayTools;
+                placeOverlayTool (oscZoomInButton, row);
+                placeOverlayTool (oscZoomOutButton, row);
+                placeOverlayTool (oscChannelModeButton, row);
+                placeOverlayTool (oscExpandButton, row);
+            }
+            break;
+        }
+
+        case ScopeModuleId::spectrogram:
+        default:
+        {
+            spectrogram.setBounds (pane);
+            spectrogram.setVisible (true);
+            spectrogram.setInterceptsMouseClicks (true, true);
+            if (toolH > 0)
+            {
+                auto row = overlayTools;
+                placeOverlayTool (specSpeedUpButton, row);
+                placeOverlayTool (specSpeedDownButton, row);
+                placeOverlayTool (specExpandButton, row);
+            }
+            break;
+        }
+    }
 }
 
 void MainComponent::layoutScopeModePanes (float scale)
 {
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
 
-    auto graph = getLocalBounds();
-    scopeSplitOverlay.setBounds (graph);
-    scopeSplitOverlay.setVisible (true);
-    scopeSplitOverlay.toFront (false);
-
+    const int n = (int) scopeEnabledOrder.size();
     const int gap = px (3.0f);
-    const int sx = juce::roundToInt ((float) graph.getWidth() * scopeSplitOverlay.getSplitX());
-    const int sy = juce::roundToInt ((float) graph.getHeight() * scopeSplitOverlay.getSplitY());
+    // Strip: no tools. Tiled: compact buttons overlaid on the pane (not a reserved row).
+    const int toolH = scopeStripLayout ? 0 : px (16.0f);
+    const int toolGap = px (1.0f);
+    const int toolSize = toolH > 0 ? juce::jmax (12, toolH - 2) : 12;
 
-    auto tl = juce::Rectangle<int> (graph.getX(), graph.getY(), sx, sy).reduced (gap);
-    auto tr = juce::Rectangle<int> (graph.getX() + sx, graph.getY(), graph.getWidth() - sx, sy).reduced (gap);
-    auto bl = juce::Rectangle<int> (graph.getX(), graph.getY() + sy, sx, graph.getHeight() - sy).reduced (gap);
-    auto br = juce::Rectangle<int> (graph.getX() + sx, graph.getY() + sy,
-                                    graph.getWidth() - sx, graph.getHeight() - sy).reduced (gap);
+    goniometer.setVisible (false);
+    m_visualizer.setVisible (false);
+    oscilloscope.setVisible (false);
+    spectrogram.setVisible (false);
+    levelMeterIn.setVisible (false);
+    levelMeterOut.setVisible (false);
+    loudnessMeter.setVisible (false);
+    stereogram.setVisible (false);
+    histogram.setVisible (false);
+    gonExpandButton.setVisible (false);
+    oscZoomInButton.setVisible (false);
+    oscZoomOutButton.setVisible (false);
+    oscChannelModeButton.setVisible (false);
+    oscExpandButton.setVisible (false);
+    specSpeedUpButton.setVisible (false);
+    specSpeedDownButton.setVisible (false);
+    specExpandButton.setVisible (false);
 
-    const int toolH = px (22.0f);
-    const int toolGap = px (2.0f);
-    const int toolSize = juce::jmax (14, toolH - 2);
+    std::vector<juce::Rectangle<int>> slots ((size_t) juce::jmax (0, n));
+    juce::Rectangle<int> stripForOverlay {};
 
-    // Top-left: Goniometer
+    if (n == 0)
     {
-        auto pane = tl;
-        auto tools = pane.removeFromBottom (toolH);
-        goniometer.setBounds (pane);
-        goniometer.setVisible (true);
-        gonExpandButton.setVisible (true);
-        gonExpandButton.setBounds (tools.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
+        scopeArrangeOverlay.setBounds (getLocalBounds());
+        scopeArrangeOverlay.setSlotBounds (slots);
+        scopeArrangeOverlay.setStripBounds (stripForOverlay);
+        return;
     }
 
-    // Top-right: Spectrum / FFT (visualizer)
+    if (scopeStripLayout)
     {
-        m_visualizer.setBounds (tr);
-        m_visualizer.setVisible (true);
-    }
+        scopeSplitOverlay.setVisible (false);
+        frequencyResponseComponent.setVisible (false);
+        frequencyResponseComponent.setBounds ({});
 
-    // Bottom-left: Oscilloscope + tools
-    {
-        auto pane = bl;
-        auto tools = pane.removeFromBottom (toolH);
-        oscilloscope.setBounds (pane);
-        oscilloscope.setVisible (true);
+        ensureScopeStripFractions();
+        // Edge-to-edge strip — Scope / Settings / Arrange overlay the panes.
+        const int stripTop = 0;
+        const int stripH = juce::jmax (px ((float) kScopeStripHeightMinPx), getHeight() - stripTop);
+        auto strip = juce::Rectangle<int> (0, stripTop, getWidth(), stripH).reduced (gap, 0);
+        stripForOverlay = strip;
 
-        oscZoomInButton.setVisible (true);
-        oscZoomOutButton.setVisible (true);
-        oscChannelModeButton.setVisible (true);
-        oscExpandButton.setVisible (true);
-
-        auto place = [&] (OscToolButton& b)
+        int x = strip.getX();
+        const int totalW = strip.getWidth();
+        for (int slot = 0; slot < n; ++slot)
         {
-            b.setBounds (tools.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
-            tools.removeFromLeft (toolGap);
-        };
-        place (oscZoomInButton);
-        place (oscZoomOutButton);
-        place (oscChannelModeButton);
-        place (oscExpandButton);
+            int cellW = (slot == n - 1)
+                            ? (strip.getRight() - x)
+                            : juce::jmax (1, juce::roundToInt ((float) totalW
+                                                               * scopeStripFractions[(size_t) slot]));
+            auto cell = juce::Rectangle<int> (x, strip.getY(), cellW, strip.getHeight())
+                            .reduced (gap / 2, gap);
+            slots[(size_t) slot] = cell;
+            placeScopePane (scopeEnabledOrder[(size_t) slot], cell, toolH, toolSize, toolGap);
+            x += cellW;
+        }
     }
-
-    // Bottom-right: Spectrogram + tools
+    else if (n == 4)
     {
-        auto pane = br;
-        auto tools = pane.removeFromBottom (toolH);
-        spectrogram.setBounds (pane);
-        spectrogram.setVisible (true);
+        auto graph = getLocalBounds();
+        scopeSplitOverlay.setBounds (graph);
+        scopeSplitOverlay.setVisible (true);
 
-        specSpeedUpButton.setVisible (true);
-        specSpeedDownButton.setVisible (true);
-        specExpandButton.setVisible (true);
+        const int sx = juce::roundToInt ((float) graph.getWidth() * scopeSplitOverlay.getSplitX());
+        const int sy = juce::roundToInt ((float) graph.getHeight() * scopeSplitOverlay.getSplitY());
 
-        auto place = [&] (OscToolButton& b)
+        slots[0] = juce::Rectangle<int> (graph.getX(), graph.getY(), sx, sy).reduced (gap);
+        slots[1] = juce::Rectangle<int> (graph.getX() + sx, graph.getY(), graph.getWidth() - sx, sy).reduced (gap);
+        slots[2] = juce::Rectangle<int> (graph.getX(), graph.getY() + sy, sx, graph.getHeight() - sy).reduced (gap);
+        slots[3] = juce::Rectangle<int> (graph.getX() + sx, graph.getY() + sy,
+                                           graph.getWidth() - sx, graph.getHeight() - sy).reduced (gap);
+
+        frequencyResponseComponent.setVisible (false);
+
+        for (int slot = 0; slot < n; ++slot)
+            placeScopePane (scopeEnabledOrder[(size_t) slot], slots[(size_t) slot], toolH, toolSize, toolGap);
+    }
+    else
+    {
+        scopeSplitOverlay.setVisible (false);
+        frequencyResponseComponent.setVisible (false);
+
+        auto graph = getLocalBounds().reduced (gap);
+        const int cols = juce::jmax (1, (int) std::ceil (std::sqrt ((float) n)));
+        const int rows = (n + cols - 1) / cols;
+        const int cellW = juce::jmax (1, graph.getWidth() / cols);
+        const int cellH = juce::jmax (1, graph.getHeight() / rows);
+
+        for (int slot = 0; slot < n; ++slot)
         {
-            b.setBounds (tools.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
-            tools.removeFromLeft (toolGap);
-        };
-        place (specSpeedUpButton);
-        place (specSpeedDownButton);
-        place (specExpandButton);
+            const int row = slot / cols;
+            const int col = slot % cols;
+            auto cell = juce::Rectangle<int> (graph.getX() + col * cellW,
+                                              graph.getY() + row * cellH,
+                                              cellW, cellH).reduced (gap / 2);
+            slots[(size_t) slot] = cell;
+            placeScopePane (scopeEnabledOrder[(size_t) slot], cell, toolH, toolSize, toolGap);
+        }
     }
 
-    frequencyResponseComponent.setVisible (false);
     oscDimmer.setVisible (false);
 
-    // Keep tool chrome above panes; divider above panes for grab, under Settings menu.
+    scopeArrangeOverlay.setBounds (getLocalBounds());
+    scopeArrangeOverlay.setSlotBounds (slots);
+    scopeArrangeOverlay.setStripBounds (stripForOverlay);
+    scopeArrangeOverlay.setVisible (true);
+
     goniometer.toFront (false);
     m_visualizer.toFront (false);
     oscilloscope.toFront (false);
     spectrogram.toFront (false);
+    levelMeterIn.toFront (false);
+    levelMeterOut.toFront (false);
+    loudnessMeter.toFront (false);
+    stereogram.toFront (false);
     gonExpandButton.toFront (false);
     oscZoomInButton.toFront (false);
     oscZoomOutButton.toFront (false);
@@ -2180,21 +3182,26 @@ void MainComponent::layoutScopeModePanes (float scale)
     specSpeedUpButton.toFront (false);
     specSpeedDownButton.toFront (false);
     specExpandButton.toFront (false);
-    scopeSplitOverlay.toFront (false);
+    scopeArrangeOverlay.toFront (false);
+    if (! scopeStripLayout && n == 4)
+        scopeSplitOverlay.toFront (false);
 
-    // Post meters sit on the right edge — keep them above the BR spectrogram pane.
+    if (scopeStripLayout)
+        menuToggleButton.toFront (false);
+
     verticalGradientMeterL.toFront (false);
     verticalGradientMeterR.toFront (false);
     verticalGradientMeterPostL.toFront (false);
     verticalGradientMeterPostR.toFront (false);
     meterChannelModeButton.toFront (false);
+    arrangeButton.toFront (false);
 }
 
 void MainComponent::layoutPresetChrome (float scale)
 {
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
 
-    // Scope mode: clear the center for meters — keep Bypass / A–D / UI / Dice / Eco.
+    // Scope mode: clear the center for meters. DSP chrome (Bypass / A–D / Eco) follows Pre/Post.
     if (scopeModeEnabled)
     {
         presetPrevButton.setVisible (false);
@@ -2293,6 +3300,14 @@ void MainComponent::resized()
     const int xRight = editorWidth - padding - totalMeterGroupWidth;
     const int meterY = centerY + px (20.0f);
 
+    // Scope mode uses Level Meter modules only — hide the default edge meters.
+    const bool hideEdgeMeters = scopeModeEnabled;
+    verticalGradientMeterL.setVisible (! hideEdgeMeters);
+    verticalGradientMeterR.setVisible (! hideEdgeMeters);
+    verticalGradientMeterPostL.setVisible (! hideEdgeMeters);
+    verticalGradientMeterPostR.setVisible (! hideEdgeMeters);
+    meterChannelModeButton.setVisible (! hideEdgeMeters);
+
     verticalGradientMeterL.setBounds(xLeft, meterY, meterWidth, meterHeight);
     verticalGradientMeterR.setBounds(xLeft + meterWidth + meterSpacing, meterY, meterWidth, meterHeight);
     verticalGradientMeterPostL.setBounds(xRight, meterY, meterWidth, meterHeight);
@@ -2316,11 +3331,32 @@ void MainComponent::resized()
     constexpr int helpTrimH = 30;
     const int historySize = juce::jlimit (16, editor.isUiCompact() ? 22 : (helpTrimH - 6), px (20.0f));
     const int historyGap = px (4.0f);
-    menuToggleButton.setBounds (area2.getRight() - settingsW, area2.getY(),
-                                settingsW, settingsH);
+    const bool scopeStripMinimal = scopeModeEnabled && scopeStripLayout;
 
-    // Undo / Redo just left of Settings (hamburger), same size as ?.
+    if (scopeStripMinimal)
     {
+        // Strip: Settings stays, 50% size, overlaid top-right. Undo/Redo hidden.
+        undoButton.setVisible (false);
+        redoButton.setVisible (false);
+        undoButton.setBounds ({});
+        redoButton.setBounds ({});
+        const int sw = juce::jmax (14, settingsW / 2);
+        const int sh = juce::jmax (12, settingsH / 2);
+        menuToggleButton.setVisible (true);
+        menuToggleButton.setIdleAlpha (0.5f);
+        menuToggleButton.setBounds (area2.getRight() - sw, area2.getY(), sw, sh);
+        menuToggleButton.toFront (false);
+    }
+    else
+    {
+        menuToggleButton.setVisible (true);
+        menuToggleButton.setIdleAlpha (1.0f);
+        undoButton.setVisible (true);
+        redoButton.setVisible (true);
+        menuToggleButton.setBounds (area2.getRight() - settingsW, area2.getY(),
+                                    settingsW, settingsH);
+
+        // Undo / Redo just left of Settings (hamburger), same size as ?.
         const int historyY = area2.getY() + (settingsH - historySize) / 2;
         int hx = menuToggleButton.getX() - historyGap - historySize;
         redoButton.setBounds (hx, historyY, historySize, historySize);
@@ -2329,6 +3365,7 @@ void MainComponent::resized()
     }
 
     // Top-left chrome: Bypass | A | B | C | D | UI | Dice.
+    // Scope strip: Bypass / A–D / Eco hidden; UI + Dice overlay panes (no stripTop).
     {
         constexpr int minimizeSize = 22;
         constexpr int minimizeMargin = 6;
@@ -2344,36 +3381,135 @@ void MainComponent::resized()
         const int diceW = px (24.0f);
         const int toolsY = chromeY + (chromeH - abH) / 2;
         const int toolsH = abH;
+        const bool analyzerOnly = isScopeAnalyzerOnly();
+        const float stripIdle = scopeStripMinimal ? 0.5f : 1.0f;
 
+        if (scopeStripMinimal)
+        {
+            bypassButton.setVisible (false);
+            slotAButton.setVisible (false);
+            slotBButton.setVisible (false);
+            slotCButton.setVisible (false);
+            slotDButton.setVisible (false);
+            bypassButton.setBounds ({});
+            slotAButton.setBounds ({});
+            slotBButton.setBounds ({});
+            slotCButton.setBounds ({});
+            slotDButton.setBounds ({});
+
+            // Square UI / Dice / Arrange — same size & pad as Scope button (bottom-left).
+            const int pad = px (8.0f);
+            const int btn = juce::jlimit (16, 22, px (20.0f));
+            const int btnGap = px (6.0f);
+            int x = pad;
+            const int y = pad;
+            uiThemeButton.setVisible (true);
+            uiRandomizeButton.setVisible (true);
+            uiThemeButton.setIdleAlpha (stripIdle);
+            uiRandomizeButton.setIdleAlpha (stripIdle);
+            uiThemeButton.setBounds (x, y, btn, btn);
+            x += btn + btnGap;
+            uiRandomizeButton.setBounds (x, y, btn, btn);
+            x += btn + btnGap;
+            arrangeButton.setIdleAlpha (stripIdle);
+            arrangeButton.setVisible (true);
+            arrangeButton.setBounds (x, y, btn, btn);
+            arrangeButton.setToggleState (scopeStripLayout, juce::dontSendNotification);
+            arrangeButton.setGlyph (OscToolButton::Glyph::StripLayout);
+            arrangeButton.refreshAlpha();
+            uiThemeButton.toFront (false);
+            uiRandomizeButton.toFront (false);
+            arrangeButton.toFront (false);
+        }
+        else
+        {
         int x = minimizeMargin + minimizeSize + gap + px (2.0f);
-        bypassButton.setBounds (x, chromeY, bypassW, chromeH);
-        x += bypassW + gap;
-        slotAButton.setBounds (x, abY, abW, abH);
-        x += abW + gap;
-        slotBButton.setBounds (x, abY, abW, abH);
-        x += abW + gap;
-        slotCButton.setBounds (x, abY, abW, abH);
-        x += abW + gap;
-        slotDButton.setBounds (x, abY, abW, abH);
-        x += abW + gap + px (2.0f);
+        if (analyzerOnly)
+        {
+            bypassButton.setVisible (false);
+            slotAButton.setVisible (false);
+            slotBButton.setVisible (false);
+            slotCButton.setVisible (false);
+            slotDButton.setVisible (false);
+            bypassButton.setBounds ({});
+            slotAButton.setBounds ({});
+            slotBButton.setBounds ({});
+            slotCButton.setBounds ({});
+            slotDButton.setBounds ({});
+        }
+        else
+        {
+            bypassButton.setVisible (true);
+            slotAButton.setVisible (true);
+            slotBButton.setVisible (true);
+            slotCButton.setVisible (true);
+            slotDButton.setVisible (true);
+            bypassButton.setBounds (x, chromeY, bypassW, chromeH);
+            x += bypassW + gap;
+            slotAButton.setBounds (x, abY, abW, abH);
+            x += abW + gap;
+            slotBButton.setBounds (x, abY, abW, abH);
+            x += abW + gap;
+            slotCButton.setBounds (x, abY, abW, abH);
+            x += abW + gap;
+            slotDButton.setBounds (x, abY, abW, abH);
+            x += abW + gap + px (2.0f);
+        }
+
+        uiThemeButton.setVisible (true);
+        uiRandomizeButton.setVisible (true);
+        uiThemeButton.setIdleAlpha (1.0f);
+        uiRandomizeButton.setIdleAlpha (1.0f);
         uiThemeButton.setBounds (x, toolsY, uiW, toolsH);
         x += uiW + gap;
         uiRandomizeButton.setBounds (x, toolsY, diceW, toolsH);
+        }
     }
 
     layoutPresetChrome (scale);
 
-    // Eco: just right of Save (or Dice in Scope mode). Same W×H as L/R ↔ M/S.
-    // OSC / Gon / Spec enable toggles sit beside Eco (hidden in Scope — panes stay on).
-    // Scope strip fills toward Gon (or L/R) when OSC is on; Gon parks on the right.
+    // Eco / Arrange chrome.
+    // Strip: Eco hidden; Arrange stays (line icon → click for grid). Tiled: Arrange beside Eco.
     {
         const int chromeH = px (28.0f);
         const int chromeY = px (6.0f);
         const int gap = px (6.0f);
         const int ecoY = chromeY + (chromeH - meterModeH) / 2;
-        const int ecoX = scopeModeEnabled ? (uiRandomizeButton.getRight() + gap)
-                                          : (presetSaveButton.getRight() + gap);
-        ecoButton.setBounds (ecoX, ecoY, meterModeW, meterModeH);
+        const bool analyzerOnly = isScopeAnalyzerOnly();
+
+        if (analyzerOnly || scopeStripMinimal)
+        {
+            ecoButton.setVisible (false);
+            ecoButton.setBounds ({});
+        }
+        else
+        {
+            ecoButton.setVisible (true);
+            const int ecoX = scopeModeEnabled ? (uiRandomizeButton.getRight() + gap)
+                                              : (presetSaveButton.getRight() + gap);
+            ecoButton.setBounds (ecoX, ecoY, meterModeW, meterModeH);
+        }
+
+        // Arrange: tiled places it in the top chrome; strip already laid it out with UI/Dice.
+        if (scopeModeEnabled && ! scopeStripMinimal)
+        {
+            const int arrangeSize = meterModeH;
+            const int arrangeX = analyzerOnly ? (uiRandomizeButton.getRight() + gap)
+                                              : (ecoButton.getRight() + gap);
+            arrangeButton.setIdleAlpha (1.0f);
+            arrangeButton.setVisible (true);
+            arrangeButton.setBounds (arrangeX, ecoY, arrangeSize, arrangeSize);
+            arrangeButton.setToggleState (scopeStripLayout, juce::dontSendNotification);
+            arrangeButton.setGlyph (OscToolButton::Glyph::GridLayout);
+            arrangeButton.refreshAlpha();
+            arrangeButton.toFront (false);
+        }
+        else if (! scopeModeEnabled)
+        {
+            arrangeButton.setVisible (false);
+            arrangeButton.setBounds ({});
+            arrangeButton.setIdleAlpha (1.0f);
+        }
 
         const int oscW = juce::jmax (28, (meterModeW * 3) / 4);
         const int oscH = juce::jmax (16, (meterModeH * 3) / 4);
@@ -2397,6 +3533,7 @@ void MainComponent::resized()
             {
                 // One meter maximized over the graph; collapse returns to the quad.
                 scopeSplitOverlay.setVisible (false);
+                scopeArrangeOverlay.setVisible (false);
                 frequencyResponseComponent.setVisible (false);
                 m_visualizer.setVisible (false);
                 oscilloscope.setVisible (oscExpanded);
@@ -2417,6 +3554,7 @@ void MainComponent::resized()
         }
         else
         {
+        scopeArrangeOverlay.setVisible (false);
         oscButton.setVisible (true);
         gonButton.setVisible (true);
         specButton.setVisible (true);
@@ -2752,6 +3890,14 @@ void MainComponent::raiseMenuSystemAboveWordmark()
         menu.toFront (false);
 
     menuToggleButton.toFront (false);
+
+    // Strip overlays must sit above pane modules (same stack as Settings).
+    if (scopeModeEnabled && scopeStripLayout)
+    {
+        uiThemeButton.toFront (false);
+        uiRandomizeButton.toFront (false);
+        menuToggleButton.toFront (false);
+    }
 
     if (rampSampleOverlay.isVisible())
     {

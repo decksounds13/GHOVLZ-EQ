@@ -37,6 +37,7 @@ public:
     
     // ========================================================================
     void setGraphColour( juce::Colour );
+    void setGraphFillColour (juce::Colour);
     void setGraphMaximumsColour( juce::Colour );
     void setBinOverlayColour (juce::Colour);
     void setBinOverlayColourRamp (const GradientRamp* ramp);

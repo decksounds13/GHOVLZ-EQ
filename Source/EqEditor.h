@@ -77,6 +77,8 @@ public:
     void syncScopeModeLayout();
     /** True while Scope mode is active (faceplate / OptionBox suppressed). */
     bool isScopeModeActive() const noexcept;
+    /** Editor height for Scope strip mode: chrome + strip (default strip 200 design px). */
+    int getScopeStripWindowHeight (int width) const;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -189,6 +191,19 @@ private:
 
         std::function<void()> onPopupMenu;
 
+        void setIdleAlpha (float a) noexcept { idleAlpha = a; refreshAlpha(); }
+        void mouseEnter (const juce::MouseEvent& e) override
+        {
+            setAlpha (1.0f);
+            juce::TextButton::mouseEnter (e);
+        }
+        void mouseExit (const juce::MouseEvent& e) override
+        {
+            setAlpha (idleAlpha);
+            juce::TextButton::mouseExit (e);
+        }
+        void refreshAlpha() noexcept { setAlpha (isMouseOver (true) ? 1.0f : idleAlpha); }
+
         void mouseDown (const juce::MouseEvent& e) override
         {
             if (e.mods.isPopupMenu())
@@ -200,6 +215,9 @@ private:
 
             juce::TextButton::mouseDown (e);
         }
+
+    private:
+        float idleAlpha = 1.0f;
     };
 
     /** Small faceplate bank pager — paints a chevron (avoids TextButton "..." ellipsis). */
@@ -438,6 +456,23 @@ private:
     bool uiCompact = true;
     int savedEditorWidth = designWidth;
     int savedEditorHeight = designHeight;
+    /** Captures editor size when entering Scope so strip/quad can restore it on exit. */
+    bool holdingSizeBeforeScope = false;
+    /** True while Scope size was last applied as strip (tracks arrange switches). */
+    bool appliedScopeStrip = false;
+    /** Persisted Scope window sizes per arrange mode (restored on re-enter / switch). */
+    int lastStripScopeWidth = 0;
+    int lastStripScopeHeight = 0;
+    int lastTiledScopeWidth = 0;
+    int lastTiledScopeHeight = 0;
+    /** Legacy single-size prefs (migrated on load; still written for compatibility). */
+    int lastScopeWidth = 0;
+    int lastScopeHeight = 0;
+    bool lastScopeWasStrip = false;
+
+    void captureCurrentScopeWindowSize();
+    void applyStripScopeWindowSize();
+    void applyTiledScopeWindowSize();
 
     bool modPanelOpen = false;
     std::unique_ptr<ModSectionComponent> modSection;

@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <array>
+#include <functional>
 #include <vector>
 #include "Menu/SharedResources.h"
 #include "ColourRamp/GradientRamp.h"
@@ -37,6 +38,9 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent& e) override;
+
+    std::function<void()> onShowContextMenu;
 
     /** Expanded overlay: log/linear Hz grid matching the scroll image axis. */
     void paintFrequencyGrid (juce::Graphics& g, juce::Rectangle<float> bounds) const;

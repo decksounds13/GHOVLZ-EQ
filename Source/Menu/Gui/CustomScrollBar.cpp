@@ -1,7 +1,9 @@
 #include "CustomScrollBar.h"
 
-CustomScrollBar::CustomScrollBar (juce::ScrollBar& scrollBarToAttachTo)
+CustomScrollBar::CustomScrollBar (juce::ScrollBar& scrollBarToAttachTo,
+                                  Orientation orientationIn)
     : scrollBar (scrollBarToAttachTo),
+      orientation (orientationIn),
       customShadow (std::make_unique<shadows::StackShadow> (juce::Colours::black.withAlpha (0.65f),
                                                             juce::Point<int> (0, -2), 5, 1))
 {
@@ -11,7 +13,7 @@ CustomScrollBar::CustomScrollBar (juce::ScrollBar& scrollBarToAttachTo)
 }
 
 CustomScrollBar::CustomScrollBar (juce::ListBox& listBoxToAttachTo)
-    : CustomScrollBar (listBoxToAttachTo.getVerticalScrollBar())
+    : CustomScrollBar (listBoxToAttachTo.getVerticalScrollBar(), Orientation::vertical)
 {
     listBoxToAttachTo.setRepaintsOnMouseActivity (false);
 
@@ -77,25 +79,34 @@ void CustomScrollBar::updateThumbPosition()
 
 juce::Rectangle<int> CustomScrollBar::getThumbBounds() const
 {
+    if (orientation == Orientation::horizontal)
+    {
+        const int thumbW = juce::jmax (10, static_cast<int> (getWidth() * thumbSize));
+        const int maxX = juce::jmax (0, getWidth() - thumbW);
+        const int thumbX = juce::jlimit (0, maxX, static_cast<int> (std::round (maxX * thumbPosition)));
+        return { thumbX, 0, thumbW, getHeight() };
+    }
+
     const int thumbHeight = juce::jmax (10, static_cast<int> (getHeight() * thumbSize));
     const int maxY = juce::jmax (0, getHeight() - thumbHeight);
     const int thumbY = juce::jlimit (0, maxY, static_cast<int> (std::round (maxY * thumbPosition)));
     return { 0, thumbY, getWidth(), thumbHeight };
 }
 
-void CustomScrollBar::setRangeStartFromThumbY (int thumbY)
+void CustomScrollBar::setRangeStartFromThumbPos (int thumbPos)
 {
-    const int thumbHeight = juce::jmax (10, static_cast<int> (getHeight() * thumbSize));
-    const int maxY = juce::jmax (0, getHeight() - thumbHeight);
     const double maxStart = getMaxRangeStart();
+    const int trackLen = orientation == Orientation::horizontal ? getWidth() : getHeight();
+    const int thumbLen = juce::jmax (10, static_cast<int> (trackLen * thumbSize));
+    const int maxPos = juce::jmax (0, trackLen - thumbLen);
 
-    if (maxY <= 0 || maxStart <= 0.0)
+    if (maxPos <= 0 || maxStart <= 0.0)
     {
         scrollBar.setCurrentRangeStart (0.0);
         return;
     }
 
-    const double proportion = juce::jlimit (0.0, 1.0, (double) thumbY / (double) maxY);
+    const double proportion = juce::jlimit (0.0, 1.0, (double) thumbPos / (double) maxPos);
     scrollBar.setCurrentRangeStart (proportion * maxStart);
 }
 
@@ -105,18 +116,20 @@ void CustomScrollBar::mouseDown (const juce::MouseEvent& event)
         return;
 
     const auto thumb = getThumbBounds();
+    const int clickPos = orientation == Orientation::horizontal ? event.x : event.y;
+    const int thumbStart = orientation == Orientation::horizontal ? thumb.getX() : thumb.getY();
+    const int thumbLen = orientation == Orientation::horizontal ? thumb.getWidth() : thumb.getHeight();
 
     if (thumb.contains (event.getPosition()))
     {
         isDragging = true;
-        dragGrabOffsetY = event.y - thumb.getY();
+        dragGrabOffset = clickPos - thumbStart;
     }
     else
     {
-        // Jump so the thumb centres on the click, then begin a drag.
-        setRangeStartFromThumbY (event.y - thumb.getHeight() / 2);
+        setRangeStartFromThumbPos (clickPos - thumbLen / 2);
         isDragging = true;
-        dragGrabOffsetY = thumb.getHeight() / 2;
+        dragGrabOffset = thumbLen / 2;
         updateThumbPosition();
     }
 }
@@ -126,7 +139,8 @@ void CustomScrollBar::mouseDrag (const juce::MouseEvent& event)
     if (! isDragging)
         return;
 
-    setRangeStartFromThumbY (event.y - dragGrabOffsetY);
+    const int clickPos = orientation == Orientation::horizontal ? event.x : event.y;
+    setRangeStartFromThumbPos (clickPos - dragGrabOffset);
 }
 
 void CustomScrollBar::mouseUp (const juce::MouseEvent&)
@@ -142,7 +156,10 @@ void CustomScrollBar::mouseWheelMove (const juce::MouseEvent& event, const juce:
         return;
 
     const double page = scrollBar.getCurrentRangeSize();
-    const double delta = (wheel.isReversed ? wheel.deltaY : -wheel.deltaY) * page * 0.35;
+    const float axis = orientation == Orientation::horizontal
+                           ? (std::abs (wheel.deltaX) > std::abs (wheel.deltaY) ? wheel.deltaX : wheel.deltaY)
+                           : wheel.deltaY;
+    const double delta = (wheel.isReversed ? axis : -axis) * page * 0.35;
     scrollBar.setCurrentRangeStart (juce::jlimit (0.0, getMaxRangeStart(),
                                                    scrollBar.getCurrentRangeStart() + delta));
 }

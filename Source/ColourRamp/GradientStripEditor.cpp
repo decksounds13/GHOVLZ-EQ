@@ -1,5 +1,6 @@
 #include "GradientStripEditor.h"
 #include "RampColorPickerPanel.h"
+#include "ColourRampBank.h"
 
 namespace
 {
@@ -192,6 +193,49 @@ namespace
     };
 }
 
+GradientStripEditor::DiceButton::DiceButton()
+    : juce::Button ({})
+{
+    setClickingTogglesState (false);
+    setTooltip ("Randomize this gradient (Appearance H/S/V limits)");
+}
+
+void GradientStripEditor::DiceButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const float corner = 3.0f;
+    auto fill = juce::Colours::black.withAlpha (0.35f);
+    if (down)
+        fill = fill.brighter (0.15f);
+    else if (highlighted)
+        fill = fill.brighter (0.08f);
+
+    g.setColour (fill);
+    g.fillRoundedRectangle (r, corner);
+    g.setColour (juce::Colours::goldenrod.withAlpha (0.75f));
+    g.drawRoundedRectangle (r, corner, 1.0f);
+
+    const float s = juce::jmin (r.getWidth(), r.getHeight());
+    const auto c = r.getCentre();
+    const float die = s * 0.52f;
+    const float thick = juce::jmax (1.2f, s * 0.08f);
+    auto dieR = juce::Rectangle<float> (c.x - die * 0.5f, c.y - die * 0.5f, die, die);
+    g.setColour (juce::Colours::whitesmoke.withAlpha (0.92f));
+    g.drawRoundedRectangle (dieR, die * 0.12f, thick);
+    const float dot = juce::jmax (1.2f, die * 0.12f);
+    auto paintDot = [&] (float nx, float ny)
+    {
+        g.fillEllipse (c.x + nx * die * 0.22f - dot * 0.5f,
+                       c.y + ny * die * 0.22f - dot * 0.5f,
+                       dot, dot);
+    };
+    paintDot (-1.0f, -1.0f);
+    paintDot (1.0f, -1.0f);
+    paintDot (0.0f, 0.0f);
+    paintDot (-1.0f, 1.0f);
+    paintDot (1.0f, 1.0f);
+}
+
 GradientStripEditor::PresetFieldButton::PresetFieldButton()
     : juce::Button ("preset")
 {
@@ -308,6 +352,12 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
     styleTiny (densifyButton);
     addAndMakeVisible (densifyButton);
 
+    invertButton.setButtonText ("Invert");
+    invertButton.setTooltip ("Reverse the ramp colours (high ↔ low)");
+    invertButton.onClick = [this] { invertClicked(); };
+    styleTiny (invertButton);
+    addAndMakeVisible (invertButton);
+
     stopCountButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     stopCountButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.7f));
     stopCountButton.setTooltip ("Pole count. Click to toggle Hard / Soft colour blend");
@@ -333,6 +383,9 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
 
     presetField.onClick = [this] { showPresetMenu(); };
     addAndMakeVisible (presetField);
+
+    randomizeButton.onClick = [this] { randomizeClicked(); };
+    addAndMakeVisible (randomizeButton);
 
     samplePathButton.setButtonText ("Sample Path");
     samplePathButton.setTooltip ("Drag across the plugin UI to sample colours into this gradient");
@@ -402,22 +455,50 @@ void GradientStripEditor::rebuildMapCombo()
 {
     mapCombo.clear (juce::dontSendNotification);
 
-    const auto add = [this] (GradientRamp::MapMode m)
-    {
-        mapCombo.addItem (GradientRamp::mapModeName (m), (int) m + 1);
-    };
-
     if (modeFamily == ModeFamily::intensity)
     {
-        add (GradientRamp::MapMode::intensityLowToHigh);
-        add (GradientRamp::MapMode::intensityHighToLow);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::intensityLowToHigh),
+                          (int) GradientRamp::MapMode::intensityLowToHigh + 1);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::intensityHighToLow),
+                          (int) GradientRamp::MapMode::intensityHighToLow + 1);
+    }
+    else if (modeFamily == ModeFamily::frequency)
+    {
+        mapCombo.addItem ("Low to High", (int) GradientRamp::MapMode::intensityLowToHigh + 1);
+        mapCombo.addItem ("High to Low", (int) GradientRamp::MapMode::intensityHighToLow + 1);
+    }
+    else if (modeFamily == ModeFamily::oscilloscope)
+    {
+        mapCombo.addItem ("Amplitude: Quiet to Loud",
+                          (int) GradientRamp::MapMode::intensityLowToHigh + 1);
+        mapCombo.addItem ("Amplitude: Loud to Quiet",
+                          (int) GradientRamp::MapMode::intensityHighToLow + 1);
+        mapCombo.addItem ("Frequency: Low to High",
+                          (int) GradientRamp::MapMode::oscFreqLowToHigh + 1);
+        mapCombo.addItem ("Frequency: High to Low",
+                          (int) GradientRamp::MapMode::oscFreqHighToLow + 1);
+    }
+    else if (modeFamily == ModeFamily::goniometer)
+    {
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::gonLoudness),
+                          (int) GradientRamp::MapMode::gonLoudness + 1);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::gonDiversionX),
+                          (int) GradientRamp::MapMode::gonDiversionX + 1);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::gonDiversionY),
+                          (int) GradientRamp::MapMode::gonDiversionY + 1);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::gonDiversionXY),
+                          (int) GradientRamp::MapMode::gonDiversionXY + 1);
     }
     else
     {
-        add (GradientRamp::MapMode::leftToRight);
-        add (GradientRamp::MapMode::rightToLeft);
-        add (GradientRamp::MapMode::topToBottom);
-        add (GradientRamp::MapMode::bottomToTop);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::leftToRight),
+                          (int) GradientRamp::MapMode::leftToRight + 1);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::rightToLeft),
+                          (int) GradientRamp::MapMode::rightToLeft + 1);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::topToBottom),
+                          (int) GradientRamp::MapMode::topToBottom + 1);
+        mapCombo.addItem (GradientRamp::mapModeName (GradientRamp::MapMode::bottomToTop),
+                          (int) GradientRamp::MapMode::bottomToTop + 1);
     }
 }
 
@@ -436,6 +517,7 @@ void GradientStripEditor::syncControlsFromRamp()
                                     : "Hard blend (click for Soft). Linear between poles.");
     simplifyButton.setEnabled (n > 2);
     densifyButton.setEnabled (n >= 2 && n < GradientRamp::kMaxStops);
+    invertButton.setEnabled (n >= 2);
     savePresetButton.setEnabled (ramp->stops.size() >= 2);
     samplePathButton.setEnabled (true);
     syncPresetField();
@@ -477,6 +559,14 @@ void GradientStripEditor::syncPresetField()
 
 void GradientStripEditor::setRamp (GradientRamp* r)
 {
+    // Same object (e.g. live colour preview notify) — keep the inline picker open.
+    if (r == ramp)
+    {
+        syncControlsFromRamp();
+        repaint();
+        return;
+    }
+
     if (polePicker != nullptr)
         closePolePicker (false);
 
@@ -502,6 +592,16 @@ void GradientStripEditor::densifyClicked()
     if (ramp == nullptr || ramp->stops.size() < 2)
         return;
     ramp->densifyOneStep();
+    syncControlsFromRamp();
+    notifyChanged();
+    repaint();
+}
+
+void GradientStripEditor::invertClicked()
+{
+    if (ramp == nullptr || ramp->stops.size() < 2)
+        return;
+    ramp->invertStops();
     syncControlsFromRamp();
     notifyChanged();
     repaint();
@@ -540,6 +640,23 @@ void GradientStripEditor::samplePathClicked()
         onSamplePath();
 }
 
+void GradientStripEditor::randomizeClicked()
+{
+    if (ramp == nullptr)
+        return;
+
+    if (polePicker != nullptr)
+        closePolePicker (false);
+
+    const bool varyAlpha = (modeFamily == ModeFamily::spatial);
+    ColourRampBank::randomizeRamp (*ramp, sharedResources.sharedColors, varyAlpha);
+    selectedIndex = -1;
+    dragIndex = -1;
+    syncControlsFromRamp();
+    notifyChanged();
+    repaint();
+}
+
 void GradientStripEditor::showPresetMenu()
 {
     if (presets == nullptr)
@@ -554,13 +671,28 @@ void GradientStripEditor::showPresetMenu()
             if (safe == nullptr || safe->ramp == nullptr || safe->presets == nullptr)
                 return;
 
-            const bool wantIntensity = (safe->modeFamily == ModeFamily::intensity);
             safe->presets->applyPreset (index, *safe->ramp);
 
-            if (wantIntensity && ! safe->ramp->isIntensityMap())
-                safe->ramp->mapMode = GradientRamp::MapMode::intensityLowToHigh;
-            else if (! wantIntensity && ! safe->ramp->isSpatialMap())
+            if (safe->modeFamily == ModeFamily::goniometer)
+            {
+                if (! safe->ramp->isGoniometerMap())
+                    safe->ramp->mapMode = GradientRamp::MapMode::gonLoudness;
+            }
+            else if (safe->modeFamily == ModeFamily::oscilloscope)
+            {
+                if (! safe->ramp->isOscilloscopeMap())
+                    safe->ramp->mapMode = GradientRamp::MapMode::intensityLowToHigh;
+            }
+            else if (safe->modeFamily == ModeFamily::intensity
+                     || safe->modeFamily == ModeFamily::frequency)
+            {
+                if (! safe->ramp->isIntensityMap())
+                    safe->ramp->mapMode = GradientRamp::MapMode::intensityLowToHigh;
+            }
+            else if (! safe->ramp->isSpatialMap())
+            {
                 safe->ramp->mapMode = GradientRamp::MapMode::bottomToTop;
+            }
 
             safe->ramp->enabled = true;
             ++safe->ramp->revision;
@@ -609,6 +741,7 @@ void GradientStripEditor::resized()
 
     const int lessW = textButtonWidth ("Less", s);
     const int moreW = textButtonWidth ("More", s);
+    const int invertW = textButtonWidth ("Invert", s);
     const int saveW = textButtonWidth ("Save", s);
     const int countW = juce::jmax (px (32), textButtonWidth (stopCountButton.getButtonText(), s, 28));
     const int useW = juce::jmax (px (52), textButtonWidth ("Use", s, 52));
@@ -617,16 +750,21 @@ void GradientStripEditor::resized()
     enableToggle.setBounds (bar1.removeFromLeft (useW));
     bar1.removeFromLeft (px (4));
     mapLabel.setBounds (bar1.removeFromLeft (px (30)));
-    const int trailing = lessW + countW + moreW + saveW + px (14);
-    mapCombo.setBounds (bar1.removeFromLeft (juce::jmax (px (110), bar1.getWidth() - trailing)));
+    const int trailing = lessW + countW + moreW + invertW + saveW + px (18);
+    mapCombo.setBounds (bar1.removeFromLeft (juce::jmax (px (100), bar1.getWidth() - trailing)));
     bar1.removeFromLeft (px (4));
     simplifyButton.setBounds (bar1.removeFromLeft (lessW));
     stopCountButton.setBounds (bar1.removeFromLeft (countW));
     densifyButton.setBounds (bar1.removeFromLeft (moreW));
     bar1.removeFromLeft (px (4));
+    invertButton.setBounds (bar1.removeFromLeft (invertW));
+    bar1.removeFromLeft (px (4));
     savePresetButton.setBounds (bar1.removeFromLeft (saveW));
 
     samplePathButton.setBounds (bar2.removeFromRight (sampleW));
+    bar2.removeFromRight (px (4));
+    const int diceSize = juce::jmin (bar2.getHeight(), px (24));
+    randomizeButton.setBounds (bar2.removeFromRight (diceSize).withSizeKeepingCentre (diceSize, diceSize));
     bar2.removeFromRight (px (6));
     presetField.setBounds (bar2);
 

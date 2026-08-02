@@ -15,14 +15,17 @@
 #include "Menu/SharedResources.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 
+class EqProcessor;
+
 class OptionBoxMenu : public juce::Component,
                       public juce::Button::Listener,
                       public juce::ComboBox::Listener,
                       public juce::Slider::Listener,
-                      public juce::AudioProcessorValueTreeState::Listener
+                      public juce::AudioProcessorValueTreeState::Listener,
+                      private juce::Timer
 {
 public:
-    OptionBoxMenu(juce::AudioProcessorValueTreeState& state);
+    OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProcessor& processor);
     ~OptionBoxMenu() override;
 
     void paint(juce::Graphics& g) override;
@@ -108,6 +111,8 @@ private:
     void listenToCurrentBandOnOff (bool shouldListen);
     void listenToCurrentBandDynamic (bool shouldListen);
     void listenToCurrentBandSpectral (bool shouldListen);
+    void timerCallback() override;
+    void paintDynThresholdMeter (juce::Graphics& g);
     float getUiScale() const;
     void applyUiScale();
     int getVisualWidth() const;
@@ -271,4 +276,6 @@ private:
     SidechainTextButtonLookAndFeel sidechainButtonLookAndFeel;
 
     juce::AudioProcessorValueTreeState& treeState;
+    EqProcessor& processor;
+    float displayedDynEnvelopeDb = -120.0f;
 };

@@ -10,7 +10,8 @@ struct GradientRamp
     /** Default pole count after sampling / densify baseline. */
     static constexpr int kDefaultStops = 8;
 
-    /** How the ramp is driven — intensity for FFT/Spec, axis for Spectrum Fill. */
+    /** How the ramp is driven — intensity for FFT/Spec, axis for Spectrum Fill,
+        goniometer diversion modes for the vectorscope. */
     enum class MapMode : int
     {
         intensityLowToHigh = 0, // quiet → loud / dark → bright
@@ -18,7 +19,13 @@ struct GradientRamp
         leftToRight,
         rightToLeft,
         topToBottom,
-        bottomToTop
+        bottomToTop,
+        gonLoudness,            // sample loudness (√(L²+R²))
+        gonDiversionX,          // |X| from plot centre (side)
+        gonDiversionY,          // |Y| from plot centre (mid)
+        gonDiversionXY,         // √(X²+Y²) from plot centre
+        oscFreqLowToHigh,       // oscilloscope: zero-crossing rate low → high
+        oscFreqHighToLow        // oscilloscope: zero-crossing rate high → low
     };
 
     /** Hard = linear between poles; Soft = smootherstep ease (less pole-focused). */
@@ -56,7 +63,27 @@ struct GradientRamp
     {
         return mapMode == MapMode::intensityLowToHigh || mapMode == MapMode::intensityHighToLow;
     }
-    bool isSpatialMap() const noexcept { return ! isIntensityMap(); }
+    bool isSpatialMap() const noexcept
+    {
+        return mapMode == MapMode::leftToRight || mapMode == MapMode::rightToLeft
+            || mapMode == MapMode::topToBottom || mapMode == MapMode::bottomToTop;
+    }
+    bool isGoniometerMap() const noexcept
+    {
+        return mapMode == MapMode::gonLoudness || mapMode == MapMode::gonDiversionX
+            || mapMode == MapMode::gonDiversionY || mapMode == MapMode::gonDiversionXY;
+    }
+    bool isOscilloscopeMap() const noexcept
+    {
+        return isIntensityMap()
+            || mapMode == MapMode::oscFreqLowToHigh
+            || mapMode == MapMode::oscFreqHighToLow;
+    }
+    bool isOscilloscopeFrequencyMap() const noexcept
+    {
+        return mapMode == MapMode::oscFreqLowToHigh
+            || mapMode == MapMode::oscFreqHighToLow;
+    }
 
     /** Remap a 0..1 driver (intensity or normalised axis) through mapMode. */
     float mapDriver (float t01) const noexcept
@@ -67,6 +94,7 @@ struct GradientRamp
             case MapMode::intensityHighToLow:
             case MapMode::rightToLeft:
             case MapMode::bottomToTop:
+            case MapMode::oscFreqHighToLow:
                 return 1.0f - t01;
             default:
                 return t01;
@@ -161,6 +189,17 @@ struct GradientRamp
         if (n >= kMaxStops || n < 2)
             return;
         resampleToCount (nextDensifyCount (n));
+    }
+
+    /** Reverse stop positions along the ramp (visual invert). */
+    void invertStops() noexcept
+    {
+        if (stops.size() < 2)
+            return;
+        for (auto& s : stops)
+            s.position = 1.0f - s.position;
+        sortAndClamp();
+        ++revision;
     }
 
     juce::Colour colourAt (float t) const noexcept
@@ -262,6 +301,12 @@ struct GradientRamp
             case MapMode::rightToLeft:        return "Right to Left";
             case MapMode::topToBottom:        return "Top to Bottom";
             case MapMode::bottomToTop:        return "Bottom to Top";
+            case MapMode::gonLoudness:        return "Loudness";
+            case MapMode::gonDiversionX:      return "X from Centre";
+            case MapMode::gonDiversionY:      return "Y from Centre";
+            case MapMode::gonDiversionXY:     return "X+Y from Centre";
+            case MapMode::oscFreqLowToHigh:   return "Low to High";
+            case MapMode::oscFreqHighToLow:   return "High to Low";
             default:                          return "Map";
         }
     }
@@ -290,7 +335,7 @@ struct GradientRamp
 
         ramp.enabled = (bool) tree.getProperty ("enabled", false);
         ramp.mapMode = static_cast<MapMode> (juce::jlimit (
-            0, (int) MapMode::bottomToTop, (int) tree.getProperty ("mapMode", (int) MapMode::intensityLowToHigh)));
+            0, (int) MapMode::oscFreqHighToLow, (int) tree.getProperty ("mapMode", (int) MapMode::intensityLowToHigh)));
         ramp.interpMode = static_cast<InterpMode> (juce::jlimit (
             0, (int) InterpMode::soft, (int) tree.getProperty ("interpMode", (int) InterpMode::hard)));
         for (int i = 0; i < tree.getNumChildren(); ++i)

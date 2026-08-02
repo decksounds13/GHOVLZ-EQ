@@ -2,9 +2,11 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
 #include <vector>
 #include "Menu/SharedResources.h"
 #include "MelatoninBlur/melatonin/shadows.h"
+#include "ColourRamp/GradientRamp.h"
 
 /** Compact beat-synced waveform strip for the graph chrome. */
 class OscilloscopeComponent : public juce::Component,
@@ -54,6 +56,11 @@ public:
 
     void setThemeColors (SharedResources* r) noexcept { themeColors = r; repaint(); }
 
+    void setColourRamp (const GradientRamp& ramp);
+    void clearColourRamp();
+
+    std::function<void()> onShowContextMenu;
+
     static constexpr int kWindowHeightPx = 80; // 60 * 4/3
     static constexpr int kWavePadPx = 2;
 
@@ -63,6 +70,10 @@ private:
         float minSum = 0.0f, maxSum = 0.0f;
         float minL = 0.0f, maxL = 0.0f;
         float minR = 0.0f, maxR = 0.0f;
+        /** Peak |sample| in column (0..1) for amplitude ramp mapping. */
+        float peakAmp = 0.0f;
+        /** Normalised zero-crossing rate (0..1) for frequency ramp mapping. */
+        float freqNorm = 0.0f;
         bool valid = false;
     };
 
@@ -127,6 +138,9 @@ private:
     float colMinSum = 1.0f, colMaxSum = -1.0f;
     float colMinL = 1.0f, colMaxL = -1.0f;
     float colMinR = 1.0f, colMaxR = -1.0f;
+    float colPrevSum = 0.0f;
+    bool colHavePrev = false;
+    int colZeroCrossings = 0;
     int lastZoomIndex = -1;
     int lastWindowSamples = -1;
     int lastColumnCount = -1;
@@ -134,6 +148,8 @@ private:
     bool scrollMode = true;
     bool expanded = false;
     ChannelMode channelMode = ChannelMode::summedStereo;
+    GradientRamp colourRamp;
+    bool hasCustomRamp = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OscilloscopeComponent)
 };

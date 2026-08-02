@@ -26,6 +26,9 @@ class FrequencyResponseComponent;
 class OscilloscopeComponent;
 class GoniometerComponent;
 class SpectrogramComponent;
+class LoudnessComponent;
+class StereogramComponent;
+class HistogramComponent;
 
 class EqProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener//, public juce::Timer 
 
@@ -67,6 +70,18 @@ public:
     void setSpectrogramTarget (class SpectrogramComponent* target) noexcept;
     SpectrogramComponent* getSpectrogramTarget() const noexcept;
 
+    /** Optional loudness meter (Scope UI). Audio thread pushes when non-null and enabled. */
+    void setLoudnessTarget (class LoudnessComponent* target) noexcept;
+    LoudnessComponent* getLoudnessTarget() const noexcept;
+
+    /** Optional stereogram (Scope UI). Audio thread pushes when non-null and enabled. */
+    void setStereogramTarget (class StereogramComponent* target) noexcept;
+    StereogramComponent* getStereogramTarget() const noexcept;
+
+    /** Optional level histogram (Scope UI). Audio thread pushes when non-null and enabled. */
+    void setHistogramTarget (class HistogramComponent* target) noexcept;
+    HistogramComponent* getHistogramTarget() const noexcept;
+
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     const juce::UndoManager& getUndoManager() const noexcept { return undoManager; }
 
@@ -101,12 +116,16 @@ public:
     float getPostProcessingRmsValue(const int channel);
     float getInputPeakValue(const int channel);
     float getPostProcessingPeakValue(const int channel);
+    float getInputTruePeakValue (int channel) const;
+    float getPostProcessingTruePeakValue (int channel) const;
 
     /** Mid/Side levels from the same tap as L/R meters. channel 0 = Mid, 1 = Side. */
     float getInputMsPeakValue (int channel) const;
     float getInputMsRmsValue (int channel) const;
     float getPostProcessingMsPeakValue (int channel) const;
     float getPostProcessingMsRmsValue (int channel) const;
+    float getInputMsTruePeakValue (int channel) const;
+    float getPostProcessingMsTruePeakValue (int channel) const;
 
     /** True when Level Meters channel mode is M/S (APVTS METER_CHANNEL_MODE_ID). */
     bool isMeterMsMode() const noexcept;
@@ -292,6 +311,25 @@ public:
     float getHighShelfEffectiveGainDb() const { return dynHighShelf.getPublishedEffectiveGain(); }
     float getLowShelfEffectiveGainDb() const { return dynLowShelf.getPublishedEffectiveGain(); }
 
+    /**
+        Detector envelope (dB) for OptionBox threshold meter.
+        Bank 1: internal DSP index 0–7. Extended: global display 8–63.
+    */
+    float getPublishedDynEnvelopeDb (int bandIndexOrGlobal) const noexcept;
+
+    /** Effective gain after dynamic / sidechain (same indexing as getPublishedDynEnvelopeDb). */
+    float getPublishedEffectiveGainDb (int bandIndexOrGlobal) const noexcept;
+
+    /**
+        Swap static ↔ dynamic-range gain when the user toggles D.
+        First enable starts range at 0 dB; later toggles restore the last range/static values.
+        Preset/session load is ignored until the first observed state is latched.
+        Indexing matches getPublishedDynEnvelopeDb.
+    */
+    void applyDynamicModeGainSwap (int bandIndexOrGlobal, bool nowDynamicOn);
+    /** Clear dual-mode gain memory (band delete / double-click reset). */
+    void clearDynamicModeGainMemory (int bandIndexOrGlobal) noexcept;
+
     /** Last-block freq/Q after LFO (curve display). Gain uses get*EffectiveGainDb(). */
     float getPublishedBand1Freq() const noexcept { return publishedBand1Freq.load (std::memory_order_relaxed); }
     float getPublishedBand1Q() const noexcept { return publishedBand1Q.load (std::memory_order_relaxed); }
@@ -444,11 +482,32 @@ private:
     std::atomic<float> postRmsDbMid { -100.0f };
     std::atomic<float> postRmsDbSide { -100.0f };
 
+    // True-peak (4× cubic inter-sample) at input / post taps.
+    std::atomic<float> inputTruePeakDbLeft { -100.0f };
+    std::atomic<float> inputTruePeakDbRight { -100.0f };
+    std::atomic<float> postTruePeakDbLeft { -100.0f };
+    std::atomic<float> postTruePeakDbRight { -100.0f };
+    std::atomic<float> inputTruePeakDbMid { -100.0f };
+    std::atomic<float> inputTruePeakDbSide { -100.0f };
+    std::atomic<float> postTruePeakDbMid { -100.0f };
+    std::atomic<float> postTruePeakDbSide { -100.0f };
+    float inputTruePeakHistL[3] {};
+    float inputTruePeakHistR[3] {};
+    float postTruePeakHistL[3] {};
+    float postTruePeakHistR[3] {};
+    float inputTruePeakHistMid[3] {};
+    float inputTruePeakHistSide[3] {};
+    float postTruePeakHistMid[3] {};
+    float postTruePeakHistSide[3] {};
+
     Analyser m_analyser;
 
     std::atomic<OscilloscopeComponent*> oscilloscopeTarget { nullptr };
     std::atomic<GoniometerComponent*> goniometerTarget { nullptr };
     std::atomic<SpectrogramComponent*> spectrogramTarget { nullptr };
+    std::atomic<LoudnessComponent*> loudnessTarget { nullptr };
+    std::atomic<StereogramComponent*> stereogramTarget { nullptr };
+    std::atomic<HistogramComponent*> histogramTarget { nullptr };
 
     std::atomic<bool> ecoMode { false };
     std::atomic<bool> scopeMode { false };
@@ -484,6 +543,16 @@ private:
     DynamicEq::BandState dynBand1, dynBand2, dynBand3, dynBand4;
     DynamicEq::BandState dynHighpass, dynLowpass;
     DynamicEq::BandState dynHighShelf, dynLowShelf;
+
+    struct DynModeGainMemory
+    {
+        float staticGainDb = 0.0f;
+        float dynamicRangeDb = 0.0f;
+        bool hasDynamicMemory = false;
+        bool latched = false;
+        bool lastDynamicOn = false;
+    };
+    std::array<DynModeGainMemory, EqBand::kMaxBands> dynModeGainMemory {};
 
     /** Curve-display snapshot of post-LFO freq/Q (gain via dyn publishedEffectiveGain). */
     std::atomic<float> publishedBand1Freq { 300.0f }, publishedBand1Q { 0.67f };

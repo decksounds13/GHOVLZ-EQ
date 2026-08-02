@@ -2,6 +2,7 @@
 #define MAINCOMPONENT_H
 
 #include <JuceHeader.h>
+#include <array>
 #include "FrequencyResponseComponent.h"
 #include "VerticalGradientMeter.h"
 #include "SettingsButtonLookAndFeel.h"
@@ -14,6 +15,12 @@
 #include "OscilloscopeComponent.h"
 #include "GoniometerComponent.h"
 #include "SpectrogramComponent.h"
+#include "ScopeModules.h"
+#include "ScopeLayoutPresets.h"
+#include "ScopeLevelMeterModule.h"
+#include "LoudnessComponent.h"
+#include "StereogramComponent.h"
+#include "HistogramComponent.h"
 #include "EqPresetStore.h"
 #include "ColourRamp/ColourRampBank.h"
 #include "ColourRamp/PathSampleOverlay.h"
@@ -72,9 +79,44 @@ public:
     void setScopeMode (bool shouldEnable, bool notifyPrefs = true);
     bool isScopeMode() const noexcept { return scopeModeEnabled; }
 
+    /** Scope arrange: false = 2×2 quad, true = side-by-side strip (EQ graph hidden). */
+    void setScopeStripLayout (bool shouldUseStrip, bool notifyPrefs = true);
+    bool isScopeStripLayout() const noexcept { return scopeStripLayout; }
+
+    /** Strip height in design pixels (default 200). Drag the strip bottom edge to resize. */
+    void setScopeStripHeightPx (int heightDesignPx, bool notifyPrefs = true);
+    /** Update stored strip height from the current window size (no layout side-effects). */
+    void syncStripHeightFromWindow (int windowW, int windowH) noexcept;
+    int getScopeStripHeightPx() const noexcept { return scopeStripHeightPx; }
+
+    /** Enabled module order for Scope panes (see ScopeModuleId). */
+    const std::vector<ScopeModuleId>& getScopeEnabledOrder() const noexcept { return scopeEnabledOrder; }
+    void setScopeEnabledOrder (const std::vector<ScopeModuleId>& order, bool notifyPrefs = true);
+
+    bool isScopeModuleEnabled (ScopeModuleId id) const noexcept;
+    void setScopeModuleEnabled (ScopeModuleId id, bool enabled, bool notifyPrefs = true);
+    /** Right-click module menu (tiled + strip): module actions + Remove Module. */
+    void showScopeModuleContextMenu (ScopeModuleId id, juce::Component* anchor);
+
     /** Scope-mode tap only (compact chrome scopes unchanged). Persisted via ui_prefs. */
     void setScopeTapPost (bool shouldTapPost, bool notifyPrefs = true);
     bool isScopeTapPost() const noexcept { return scopeTapPost; }
+    /** Scope + Pre: analyzer-only (DSP off) — hide EQ chrome. */
+    bool isScopeAnalyzerOnly() const noexcept { return scopeModeEnabled && ! scopeTapPost; }
+    /** Strip Scope (or Pre): hide phase / Side Check / DSP chrome. */
+    bool shouldHideScopeDspChrome() const noexcept
+    {
+        return isScopeAnalyzerOnly() || (scopeModeEnabled && scopeStripLayout);
+    }
+
+    ScopeLayoutPreset captureScopeLayoutPreset (const juce::String& name) const;
+    void applyScopeLayoutPreset (const ScopeLayoutPreset& preset, bool notifyPrefs = true);
+    float getScopeSplitX() const noexcept { return scopeSplitOverlay.getSplitX(); }
+    float getScopeSplitY() const noexcept { return scopeSplitOverlay.getSplitY(); }
+    void setScopeSplitNorm (float xNorm, float yNorm) noexcept;
+
+    const std::vector<float>& getScopeStripFractions() const noexcept { return scopeStripFractions; }
+    void setScopeStripFractions (const std::vector<float>& fracs);
 
     /** Global Melatonin glow / drop-shadow bypass. Persisted via ui_prefs. */
     void setDisableGlowShadowEffects (bool shouldDisable, bool notifyPrefs = true);
@@ -129,6 +171,9 @@ private:
     void applyEcoMode (bool shouldEnable);
     void applyScopeMode (bool shouldEnable);
     void layoutScopeModePanes (float scale);
+    void placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int> pane, int toolH, int toolSize, int toolGap);
+    void syncScopeModuleEnabledStates();
+    void applyScopePaneReorder (int fromSlot, int toSlot, bool insertBefore);
     void syncMeterChannelModeButton();
     void toggleMeterChannelMode();
     void setOscExpanded (bool shouldExpand);
@@ -152,7 +197,8 @@ private:
     class OscToolButton : public juce::Button
     {
     public:
-        enum class Glyph { Plus, Minus, SummedStereo, SplitStereo, Expand, Collapse, Dice };
+        enum class Glyph { Plus, Minus, SummedStereo, SplitStereo, Expand, Collapse, Dice,
+                           StripLayout, GridLayout };
 
         explicit OscToolButton (Glyph g)
             : juce::Button ({}), glyph (g)
@@ -271,12 +317,59 @@ private:
                     paintDot (1.0f, 1.0f);
                     break;
                 }
+                case Glyph::StripLayout:
+                    // Horizontal line = strip layout.
+                    g.fillRect (c.x - arm * 1.15f, c.y - thick * 0.5f, arm * 2.3f, thick);
+                    break;
+                case Glyph::GridLayout:
+                {
+                    // Square = tiled / grid layout.
+                    const float side = arm * 1.55f;
+                    g.drawRect (c.x - side * 0.5f, c.y - side * 0.5f, side, side,
+                                juce::jmax (1.5f, thick * 0.85f));
+                    break;
+                }
             }
         }
+
+        void setIdleAlpha (float a) noexcept { idleAlpha = a; refreshAlpha(); }
+        void mouseEnter (const juce::MouseEvent& e) override
+        {
+            setAlpha (1.0f);
+            juce::Button::mouseEnter (e);
+        }
+        void mouseExit (const juce::MouseEvent& e) override
+        {
+            setAlpha (idleAlpha);
+            juce::Button::mouseExit (e);
+        }
+        void refreshAlpha() noexcept { setAlpha (isMouseOver (true) ? 1.0f : idleAlpha); }
 
     private:
         Glyph glyph;
         SharedResources* themeResources = nullptr;
+        float idleAlpha = 1.0f;
+    };
+
+    /** Chrome button: idle alpha until hovered (strip overlays use 50%). */
+    class HoverFadeButton : public juce::TextButton
+    {
+    public:
+        HoverFadeButton (const juce::String& name) : juce::TextButton (name) {}
+        void setIdleAlpha (float a) noexcept { idleAlpha = a; refreshAlpha(); }
+        void mouseEnter (const juce::MouseEvent& e) override
+        {
+            setAlpha (1.0f);
+            juce::TextButton::mouseEnter (e);
+        }
+        void mouseExit (const juce::MouseEvent& e) override
+        {
+            setAlpha (idleAlpha);
+            juce::TextButton::mouseExit (e);
+        }
+        void refreshAlpha() noexcept { setAlpha (isMouseOver (true) ? 1.0f : idleAlpha); }
+    private:
+        float idleAlpha = 1.0f;
     };
 
     // LookAndFeels must outlive any components that use them.
@@ -308,7 +401,7 @@ private:
     /** Cycles L/R ↔ M/S meter channel mode (APVTS METER_CHANNEL_MODE_ID). */
     juce::TextButton meterChannelModeButton { "L/R" };
 
-    juce::TextButton menuToggleButton{ "Toggle Menu" };
+    HoverFadeButton menuToggleButton{ "Toggle Menu" };
 
     juce::TextButton bypassButton { "Bypass" };
     AbSlotButton slotAButton { "A" };
@@ -325,7 +418,7 @@ private:
     juce::TextButton presetSaveButton { "Save" };
 
     /** Left of preset bar: UI theme picker + dice randomize (ramps live in the UI dropdown). */
-    juce::TextButton uiThemeButton { "UI" };
+    HoverFadeButton uiThemeButton { "UI" };
     OscToolButton uiRandomizeButton { OscToolButton::Glyph::Dice };
     PathSampleOverlay rampSampleOverlay;
 
@@ -347,6 +440,12 @@ private:
     /** Spec toggle — spectrogram strip between UI dice and the EQ preset bar. */
     juce::TextButton specButton { "Spec" };
     SpectrogramComponent spectrogram;
+
+    ScopeLevelMeterModule levelMeterIn;
+    ScopeLevelMeterModule levelMeterOut;
+    LoudnessComponent loudnessMeter;
+    StereogramComponent stereogram;
+    HistogramComponent histogram;
 
     /** Dims UI under an expanded scope (clicks pass through). */
     class OscDimmerComponent : public juce::Component
@@ -389,6 +488,60 @@ private:
         static constexpr int kHitPad = 6;
     };
 
+    /** Drag Scope panes by their top edge; swap (quad) or insert (strip).
+        Strip: bottom edge = height; vertical dividers = column widths. */
+    class ScopeArrangeOverlay : public juce::Component
+    {
+    public:
+        explicit ScopeArrangeOverlay (MainComponent& owner) : main (owner)
+        {
+            setInterceptsMouseClicks (true, false);
+        }
+
+        void paint (juce::Graphics& g) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp (const juce::MouseEvent& e) override;
+        bool hitTest (int x, int y) override;
+        void mouseMove (const juce::MouseEvent& e) override;
+        void mouseExit (const juce::MouseEvent& e) override;
+
+        void setSlotBounds (const std::vector<juce::Rectangle<int>>& bounds) noexcept
+        {
+            slotBounds = bounds;
+        }
+
+        void setStripBounds (juce::Rectangle<int> bounds) noexcept
+        {
+            stripBounds = bounds;
+        }
+
+    private:
+        int hitDragHandle (juce::Point<int> p) const noexcept;
+        bool hitResizeEdge (juce::Point<int> p) const noexcept;
+        int hitColumnDivider (juce::Point<int> p) const noexcept;
+        int hitPaneEdgeForHover (juce::Point<int> p) const noexcept;
+        void updateDropTarget (juce::Point<int> p) noexcept;
+        void updateHoverCursor (juce::Point<int> p);
+
+        MainComponent& main;
+        std::vector<juce::Rectangle<int>> slotBounds {};
+        juce::Rectangle<int> stripBounds {};
+        int dragFromSlot = -1;
+        int dropSlot = -1;
+        bool dropInsertBefore = false;
+        bool resizingStrip = false;
+        bool hoverResize = false;
+        int resizingColumn = -1; // divider index i = boundary between slot i and i+1
+        int hoverColumnDivider = -1;
+        int hoverPaneOutline = -1; // slot index to outline on hover
+        juce::Point<int> dragPos {};
+        juce::Point<float> dragGrabOffset {}; // mouse relative to pane top-left at grab
+        static constexpr int kHandleH = 10;
+        static constexpr int kInsertBand = 14;
+        static constexpr int kResizeHitPad = 6;
+    };
+
     OscToolButton oscZoomInButton { OscToolButton::Glyph::Plus };
     OscToolButton oscZoomOutButton { OscToolButton::Glyph::Minus };
     OscToolButton oscChannelModeButton { OscToolButton::Glyph::SummedStereo };
@@ -398,9 +551,24 @@ private:
     OscToolButton specSpeedDownButton { OscToolButton::Glyph::Minus };
     OscToolButton specExpandButton { OscToolButton::Glyph::Expand };
     ScopeSplitOverlay scopeSplitOverlay { *this };
+    ScopeArrangeOverlay scopeArrangeOverlay { *this };
+
+    OscToolButton arrangeButton { OscToolButton::Glyph::GridLayout };
 
     bool ecoEnabled = false;
     bool scopeModeEnabled = false;
+    /** false = 2×2 quad (when N==4) or grid; true = horizontal strip (EQ graph hidden). */
+    bool scopeStripLayout = false;
+    std::vector<ScopeModuleId> scopeEnabledOrder = ScopeModules::defaultEnabledOrder();
+    /** Strip column width fractions (sum ≈ 1). Sized to match scopeEnabledOrder. */
+    std::vector<float> scopeStripFractions;
+    void ensureScopeStripFractions();
+    void setScopeStripColumnFraction (int leftSlot, float leftFrac);
+    static constexpr int kScopeStripHeightDefaultPx = 200;
+    static constexpr int kScopeStripHeightMinPx = 80;
+    static constexpr float kScopeStripMinFrac = 0.08f;
+    /** Strip height in design pixels (scaled by UI width / 1200). Default 200. */
+    int scopeStripHeightPx = kScopeStripHeightDefaultPx;
     /** Scope-mode Pre/Post tap preference (false = Pre). Persisted; Scope itself is not. */
     bool scopeTapPost = false;
     bool oscExpanded = false;

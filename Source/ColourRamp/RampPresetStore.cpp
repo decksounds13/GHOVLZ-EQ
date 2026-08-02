@@ -115,6 +115,23 @@ void RampPresetStore::seedFactoryPresets()
     addFactory (presets, "Mint Night", makeRamp ({
         { 0.00f, rgb (5, 15, 20) }, { 0.40f, rgb (20, 70, 70) },
         { 0.70f, rgb (80, 180, 140) }, { 1.00f, rgb (210, 255, 220) } }));
+
+    // Full-spectrum rainbow: start at blue, then every hue at max saturation / brightness.
+    {
+        GradientRamp rainbow;
+        constexpr int kStops = 13; // blue → … → blue (full turn)
+        for (int i = 0; i < kStops; ++i)
+        {
+            const float t = (float) i / (float) (kStops - 1);
+            // JUCE hue: 0 = red; blue ≈ 0.666. Walk a full turn from blue.
+            const float hue = std::fmod (2.0f / 3.0f + t, 1.0f);
+            rainbow.stops.push_back ({ t, juce::Colour::fromHSV (hue, 1.0f, 1.0f, 1.0f) });
+        }
+        rainbow.sortAndClamp();
+        rainbow.interpMode = GradientRamp::InterpMode::soft;
+        rainbow.enabled = true;
+        addFactory (presets, "Rainbow", std::move (rainbow));
+    }
 }
 
 bool RampPresetStore::savePreset (juce::String name, const GradientRamp& ramp)

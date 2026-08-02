@@ -37,6 +37,25 @@ const SharedColors& VerticalGradientMeter::colors() const noexcept
     return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
 }
 
+void VerticalGradientMeter::setThemeColors (SharedResources* r) noexcept
+{
+    themeColors = r;
+    rebuildPeakGradient();
+    repaint();
+}
+
+void VerticalGradientMeter::rebuildPeakGradient()
+{
+    const auto& theme = colors();
+    const auto bounds = getLocalBounds().toFloat();
+    // Peak fill tracks Meter Fill so dice / theme changes update without a resize.
+    gradient2 = juce::ColourGradient { theme.meterFill.withAlpha (150.0f / 255.0f),
+                                       bounds.getBottomLeft(),
+                                       theme.meterFill.brighter (0.2f).withAlpha (230.0f / 255.0f),
+                                       bounds.getTopLeft(),
+                                       false };
+}
+
 VerticalGradientMeter::MeterMode VerticalGradientMeter::getMeterMode() const
 {
     if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter ("METER_MODE_ID")))
@@ -78,14 +97,26 @@ float VerticalGradientMeter::dbToY (float db, float height) noexcept
                        kMeterFloorDb, kMeterCeilDb, 0.0f, height);
 }
 
+void VerticalGradientMeter::setTextChromeVisible (bool shouldShow) noexcept
+{
+    if (textChromeVisible == shouldShow)
+        return;
+    textChromeVisible = shouldShow;
+    repaint();
+}
+
 juce::Rectangle<float> VerticalGradientMeter::getMeterBodyBounds() const
 {
+    if (! textChromeVisible)
+        return getLocalBounds().toFloat().reduced (0.0f, 4.0f);
     return getLocalBounds().toFloat().reduced (0.0f, 40.0f);
 }
 
 juce::Rectangle<float> VerticalGradientMeter::getClipIndicatorBounds() const
 {
     const auto body = getMeterBodyBounds();
+    if (! textChromeVisible)
+        return { body.getX(), body.getY(), body.getWidth(), juce::jmin (4.0f, body.getHeight() * 0.08f) };
     return { body.getX(), body.getY() - 20.0f, body.getWidth(), 15.0f };
 }
 
@@ -108,6 +139,7 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
     const auto& theme = colors();
     const auto bounds = getMeterBodyBounds();
     const auto mode = getMeterMode();
+    rebuildPeakGradient();
 
     const juce::Colour customColor = theme.meterBackground.withAlpha (100.0f / 255.0f);
     g.setColour (customColor);
@@ -128,8 +160,10 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
 
     if (showRms)
     {
-        const float rmsAlpha = mode == MeterMode::PeakAndRms ? 0.55f : 1.0f;
-        g.setColour (theme.meterFill.withAlpha (rmsAlpha));
+        // Peak+RMS: brighter / more opaque so the RMS lane isn't washed by the peak fill under it.
+        const float rmsAlpha = mode == MeterMode::PeakAndRms ? 0.92f : 1.0f;
+        g.setColour (theme.meterFill.brighter (mode == MeterMode::PeakAndRms ? 0.15f : 0.0f)
+                                 .withAlpha (rmsAlpha));
         const float scaledY = dbToY (displayedRmsDb, bounds.getHeight());
         const float barW = mode == MeterMode::PeakAndRms
                                ? juce::jmax (2.0f, bounds.getWidth() * 0.45f)
@@ -150,12 +184,15 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
                                     : customColor);
     g.fillRect (getClipIndicatorBounds());
 
+    if (! textChromeVisible)
+        return;
+
     // Readout: 0.1 dB resolution, painted unclipped so it is never "..."
     const float textDb = std::max (readoutDb, -99.9f);
     const auto text = juce::String (textDb, 1);
     g.setFont (juce::FontOptions ("Lato Black", 10.0f, juce::Font::plain));
     g.setColour (clipState.clipping ? theme.meterClip
-                                    : theme.pluginButtonText.withAlpha (0.9f));
+                                    : theme.meterReadoutText.withAlpha (0.95f));
     g.drawText (text, getReadoutBounds(), juce::Justification::centred, false);
 
     g.setFont (juce::FontOptions ("Lato Black", 11.0f, juce::Font::plain));
@@ -245,11 +282,5 @@ void VerticalGradientMeter::timerCallback()
 
 void VerticalGradientMeter::resized()
 {
-    const auto& theme = colors();
-    const auto bounds = getLocalBounds().toFloat();
-    gradient2 = juce::ColourGradient { theme.meterFill.withAlpha (150.0f / 255.0f),
-                                       bounds.getBottomLeft(),
-                                       theme.meterFill.brighter (0.2f).withAlpha (230.0f / 255.0f),
-                                       bounds.getTopLeft(),
-                                       false };
+    rebuildPeakGradient();
 }

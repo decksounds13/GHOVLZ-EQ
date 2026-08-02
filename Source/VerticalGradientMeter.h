@@ -43,7 +43,16 @@ public:
     void mouseDown (const juce::MouseEvent& event) override;
     void timerCallback() override;
 
-    void setThemeColors (SharedResources* r) noexcept { themeColors = r; repaint(); }
+    void setThemeColors (SharedResources* r) noexcept;
+
+    /** When false, meter bar fills the component (no peak readout / channel label). */
+    void setTextChromeVisible (bool shouldShow) noexcept;
+    bool isTextChromeVisible() const noexcept { return textChromeVisible; }
+
+    float getDisplayedReadoutDb() const noexcept { return readoutDb; }
+    float getDisplayedPeakDb() const noexcept { return displayedPeakDb; }
+    float getDisplayedRmsDb() const noexcept { return displayedRmsDb; }
+    float getPeakHoldDb() const noexcept { return peakHoldDb; }
 
 private:
     enum class MeterMode { Peak = 0, Rms = 1, PeakAndRms = 2 };
@@ -57,6 +66,7 @@ private:
     juce::Rectangle<float> getClipIndicatorBounds() const;
     juce::Rectangle<float> getReadoutBounds() const;
     juce::Rectangle<float> getChannelLabelBounds() const;
+    void rebuildPeakGradient();
 
     const SharedColors& colors() const noexcept;
 
@@ -66,6 +76,7 @@ private:
     MeterClipState& clipState;
     int slot = 0;
     SharedResources* themeColors = nullptr;
+    bool textChromeVisible = true;
 
     juce::ColourGradient gradient2{};
 

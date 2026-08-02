@@ -76,6 +76,7 @@ namespace ThemeColorRegistry
         { "Meter Background",             "MeterBackground",                    &SharedColors::meterBackground },
         { "Meter Clip",                   "MeterClip",                          &SharedColors::meterClip },
         { "Meter Fill",                   "MeterFill",                          &SharedColors::meterFill },
+        { "Meter Readout Text",           "MeterReadoutText",                   &SharedColors::meterReadoutText },
 
         // Oscilloscope / Goniometer (shared backgrounds + path)
         { "Osc/Gon Background",           "OscBackground",                      &SharedColors::oscBackground },
@@ -87,6 +88,9 @@ namespace ThemeColorRegistry
         // Corr meter colours stay gon-only:
         { "Gon Corr Negative",            "GonCorrNegative",                    &SharedColors::gonCorrNegative },
         { "Gon Corr Positive",            "GonCorrPositive",                    &SharedColors::gonCorrPositive },
+
+        // Scope arrange
+        { "Scope Drop Outline",           "ScopeDropOutline",                   &SharedColors::scopeDropOutline },
 
         // Mod
         { "Mod Accent",                   "ModAccent",                          &SharedColors::modAccent },
@@ -149,7 +153,8 @@ SharedColors::RandomizeModule SharedColors::moduleForDisplayName (const juce::St
         || displayName.startsWith ("Meter ")
         || displayName.startsWith ("Osc ")
         || displayName.startsWith ("Gon ")
-        || displayName.startsWith ("Osc/Gon "))
+        || displayName.startsWith ("Osc/Gon ")
+        || displayName.startsWith ("Scope "))
         return RandomizeModule::Graph;
 
     return RandomizeModule::Other;

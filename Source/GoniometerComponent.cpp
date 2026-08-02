@@ -11,6 +11,20 @@ GoniometerComponent::~GoniometerComponent()
     stopTimer();
 }
 
+void GoniometerComponent::setColourRamp (const GradientRamp& ramp)
+{
+    colourRamp = ramp;
+    hasCustomRamp = ramp.isUsable();
+    repaint();
+}
+
+void GoniometerComponent::clearColourRamp()
+{
+    hasCustomRamp = false;
+    colourRamp = {};
+    repaint();
+}
+
 const SharedColors& GoniometerComponent::colors() const noexcept
 {
     static const SharedColors defaultColors;
@@ -217,7 +231,7 @@ void GoniometerComponent::updateCorrelationFromRing()
     correlationDisplay += a * (correlation - correlationDisplay);
 }
 
-void GoniometerComponent::buildGlowPath (juce::Path& outPath) const
+void GoniometerComponent::buildGlowPath (juce::Path& outPath, float pointRadius) const
 {
     outPath.clear();
 
@@ -232,32 +246,26 @@ void GoniometerComponent::buildGlowPath (juce::Path& outPath) const
     const bool highQuality = isHighQuality();
     const int n = juce::jmin (highQuality ? kMaxPlotSamplesPerTick : kMaxPlotSamplesPerTick / 3, cap);
     const int w = writePos.load (std::memory_order_acquire);
-    int pos = (w - n + cap) % cap;
 
     const float cx = plot.getCentreX();
     const float cy = plot.getCentreY();
     const float scale = plot.getWidth() * 0.42f;
-    const int step = highQuality ? 1 : 2;
+    // Cap glow primitives — Melatonin caches per-path; a 2k-point Lissajous stroke was unusable.
+    constexpr int kMaxGlowPoints = 280;
+    const int step = juce::jmax (highQuality ? 2 : 4, n / kMaxGlowPoints);
+    const float r = juce::jmax (1.25f, pointRadius);
 
-    bool started = false;
+    int pos = (w - n + cap) % cap;
     for (int i = 0; i < n; i += step)
     {
-        const float L = ringL[(size_t) ((pos + i) % cap)];
-        const float R = ringR[(size_t) ((pos + i) % cap)];
+        const float L = ringL[(size_t) pos];
+        const float R = ringR[(size_t) pos];
         const float mid = 0.70710678f * (L + R);
         const float side = 0.70710678f * (L - R);
         const float x = cx + side * scale;
         const float y = cy - mid * scale;
-
-        if (! started)
-        {
-            outPath.startNewSubPath (x, y);
-            started = true;
-        }
-        else
-        {
-            outPath.lineTo (x, y);
-        }
+        outPath.addEllipse (x - r, y - r, r * 2.0f, r * 2.0f);
+        pos = (pos + step) % cap;
     }
 }
 
@@ -299,8 +307,9 @@ void GoniometerComponent::fadeAndPlotTrail()
     const float point = juce::jmax (1.0f, lineWidth * (highQuality ? 0.85f : 0.7f));
 
     const auto& theme = colors();
-    const auto ink = theme.oscLine.withMultipliedAlpha (lineOpacity);
-    tg.setColour (ink);
+    const bool useRamp = loadFloatParam ("GON_USE_RAMP_ID", 1.0f) > 0.5f
+                         && hasCustomRamp && colourRamp.isUsable();
+    const auto solidInk = theme.oscLine.withMultipliedAlpha (lineOpacity);
 
     const int step = highQuality ? 1 : 2;
     for (int i = 0; i < n; i += step)
@@ -311,11 +320,37 @@ void GoniometerComponent::fadeAndPlotTrail()
         const float side = 0.70710678f * (L - R);
         const float x = cx + side * scale;
         const float y = cy - mid * scale;
+        if (useRamp)
+        {
+            float driver = 0.0f;
+            switch (colourRamp.mapMode)
+            {
+                case GradientRamp::MapMode::gonDiversionX:
+                    driver = juce::jlimit (0.0f, 1.0f, std::abs (side));
+                    break;
+                case GradientRamp::MapMode::gonDiversionY:
+                    driver = juce::jlimit (0.0f, 1.0f, std::abs (mid));
+                    break;
+                case GradientRamp::MapMode::gonDiversionXY:
+                    driver = juce::jlimit (0.0f, 1.0f, std::sqrt (mid * mid + side * side));
+                    break;
+                case GradientRamp::MapMode::gonLoudness:
+                default:
+                    // Loudness (and legacy intensity maps): sample amplitude.
+                    driver = juce::jlimit (0.0f, 1.0f, std::sqrt (L * L + R * R));
+                    break;
+            }
+            tg.setColour (colourRamp.colourForDriver (driver).withMultipliedAlpha (lineOpacity));
+        }
+        else
+        {
+            tg.setColour (solidInk);
+        }
         tg.fillEllipse (x - point * 0.5f, y - point * 0.5f, point, point);
         pos = (pos + step) % cap;
     }
 
-    buildGlowPath (lastGlowPath);
+    buildGlowPath (lastGlowPath, point);
 }
 
 void GoniometerComponent::timerCallback()
@@ -333,6 +368,12 @@ void GoniometerComponent::resized()
     ensureTrailImage (getPlotBounds().getWidth());
 }
 
+void GoniometerComponent::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && onShowContextMenu != nullptr)
+        onShowContextMenu();
+}
+
 void GoniometerComponent::paint (juce::Graphics& g)
 {
     const auto& theme = colors();
@@ -341,10 +382,6 @@ void GoniometerComponent::paint (juce::Graphics& g)
     if (plot.isEmpty())
         return;
 
-    const float lineOpacity = juce::jlimit (0.0f, 1.0f, loadFloatParam ("OSC_LINE_OPACITY_ID", 100.0f) * 0.01f);
-    const float lineWidth = juce::jmax (0.5f,
-                                        loadFloatParam (expanded ? "GON_EXPANDED_LINE_WIDTH_ID" : "GON_LINE_WIDTH_ID",
-                                                        expanded ? 2.6f : 1.6f));
     const bool glowEnabled = loadFloatParam (expanded ? "GON_EXPANDED_GLOW_ENABLE_ID" : "GON_GLOW_ENABLE_ID", 1.0f) > 0.5f;
     const float glowOpacity = juce::jlimit (0.0f, 1.0f,
                                             loadFloatParam (expanded ? "GON_EXPANDED_GLOW_OPACITY_ID" : "GON_GLOW_OPACITY_ID", 75.0f) * 0.01f);
@@ -354,7 +391,6 @@ void GoniometerComponent::paint (juce::Graphics& g)
     const float glowSpread = juce::jmax (0.0f,
                                          loadFloatParam (expanded ? "GON_EXPANDED_GLOW_SPREAD_ID" : "GON_GLOW_SPREAD_ID",
                                                          expanded ? 2.0f : 1.0f));
-    const bool highQuality = isHighQuality();
 
     g.setColour (theme.oscBackground.withAlpha (expanded ? 90.0f / 255.0f : 210.0f / 255.0f));
     g.fillRoundedRectangle (plot, expanded ? 2.0f : 3.0f);
@@ -374,13 +410,9 @@ void GoniometerComponent::paint (juce::Graphics& g)
     if (glowEnabled && SharedResources::glowShadowEffectsEnabled()
         && glowOpacity > 0.05f && glowRadius > 0.5f && ! lastGlowPath.isEmpty())
     {
-        const auto bloom = theme.oscGlow.withAlpha (glowOpacity * 0.45f);
-        const auto core = theme.oscGlow.brighter (0.15f).withAlpha (glowOpacity * 0.75f);
-        const juce::PathStrokeType glowStroke (juce::jmax (1.0f, lineWidth + 0.5f),
-                                               juce::PathStrokeType::curved,
-                                               juce::PathStrokeType::rounded);
-        juce::Path glowShape;
-        glowStroke.createStrokedPath (glowShape, lastGlowPath);
+        // Filled point cloud — Melatonin only expands/blurs fills (spread is a no-op on strokes).
+        const auto bloom = theme.oscGlow.withAlpha (glowOpacity * 0.50f);
+        const auto core = theme.oscGlow.brighter (0.15f).withAlpha (glowOpacity * 0.80f);
 
         plotGlow.setRadius ((double) glowRadius, 0);
         plotGlow.setSpread ((double) glowSpread, 0);
@@ -392,7 +424,8 @@ void GoniometerComponent::paint (juce::Graphics& g)
         plotGlow.setOffset (0, 0, 1);
         plotGlow.setColor (core, 1);
 
-        plotGlow.render (g, glowShape, expanded || ! highQuality);
+        // Fast path: glow path changes every frame (same as stereogram / expanded osc).
+        plotGlow.render (g, lastGlowPath, true);
     }
 
     if (trailImage.isValid())
@@ -412,8 +445,6 @@ void GoniometerComponent::paint (juce::Graphics& g)
                     juce::Rectangle<float> (plot.getRight() - 14.0f, plot.getBottom() - fontH - 4.0f, 12.0f, fontH + 2.0f),
                     juce::Justification::centred, false);
     }
-
-    juce::ignoreUnused (lineOpacity);
 
     if (! corr.isEmpty())
     {

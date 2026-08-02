@@ -21,6 +21,8 @@ public:
     // ========================================================================
     void setScaleType (const bool);
     virtual void setColour (const juce::Colour&);
+    void setFillColour (const juce::Colour& colour) noexcept { m_fillColour = colour; }
+    void setHoldColour (const juce::Colour& colour) noexcept { m_holdColour = colour; }
     void setBinOverlayColour (juce::Colour colour) noexcept { m_binOverlay.setBaseColour (colour); }
     void setBinOverlayColourRamp (const GradientRamp* ramp) noexcept { m_binOverlay.setColourRamp (ramp); }
     void setSpectrumFillRamp (const GradientRamp* ramp) noexcept { m_spectrumFillRamp = ramp; }
@@ -56,6 +58,8 @@ protected:
     };
     std::atomic<bool> m_isLogarithmicScale { true };
     juce::Colour m_colour { 0xff48bde8 };
+    juce::Colour m_fillColour { juce::Colour::fromRGBA (115, 100, 63, 90) };
+    juce::Colour m_holdColour { juce::Colour::fromRGBA (230, 170, 132, 105) };
 
     // Scratch buffers reused across paint calls (avoid per-frame heap churn).
     std::vector<float> m_columnPre;

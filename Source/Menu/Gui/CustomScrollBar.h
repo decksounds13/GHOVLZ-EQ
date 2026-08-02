@@ -8,7 +8,14 @@ class CustomScrollBar : public juce::Component,
                         public juce::ScrollBar::Listener
 {
 public:
-    explicit CustomScrollBar (juce::ScrollBar& scrollBarToAttachTo);
+    enum class Orientation
+    {
+        vertical,
+        horizontal
+    };
+
+    explicit CustomScrollBar (juce::ScrollBar& scrollBarToAttachTo,
+                              Orientation orientationIn = Orientation::vertical);
     explicit CustomScrollBar (juce::ListBox& listBoxToAttachTo);
     ~CustomScrollBar() override;
 
@@ -25,19 +32,24 @@ public:
     void setThumbOutlineColour (const juce::Colour& colour);
     void setTrackBackgroundColour (const juce::Colour& colour);
 
+    Orientation getOrientation() const noexcept { return orientation; }
+    /** True when the attached bar can actually scroll. */
+    bool isScrollable() const noexcept { return getMaxRangeStart() > 0.0; }
+
 private:
     juce::ScrollBar& scrollBar;
+    Orientation orientation = Orientation::vertical;
     double thumbPosition = 0.0;
     double thumbSize = 1.0;
     bool isDragging = false;
-    int dragGrabOffsetY = 0;
+    int dragGrabOffset = 0;
 
     juce::Colour thumbBackgroundColour = juce::Colour::fromRGB (200, 200, 200);
     juce::Colour thumbOutlineColour = juce::Colour::fromRGB (10, 10, 10);
     juce::Colour trackBackgroundColour = juce::Colour::fromRGB (100, 100, 100);
 
     juce::Rectangle<int> getThumbBounds() const;
-    void setRangeStartFromThumbY (int thumbY);
+    void setRangeStartFromThumbPos (int thumbPos);
     double getMaxRangeStart() const;
 
     melatonin::InnerShadow innerShadow1 = { { juce::Colours::black.withAlpha (0.8f), 4, { 2, 0 } } };

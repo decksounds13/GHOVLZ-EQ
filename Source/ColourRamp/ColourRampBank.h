@@ -14,6 +14,10 @@ public:
         fftBars = 0,
         spectrogram,
         spectrumFill,
+        oscilloscope,
+        goniometer,
+        stereogram,
+        histogram,
         numTargets
     };
 
@@ -38,11 +42,21 @@ public:
     void notifyPreview();
 
     /**
+        Replace one ramp with 2–10 random poles (Appearance H/S/V limits) and enable Use.
+        varyAlpha: spectrum-fill style translucent stops.
+    */
+    static void randomizeRamp (GradientRamp& ramp,
+                               const SharedColors& colours,
+                               bool varyAlpha = false);
+
+    /**
         2–10 random poles using Appearance H/S/V limits; enables Use.
-        Optional per-target mask (fft / spectrogram / fill). Null = all three.
+        Optional per-target mask; maskCount limits how many entries are read (legacy dice uses 3).
+        Null mask = all targets.
     */
     void randomizeRamps (const SharedColors& colours,
-                         const bool* targetEnabled3 = nullptr);
+                         const bool* targetEnabled = nullptr,
+                         int maskCount = 0);
     /** Turn Use off on all targets so built-in schemes (e.g. Heat) show again. */
     void disableAllCustomRamps();
     /** Turn Use off on one target (e.g. when Colour Scheme combo changes). */

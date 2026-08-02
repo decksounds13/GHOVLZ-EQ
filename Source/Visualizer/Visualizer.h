@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <functional>
 #include "Layers/Grid.h"
 #include "Layers/Graph.h"
 #include "Analyser.h"
@@ -27,8 +28,10 @@ public:
     // ========================================================================
     void paint( juce::Graphics & ) override;
     void resized() override;
-    
-    
+    void mouseDown (juce::MouseEvent const&) override;
+
+    std::function<void()> onShowContextMenu;
+
     // ========================================================================
     void setBackgroundColour( const juce::Colour & );
     

@@ -2,14 +2,19 @@
 
 #include <JuceHeader.h>
 
+#include "../../ColourRamp/ColourRampBank.h"
+#include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
 #include "CustomScrollBar.h"
 
-class GoniometerSettingsComponent : public juce::Component
+class GoniometerSettingsComponent : public juce::Component,
+                                    private juce::ChangeListener
 {
 public:
-    GoniometerSettingsComponent (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+    GoniometerSettingsComponent (SharedResources& resources,
+                                 juce::AudioProcessorValueTreeState& state,
+                                 ColourRampBank& colourRamps);
     ~GoniometerSettingsComponent() override;
 
     void paint (juce::Graphics& g) override;
@@ -20,14 +25,20 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
     class Content : public juce::Component
     {
     public:
-        Content (SharedResources& resources, juce::AudioProcessorValueTreeState& state);
+        Content (SharedResources& resources,
+                 juce::AudioProcessorValueTreeState& state,
+                 ColourRampBank& colourRamps);
         ~Content() override;
 
         void resized() override;
         int getPreferredHeight() const;
+        void syncGradientFromBank();
+        void syncRampControlsEnabled();
 
     private:
         void styleSlider (juce::Slider& slider);
@@ -42,10 +53,16 @@ private:
 
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
+        ColourRampBank& colourRamps;
         ComboBoxLookAndFeel qualityLookAndFeel;
 
         juce::Label titleLabel;
         juce::TextButton saveDefaultButton { "Save Default" };
+
+        juce::ToggleButton useRampToggle { "Use colour ramp" };
+        std::unique_ptr<ButtonAttachment> useRampAttachment;
+        juce::Label gradientLabel;
+        GradientStripEditor gradientEditor;
 
         juce::Label qualityLabel;
         juce::ComboBox qualityCombo;
@@ -89,6 +106,7 @@ private:
     };
 
     SharedResources& sharedResources;
+    ColourRampBank& colourRamps;
     Content content;
     juce::Viewport viewport;
     std::unique_ptr<CustomScrollBar> customScrollBar;

@@ -9,6 +9,8 @@ Visualizer::Visualizer(
 {
     addAndMakeVisible( m_grid );
     addAndMakeVisible( m_graph );
+    m_grid.addMouseListener (this, true);
+    m_graph.addMouseListener (this, true);
     applyThemeColours();
 }
 
@@ -35,7 +37,8 @@ void Visualizer::applyThemeColours()
     m_grid.setGridColour (c.spectrumGrid);
     m_grid.setTextColour (c.spectrumText);
     m_graph.setGraphColour (c.spectrumLine.withAlpha (0.6f));
-    m_graph.setGraphMaximumsColour (c.spectrumLine.withAlpha (0.6f));
+    m_graph.setGraphFillColour (c.spectrumFill.withAlpha (0.55f));
+    m_graph.setGraphMaximumsColour (c.spectrumLine.brighter (0.2f).withAlpha (0.65f));
     m_graph.setBinOverlayColour (c.spectrumFill);
 }
 
@@ -79,6 +82,12 @@ void Visualizer::resized()
     
     m_grid.setBounds( area );
     m_graph.setBounds( area );
+}
+
+void Visualizer::mouseDown (juce::MouseEvent const& e)
+{
+    if (e.mods.isPopupMenu() && onShowContextMenu != nullptr)
+        onShowContextMenu();
 }
 
 

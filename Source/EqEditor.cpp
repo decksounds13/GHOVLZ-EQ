@@ -842,11 +842,23 @@ void EqEditor::resized()
     const float scale = (float) getWidth() / (float) designWidth;
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
 
-    if (uiCompact)
+    const bool scopeOn = isScopeModeActive();
+    const bool scopeStrip = scopeOn && mainComponent != nullptr
+                            && mainComponent->isScopeStripLayout();
+
+    // Track Scope window size continuously so leave/re-enter restores host or edge resizes.
+    if (holdingSizeBeforeScope && scopeOn)
+    {
+        appliedScopeStrip = scopeStrip;
+        captureCurrentScopeWindowSize();
+    }
+
+    // Compact UI, or Scope strip: MainComponent owns the full editor (no faceplate stack / black void).
+    if (uiCompact || scopeStrip)
     {
         int mainH = getHeight();
         int modH = 0;
-        if (modPanelOpen && modSection != nullptr)
+        if (! scopeStrip && modPanelOpen && modSection != nullptr)
         {
             modH = getModPanelHeightForGraphHeight (0);
             mainH = juce::jmax (120, getHeight() - modH);
@@ -857,8 +869,10 @@ void EqEditor::resized()
 
         if (modSection != nullptr)
         {
-            modSection->setVisible (modPanelOpen);
-            if (modPanelOpen)
+            // Mod panel stays off the strip Scope window.
+            const bool showMod = modPanelOpen && ! scopeStrip;
+            modSection->setVisible (showMod);
+            if (showMod)
             {
                 // Use the fixed mod height (not leftover), so resize can't stretch the LFO panel.
                 modSection->setBounds (0, mainH, getWidth(), modH);
@@ -1411,6 +1425,14 @@ void EqEditor::layoutBrandWordmark (int outClusterLeftX)
 
 void EqEditor::layoutHelpTooltipsButton()
 {
+    // Strip Scope: hide ? — Scope / Settings / UI / Dice overlays remain.
+    if (mainComponent != nullptr && mainComponent->isScopeMode() && mainComponent->isScopeStripLayout())
+    {
+        helpTooltipsButton.setVisible (false);
+        helpTooltipsButton.setBounds ({});
+        return;
+    }
+
     helpTooltipsButton.setVisible (true);
     addAndMakeVisible (helpTooltipsButton);
 
@@ -1460,6 +1482,14 @@ void EqEditor::layoutHelpTooltipsButton()
 
 void EqEditor::layoutPhaseModeCombo()
 {
+    // Scope Pre / strip: no DSP phase control.
+    if (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome())
+    {
+        phaseModeCombo.setVisible (false);
+        phaseModeCombo.setBounds ({});
+        return;
+    }
+
     phaseModeCombo.setVisible (true);
     addAndMakeVisible (phaseModeCombo);
 
@@ -1491,27 +1521,78 @@ void EqEditor::layoutScopeModeButton()
     const int btnSize = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
     const int btnW = juce::jmax (btnSize, px (uiCompact ? 52.0f : 58.0f));
     const int gap = px (6.0f);
-    const int y = sideCheckButton.getY() + (sideCheckButton.getHeight() - btnSize) / 2;
 
-    int x = sideCheckButton.getRight() + gap;
-    if (! uiCompact && onOffButton8 != nullptr && onOffButton8->getWidth() > 0)
+    const bool stripOverlay = mainComponent != nullptr && mainComponent->isScopeMode()
+                              && mainComponent->isScopeStripLayout();
+
+    int x = 0;
+    int y = 0;
+    if (stripOverlay)
     {
-        // Expanded faceplate: under band 6 (column of onOffButton8) so it clears the logo.
-        x = onOffButton8->getBounds().getCentreX() - btnW / 2;
+        // Square control, bottom-left — matches UI / Dice / Arrange at top-left (pad 8).
+        x = px (8.0f);
+        y = juce::jmax (0, getHeight() - btnSize - px (8.0f));
+        scopeModeButton.setBounds (x, y, btnSize, btnSize);
+        scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
+                                        juce::dontSendNotification);
+        scopeModeButton.setIdleAlpha (0.5f);
+        scopeModeButton.toFront (false);
+        return;
     }
-    else if (sideCheckAmountSlider.isVisible())
+    else
     {
-        x = juce::jmax (x, sideCheckLpKnob.getRight() + gap);
+        // Anchor Y to help; X after SideCheck / Phase when those are shown, else after ?.
+        y = helpTooltipsButton.getY() + (helpTooltipsButton.getHeight() - btnSize) / 2;
+        x = helpTooltipsButton.getRight() + gap;
+        if (sideCheckButton.isVisible() && sideCheckButton.getWidth() > 0)
+            x = sideCheckButton.getRight() + gap;
+        else if (phaseModeCombo.isVisible() && phaseModeCombo.getWidth() > 0)
+            x = phaseModeCombo.getRight() + gap;
+
+        if (! uiCompact && onOffButton8 != nullptr && onOffButton8->getWidth() > 0
+            && ! (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome()))
+        {
+            // Expanded faceplate: under band 6 (column of onOffButton8) so it clears the logo.
+            x = onOffButton8->getBounds().getCentreX() - btnW / 2;
+        }
+        else if (sideCheckAmountSlider.isVisible())
+        {
+            x = juce::jmax (x, sideCheckLpKnob.getRight() + gap);
+        }
     }
 
     scopeModeButton.setBounds (x, y, btnW, btnSize);
     scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
                                     juce::dontSendNotification);
+    scopeModeButton.setIdleAlpha (stripOverlay ? 0.5f : 1.0f);
     scopeModeButton.toFront (false);
 }
 
 void EqEditor::layoutSideCheckButton()
 {
+    // Scope Pre / strip: hide Side Check and its DSP controls.
+    if (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome())
+    {
+        sideCheckButton.setVisible (false);
+        sideCheckAmountSlider.setVisible (false);
+        sideCheckSpeedButton.setVisible (false);
+        sideCheckHqButton.setVisible (false);
+        sideCheckHpKnob.setVisible (false);
+        sideCheckLpKnob.setVisible (false);
+        sideCheckHpLabel.setVisible (false);
+        sideCheckLpLabel.setVisible (false);
+        sideCheckButton.setBounds ({});
+        sideCheckAmountSlider.setBounds ({});
+        sideCheckSpeedButton.setBounds ({});
+        sideCheckHqButton.setBounds ({});
+        sideCheckHpKnob.setBounds ({});
+        sideCheckLpKnob.setBounds ({});
+        sideCheckHpLabel.setBounds ({});
+        sideCheckLpLabel.setBounds ({});
+        layoutScopeModeButton();
+        return;
+    }
+
     sideCheckButton.setVisible (true);
     addAndMakeVisible (sideCheckButton);
 
@@ -1594,6 +1675,18 @@ void EqEditor::layoutSideCheckButton()
 
 void EqEditor::updateSideCheckAmountVisibility()
 {
+    if (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome())
+    {
+        sideCheckAmountSlider.setVisible (false);
+        sideCheckSpeedButton.setVisible (false);
+        sideCheckHqButton.setVisible (false);
+        sideCheckHpKnob.setVisible (false);
+        sideCheckLpKnob.setVisible (false);
+        sideCheckHpLabel.setVisible (false);
+        sideCheckLpLabel.setVisible (false);
+        return;
+    }
+
     const bool scOn = sideCheckButton.getToggleState()
         || (audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId()) != nullptr
             && audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId())->load() > 0.5f);
@@ -1693,6 +1786,83 @@ bool EqEditor::isFaceplateSuppressed() const noexcept
     return uiCompact || isScopeModeActive();
 }
 
+int EqEditor::getScopeStripWindowHeight (int width) const
+{
+    const float scale = (float) juce::jmax (1, width) / (float) designWidth;
+    // Edge-to-edge strip window — overlays sit on the panes.
+    const int stripDesign = mainComponent != nullptr ? mainComponent->getScopeStripHeightPx() : 200;
+    return juce::jmax (1, juce::roundToInt ((float) stripDesign * scale));
+}
+
+void EqEditor::captureCurrentScopeWindowSize()
+{
+    const int w = getWidth();
+    const int h = getHeight();
+    if (w <= 0 || h <= 0)
+        return;
+
+    lastScopeWidth = w;
+    lastScopeHeight = h;
+    lastScopeWasStrip = appliedScopeStrip;
+    if (appliedScopeStrip)
+    {
+        lastStripScopeWidth = w;
+        lastStripScopeHeight = h;
+        if (mainComponent != nullptr)
+            mainComponent->syncStripHeightFromWindow (w, h);
+    }
+    else
+    {
+        lastTiledScopeWidth = w;
+        lastTiledScopeHeight = h;
+    }
+}
+
+void EqEditor::applyStripScopeWindowSize()
+{
+    resizeConstrainer.setFixedAspectRatio (0.0);
+    resizeConstrainer.setSizeLimits (600, 100, 2400, 2000);
+    setConstrainer (&resizeConstrainer);
+
+    if (lastStripScopeWidth >= 600 && lastStripScopeHeight >= 100)
+    {
+        if (mainComponent != nullptr)
+            mainComponent->syncStripHeightFromWindow (lastStripScopeWidth, lastStripScopeHeight);
+        setSize (juce::jlimit (600, 2400, lastStripScopeWidth),
+                 juce::jlimit (100, 2000, lastStripScopeHeight));
+        return;
+    }
+
+    const int stripW = juce::jlimit (600, 2400, getWidth() > 0 ? getWidth() : designWidth);
+    setSize (stripW, getScopeStripWindowHeight (stripW));
+}
+
+void EqEditor::applyTiledScopeWindowSize()
+{
+    resizeConstrainer.setFixedAspectRatio (0.0);
+    resizeConstrainer.setSizeLimits (900, 400, 2400, 1600);
+    setConstrainer (&resizeConstrainer);
+
+    if (lastTiledScopeWidth >= 900 && lastTiledScopeHeight >= 400)
+    {
+        setSize (juce::jlimit (900, 2400, lastTiledScopeWidth),
+                 juce::jlimit (400, 1600, lastTiledScopeHeight));
+        return;
+    }
+
+    const int w = getWidth() > 0 ? getWidth() : designWidth;
+    if (uiCompact)
+    {
+        const int graphH = getGraphHeightForWidth (w);
+        const int modH = modPanelOpen ? getModPanelHeightForGraphHeight (graphH) : 0;
+        setSize (w, graphH + modH);
+    }
+    else
+    {
+        setSize (w, getExpandedEditorHeight (w, modPanelOpen));
+    }
+}
+
 void EqEditor::syncScopeModeLayout()
 {
     if (getWidth() <= 0 || getHeight() <= 0)
@@ -1704,9 +1874,74 @@ void EqEditor::syncScopeModeLayout()
     if (showFaceplate)
         updateBandFaceplateGainVisibility();
 
-    if (! uiCompact)
+    const int w = getWidth() > 0 ? getWidth() : designWidth;
+    const bool scopeOn = isScopeModeActive();
+    const bool stripOn = scopeOn && mainComponent != nullptr && mainComponent->isScopeStripLayout();
+
+    if (scopeOn)
     {
-        const int w = getWidth() > 0 ? getWidth() : designWidth;
+        const bool enteringScope = ! holdingSizeBeforeScope;
+        const bool switchingArrange = holdingSizeBeforeScope && (appliedScopeStrip != stripOn);
+
+        if (enteringScope)
+        {
+            savedEditorWidth = getWidth();
+            savedEditorHeight = getHeight();
+            holdingSizeBeforeScope = true;
+        }
+        else if (switchingArrange)
+        {
+            // Persist the arrange mode we're leaving before applying the other.
+            captureCurrentScopeWindowSize();
+        }
+
+        if (stripOn)
+        {
+            if (enteringScope || switchingArrange)
+            {
+                applyStripScopeWindowSize();
+            }
+            else
+            {
+                // Already in strip (e.g. edge-drag height change): keep width, apply design height.
+                resizeConstrainer.setFixedAspectRatio (0.0);
+                resizeConstrainer.setSizeLimits (600, 100, 2400, 2000);
+                setConstrainer (&resizeConstrainer);
+                const int stripW = juce::jlimit (600, 2400, getWidth());
+                setSize (stripW, getScopeStripWindowHeight (stripW));
+            }
+        }
+        else if (enteringScope || switchingArrange)
+        {
+            applyTiledScopeWindowSize();
+        }
+
+        appliedScopeStrip = stripOn;
+    }
+    else if (holdingSizeBeforeScope)
+    {
+        captureCurrentScopeWindowSize();
+        holdingSizeBeforeScope = false;
+        appliedScopeStrip = false;
+        const int rw = savedEditorWidth > 0 ? savedEditorWidth : designWidth;
+        const int rh = savedEditorHeight > 0 ? savedEditorHeight
+                                             : (uiCompact ? getGraphHeightForWidth (rw)
+                                                          : getExpandedEditorHeight (rw, modPanelOpen));
+        if (uiCompact)
+        {
+            setConstrainer (nullptr);
+            setSize (rw, rh);
+        }
+        else
+        {
+            resizeConstrainer.setFixedAspectRatio (0.0);
+            resizeConstrainer.setSizeLimits (900, 500, 2400, 1600);
+            setConstrainer (&resizeConstrainer);
+            setSize (rw, juce::jmax (rh, getExpandedEditorHeight (rw, modPanelOpen)));
+        }
+    }
+    else if (! uiCompact)
+    {
         setSize (w, getExpandedEditorHeight (w, modPanelOpen));
     }
 
@@ -1723,14 +1958,54 @@ void EqEditor::showScopeTapMenu()
         return;
 
     const bool tapPost = mainComponent->isScopeTapPost();
+    const bool stripOn = mainComponent->isScopeStripLayout();
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addSectionHeader ("Scope tap");
     menu.addItem (1, "Pre (analyzer / DSP off)", true, ! tapPost);
     menu.addItem (2, "Post (EQ DSP on)", true, tapPost);
+    menu.addSeparator();
+    menu.addSectionHeader ("Arrange");
+    menu.addItem (3, "Tiled (quad / grid)", true, ! stripOn);
+    menu.addItem (4, "Strip (side-by-side)", true, stripOn);
+    menu.addSeparator();
+    menu.addSectionHeader (stripOn ? "Strip layout presets" : "Tiled layout presets");
+    menu.addItem (5, "Save scope layout...");
+    auto modePresets = ScopeLayoutPresets::loadForMode (stripOn);
+    std::vector<juce::String> presetNames;
+    int presetItemId = 100;
+    if (modePresets.empty())
+    {
+        menu.addItem (-1, "(no saved presets)", false, false);
+    }
+    else
+    {
+        for (const auto& p : modePresets)
+        {
+            presetNames.push_back (p.name);
+            menu.addItem (presetItemId++, p.name);
+        }
+    }
+    menu.addSeparator();
+    menu.addSectionHeader ("Modules");
+
+    const auto defaults = ScopeModules::defaultEnabledOrder();
+    int itemId = 10;
+    std::vector<ScopeModuleId> menuIds;
+    for (int mi = 0; mi < ScopeModules::kNumModules; ++mi)
+    {
+        const auto id = static_cast<ScopeModuleId> (mi);
+        menuIds.push_back (id);
+        const bool checked = mainComponent->isScopeModuleEnabled (id);
+        const bool isDefault = std::find (defaults.begin(), defaults.end(), id) != defaults.end();
+        juce::String label = ScopeModules::idToLabel (id);
+        if (! isDefault)
+            label += " (optional)";
+        menu.addItem (itemId++, label, true, checked);
+    }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&scopeModeButton),
-                        [safe = juce::Component::SafePointer<EqEditor> (this)] (int result)
+                        [safe = juce::Component::SafePointer<EqEditor> (this), menuIds, presetNames, stripOn] (int result)
                         {
                             if (safe == nullptr || safe->mainComponent == nullptr || result <= 0)
                                 return;
@@ -1739,6 +2014,60 @@ void EqEditor::showScopeTapMenu()
                                 safe->mainComponent->setScopeTapPost (false, true);
                             else if (result == 2)
                                 safe->mainComponent->setScopeTapPost (true, true);
+                            else if (result == 3)
+                                safe->mainComponent->setScopeStripLayout (false, true);
+                            else if (result == 4)
+                                safe->mainComponent->setScopeStripLayout (true, true);
+                            else if (result == 5)
+                            {
+                                auto* aw = new juce::AlertWindow ("Save scope layout",
+                                                                  stripOn ? "Name this Strip layout preset:"
+                                                                          : "Name this Tiled layout preset:",
+                                                                  juce::AlertWindow::NoIcon);
+                                aw->addTextEditor ("name", "My Layout", "Name");
+                                aw->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                                juce::Component::SafePointer<juce::AlertWindow> awSafe (aw);
+                                aw->enterModalState (true,
+                                    juce::ModalCallbackFunction::create (
+                                        [safe, awSafe] (int r)
+                                        {
+                                            if (safe == nullptr || safe->mainComponent == nullptr || r != 1
+                                                || awSafe == nullptr)
+                                                return;
+                                            const auto name = awSafe->getTextEditorContents ("name").trim();
+                                            if (name.isEmpty())
+                                                return;
+                                            auto preset = safe->mainComponent->captureScopeLayoutPreset (name);
+                                            ScopeLayoutPresets::savePreset (preset);
+                                        }),
+                                    true);
+                            }
+                            else if (result >= 100)
+                            {
+                                const int idx = result - 100;
+                                if (idx >= 0 && idx < (int) presetNames.size())
+                                {
+                                    for (const auto& p : ScopeLayoutPresets::loadForMode (stripOn))
+                                    {
+                                        if (p.name == presetNames[(size_t) idx])
+                                        {
+                                            safe->mainComponent->applyScopeLayoutPreset (p, true);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            else if (result >= 10 && result < 100)
+                            {
+                                const int idx = result - 10;
+                                if (idx >= 0 && idx < (int) menuIds.size())
+                                {
+                                    const auto id = menuIds[(size_t) idx];
+                                    const bool nowEnabled = safe->mainComponent->isScopeModuleEnabled (id);
+                                    safe->mainComponent->setScopeModuleEnabled (id, ! nowEnabled, true);
+                                }
+                            }
                         });
 }
 
@@ -1748,6 +2077,12 @@ void EqEditor::loadUiPrefs()
     bool ecoEnabled = false;
     bool disableGlow = false;
     bool scopeTapPost = false; // default Pre (analyzer)
+    int scopeStripH = 200;
+    bool scopeStrip = false;
+    float scopeSplitX = 0.5f;
+    float scopeSplitY = 0.5f;
+    juce::String scopeFractionsStr;
+    std::vector<ScopeModuleId> scopeModules = ScopeModules::defaultEnabledOrder();
     bool randFaceplate = true, randGraph = true, randMenu = true;
     bool randRampFft = true, randRampSpec = true, randRampFill = true;
 
@@ -1762,6 +2097,61 @@ void EqEditor::loadUiPrefs()
                 ecoEnabled = xml->getBoolAttribute ("ecoEnabled", false);
                 disableGlow = xml->getBoolAttribute ("disableGlowShadowEffects", false);
                 scopeTapPost = xml->getBoolAttribute ("scopeTapPost", false);
+                scopeStripH = xml->getIntAttribute ("scopeStripHeightPx", 200);
+                scopeStrip = xml->getBoolAttribute ("scopeStripLayout", false);
+                scopeSplitX = (float) xml->getDoubleAttribute ("scopeSplitX", 0.5);
+                scopeSplitY = (float) xml->getDoubleAttribute ("scopeSplitY", 0.5);
+                scopeFractionsStr = xml->getStringAttribute ("scopeStripFractions", {});
+                lastScopeWidth = xml->getIntAttribute ("lastScopeWidth", 0);
+                lastScopeHeight = xml->getIntAttribute ("lastScopeHeight", 0);
+                lastScopeWasStrip = xml->getBoolAttribute ("lastScopeWasStrip", false);
+                lastStripScopeWidth = xml->getIntAttribute ("lastStripScopeWidth", 0);
+                lastStripScopeHeight = xml->getIntAttribute ("lastStripScopeHeight", 0);
+                lastTiledScopeWidth = xml->getIntAttribute ("lastTiledScopeWidth", 0);
+                lastTiledScopeHeight = xml->getIntAttribute ("lastTiledScopeHeight", 0);
+                // Migrate older single-size prefs into the per-arrange slots.
+                if (lastStripScopeWidth <= 0 && lastStripScopeHeight <= 0
+                    && lastScopeWasStrip && lastScopeWidth > 0 && lastScopeHeight > 0)
+                {
+                    lastStripScopeWidth = lastScopeWidth;
+                    lastStripScopeHeight = lastScopeHeight;
+                }
+                if (lastTiledScopeWidth <= 0 && lastTiledScopeHeight <= 0
+                    && ! lastScopeWasStrip && lastScopeWidth > 0 && lastScopeHeight > 0)
+                {
+                    lastTiledScopeWidth = lastScopeWidth;
+                    lastTiledScopeHeight = lastScopeHeight;
+                }
+                if (xml->hasAttribute ("scopeModules"))
+                {
+                    scopeModules = ScopeModules::orderFromString (xml->getStringAttribute ("scopeModules"));
+                }
+                else
+                {
+                    const auto orderStr = xml->getStringAttribute ("scopePaneOrder", "0,1,2,3");
+                    auto parts = juce::StringArray::fromTokens (orderStr, ",", {});
+                    if (parts.size() == 4)
+                    {
+                        static const ScopeModuleId legacyMap[4] = {
+                            ScopeModuleId::goniometer,
+                            ScopeModuleId::spectrum,
+                            ScopeModuleId::oscilloscope,
+                            ScopeModuleId::spectrogram
+                        };
+                        scopeModules.clear();
+                        std::array<bool, ScopeModules::kNumModules> seen {};
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            const int v = parts[i].getIntValue();
+                            if (v < 0 || v > 3 || seen[(size_t) legacyMap[v]])
+                                continue;
+                            seen[(size_t) legacyMap[v]] = true;
+                            scopeModules.push_back (legacyMap[v]);
+                        }
+                        if (scopeModules.empty())
+                            scopeModules = ScopeModules::defaultEnabledOrder();
+                    }
+                }
                 randFaceplate = xml->getBoolAttribute ("randFaceplateMod", true);
                 randGraph = xml->getBoolAttribute ("randGraph", true);
                 randMenu = xml->getBoolAttribute ("randMenu", true);
@@ -1779,7 +2169,14 @@ void EqEditor::loadUiPrefs()
         mainComponent->setEcoMode (ecoEnabled, false);
         mainComponent->setDisableGlowShadowEffects (disableGlow, false);
         mainComponent->setScopeTapPost (scopeTapPost, false);
-        // Scope is a session view — always start in EQ mode, never restore from prefs.
+        mainComponent->setScopeEnabledOrder (scopeModules, false);
+        mainComponent->setScopeStripHeightPx (scopeStripH, false);
+        mainComponent->setScopeStripLayout (scopeStrip, false);
+        mainComponent->setScopeSplitNorm (scopeSplitX, scopeSplitY);
+        if (scopeFractionsStr.isNotEmpty())
+            mainComponent->setScopeStripFractions (
+                ScopeLayoutPresets::decodeFractions (scopeFractionsStr, (int) scopeModules.size()));
+        // Scope itself stays off at load; geometry above is restored when Scope is re-opened.
         mainComponent->setScopeMode (false, false);
 
         auto& c = mainComponent->getSharedResources().sharedColors;
@@ -1804,6 +2201,14 @@ void EqEditor::saveUiPrefs() const
     xml->setAttribute ("scopeTapPost", mainComponent != nullptr && mainComponent->isScopeTapPost());
     if (mainComponent != nullptr)
     {
+        xml->setAttribute ("scopeStripHeightPx", mainComponent->getScopeStripHeightPx());
+        xml->setAttribute ("scopeStripLayout", mainComponent->isScopeStripLayout());
+        xml->setAttribute ("scopeSplitX", (double) mainComponent->getScopeSplitX());
+        xml->setAttribute ("scopeSplitY", (double) mainComponent->getScopeSplitY());
+        xml->setAttribute ("scopeStripFractions",
+                           ScopeLayoutPresets::encodeFractions (mainComponent->getScopeStripFractions()));
+        xml->setAttribute ("scopeModules",
+                           ScopeModules::orderToString (mainComponent->getScopeEnabledOrder()));
         const auto& c = mainComponent->getSharedResources().sharedColors;
         xml->setAttribute ("randFaceplateMod", c.randomizeFaceplateMod);
         xml->setAttribute ("randGraph", c.randomizeGraphModule);
@@ -1812,6 +2217,13 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("randRampSpec", c.randomizeRampSpectrogram);
         xml->setAttribute ("randRampFill", c.randomizeRampSpectrumFill);
     }
+    xml->setAttribute ("lastScopeWidth", lastScopeWidth);
+    xml->setAttribute ("lastScopeHeight", lastScopeHeight);
+    xml->setAttribute ("lastScopeWasStrip", lastScopeWasStrip);
+    xml->setAttribute ("lastStripScopeWidth", lastStripScopeWidth);
+    xml->setAttribute ("lastStripScopeHeight", lastStripScopeHeight);
+    xml->setAttribute ("lastTiledScopeWidth", lastTiledScopeWidth);
+    xml->setAttribute ("lastTiledScopeHeight", lastTiledScopeHeight);
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
     xml->setAttribute ("faceplateBank", faceplateBank);
 
@@ -2474,10 +2886,11 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
     brandWordmark.setVisible (true);
     brandWordmark.setCompactLook (! shouldShow);
 
-    // Help (?), Phase, and Side Check stay visible in both compact and expanded.
+    // Help (?) stays; Phase / Side Check hide in Scope Pre or strip.
     helpTooltipsButton.setVisible (true);
-    phaseModeCombo.setVisible (true);
-    sideCheckButton.setVisible (true);
+    const bool hideDsp = mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome();
+    phaseModeCombo.setVisible (! hideDsp);
+    sideCheckButton.setVisible (! hideDsp);
     updateSideCheckAmountVisibility();
 }
 

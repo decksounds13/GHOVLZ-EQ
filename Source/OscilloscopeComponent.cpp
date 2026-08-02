@@ -12,6 +12,20 @@ OscilloscopeComponent::~OscilloscopeComponent()
     stopTimer();
 }
 
+void OscilloscopeComponent::setColourRamp (const GradientRamp& ramp)
+{
+    colourRamp = ramp;
+    hasCustomRamp = ramp.isUsable();
+    repaint();
+}
+
+void OscilloscopeComponent::clearColourRamp()
+{
+    hasCustomRamp = false;
+    colourRamp = {};
+    repaint();
+}
+
 const SharedColors& OscilloscopeComponent::colors() const noexcept
 {
     static const SharedColors defaultColors;
@@ -45,6 +59,9 @@ void OscilloscopeComponent::resetDisplay()
     colMinSum = 1.0f; colMaxSum = -1.0f;
     colMinL = 1.0f; colMaxL = -1.0f;
     colMinR = 1.0f; colMaxR = -1.0f;
+    colPrevSum = 0.0f;
+    colHavePrev = false;
+    colZeroCrossings = 0;
     lastZoomIndex = -1;
     lastWindowSamples = -1;
     lastColumnCount = -1;
@@ -255,6 +272,13 @@ void OscilloscopeComponent::advanceDisplayFromRing()
         colMaxL = juce::jmax (colMaxL, l);
         colMinR = juce::jmin (colMinR, r);
         colMaxR = juce::jmax (colMaxR, r);
+
+        if (colHavePrev
+            && ((colPrevSum >= 0.0f) != (sum >= 0.0f))
+            && (std::abs (colPrevSum) + std::abs (sum) > 1.0e-5f))
+            ++colZeroCrossings;
+        colPrevSum = sum;
+        colHavePrev = true;
         ++samplesInColumn;
 
         ++ringReadPos;
@@ -271,6 +295,14 @@ void OscilloscopeComponent::advanceDisplayFromRing()
             baked.maxL = juce::jlimit (-1.0f, 1.0f, colMaxL);
             baked.minR = juce::jlimit (-1.0f, 1.0f, colMinR);
             baked.maxR = juce::jlimit (-1.0f, 1.0f, colMaxR);
+            baked.peakAmp = juce::jlimit (0.0f, 1.0f,
+                juce::jmax (juce::jmax (std::abs (baked.minSum), std::abs (baked.maxSum)),
+                            juce::jmax (juce::jmax (std::abs (baked.minL), std::abs (baked.maxL)),
+                                        juce::jmax (std::abs (baked.minR), std::abs (baked.maxR)))));
+            // ~0.35 crossings/sample ≈ dense HF; clamp to a readable 0..1 driver.
+            baked.freqNorm = juce::jlimit (0.0f, 1.0f,
+                                           (float) colZeroCrossings
+                                               / juce::jmax (1.0f, (float) samplesPerColumn * 0.35f));
             baked.valid = true;
 
             if (scrollMode)
@@ -292,6 +324,9 @@ void OscilloscopeComponent::advanceDisplayFromRing()
             colMinSum = 1.0f; colMaxSum = -1.0f;
             colMinL = 1.0f; colMaxL = -1.0f;
             colMinR = 1.0f; colMaxR = -1.0f;
+            colPrevSum = 0.0f;
+            colHavePrev = false;
+            colZeroCrossings = 0;
         }
     }
 }
@@ -320,6 +355,12 @@ void OscilloscopeComponent::mouseDown (const juce::MouseEvent& e)
 
 void OscilloscopeComponent::showContextMenu()
 {
+    if (onShowContextMenu != nullptr)
+    {
+        onShowContextMenu();
+        return;
+    }
+
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addItem (1, "Redraw in place", true, ! scrollMode);
@@ -409,6 +450,7 @@ void OscilloscopeComponent::strokeWaveform (juce::Graphics& g, const juce::Path&
         waveGlow.render (g, glowShape, expanded || ! highQuality);
     }
 
+    // Solid theme stroke only — amplitude/frequency ramps paint per-column elsewhere.
     g.setColour (lineColour);
     g.strokePath (waveform, stroke);
 }
@@ -432,6 +474,9 @@ void OscilloscopeComponent::paintEnvelopeLane (juce::Graphics& g,
     const float xScale = plot.getWidth() / (float) juce::jmax (1, n);
     const auto& theme = colors();
     const auto lineColour = theme.oscLine.withMultipliedAlpha (lineOpacity);
+    const bool useRamp = loadFloatParam ("OSC_USE_RAMP_ID", 1.0f) > 0.5f
+                         && hasCustomRamp && colourRamp.isUsable();
+    const bool rampByFreq = useRamp && colourRamp.isOscilloscopeFrequencyMap();
 
     auto sampleMax = [useLeft, useRight] (const Column& col) -> float
     {
@@ -445,6 +490,19 @@ void OscilloscopeComponent::paintEnvelopeLane (juce::Graphics& g,
         if (useRight) return col.minR;
         return col.minSum;
     };
+    auto columnPeak = [useLeft, useRight] (const Column& col) -> float
+    {
+        if (useLeft)
+            return juce::jlimit (0.0f, 1.0f, juce::jmax (std::abs (col.minL), std::abs (col.maxL)));
+        if (useRight)
+            return juce::jlimit (0.0f, 1.0f, juce::jmax (std::abs (col.minR), std::abs (col.maxR)));
+        return col.peakAmp;
+    };
+    auto rampColourFor = [&] (const Column& col) -> juce::Colour
+    {
+        const float driver = rampByFreq ? col.freqNorm : columnPeak (col);
+        return colourRamp.colourForDriver (driver).withMultipliedAlpha (lineOpacity);
+    };
 
     // In-place (non-scroll) mode stores columns as a circular buffer. Spatially
     // adjacent cells on either side of writeColumn are not temporal neighbours —
@@ -452,6 +510,103 @@ void OscilloscopeComponent::paintEnvelopeLane (juce::Graphics& g,
     const int seamColumn = (! scrollMode && n > 1)
                                ? juce::jlimit (0, n - 1, writeColumn)
                                : -1;
+
+    auto paintRampStubs = [&] (int runStart, int runEnd, bool withGlow)
+    {
+        // Soft fill under the envelope (theme tint — ramp colours stay on the stroke).
+        if (highQuality && runEnd > runStart)
+        {
+            juce::Path band;
+            for (int i = runStart; i < runEnd; ++i)
+            {
+                const auto& col = columns[(size_t) i];
+                const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+                const float yMax = plot.getY() + (0.5f - 0.5f * sampleMax (col)) * plot.getHeight();
+                if (i == runStart)
+                    band.startNewSubPath (px, yMax);
+                else
+                    band.lineTo (px, yMax);
+            }
+            for (int i = runEnd - 1; i >= runStart; --i)
+            {
+                const auto& col = columns[(size_t) i];
+                const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+                const float yMin = plot.getY() + (0.5f - 0.5f * sampleMin (col)) * plot.getHeight();
+                band.lineTo (px, yMin);
+            }
+            band.closeSubPath();
+            g.setColour (lineColour.withMultipliedAlpha (0.18f));
+            g.fillPath (band);
+        }
+
+        if (withGlow && glowEnabled)
+        {
+            juce::Path stubs;
+            for (int i = runStart; i < runEnd; ++i)
+            {
+                const auto& col = columns[(size_t) i];
+                const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+                appendColumnStub (stubs, px,
+                                  plot.getY() + (0.5f - 0.5f * sampleMax (col)) * plot.getHeight(),
+                                  plot.getY() + (0.5f - 0.5f * sampleMin (col)) * plot.getHeight());
+            }
+            strokeWaveform (g, stubs, pathWidth, lineOpacity, highQuality,
+                            true, glowOpacity, glowRadius, glowSpread);
+        }
+
+        const juce::PathStrokeType stroke (pathWidth,
+                                           juce::PathStrokeType::curved,
+                                           juce::PathStrokeType::rounded);
+        for (int i = runStart; i < runEnd; ++i)
+        {
+            const auto& col = columns[(size_t) i];
+            if (! col.valid)
+                continue;
+
+            const float px = plot.getX() + ((float) i + 0.5f) * xScale;
+            float yMax = plot.getY() + (0.5f - 0.5f * sampleMax (col)) * plot.getHeight();
+            float yMin = plot.getY() + (0.5f - 0.5f * sampleMin (col)) * plot.getHeight();
+            if (std::abs (yMin - yMax) < 1.0f)
+            {
+                const float mid = 0.5f * (yMin + yMax);
+                yMax = mid - 0.5f;
+                yMin = mid + 0.5f;
+            }
+
+            juce::Path stub;
+            stub.startNewSubPath (px, yMax);
+            stub.lineTo (px, yMin);
+            g.setColour (rampColourFor (col));
+            g.strokePath (stub, stroke);
+        }
+    };
+
+    if (useRamp)
+    {
+        if (! highQuality)
+        {
+            paintRampStubs (0, n, glowEnabled);
+            return;
+        }
+
+        int x = 0;
+        while (x < n)
+        {
+            while (x < n && ! columns[(size_t) x].valid)
+                ++x;
+            if (x >= n)
+                break;
+            const int runStart = x;
+            ++x;
+            while (x < n
+                   && columns[(size_t) x].valid
+                   && ! (seamColumn >= 0 && x == seamColumn))
+                ++x;
+            paintRampStubs (runStart, x, glowEnabled);
+            glowEnabled = false; // glow once for the first run only
+        }
+        return;
+    }
 
     if (! highQuality)
     {

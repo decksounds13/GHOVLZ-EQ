@@ -296,7 +296,9 @@ void SpectrogramComponent::setExpanded (bool shouldExpand) noexcept
     expanded = shouldExpand;
     setOpaque (expanded); // pane fills the rect; compact uses rounded transparent corners
     setInterceptsMouseClicks (! expanded, ! expanded);
-    // Do not wipe history — pane / fullscreen is only a paint stretch of the same image.
+    // Compact vs pane share history, but compact needs a brightness re-colourise
+    // so the strip doesn't read dimmer than the expanded overlay.
+    rerenderScrollFromHistory();
     repaint();
 }
 
@@ -391,8 +393,9 @@ void SpectrogramComponent::setCustomColourRamp (const GradientRamp* ramp) noexce
     customColourRamp = ramp;
     customRampRevision = ramp != nullptr ? ramp->revision : 0;
     rebuildColourLut();
-    screenSoftDirty = true;
-    imageDirty = true;
+    // Recolour the whole scroll history immediately — don't wait for new columns
+    // (deposit used to stamp lastLookFingerprint and skip the full re-tint).
+    rerenderScrollFromHistory();
     repaint();
 }
 
@@ -943,7 +946,9 @@ void SpectrogramComponent::colouriseColumnIntoImage (int x, const float* dbRows,
     if (! scrollImage.isValid() || dbRows == nullptr || x < 0 || x >= internalW)
         return;
 
-    const float dbGain = juce::Decibels::gainToDecibels (juce::jmax (brightness, 1.0e-3f), -100.0f);
+    // Compact strip is heavily downscaled — lift gain hard so it matches the expanded pane.
+    const float brightAdj = expanded ? brightness : brightness * 2.75f;
+    const float dbGain = juce::Decibels::gainToDecibels (juce::jmax (brightAdj, 1.0e-3f), -100.0f);
     const float denom = juce::jmax (1.0f, maxDb - minDb);
 
     juce::Image::BitmapData pixels (scrollImage, juce::Image::BitmapData::readWrite);
@@ -1165,7 +1170,8 @@ void SpectrogramComponent::appendDisplayColumn (const float* displayDbRows)
         rebuildColourLut();
 
     colouriseColumnIntoImage (x, displayDbRows, brightness, minDb, maxDb);
-    lastLookFingerprint = lookFingerprint();
+    // Do not stamp lastLookFingerprint here — a mid-frame LUT/ramp change would
+    // hide the mismatch and leave already-drawn columns on the old palette.
 
     imageDirty = true;
     screenSoftDirty = true;
@@ -1195,9 +1201,8 @@ void SpectrogramComponent::timerCallback()
     if (! enabled.load (std::memory_order_relaxed))
         return;
 
-    advanceFromRing();
-
-    // Look params (scheme / brightness / floor / ceiling / soften) recolour the whole strip.
+    // Apply look/ramp changes before depositing new columns so history is
+    // recoloured first (and fingerprint isn't stamped by a single new column).
     const auto fp = lookFingerprint();
     if (fp != lastLookFingerprint)
     {
@@ -1215,6 +1220,8 @@ void SpectrogramComponent::timerCallback()
         rerenderScrollFromHistory();
     }
 
+    advanceFromRing();
+
     if (imageDirty)
     {
         imageDirty = false;
@@ -1226,6 +1233,12 @@ void SpectrogramComponent::resized()
 {
     // Internal scroll buffer is resolution-setting sized; screen soften tracks component.
     screenSoftDirty = true;
+}
+
+void SpectrogramComponent::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && onShowContextMenu != nullptr)
+        onShowContextMenu();
 }
 
 void SpectrogramComponent::rebuildScreenSoftened()
@@ -1244,7 +1257,8 @@ void SpectrogramComponent::rebuildScreenSoftened()
         screenImage = juce::Image (juce::Image::ARGB, area.getWidth(), area.getHeight(), true);
     }
 
-    screenImage.clear (screenImage.getBounds(), juce::Colours::transparentBlack);
+    // Opaque clear — transparent holes + blur made the compact strip look washed/dim.
+    screenImage.clear (screenImage.getBounds(), juce::Colours::black);
 
     {
         juce::Graphics ig (screenImage);
@@ -1253,7 +1267,10 @@ void SpectrogramComponent::rebuildScreenSoftened()
     }
 
     // Soften 0..100 → blur radius 0..5 (screen pixels). 0 skips Melatonin path.
-    const float soften = juce::jlimit (0.0f, 100.0f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f));
+    // Compact: no soften — blur + downscale was washing the strip dark.
+    const float soften = expanded
+                             ? juce::jlimit (0.0f, 100.0f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f))
+                             : 0.0f;
     const int radius = juce::roundToInt (soften * 0.05f); // 0..5
 
     if (radius > 0)
@@ -1335,7 +1352,10 @@ void SpectrogramComponent::paint (juce::Graphics& g)
     if (scrollImage.isValid())
     {
         const auto imageBounds = bounds;
-        const float soften = juce::jlimit (0.0f, 100.0f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f));
+        // Compact: skip soften entirely (blur reads as dim on the tiny strip).
+        const float soften = expanded
+                                 ? juce::jlimit (0.0f, 100.0f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f))
+                                 : 0.0f;
         const int radius = juce::roundToInt (soften * 0.05f);
 
         juce::Graphics::ScopedSaveState state (g);
@@ -1344,7 +1364,9 @@ void SpectrogramComponent::paint (juce::Graphics& g)
 
         if (radius <= 0)
         {
-            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            // lowResamplingQuality keeps bright peaks when shrinking the scroll buffer.
+            g.setImageResamplingQuality (expanded ? juce::Graphics::highResamplingQuality
+                                                  : juce::Graphics::lowResamplingQuality);
             g.drawImage (scrollImage, imageBounds);
         }
         else

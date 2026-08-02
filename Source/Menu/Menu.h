@@ -1,9 +1,12 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <memory>
+#include <vector>
 #include "../Menu/SharedResources.h"
 #include "../TextButtonLookAndFeel.h"
 #include "Gui/AppearanceComponent.h"
+#include "Gui/CustomScrollBar.h"
 #include "../Menu/Gui/CustomTabBarLookAndFeel.h"
 #include "../ColourRamp/ColourRampBank.h"
 #include "MelatoninBlur/melatonin/shadows.h"
@@ -19,6 +22,8 @@ public:
     static constexpr int kContentWidth = 800;          // 1200 * 2/3
     static constexpr int kContentHeight = 447;         // ~850 / 1.9
     static constexpr int kDragBarHeight = 24;
+    static constexpr int kScrollBarThickness = 11;
+    static constexpr int kTabsPerPage = 6;
 
     Menu (SharedResources& resources,
           juce::AudioProcessorValueTreeState& state,
@@ -49,7 +54,89 @@ public:
     }
 
 private:
+    /** Chevron pager for tab pages (same idea as faceplate bank arrows). */
+    class TabPageArrowButton : public juce::Button
+    {
+    public:
+        explicit TabPageArrowButton (bool pointRightIn)
+            : juce::Button (pointRightIn ? "tabNext" : "tabPrev"),
+              pointRight (pointRightIn)
+        {
+            setClickingTogglesState (false);
+        }
+
+        void setChromeColours (juce::Colour fill, juce::Colour ink) noexcept
+        {
+            fillColour = fill;
+            inkColour = ink;
+            repaint();
+        }
+
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override
+        {
+            auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+            auto fill = fillColour;
+            auto ink = inkColour;
+            if (! isEnabled())
+            {
+                fill = fill.withMultipliedAlpha (0.45f);
+                ink = ink.withMultipliedAlpha (0.4f);
+            }
+            else if (down)
+            {
+                fill = fill.brighter (0.15f);
+                ink = ink.brighter (0.1f);
+            }
+            else if (highlighted)
+            {
+                fill = fill.brighter (0.1f);
+                ink = ink.brighter (0.08f);
+            }
+
+            g.setColour (fill);
+            g.fillRoundedRectangle (bounds, 3.0f);
+            g.setColour (ink.withAlpha (0.35f));
+            g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
+
+            const float cx = bounds.getCentreX();
+            const float cy = bounds.getCentreY();
+            const float h = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.22f;
+            juce::Path chevron;
+            if (pointRight)
+            {
+                chevron.startNewSubPath (cx - h * 0.55f, cy - h);
+                chevron.lineTo (cx + h * 0.55f, cy);
+                chevron.lineTo (cx - h * 0.55f, cy + h);
+            }
+            else
+            {
+                chevron.startNewSubPath (cx + h * 0.55f, cy - h);
+                chevron.lineTo (cx - h * 0.55f, cy);
+                chevron.lineTo (cx + h * 0.55f, cy + h);
+            }
+            g.setColour (ink);
+            g.strokePath (chevron, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved,
+                                                         juce::PathStrokeType::rounded));
+        }
+
+    private:
+        bool pointRight = false;
+        juce::Colour fillColour { juce::Colours::black.withAlpha (0.35f) };
+        juce::Colour inkColour { juce::Colours::whitesmoke.withAlpha (0.9f) };
+    };
+
+    struct TabEntry
+    {
+        juce::String name;
+        juce::Component* content = nullptr; // owned by ownedTabContents
+    };
+
     bool isInDragBar (juce::Point<int> localPos) const noexcept;
+    void syncScrollBarColours();
+    void layoutScrollBars();
+    void rebuildTabsForCurrentPage();
+    void setTabPage (int page);
+    int getNumTabPages() const noexcept;
 
     SharedResources& sharedResources;
     TextButtonLookAndFeel& textButtonLookAndFeel;
@@ -60,6 +147,14 @@ private:
     juce::Viewport viewport;
     juce::Component contentPanel;
     juce::TabbedComponent tabBar { juce::TabbedButtonBar::TabsAtTop };
+    std::unique_ptr<CustomScrollBar> verticalScrollBar;
+    std::unique_ptr<CustomScrollBar> horizontalScrollBar;
+
+    std::vector<std::unique_ptr<juce::Component>> ownedTabContents;
+    std::vector<TabEntry> allTabs;
+    int tabPageIndex = 0;
+    TabPageArrowButton tabPrevButton { false };
+    TabPageArrowButton tabNextButton { true };
 
     juce::ComponentBoundsConstrainer constrainer;
     std::unique_ptr<juce::ResizableCornerComponent> resizer;

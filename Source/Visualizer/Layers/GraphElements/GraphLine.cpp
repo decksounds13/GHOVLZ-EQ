@@ -346,34 +346,34 @@ void GraphLine::drawFrame (juce::Graphics& g)
         return curve;
     };
 
-    // --- Hold (gold/orange) ---
+    // --- Hold (max) — theme Spectrum Line / Fill ---
     if (drawSpectrumPaths && showHoldFill && needHold)
     {
-        g.setColour (juce::Colour::fromRGBA (169, 100, 20, 90).withMultipliedAlpha (fillOpacity));
+        g.setColour (m_fillColour.darker (0.15f).withMultipliedAlpha (fillOpacity * 0.85f));
         g.fillPath (closeFill (holdCurve));
     }
 
     if (drawSpectrumPaths && showHoldCurve && needHold)
     {
-        g.setColour (juce::Colour::fromRGBA (230, 170, 132, 105).withMultipliedAlpha (lineOpacity));
+        g.setColour (m_holdColour.withMultipliedAlpha (lineOpacity));
         g.strokePath (holdCurve.createPathWithRoundedCorners (kCornerRound), juce::PathStrokeType (pathWidth));
     }
 
-    // --- Pre (dark brown, sits behind post) ---
+    // --- Pre (darker variant of fill/line, sits behind post) ---
     if (drawSpectrumPaths && showPreFill && needPre)
     {
-        g.setColour (juce::Colour::fromRGBA (58, 42, 32, 110).withMultipliedAlpha (fillOpacity));
+        g.setColour (m_fillColour.darker (0.55f).withMultipliedAlpha (fillOpacity * 0.7f));
         g.fillPath (closeFill (preCurve));
     }
 
     if (drawSpectrumPaths && showPreCurve && needPre)
     {
-        g.setColour (juce::Colour::fromRGBA (105, 78, 58, 140).withMultipliedAlpha (lineOpacity * 0.85f));
+        g.setColour (m_colour.darker (0.45f).withMultipliedAlpha (lineOpacity * 0.85f));
         g.strokePath (preCurve.createPathWithRoundedCorners (kCornerRound),
                       juce::PathStrokeType (juce::jmax (0.75f, pathWidth * 0.85f)));
     }
 
-    // --- Post fill (240-ish warm fill under the live curve) ---
+    // --- Post fill ---
     if (drawSpectrumPaths && showPostFill && needPost)
     {
         const auto fillPath = closeFill (postCurve);
@@ -386,7 +386,7 @@ void GraphLine::drawFrame (juce::Graphics& g)
         }
         else
         {
-            g.setColour (juce::Colour::fromRGBA (115, 100, 63, 90).withMultipliedAlpha (fillOpacity));
+            g.setColour (m_fillColour.withMultipliedAlpha (fillOpacity));
             g.fillPath (fillPath);
         }
     }
@@ -423,8 +423,8 @@ void GraphLine::drawFrame (juce::Graphics& g)
 
             if (glowAlpha > 0.05f && glowRadius > 0.5f)
             {
-                const auto bloomColour = juce::Colour::fromRGBA (187, 219, 132, 130).withAlpha (glowAlpha * 0.45f);
-                const auto coreColour = juce::Colour::fromRGBA (230, 255, 170, 180).withAlpha (glowAlpha * 0.75f);
+                const auto bloomColour = m_colour.brighter (0.15f).withAlpha (glowAlpha * 0.45f);
+                const auto coreColour = m_colour.brighter (0.45f).withAlpha (glowAlpha * 0.75f);
 
                 m_curveGlow.setRadius ((double) juce::jlimit (0.0f, 80.0f, glowRadius), 0);
                 m_curveGlow.setSpread ((double) juce::jlimit (0.0f, 40.0f, glowSpread), 0);
@@ -441,8 +441,7 @@ void GraphLine::drawFrame (juce::Graphics& g)
             }
         }
 
-        // Match 240 post stroke colour closely.
-        g.setColour (juce::Colour::fromRGBA (187, 219, 132, 105).withMultipliedAlpha (lineOpacity));
+        g.setColour (m_colour.withMultipliedAlpha (lineOpacity));
         g.strokePath (roundedPost, juce::PathStrokeType (pathWidth));
     }
 }

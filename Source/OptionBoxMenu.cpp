@@ -2,9 +2,47 @@
 #include "OnOffButton1.h"
 #include "FilterType.h"
 #include "EqBand.h"
+#include "EqProcessor.h"
 
-OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
-    : treeState(state) // Initialize treeState with the passed state parameter
+namespace
+{
+    void paintDynThresholdLevelMeter (juce::Graphics& g,
+                                      juce::Rectangle<float> meterBounds,
+                                      float envDb,
+                                      float threshDb,
+                                      juce::Colour meterFill,
+                                      juce::Colour meterBackground)
+    {
+        // Match DynThreshold param span so the thumb lines up with the level.
+        constexpr float kFloorDb = -120.0f;
+        constexpr float kCeilDb = 0.0f;
+
+        auto r = meterBounds.reduced (1.0f, 1.0f);
+        if (r.getWidth() < 2.0f || r.getHeight() < 4.0f)
+            return;
+
+        g.setColour (meterBackground.withAlpha (0.94f));
+        g.fillRoundedRectangle (r, 2.0f);
+        g.setColour (meterFill.withMultipliedBrightness (0.35f).withAlpha (0.78f));
+        g.drawRoundedRectangle (r, 2.0f, 1.0f);
+
+        const float levelNorm = juce::jlimit (0.0f, 1.0f, (envDb - kFloorDb) / (kCeilDb - kFloorDb));
+        auto fill = r.removeFromBottom (r.getHeight() * levelNorm);
+        const bool triggered = envDb >= threshDb;
+        g.setColour (triggered ? meterFill.brighter (0.25f).withAlpha (0.92f)
+                               : meterFill.withAlpha (0.47f));
+        g.fillRoundedRectangle (fill, 1.5f);
+
+        const float threshNorm = juce::jlimit (0.0f, 1.0f, (threshDb - kFloorDb) / (kCeilDb - kFloorDb));
+        const float y = meterBounds.getBottom() - 1.0f - threshNorm * (meterBounds.getHeight() - 2.0f);
+        g.setColour (juce::Colours::whitesmoke.withAlpha (triggered ? 0.8f : 0.35f));
+        g.drawLine (meterBounds.getX() + 0.5f, y, meterBounds.getRight() - 0.5f, y, 1.0f);
+    }
+}
+
+OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProcessor& proc)
+    : treeState (state),
+      processor (proc)
 {
     onOffButton1 = std::make_unique<OnOffButton1>(treeState, "highpassOnOff");
 
@@ -207,12 +245,14 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
     spectralPerBandLatticeButton.setLookAndFeel (&myTextButtonLookAndFeel);
     addChildComponent (spectralPerBandLatticeButton);
 
-    dynThresholdSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    dynThresholdSlider.setSliderStyle (juce::Slider::LinearVertical);
     dynThresholdSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-    dynThresholdSlider.setTooltip ("Threshold - level where dynamic EQ starts engaging");
-    dynThresholdSlider.setColour (juce::Slider::backgroundColourId, juce::Colour::fromRGBA (40, 35, 28, 255));
-    dynThresholdSlider.setColour (juce::Slider::trackColourId, juce::Colour::fromRGBA (180, 150, 55, 220));
+    dynThresholdSlider.setTooltip ("Threshold - signal fills from the bottom; processing engages when level reaches the thumb");
+    // Transparent track so the level meter painted underneath is visible.
+    dynThresholdSlider.setColour (juce::Slider::backgroundColourId, juce::Colours::transparentBlack);
+    dynThresholdSlider.setColour (juce::Slider::trackColourId, juce::Colours::transparentBlack);
     dynThresholdSlider.setColour (juce::Slider::thumbColourId, juce::Colour::fromRGBA (220, 200, 120, 255));
+    dynThresholdSlider.setOpaque (false);
     dynThresholdSlider.addListener (this);
     addChildComponent (dynThresholdSlider);
 
@@ -291,6 +331,7 @@ OptionBoxMenu::OptionBoxMenu(juce::AudioProcessorValueTreeState& state)
 
 OptionBoxMenu::~OptionBoxMenu()
 {
+    stopTimer();
     treeState.removeParameterListener (SpectralPerBandLattice::enabledParamId(), this);
     listenToCurrentBandOnOff (false);
     listenToCurrentBandDynamic (false);
@@ -515,6 +556,31 @@ void OptionBoxMenu::paint(juce::Graphics& g)
     outerThinOutlinePath.addRoundedRectangle (0.0f, 0.0f, (float) getWidth(), (float) getHeight(), cornerRadius);
     g.setColour (c.pluginButtonAccent.withAlpha (0.45f));
     g.strokePath (outerThinOutlinePath, juce::PathStrokeType (thinOutlineWidth));
+
+    paintDynThresholdMeter (g);
+}
+
+void OptionBoxMenu::paintDynThresholdMeter (juce::Graphics& g)
+{
+    if (! dynThresholdSlider.isVisible())
+        return;
+
+    const auto& c = colors();
+    paintDynThresholdLevelMeter (g,
+                                 dynThresholdSlider.getBounds().toFloat(),
+                                 displayedDynEnvelopeDb,
+                                 (float) dynThresholdSlider.getValue(),
+                                 c.meterFill,
+                                 c.meterBackground);
+}
+
+void OptionBoxMenu::timerCallback()
+{
+    if (! dynThresholdSlider.isVisible() || currentBandIndex < 0)
+        return;
+
+    displayedDynEnvelopeDb = processor.getPublishedDynEnvelopeDb (currentBandIndex);
+    repaint (dynThresholdSlider.getBounds().expanded (2));
 }
 
 void OptionBoxMenu::resized()
@@ -751,24 +817,18 @@ void OptionBoxMenu::resized()
         spectralSatDriveKnob.setBounds (resX, packY, ssDriveSize, ssDriveSize);
     }
 
-    // Threshold: beside D when S is off; below Expand when both D and S are on.
-    const int threshH = 14;
-    const int dynMaxRight = juce::jmin (knob2Bounds.getX() - 4, optionBoxRight);
+    // Vertical threshold: top at the old D-row Y, bottom of the OptionBox with padding.
+    // Narrow (~10px) so it reads as a compressor-style meter+thumb.
+    constexpr int kThreshW = 10;
+    constexpr int kThreshBottomPad = 10;
+    const int threshTop = dynRowY;
+    const int threshH = juce::jmax (24, getHeight() - threshTop - kThreshBottomPad);
+    int threshX = dynamicButton.getRight() + 4;
     if (sOn)
-    {
-        const int threshY = juce::jmax (spectralExpandButton.getBottom(),
-                                        juce::jmax (spectralPackButton.getBottom(),
-                                                    spectralSatButton.getBottom())) + 3;
-        const int threshX = dynRowX;
-        dynThresholdSlider.setBounds (threshX, threshY, juce::jmax (0, dynMaxRight - threshX), threshH);
-    }
-    else
-    {
-        const int threshX = dynamicButton.getRight() + 4;
-        const int threshW = juce::jmax (0, dynMaxRight - threshX);
-        const int threshY = dynRowY + (dynBtnH - threshH) / 2;
-        dynThresholdSlider.setBounds (threshX, threshY, threshW, threshH);
-    }
+        threshX = amountX + sliderColW + 4;
+    threshX += 5; // nudge right of the D / spectral pack column
+    threshX = juce::jmin (threshX, optionBoxRight - kThreshW);
+    dynThresholdSlider.setBounds (threshX, threshTop, kThreshW, threshH);
 
     // A / R — face is arSize; ms readout sits in a short band under the face (hover).
     // A/R letter labels use a tight gap under the face (not under the readout band).
@@ -1316,6 +1376,13 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
 
     // Threshold is D-only; A/R shared by D, S, and Sidechain.
     dynThresholdSlider.setVisible (dOn);
+    if (dOn)
+        startTimerHz (30);
+    else
+        stopTimer();
+
+    gainLabel.setText (dOn ? "Range" : "Gain", juce::dontSendNotification);
+
     const bool showAR = dOn || sOn || scOn;
     attackKnob.setVisible (showAR);
     releaseKnob.setVisible (showAR);

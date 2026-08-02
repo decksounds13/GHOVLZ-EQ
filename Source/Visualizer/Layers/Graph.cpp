@@ -221,6 +221,12 @@ void Graph::setGraphColour( juce::Colour colour )
     m_graphBins.setColour (colour);
 }
 
+void Graph::setGraphFillColour (juce::Colour colour)
+{
+    m_graphLine.setFillColour (colour);
+    m_graphMaximumsLine.setFillColour (colour);
+}
+
 void Graph::setBinOverlayColour (juce::Colour colour)
 {
     m_graphLine.setBinOverlayColour (colour);
@@ -240,6 +246,8 @@ void Graph::setGraphMaximumsColour( juce::Colour colour )
 {
     m_volumeMaximumsGraphColour = colour;
     m_graphMaximumsLine.setColour (colour);
+    m_graphLine.setHoldColour (colour);
+    m_graphMaximumsLine.setHoldColour (colour);
 }
 
 

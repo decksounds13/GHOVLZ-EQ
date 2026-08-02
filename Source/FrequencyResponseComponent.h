@@ -77,6 +77,8 @@ public:
 
     OptionBoxMenu* getOptionBoxMenu() noexcept { return optionBoxMenu.get(); }
     void setOptionBoxVisible (bool shouldBeVisible);
+    /** True while OptionBox is open on this band (Bank1 0–7 or global 8–63). */
+    bool isOptionBoxSelectingBand (int bandIndex) const noexcept;
 
     /** Called with band index (Bank1 internal 0–7, or global display 8–63); -1 to clear. */
     std::function<void(int)> onBandManipulationHighlight;
@@ -323,10 +325,18 @@ private:
     std::vector<float> responseBand1, responseBand2, responseBand3, responseBand4;
     std::vector<float> responseHighpass, responseLowpass, responseHighShelf, responseLowShelf;
     std::vector<float> responseCombined;
+    /** Scratch for sum-only IIR when a band's display curve is at target/range but D/SC is live. */
+    std::vector<float> responseDynSumScratch;
     /** Per extended-band magnitude (dB) for individual curves + sum. */
     std::array<std::vector<float>, EqBand::kMaxBands - EqBand::kBankSize> responseExtended {};
     std::array<juce::Path, EqBand::kMaxBands - EqBand::kBankSize> extendedResponsePaths {};
     bool needsUpdateExtended = true;
+
+    /** Spectral Amount visualization (second curve/handle when S is on). Slot = DSP 0–7. */
+    static constexpr int kNumSpectralSlots = SpectralDynamics::kNumSlots;
+    std::array<std::vector<float>, kNumSpectralSlots> responseSpectralAmount {};
+    std::array<juce::Path, kNumSpectralSlots> spectralAmountPaths {};
+    bool needsUpdateSpectralAmount = true;
 
     static constexpr int kNumExtended = EqBand::kMaxBands - EqBand::kBankSize;
     struct ExtendedHandleState
@@ -340,6 +350,18 @@ private:
     };
     std::array<ExtendedHandleState, kNumExtended> extendedHandles {};
     int activeExtendedGlobal = -1;
+
+    struct SpectralAmountHandleState
+    {
+        float x = -1000.0f;
+        float y = -1000.0f;
+        bool hovering = false;
+        bool dragging = false;
+        float dragOffsetX = 0.0f;
+        float dragOffsetY = 0.0f;
+    };
+    std::array<SpectralAmountHandleState, kNumSpectralSlots> spectralAmountHandles {};
+    int activeSpectralAmountSlot = -1;
     int preferredCreateBank = 0;
     /** Scratch buffer for sampling published spectral GR onto display frequencies. */
     std::vector<float> spectralGrScratch;

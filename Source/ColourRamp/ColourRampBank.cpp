@@ -33,6 +33,46 @@ ColourRampBank::ColourRampBank()
         };
         ramps[(int) Target::spectrumFill] = std::move (r);
     }
+    {
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+        r.stops = {
+            { 0.0f, juce::Colour::fromRGB (0, 0, 8) },
+            { 0.5f, juce::Colour::fromRGB (80, 200, 255) },
+            { 1.0f, juce::Colour::fromRGB (255, 255, 255) }
+        };
+        ramps[(int) Target::oscilloscope] = std::move (r);
+    }
+    {
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::gonLoudness;
+        r.stops = {
+            { 0.0f, juce::Colour::fromRGB (0, 0, 6) },
+            { 0.55f, juce::Colour::fromRGB (255, 180, 60) },
+            { 1.0f, juce::Colour::fromRGB (255, 255, 220) }
+        };
+        ramps[(int) Target::goniometer] = std::move (r);
+    }
+    {
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+        r.stops = {
+            { 0.0f, juce::Colour::fromRGB (0, 0, 4) },
+            { 0.45f, juce::Colour::fromRGB (120, 80, 255) },
+            { 1.0f, juce::Colour::fromRGB (255, 240, 200) }
+        };
+        ramps[(int) Target::stereogram] = std::move (r);
+    }
+    {
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+        r.stops = {
+            { 0.0f, juce::Colour::fromRGB (20, 10, 8) },
+            { 0.55f, juce::Colour::fromRGB (230, 60, 55) },
+            { 1.0f, juce::Colour::fromRGB (255, 230, 180) }
+        };
+        ramps[(int) Target::histogram] = std::move (r);
+    }
 
     load();
     sanitizeMapModes();
@@ -45,6 +85,10 @@ juce::String ColourRampBank::targetName (Target t)
         case Target::fftBars:      return "FFT Bars";
         case Target::spectrogram:  return "Spectrogram";
         case Target::spectrumFill: return "Spectrum Fill";
+        case Target::oscilloscope: return "Oscilloscope";
+        case Target::goniometer:   return "Goniometer";
+        case Target::stereogram:   return "Stereogram";
+        case Target::histogram:    return "Histogram";
         default:                   return "Ramp";
     }
 }
@@ -105,43 +149,50 @@ void ColourRampBank::notifyPreview()
     sendChangeMessage();
 }
 
-void ColourRampBank::randomizeRamps (const SharedColors& colours, const bool* targetEnabled3)
+void ColourRampBank::randomizeRamp (GradientRamp& ramp,
+                                    const SharedColors& colours,
+                                    bool varyAlpha)
 {
     auto& rng = juce::Random::getSystemRandom();
+    const int n = rng.nextInt ({ 2, 11 }); // 2..10 inclusive
+    std::vector<GradientRamp::Stop> stops;
+    stops.reserve ((size_t) n);
+
+    for (int i = 0; i < n; ++i)
+    {
+        GradientRamp::Stop s;
+        if (i == 0)           s.position = 0.0f;
+        else if (i == n - 1)  s.position = 1.0f;
+        else                  s.position = rng.nextFloat();
+
+        const float alpha = varyAlpha ? (0.35f + rng.nextFloat() * 0.55f) : 1.0f;
+        s.colour = colours.randomColourInLimits (alpha);
+        stops.push_back (s);
+    }
+
+    ramp.stops = std::move (stops);
+    ramp.sortAndClamp();
+    ramp.interpMode = GradientRamp::InterpMode::soft;
+    ramp.enabled = ramp.stops.size() >= 2;
+    ++ramp.revision;
+}
+
+void ColourRampBank::randomizeRamps (const SharedColors& colours, const bool* targetEnabled, int maskCount)
+{
     bool any = false;
 
     for (int ti = 0; ti < (int) Target::numTargets; ++ti)
     {
-        if (targetEnabled3 != nullptr && ! targetEnabled3[ti])
-            continue;
-
-        auto& ramp = ramps[ti];
-        const int n = rng.nextInt ({ 2, 11 }); // 2..10 inclusive
-        std::vector<GradientRamp::Stop> stops;
-        stops.reserve ((size_t) n);
-
-        // Always pin endpoints; scatter interiors.
-        for (int i = 0; i < n; ++i)
+        if (targetEnabled != nullptr)
         {
-            GradientRamp::Stop s;
-            if (i == 0)           s.position = 0.0f;
-            else if (i == n - 1)  s.position = 1.0f;
-            else                  s.position = rng.nextFloat();
-
-            // Spectrum fill keeps some alpha variety for overlays.
-            const float alpha = (ti == (int) Target::spectrumFill)
-                                    ? (0.35f + rng.nextFloat() * 0.55f)
-                                    : 1.0f;
-            s.colour = colours.randomColourInLimits (alpha);
-            stops.push_back (s);
+            if (ti < maskCount && ! targetEnabled[ti])
+                continue;
+            if (ti >= maskCount)
+                continue;
         }
 
-        ramp.stops = std::move (stops);
-        ramp.sortAndClamp();
-        // Soft blend pairs well with sparse random poles.
-        ramp.interpMode = GradientRamp::InterpMode::soft;
-        ramp.enabled = ramp.stops.size() >= 2;
-        ++ramp.revision;
+        const bool varyAlpha = (ti == (int) Target::spectrumFill);
+        randomizeRamp (ramps[ti], colours, varyAlpha);
         any = true;
     }
 
@@ -192,6 +243,10 @@ juce::ValueTree ColourRampBank::toValueTree() const
     tree.appendChild (ramps[(int) Target::fftBars].toValueTree ("FftBars"), nullptr);
     tree.appendChild (ramps[(int) Target::spectrogram].toValueTree ("Spectrogram"), nullptr);
     tree.appendChild (ramps[(int) Target::spectrumFill].toValueTree ("SpectrumFill"), nullptr);
+    tree.appendChild (ramps[(int) Target::oscilloscope].toValueTree ("Oscilloscope"), nullptr);
+    tree.appendChild (ramps[(int) Target::goniometer].toValueTree ("Goniometer"), nullptr);
+    tree.appendChild (ramps[(int) Target::stereogram].toValueTree ("Stereogram"), nullptr);
+    tree.appendChild (ramps[(int) Target::histogram].toValueTree ("Histogram"), nullptr);
     return tree;
 }
 
@@ -215,6 +270,10 @@ void ColourRampBank::applyFromValueTree (const juce::ValueTree& tree, bool force
     loadOne (Target::fftBars, "FftBars");
     loadOne (Target::spectrogram, "Spectrogram");
     loadOne (Target::spectrumFill, "SpectrumFill");
+    loadOne (Target::oscilloscope, "Oscilloscope");
+    loadOne (Target::goniometer, "Goniometer");
+    loadOne (Target::stereogram, "Stereogram");
+    loadOne (Target::histogram, "Histogram");
     sanitizeMapModes();
 
     if (! forceCustomRampsOff)
@@ -244,7 +303,9 @@ void ColourRampBank::load()
             return;
 
         bool anyWereEnabled = false;
-        for (auto id : { juce::Identifier ("FftBars"), juce::Identifier ("Spectrogram"), juce::Identifier ("SpectrumFill") })
+        for (auto id : { juce::Identifier ("FftBars"), juce::Identifier ("Spectrogram"), juce::Identifier ("SpectrumFill"),
+                         juce::Identifier ("Oscilloscope"), juce::Identifier ("Goniometer"), juce::Identifier ("Stereogram"),
+                         juce::Identifier ("Histogram") })
         {
             auto child = tree.getChildWithName (id);
             if (child.isValid() && (bool) child.getProperty ("enabled", false))
@@ -261,17 +322,29 @@ void ColourRampBank::load()
 
 void ColourRampBank::sanitizeMapModes()
 {
-    // FFT / Spec = intensity axis; Spectrum Fill = spatial axis.
-    for (auto t : { Target::fftBars, Target::spectrogram })
+    // FFT / Spec / Stereogram / Histogram = intensity; Osc = amp+freq; Fill = spatial; Gon = diversion.
+    for (auto t : { Target::fftBars, Target::spectrogram, Target::stereogram, Target::histogram })
     {
         auto& r = ramps[(int) t];
         if (! r.isIntensityMap())
             r.mapMode = GradientRamp::MapMode::intensityLowToHigh;
     }
 
+    auto& osc = ramps[(int) Target::oscilloscope];
+    if (! osc.isOscilloscopeMap())
+        osc.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+
     auto& fill = ramps[(int) Target::spectrumFill];
     if (! fill.isSpatialMap())
         fill.mapMode = GradientRamp::MapMode::bottomToTop;
+
+    auto& gon = ramps[(int) Target::goniometer];
+    // Migrate legacy intensity maps → Loudness; otherwise clamp to a goniometer mode.
+    if (gon.mapMode == GradientRamp::MapMode::intensityLowToHigh
+        || gon.mapMode == GradientRamp::MapMode::intensityHighToLow)
+        gon.mapMode = GradientRamp::MapMode::gonLoudness;
+    else if (! gon.isGoniometerMap())
+        gon.mapMode = GradientRamp::MapMode::gonLoudness;
 }
 
 void ColourRampBank::save() const

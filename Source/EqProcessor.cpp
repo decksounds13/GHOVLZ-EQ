@@ -1,4 +1,7 @@
 ﻿#include "EqProcessor.h"
+#include "LoudnessComponent.h"
+#include "StereogramComponent.h"
+#include "HistogramComponent.h"
 #include "EqEditor.h"
 #include "BinaryData.h"
 #include "FrequencyResponseComponent.h"
@@ -18,6 +21,94 @@ juce::Image EqProcessor::darkKnob4_StitchedImage;
 
 namespace
 {
+    /** Catmull-Rom / Hermite cubic between y1 and y2 (t in 0..1). */
+    float cubicHermite (float y0, float y1, float y2, float y3, float t) noexcept
+    {
+        const float c0 = y1;
+        const float c1 = 0.5f * (y2 - y0);
+        const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+        const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+        return ((c3 * t + c2) * t + c1) * t + c0;
+    }
+
+    /** 4× oversampled true-peak estimate (ITU-style inter-sample peak). hist = 3 floats. */
+    float measureTruePeakDb (const float* data, int numSamples, float hist[3]) noexcept
+    {
+        constexpr float silenceDb = -100.0f;
+        if (data == nullptr || numSamples <= 0 || hist == nullptr)
+            return silenceDb;
+
+        float peak = 0.0f;
+        float y0 = hist[0], y1 = hist[1], y2 = hist[2];
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float y3 = data[i];
+            peak = juce::jmax (peak, std::abs (y2));
+            peak = juce::jmax (peak, std::abs (y3));
+
+            for (float t = 0.25f; t < 1.0f; t += 0.25f)
+                peak = juce::jmax (peak, std::abs (cubicHermite (y0, y1, y2, y3, t)));
+
+            y0 = y1;
+            y1 = y2;
+            y2 = y3;
+        }
+
+        hist[0] = y0;
+        hist[1] = y1;
+        hist[2] = y2;
+        return juce::Decibels::gainToDecibels (peak, silenceDb);
+    }
+
+    void measureMidSideTruePeak (const juce::AudioBuffer<float>& buffer,
+                                 int numSamples,
+                                 std::atomic<float>& tpMid,
+                                 std::atomic<float>& tpSide,
+                                 float histMid[3],
+                                 float histSide[3]) noexcept
+    {
+        constexpr float silenceDb = -100.0f;
+        if (numSamples <= 0 || buffer.getNumChannels() <= 0
+            || histMid == nullptr || histSide == nullptr)
+        {
+            tpMid.store (silenceDb);
+            tpSide.store (silenceDb);
+            return;
+        }
+
+        const float* left = buffer.getReadPointer (0);
+        const float* right = buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr;
+
+        float peakM = 0.0f, peakS = 0.0f;
+        float m0 = histMid[0], m1 = histMid[1], m2 = histMid[2];
+        float s0 = histSide[0], s1 = histSide[1], s2 = histSide[2];
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float mid = right == nullptr ? left[i] : 0.5f * (left[i] + right[i]);
+            const float side = right == nullptr ? 0.0f : 0.5f * (left[i] - right[i]);
+
+            peakM = juce::jmax (peakM, std::abs (m2));
+            peakM = juce::jmax (peakM, std::abs (mid));
+            peakS = juce::jmax (peakS, std::abs (s2));
+            peakS = juce::jmax (peakS, std::abs (side));
+            for (float t = 0.25f; t < 1.0f; t += 0.25f)
+            {
+                peakM = juce::jmax (peakM, std::abs (cubicHermite (m0, m1, m2, mid, t)));
+                peakS = juce::jmax (peakS, std::abs (cubicHermite (s0, s1, s2, side, t)));
+            }
+
+            m0 = m1; m1 = m2; m2 = mid;
+            s0 = s1; s1 = s2; s2 = side;
+        }
+
+        histMid[0] = m0; histMid[1] = m1; histMid[2] = m2;
+        histSide[0] = s0; histSide[1] = s1; histSide[2] = s2;
+        tpMid.store (juce::Decibels::gainToDecibels (peakM, silenceDb));
+        tpSide.store (juce::Decibels::gainToDecibels (peakS, silenceDb));
+    }
+
     /** Mid = 0.5*(L+R), Side = 0.5*(L-R) — matches Side Check. Mono → Mid=L, Side=silence. */
     void measureMidSideLevels (const juce::AudioBuffer<float>& buffer,
                                int numSamples,
@@ -211,6 +302,42 @@ void EqProcessor::setSpectrogramTarget (SpectrogramComponent* target) noexcept
 SpectrogramComponent* EqProcessor::getSpectrogramTarget() const noexcept
 {
     return spectrogramTarget.load (std::memory_order_acquire);
+}
+
+void EqProcessor::setLoudnessTarget (LoudnessComponent* target) noexcept
+{
+    loudnessTarget.store (target, std::memory_order_release);
+    if (target != nullptr && sampleRate > 0.0)
+        target->prepare (sampleRate);
+}
+
+LoudnessComponent* EqProcessor::getLoudnessTarget() const noexcept
+{
+    return loudnessTarget.load (std::memory_order_acquire);
+}
+
+void EqProcessor::setStereogramTarget (StereogramComponent* target) noexcept
+{
+    stereogramTarget.store (target, std::memory_order_release);
+    if (target != nullptr && sampleRate > 0.0)
+        target->prepare (sampleRate);
+}
+
+StereogramComponent* EqProcessor::getStereogramTarget() const noexcept
+{
+    return stereogramTarget.load (std::memory_order_acquire);
+}
+
+void EqProcessor::setHistogramTarget (HistogramComponent* target) noexcept
+{
+    histogramTarget.store (target, std::memory_order_release);
+    if (target != nullptr && sampleRate > 0.0)
+        target->prepare (sampleRate);
+}
+
+HistogramComponent* EqProcessor::getHistogramTarget() const noexcept
+{
+    return histogramTarget.load (std::memory_order_acquire);
 }
 
 void EqProcessor::setEcoMode (bool shouldEnable) noexcept
@@ -969,6 +1096,96 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_FREEZE_ID", "SpecFreeze",
         analyserDefaults.getBool ("SPEC_FREEZE_ID", false)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "LOUDNESS_TARGET_ID", "LoudnessTarget",
+        juce::NormalisableRange<float> (-23.0f, -9.0f, 1.0f),
+        -14.0f));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "STEREOGRAM_USE_RAMP_ID", "StereogramUseRamp",
+        analyserDefaults.getBool ("STEREOGRAM_USE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "STEREOGRAM_DOT_SIZE_ID", "StereogramDotSize",
+        juce::NormalisableRange<float> (1.0f, 8.0f, 0.05f),
+        analyserDefaults.getFloat ("STEREOGRAM_DOT_SIZE_ID", 3.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "STEREOGRAM_DOT_DENSITY_ID", "StereogramDotDensity",
+        juce::NormalisableRange<float> (1.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("STEREOGRAM_DOT_DENSITY_ID", 100.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "STEREOGRAM_FADE_MS_ID", "StereogramFadeMs",
+        juce::NormalisableRange<float> (50.0f, 2000.0f, 1.0f, 0.45f),
+        analyserDefaults.getFloat ("STEREOGRAM_FADE_MS_ID", 400.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "STEREOGRAM_GLOW_ENABLE_ID", "StereogramGlowEnable",
+        analyserDefaults.getBool ("STEREOGRAM_GLOW_ENABLE_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "STEREOGRAM_GLOW_RADIUS_ID", "StereogramGlowRadius",
+        juce::NormalisableRange<float> (0.0f, 40.0f, 0.1f),
+        analyserDefaults.getFloat ("STEREOGRAM_GLOW_RADIUS_ID", 8.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "STEREOGRAM_GLOW_SPREAD_ID", "StereogramGlowSpread",
+        juce::NormalisableRange<float> (0.0f, 20.0f, 0.1f),
+        analyserDefaults.getFloat ("STEREOGRAM_GLOW_SPREAD_ID", 1.5f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "STEREOGRAM_GLOW_OPACITY_ID", "StereogramGlowOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("STEREOGRAM_GLOW_OPACITY_ID", 75.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "HISTOGRAM_USE_RAMP_ID", "HistogramUseRamp",
+        analyserDefaults.getBool ("HISTOGRAM_USE_RAMP_ID", false)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_SPEED_ID", "HistogramSpeed",
+        juce::NormalisableRange<float> (1.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("HISTOGRAM_SPEED_ID", 35.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_LINE_WIDTH_ID", "HistogramLineWidth",
+        juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
+        analyserDefaults.getFloat ("HISTOGRAM_LINE_WIDTH_ID", 2.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_FILL_OPACITY_ID", "HistogramFillOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("HISTOGRAM_FILL_OPACITY_ID", 35.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_MIN_DB_ID", "HistogramMinDb",
+        juce::NormalisableRange<float> (-70.0f, 0.0f, 0.1f),
+        analyserDefaults.getFloat ("HISTOGRAM_MIN_DB_ID", -60.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_MAX_DB_ID", "HistogramMaxDb",
+        juce::NormalisableRange<float> (-40.0f, 6.0f, 0.1f),
+        analyserDefaults.getFloat ("HISTOGRAM_MAX_DB_ID", 0.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "HISTOGRAM_SHOW_LUFS_ID", "HistogramShowLufs",
+        analyserDefaults.getBool ("HISTOGRAM_SHOW_LUFS_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "HISTOGRAM_SHOW_RMS_ID", "HistogramShowRms",
+        analyserDefaults.getBool ("HISTOGRAM_SHOW_RMS_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "HISTOGRAM_SHOW_TRUE_PEAK_ID", "HistogramShowTruePeak",
+        analyserDefaults.getBool ("HISTOGRAM_SHOW_TRUE_PEAK_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "HISTOGRAM_FREEZE_ID", "HistogramFreeze",
+        analyserDefaults.getBool ("HISTOGRAM_FREEZE_ID", false)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "HISTOGRAM_GLOW_ENABLE_ID", "HistogramGlowEnable",
+        analyserDefaults.getBool ("HISTOGRAM_GLOW_ENABLE_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_GLOW_RADIUS_ID", "HistogramGlowRadius",
+        juce::NormalisableRange<float> (0.0f, 40.0f, 0.1f),
+        analyserDefaults.getFloat ("HISTOGRAM_GLOW_RADIUS_ID", 8.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_GLOW_SPREAD_ID", "HistogramGlowSpread",
+        juce::NormalisableRange<float> (0.0f, 20.0f, 0.1f),
+        analyserDefaults.getFloat ("HISTOGRAM_GLOW_SPREAD_ID", 1.5f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "HISTOGRAM_GLOW_OPACITY_ID", "HistogramGlowOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("HISTOGRAM_GLOW_OPACITY_ID", 70.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "OSC_USE_RAMP_ID", "OscUseRamp",
+        analyserDefaults.getBool ("OSC_USE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "GON_USE_RAMP_ID", "GonUseRamp",
+        analyserDefaults.getBool ("GON_USE_RAMP_ID", true)));
     // Multicolor band fills (default on). Off → neutral golden-yellow boost/cut fills.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_MULTICOLOR_BAND_FILL_ID", "MulticolorBandFill",
@@ -2066,6 +2283,12 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         gon->prepare (sampleRate);
     if (auto* spec = spectrogramTarget.load (std::memory_order_acquire))
         spec->prepare (sampleRate);
+    if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
+        loud->prepare (sampleRate);
+    if (auto* stereo = stereogramTarget.load (std::memory_order_acquire))
+        stereo->prepare (sampleRate);
+    if (auto* hist = histogramTarget.load (std::memory_order_acquire))
+        hist->prepare (sampleRate);
 
     // Initialize dsp modules
     juce::dsp::ProcessSpec spec;
@@ -2225,6 +2448,22 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     postPeakDbSide.store (-100.0f);
     postRmsDbMid.store (-100.0f);
     postRmsDbSide.store (-100.0f);
+    inputTruePeakDbLeft.store (-100.0f);
+    inputTruePeakDbRight.store (-100.0f);
+    postTruePeakDbLeft.store (-100.0f);
+    postTruePeakDbRight.store (-100.0f);
+    inputTruePeakDbMid.store (-100.0f);
+    inputTruePeakDbSide.store (-100.0f);
+    postTruePeakDbMid.store (-100.0f);
+    postTruePeakDbSide.store (-100.0f);
+    for (float& v : inputTruePeakHistL) v = 0.0f;
+    for (float& v : inputTruePeakHistR) v = 0.0f;
+    for (float& v : postTruePeakHistL) v = 0.0f;
+    for (float& v : postTruePeakHistR) v = 0.0f;
+    for (float& v : inputTruePeakHistMid) v = 0.0f;
+    for (float& v : inputTruePeakHistSide) v = 0.0f;
+    for (float& v : postTruePeakHistMid) v = 0.0f;
+    for (float& v : postTruePeakHistSide) v = 0.0f;
 
     // Update coefficients based on initial values
     updateParameters();
@@ -2387,6 +2626,35 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             postRmsDbRight.store (postRmsDbLeft.load());
         }
 
+        if (mainBuffer.getNumChannels() > 0 && numSamples > 0)
+        {
+            const float tpL = measureTruePeakDb (mainBuffer.getReadPointer (0), numSamples, inputTruePeakHistL);
+            inputTruePeakDbLeft.store (tpL);
+            postTruePeakDbLeft.store (tpL);
+            // Keep post hist in sync on bypass (same audio).
+            for (int i = 0; i < 3; ++i)
+                postTruePeakHistL[i] = inputTruePeakHistL[i];
+
+            if (mainBuffer.getNumChannels() > 1)
+            {
+                const float tpR = measureTruePeakDb (mainBuffer.getReadPointer (1), numSamples, inputTruePeakHistR);
+                inputTruePeakDbRight.store (tpR);
+                postTruePeakDbRight.store (tpR);
+                for (int i = 0; i < 3; ++i)
+                    postTruePeakHistR[i] = inputTruePeakHistR[i];
+            }
+            else
+            {
+                inputTruePeakDbRight.store (tpL);
+                postTruePeakDbRight.store (tpL);
+                for (int i = 0; i < 3; ++i)
+                {
+                    inputTruePeakHistR[i] = inputTruePeakHistL[i];
+                    postTruePeakHistR[i] = inputTruePeakHistL[i];
+                }
+            }
+        }
+
         // Bypass: input == output, so Mid/Side taps match at both meter points.
         measureMidSideLevels (mainBuffer, numSamples,
                               inputPeakDbMid, inputRmsDbMid, inputPeakDbSide, inputRmsDbSide);
@@ -2394,6 +2662,17 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         postRmsDbMid.store (inputRmsDbMid.load());
         postPeakDbSide.store (inputPeakDbSide.load());
         postRmsDbSide.store (inputRmsDbSide.load());
+
+        measureMidSideTruePeak (mainBuffer, numSamples,
+                                inputTruePeakDbMid, inputTruePeakDbSide,
+                                inputTruePeakHistMid, inputTruePeakHistSide);
+        postTruePeakDbMid.store (inputTruePeakDbMid.load());
+        postTruePeakDbSide.store (inputTruePeakDbSide.load());
+        for (int i = 0; i < 3; ++i)
+        {
+            postTruePeakHistMid[i] = inputTruePeakHistMid[i];
+            postTruePeakHistSide[i] = inputTruePeakHistSide[i];
+        }
 
         const bool analyserOn = isSpectrumAnalyserActive();
         if (analyserOn && mainBuffer.getNumChannels() > 0)
@@ -2435,6 +2714,36 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                 const auto* left = mainBuffer.getReadPointer (0);
                 const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
                 spec->pushSamples (left, right, numSamples);
+            }
+        }
+
+        if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
+        {
+            if (loud->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                loud->pushSamples (left, right, numSamples);
+            }
+        }
+
+        if (auto* stereo = stereogramTarget.load (std::memory_order_acquire))
+        {
+            if (stereo->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                stereo->pushSamples (left, right, numSamples);
+            }
+        }
+
+        if (auto* hist = histogramTarget.load (std::memory_order_acquire))
+        {
+            if (hist->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                hist->pushSamples (left, right, numSamples);
             }
         }
 
@@ -2626,8 +2935,26 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             inputRmsDbRight.store (inputRmsDbLeft.load());
         }
 
+        if (mainBuffer.getNumChannels() > 0 && numSamples > 0)
+        {
+            inputTruePeakDbLeft.store (measureTruePeakDb (mainBuffer.getReadPointer (0),
+                                                          numSamples, inputTruePeakHistL));
+            if (mainBuffer.getNumChannels() > 1)
+                inputTruePeakDbRight.store (measureTruePeakDb (mainBuffer.getReadPointer (1),
+                                                               numSamples, inputTruePeakHistR));
+            else
+            {
+                inputTruePeakDbRight.store (inputTruePeakDbLeft.load());
+                for (int i = 0; i < 3; ++i)
+                    inputTruePeakHistR[i] = inputTruePeakHistL[i];
+            }
+        }
+
         measureMidSideLevels (mainBuffer, numSamples,
                               inputPeakDbMid, inputRmsDbMid, inputPeakDbSide, inputRmsDbSide);
+        measureMidSideTruePeak (mainBuffer, numSamples,
+                                inputTruePeakDbMid, inputTruePeakDbSide,
+                                inputTruePeakHistMid, inputTruePeakHistSide);
     }
 
     const float preLeftDb = inputRmsDbLeft.load();
@@ -2738,6 +3065,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             if (sidechainMidi)
             {
                 amount = scGate.stepToward (midiNotesHeld > 0 ? 1.0f : 0.0f);
+                dynState.publishedEnvelopeDb.store (amount > 0.5f ? 0.0f : DynamicEq::kSilenceFloorDb,
+                                                    std::memory_order_relaxed);
             }
             else
             {
@@ -2747,6 +3076,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                                                     frequency, q, thresholdDb);
                 else
                     amount = scGate.stepToward (0.0f);
+                dynState.publishedEnvelopeDb.store (scDetect.getPublishedEnvelopeDb(),
+                                                    std::memory_order_relaxed);
             }
 
             const float eg = DynamicEq::effectiveGainDb (true, targetGainDb, amount);
@@ -3441,8 +3772,26 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             postRmsDbRight.store (postRmsDbLeft.load());
         }
 
+        if (mainBuffer.getNumChannels() > 0 && numSamples > 0)
+        {
+            postTruePeakDbLeft.store (measureTruePeakDb (mainBuffer.getReadPointer (0),
+                                                         numSamples, postTruePeakHistL));
+            if (mainBuffer.getNumChannels() > 1)
+                postTruePeakDbRight.store (measureTruePeakDb (mainBuffer.getReadPointer (1),
+                                                              numSamples, postTruePeakHistR));
+            else
+            {
+                postTruePeakDbRight.store (postTruePeakDbLeft.load());
+                for (int i = 0; i < 3; ++i)
+                    postTruePeakHistR[i] = postTruePeakHistL[i];
+            }
+        }
+
         measureMidSideLevels (mainBuffer, numSamples,
                               postPeakDbMid, postRmsDbMid, postPeakDbSide, postRmsDbSide);
+        measureMidSideTruePeak (mainBuffer, numSamples,
+                                postTruePeakDbMid, postTruePeakDbSide,
+                                postTruePeakHistMid, postTruePeakHistSide);
     }
 
 
@@ -3525,6 +3874,36 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const auto* left = mainBuffer.getReadPointer (0);
             const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
             spec->pushSamples (left, right, mainBuffer.getNumSamples());
+        }
+    }
+
+    if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
+    {
+        if (loud->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+        {
+            const auto* left = mainBuffer.getReadPointer (0);
+            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+            loud->pushSamples (left, right, mainBuffer.getNumSamples());
+        }
+    }
+
+    if (auto* stereo = stereogramTarget.load (std::memory_order_acquire))
+    {
+        if (stereo->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+        {
+            const auto* left = mainBuffer.getReadPointer (0);
+            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+            stereo->pushSamples (left, right, mainBuffer.getNumSamples());
+        }
+    }
+
+    if (auto* hist = histogramTarget.load (std::memory_order_acquire))
+    {
+        if (hist->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+        {
+            const auto* left = mainBuffer.getReadPointer (0);
+            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+            hist->pushSamples (left, right, mainBuffer.getNumSamples());
         }
     }
 }
@@ -4043,6 +4422,112 @@ void EqProcessor::updateReportedLatency() noexcept
     setLatencySamples (computeProcessingLatencySamples());
 }
 
+float EqProcessor::getPublishedDynEnvelopeDb (int bandIndexOrGlobal) const noexcept
+{
+    // Bank 1 uses internal DSP index 0–7; extended uses global display 8–63.
+    if (bandIndexOrGlobal < 0 || bandIndexOrGlobal >= EqBand::kMaxBands)
+        return DynamicEq::kSilenceFloorDb;
+
+    if (bandIndexOrGlobal >= EqBand::kBankSize)
+        return extendedDyn[(size_t) (bandIndexOrGlobal - EqBand::kBankSize)].getPublishedEnvelopeDb();
+
+    switch (bandIndexOrGlobal)
+    {
+        case 0: return dynBand1.getPublishedEnvelopeDb();
+        case 1: return dynBand2.getPublishedEnvelopeDb();
+        case 2: return dynBand3.getPublishedEnvelopeDb();
+        case 3: return dynBand4.getPublishedEnvelopeDb();
+        case 4: return dynHighpass.getPublishedEnvelopeDb();
+        case 5: return dynLowpass.getPublishedEnvelopeDb();
+        case 6: return dynHighShelf.getPublishedEnvelopeDb();
+        case 7: return dynLowShelf.getPublishedEnvelopeDb();
+        default: break;
+    }
+
+    return DynamicEq::kSilenceFloorDb;
+}
+
+float EqProcessor::getPublishedEffectiveGainDb (int bandIndexOrGlobal) const noexcept
+{
+    if (bandIndexOrGlobal < 0 || bandIndexOrGlobal >= EqBand::kMaxBands)
+        return 0.0f;
+
+    if (bandIndexOrGlobal >= EqBand::kBankSize)
+        return extendedDyn[(size_t) (bandIndexOrGlobal - EqBand::kBankSize)].getPublishedEffectiveGain();
+
+    switch (bandIndexOrGlobal)
+    {
+        case 0: return dynBand1.getPublishedEffectiveGain();
+        case 1: return dynBand2.getPublishedEffectiveGain();
+        case 2: return dynBand3.getPublishedEffectiveGain();
+        case 3: return dynBand4.getPublishedEffectiveGain();
+        case 4: return dynHighpass.getPublishedEffectiveGain();
+        case 5: return dynLowpass.getPublishedEffectiveGain();
+        case 6: return dynHighShelf.getPublishedEffectiveGain();
+        case 7: return dynLowShelf.getPublishedEffectiveGain();
+        default: break;
+    }
+
+    return 0.0f;
+}
+
+void EqProcessor::clearDynamicModeGainMemory (int bandIndexOrGlobal) noexcept
+{
+    if (bandIndexOrGlobal < 0 || bandIndexOrGlobal >= EqBand::kMaxBands)
+        return;
+    dynModeGainMemory[(size_t) bandIndexOrGlobal] = {};
+}
+
+void EqProcessor::applyDynamicModeGainSwap (int bandIndexOrGlobal, bool nowDynamicOn)
+{
+    if (bandIndexOrGlobal < 0 || bandIndexOrGlobal >= EqBand::kMaxBands)
+        return;
+
+    auto& mem = dynModeGainMemory[(size_t) bandIndexOrGlobal];
+    if (! mem.latched)
+    {
+        mem.latched = true;
+        mem.lastDynamicOn = nowDynamicOn;
+        return;
+    }
+
+    if (mem.lastDynamicOn == nowDynamicOn)
+        return;
+
+    mem.lastDynamicOn = nowDynamicOn;
+
+    const auto gainId = bandIndexOrGlobal >= EqBand::kBankSize
+                            ? EqBand::gainParamIDForGlobal (bandIndexOrGlobal)
+                            : EqBand::gainParamID (bandIndexOrGlobal);
+    auto* param = dynamic_cast<juce::RangedAudioParameter*> (treeState.getParameter (gainId));
+    if (param == nullptr)
+        return;
+
+    const float currentGain = param->convertFrom0to1 (param->getValue());
+
+    if (nowDynamicOn)
+    {
+        mem.staticGainDb = currentGain;
+        const float restore = mem.hasDynamicMemory ? mem.dynamicRangeDb : 0.0f;
+        if (! mem.hasDynamicMemory)
+        {
+            mem.dynamicRangeDb = 0.0f;
+            mem.hasDynamicMemory = true;
+        }
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (param->convertTo0to1 (restore));
+        param->endChangeGesture();
+    }
+    else
+    {
+        mem.dynamicRangeDb = currentGain;
+        mem.hasDynamicMemory = true;
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (param->convertTo0to1 (mem.staticGainDb));
+        param->endChangeGesture();
+    }
+}
+
 void EqProcessor::applyBypassLatencyCompensation (juce::AudioBuffer<float>& buffer, int delaySamples) noexcept
 {
     delaySamples = juce::jlimit (0, kMaxBypassCompDelay, delaySamples);
@@ -4186,6 +4671,42 @@ float EqProcessor::getPostProcessingMsRmsValue (int channel) const
         return postRmsDbMid.load();
     if (channel == 1)
         return postRmsDbSide.load();
+    return -100.0f;
+}
+
+float EqProcessor::getInputTruePeakValue (int channel) const
+{
+    if (channel == 0)
+        return inputTruePeakDbLeft.load();
+    if (channel == 1)
+        return inputTruePeakDbRight.load();
+    return -100.0f;
+}
+
+float EqProcessor::getPostProcessingTruePeakValue (int channel) const
+{
+    if (channel == 0)
+        return postTruePeakDbLeft.load();
+    if (channel == 1)
+        return postTruePeakDbRight.load();
+    return -100.0f;
+}
+
+float EqProcessor::getInputMsTruePeakValue (int channel) const
+{
+    if (channel == 0)
+        return inputTruePeakDbMid.load();
+    if (channel == 1)
+        return inputTruePeakDbSide.load();
+    return -100.0f;
+}
+
+float EqProcessor::getPostProcessingMsTruePeakValue (int channel) const
+{
+    if (channel == 0)
+        return postTruePeakDbMid.load();
+    if (channel == 1)
+        return postTruePeakDbSide.load();
     return -100.0f;
 }
 

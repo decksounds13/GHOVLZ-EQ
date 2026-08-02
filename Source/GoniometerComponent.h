@@ -2,9 +2,11 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
 #include <vector>
 #include "Menu/SharedResources.h"
 #include "MelatoninBlur/melatonin/shadows.h"
+#include "ColourRamp/GradientRamp.h"
 
 /**
  * Stereo goniometer (Lissajous / vectorscope) with a vertical correlation meter.
@@ -37,6 +39,12 @@ public:
 
     void setThemeColors (SharedResources* r) noexcept { themeColors = r; repaint(); }
 
+    void setColourRamp (const GradientRamp& ramp);
+    void clearColourRamp();
+
+    void mouseDown (const juce::MouseEvent& e) override;
+    std::function<void()> onShowContextMenu;
+
     /** Same compact chrome height as OscilloscopeComponent. */
     static constexpr int kWindowHeightPx = 80;
     /** Slim correlation strip beside the square plot. */
@@ -50,7 +58,8 @@ private:
     void ensureTrailImage (int plotSize);
     void fadeAndPlotTrail();
     void updateCorrelationFromRing();
-    void buildGlowPath (juce::Path& outPath) const;
+    /** Filled ellipses at sample points (Melatonin blurs fills; stroked Lissajous paths do not). */
+    void buildGlowPath (juce::Path& outPath, float pointRadius) const;
     float loadFloatParam (const char* id, float fallback) const;
     bool isHighQuality() const;
 
@@ -92,6 +101,8 @@ private:
 
     juce::Image trailImage;
     juce::Path lastGlowPath;
+    GradientRamp colourRamp;
+    bool hasCustomRamp = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GoniometerComponent)
 };

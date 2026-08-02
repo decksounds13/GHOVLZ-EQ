@@ -148,6 +148,11 @@
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp"/>
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp"/>
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp"/>
+    <ClCompile Include="..\..\Source\ScopeLevelMeterModule.cpp"/>
+    <ClCompile Include="..\..\Source\LoudnessComponent.cpp"/>
+    <ClCompile Include="..\..\Source\ScopeLayoutPresets.cpp"/>
+    <ClCompile Include="..\..\Source\StereogramComponent.cpp"/>
+    <ClCompile Include="..\..\Source\HistogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\PathSampleOverlay.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\RampColorPickerPanel.cpp"/>
@@ -255,6 +260,9 @@
     <ClCompile Include="..\..\Source\Menu\Gui\UIElementsList.cpp"/>
     <ClCompile Include="..\..\Source\Menu\Gui\Eyedropper.cpp"/>
     <ClCompile Include="..\..\Source\Menu\Gui\LevelMetersComponent.cpp"/>
+    <ClCompile Include="..\..\Source\Menu\Gui\LoudnessSettingsComponent.cpp"/>
+    <ClCompile Include="..\..\Source\Menu\Gui\StereogramSettingsComponent.cpp"/>
+    <ClCompile Include="..\..\Source\Menu\Gui\HistogramSettingsComponent.cpp"/>
     <ClCompile Include="..\..\Source\CustomPopup.cpp"/>
     <ClCompile Include="..\..\..\..\..\..\..\modules\gin\3rdparty\bsdiff\bsdiff.c">
       <ExcludedFromBuild>true</ExcludedFromBuild>
@@ -3462,6 +3470,12 @@
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.h"/>
     <ClInclude Include="..\..\Source\GoniometerComponent.h"/>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
+    <ClInclude Include="..\..\Source\ScopeModules.h"/>
+    <ClInclude Include="..\..\Source\ScopeLayoutPresets.h"/>
+    <ClInclude Include="..\..\Source\ScopeLevelMeterModule.h"/>
+    <ClInclude Include="..\..\Source\LoudnessComponent.h"/>
+    <ClInclude Include="..\..\Source\StereogramComponent.h"/>
+    <ClInclude Include="..\..\Source\HistogramComponent.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\GradientRamp.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\ColourRampBank.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\PathSampleOverlay.h"/>
@@ -3619,6 +3633,9 @@
     <ClInclude Include="..\..\Source\Menu\Gui\ThemeList.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\Eyedropper.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\LevelMetersComponent.h"/>
+    <ClInclude Include="..\..\Source\Menu\Gui\LoudnessSettingsComponent.h"/>
+    <ClInclude Include="..\..\Source\Menu\Gui\StereogramSettingsComponent.h"/>
+    <ClInclude Include="..\..\Source\Menu\Gui\HistogramSettingsComponent.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\UIElementsList.h"/>
     <ClInclude Include="..\..\Source\ArrowSliderLookAndFeel.h"/>
     <ClInclude Include="..\..\Source\BrandWordmark.h"/>

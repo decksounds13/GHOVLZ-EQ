@@ -7,6 +7,7 @@
 #include "FilterType.h"
 #include "BandChannel.h"
 #include "DynamicEq.h"
+#include "BandSidechain.h"
 #include "EqBand.h"
 #include "LfoMod.h"
 #include "ComboBoxLookAndFeel.h"
@@ -22,6 +23,88 @@ namespace
     juce::Colour bandCurveColour (juce::Colour fill) noexcept
     {
         return fill.withAlpha (0.75f);
+    }
+
+    bool rawBoolParam (juce::AudioProcessorValueTreeState& state, const char* id) noexcept
+    {
+        if (auto* v = state.getRawParameterValue (id))
+            return v->load() > 0.5f;
+        return false;
+    }
+
+    /** Map Spectral Amount (0…max) onto the EQ display dB axis (pull down = more cut). */
+    float spectralAmountToDisplayDb (float amount, bool expand, float rangeDb) noexcept
+    {
+        const float t = juce::jlimit (0.0f, 1.0f, amount / SpectralDynamics::kMaxSpectralAmount);
+        return expand ? (t * rangeDb) : (-t * rangeDb);
+    }
+
+    float displayDbToSpectralAmount (float db, bool expand, float rangeDb) noexcept
+    {
+        if (rangeDb <= 1.0e-3f)
+            return 0.0f;
+        const float t = expand ? juce::jlimit (0.0f, 1.0f, db / rangeDb)
+                               : juce::jlimit (0.0f, 1.0f, -db / rangeDb);
+        return t * SpectralDynamics::kMaxSpectralAmount;
+    }
+
+    /** Dynamic-mode / spectral-amount handle chrome: coloured ring + up/down range arrows. */
+    void paintDynamicRangeHandleDecor (juce::Graphics& g,
+                                       float cx, float cy,
+                                       float handleSize,
+                                       juce::Colour bandColour,
+                                       float scale)
+    {
+        const float ringSize = handleSize + 6.0f * scale;
+        const float ringRadius = ringSize * 0.5f;
+        g.setColour (bandColour.brighter (0.35f).withAlpha (0.95f));
+        g.drawEllipse (cx - ringRadius, cy - ringRadius, ringSize, ringSize, 2.0f * scale);
+
+        // 2× prior arrow size; sit just outside the ring with ~2 px padding.
+        const float arrowHalf = 7.2f * scale;
+        const float arrowH = 10.0f * scale;
+        const float gap = 2.0f * scale;
+
+        juce::Path up;
+        const float uy = cy - ringRadius - gap;
+        up.addTriangle (cx, uy - arrowH,
+                        cx - arrowHalf, uy,
+                        cx + arrowHalf, uy);
+        g.setColour (bandColour.withAlpha (0.95f));
+        g.fillPath (up);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.strokePath (up, juce::PathStrokeType (1.2f * scale));
+
+        juce::Path down;
+        const float dy = cy + ringRadius + gap;
+        down.addTriangle (cx, dy + arrowH,
+                          cx - arrowHalf, dy,
+                          cx + arrowHalf, dy);
+        g.setColour (bandColour.withAlpha (0.95f));
+        g.fillPath (down);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.strokePath (down, juce::PathStrokeType (1.2f * scale));
+    }
+
+    int bandIndexFromDynamicParamId (const juce::String& parameterID) noexcept
+    {
+        if (parameterID == "band1Dynamic") return 0;
+        if (parameterID == "band2Dynamic") return 1;
+        if (parameterID == "band3Dynamic") return 2;
+        if (parameterID == "band4Dynamic") return 3;
+        if (parameterID == "highpassDynamic") return 4;
+        if (parameterID == "lowpassDynamic") return 5;
+        if (parameterID == "highShelfDynamic") return 6;
+        if (parameterID == "lowShelfDynamic") return 7;
+        // Extended: eqB09Dynamic … eqB64Dynamic
+        if (parameterID.startsWith ("eqB") && parameterID.endsWith ("Dynamic"))
+        {
+            const auto mid = parameterID.substring (3, parameterID.length() - 8);
+            const int bandNumber = mid.getIntValue(); // 9..64
+            if (bandNumber >= 9 && bandNumber <= EqBand::kMaxBands)
+                return bandNumber - 1; // global 8..63
+        }
+        return -1;
     }
 }
 
@@ -180,7 +263,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     }
 
     juce::String optionBoxParamID = "TheActualParamIDForOptionBoxMenu";  // Replace with the actual ID
-    optionBoxMenu = std::make_unique<OptionBoxMenu>(parameters);
+    optionBoxMenu = std::make_unique<OptionBoxMenu> (parameters, processor);
     optionBoxMenu->undoManager = &processor.getUndoManager();
 
     optionBoxMenu->onBandKnobDragHighlight = [this] (int index)
@@ -201,6 +284,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
             else if (index >= 0)
                 onFaceplateBankJump (0);
         }
+        repaint(); // grow the newly selected handle
     };
     
     addAndMakeVisible(*optionBoxMenu);
@@ -607,8 +691,11 @@ void FrequencyResponseComponent::ensureResponseBufferSize (int width)
     resizeIfNeeded (responseHighShelf);
     resizeIfNeeded (responseLowShelf);
     resizeIfNeeded (responseCombined);
+    resizeIfNeeded (responseDynSumScratch);
     for (auto& ext : responseExtended)
         resizeIfNeeded (ext);
+    for (auto& spec : responseSpectralAmount)
+        resizeIfNeeded (spec);
 }
 
 void FrequencyResponseComponent::fillMagnitudeResponse (const juce::dsp::IIR::Coefficients<float>::Ptr& coeffs,
@@ -676,11 +763,13 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         return 0.0f;
     };
 
-    // When dynamic EQ / sidechain is on, curve uses published effective gains (timer marks bands dirty each tick).
+    // D / SC: per-band curve stays on target/range (handle); cumulative uses effective gain.
     const bool dyn1 = raw ("band1Dynamic") > 0.5f || raw ("band1Sidechain") > 0.5f;
     const bool dyn2 = raw ("band2Dynamic") > 0.5f || raw ("band2Sidechain") > 0.5f;
     const bool dyn3 = raw ("band3Dynamic") > 0.5f || raw ("band3Sidechain") > 0.5f;
     const bool dyn4 = raw ("band4Dynamic") > 0.5f || raw ("band4Sidechain") > 0.5f;
+    const bool dynHP = raw ("highpassDynamic") > 0.5f || raw ("highpassSidechain") > 0.5f;
+    const bool dynLP = raw ("lowpassDynamic") > 0.5f || raw ("lowpassSidechain") > 0.5f;
     const bool dynHS = raw ("highShelfDynamic") > 0.5f || raw ("highShelfSidechain") > 0.5f;
     const bool dynLS = raw ("lowShelfDynamic") > 0.5f || raw ("lowShelfSidechain") > 0.5f;
     const bool spec1 = raw ("band1Spectral") > 0.5f;
@@ -692,19 +781,25 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     const bool specHS = raw ("highShelfSpectral") > 0.5f;
     const bool specLS = raw ("lowShelfSpectral") > 0.5f;
 
+    // Any LFO routed → prefer published F/G/Q so modulation is visible on curves.
+    const bool anyLfoRouted = LfoMod::anyActiveRouting (parameters);
+
     const float eg1 = processor.getBand1EffectiveGainDb();
     const float eg2 = processor.getBand2EffectiveGainDb();
     const float eg3 = processor.getBand3EffectiveGainDb();
     const float eg4 = processor.getBand4EffectiveGainDb();
+    const float egHP = processor.getPublishedEffectiveGainDb (4);
+    const float egLP = processor.getPublishedEffectiveGainDb (5);
     const float egHS = processor.getHighShelfEffectiveGainDb();
     const float egLS = processor.getLowShelfEffectiveGainDb();
 
-    // Secondary catch for paints that weren't kicked by the dyn timer (e.g. knob edits).
-    // While D is active the timer already forces dirty every tick — no threshold there.
+    // Secondary catch for paints that weren't kicked by the animation timer.
+    // LFO dirties per-band paths; D/SC sum animation is driven by the 45 Hz timer.
     constexpr float dynCurveEps = 0.05f;
-    auto maybeDirtyDyn = [&] (bool dynOn, float effectiveGain, float staticGain, float& lastGain, bool& dirtyFlag)
+    auto maybeDirtyLive = [&] (bool trackEffective, float effectiveGain, float staticGain,
+                               float& lastGain, bool& dirtyFlag)
     {
-        const float want = dynOn ? effectiveGain : staticGain;
+        const float want = trackEffective ? effectiveGain : staticGain;
         if (std::abs (want - lastGain) > dynCurveEps)
         {
             dirtyFlag = true;
@@ -712,16 +807,16 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         }
     };
 
-    maybeDirtyDyn (dyn1, eg1, raw ("band1Gain"), lastDynCurveGain1, needsUpdateBand1);
-    maybeDirtyDyn (dyn2, eg2, raw ("band2Gain"), lastDynCurveGain2, needsUpdateBand2);
-    maybeDirtyDyn (dyn3, eg3, raw ("band3Gain"), lastDynCurveGain3, needsUpdateBand3);
-    maybeDirtyDyn (dyn4, eg4, raw ("band4Gain"), lastDynCurveGain4, needsUpdateBand4);
-    maybeDirtyDyn (dynHS, egHS, raw ("highShelfGain"), lastDynCurveGainHS, needsUpdateHighShelf);
-    maybeDirtyDyn (dynLS, egLS, raw ("lowShelfGain"), lastDynCurveGainLS, needsUpdateLowShelf);
+    maybeDirtyLive (anyLfoRouted, eg1, raw ("band1Gain"), lastDynCurveGain1, needsUpdateBand1);
+    maybeDirtyLive (anyLfoRouted, eg2, raw ("band2Gain"), lastDynCurveGain2, needsUpdateBand2);
+    maybeDirtyLive (anyLfoRouted, eg3, raw ("band3Gain"), lastDynCurveGain3, needsUpdateBand3);
+    maybeDirtyLive (anyLfoRouted, eg4, raw ("band4Gain"), lastDynCurveGain4, needsUpdateBand4);
+    maybeDirtyLive (anyLfoRouted, egHS, raw ("highShelfGain"), lastDynCurveGainHS, needsUpdateHighShelf);
+    maybeDirtyLive (anyLfoRouted, egLS, raw ("lowShelfGain"), lastDynCurveGainLS, needsUpdateLowShelf);
 
     const bool anyDirty = needsUpdateBand1 || needsUpdateBand2 || needsUpdateBand3 || needsUpdateBand4
                           || needsUpdateHighpass || needsUpdateLowpass || needsUpdateHighShelf || needsUpdateLowShelf
-                          || needsUpdateExtended || needsUpdateCombined;
+                          || needsUpdateExtended || needsUpdateCombined || needsUpdateSpectralAmount;
 
     if (! anyDirty)
         return;
@@ -737,22 +832,19 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     auto clampQ = [] (float q) { return juce::jmax (0.05f, q); };
     const bool proportionalQOn = raw ("PROPORTIONAL_Q_ID") > 0.5f;
 
-    // Live curve: D / SC use published effective gain; LFO uses published post-mod freq/Q/gain.
-    // Effective gain is always published each block (static = knob, including LFO on gain).
+    // Per-band curves: LFO uses published post-mod F/G/Q; D/SC keep target/range (handle).
+    // Cumulative curve: D/SC/LFO use published effective gain (rebuilt below when needed).
     auto displayGain = [&] (bool liveGain, float staticGain, float effectiveGain) -> float
     {
         return liveGain ? effectiveGain : staticGain;
     };
 
-    // Any LFO routed → always prefer published F/G/Q so modulation is visible on curves.
-    const bool anyLfoRouted = LfoMod::anyActiveRouting (parameters);
-
-    const bool live1 = dyn1 || anyLfoRouted;
-    const bool live2 = dyn2 || anyLfoRouted;
-    const bool live3 = dyn3 || anyLfoRouted;
-    const bool live4 = dyn4 || anyLfoRouted;
-    const bool liveHS = dynHS || anyLfoRouted;
-    const bool liveLS = dynLS || anyLfoRouted;
+    const bool live1 = anyLfoRouted;
+    const bool live2 = anyLfoRouted;
+    const bool live3 = anyLfoRouted;
+    const bool live4 = anyLfoRouted;
+    const bool liveHS = anyLfoRouted;
+    const bool liveLS = anyLfoRouted;
 
     // Display pipeline (DSP untouched):
     //   1) Dense log-f grid (logFrequencies — one sample per pixel)
@@ -939,18 +1031,83 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         lastDynCurveGainLS = gain;
     }
 
-    for (int i = 0; i < width; ++i)
+    // Sum: reuse per-band buffers unless D/SC is live without LFO (buffers are at target/range).
+    auto addBandToCombined = [&] (bool bandOn, bool dynLive, bool lfoLive,
+                                  int type, float freq, float qBase, float effectiveGain,
+                                  const juce::String& slopeId, const std::vector<float>& bandBuf)
     {
-        float sum = 0.0f;
-        if (processor.getIsBand1On())     sum += responseBand1[(size_t) i];
-        if (processor.getIsBand2On())     sum += responseBand2[(size_t) i];
-        if (processor.getIsBand3On())     sum += responseBand3[(size_t) i];
-        if (processor.getIsBand4On())     sum += responseBand4[(size_t) i];
-        if (processor.getIsHighpassOn())  sum += responseHighpass[(size_t) i];
-        if (processor.getIsLowpassOn())   sum += responseLowpass[(size_t) i];
-        if (processor.getIsHighShelfOn()) sum += responseHighShelf[(size_t) i];
-        if (processor.getIsLowShelfOn())  sum += responseLowShelf[(size_t) i];
-        responseCombined[(size_t) i] = sum;
+        if (! bandOn || (int) bandBuf.size() != width)
+            return;
+
+        const bool sumNeedsEffective = dynLive && ! lfoLive && FilterType::usesGain (type);
+        if (sumNeedsEffective)
+        {
+            fillBandResponse (type, freq, qBase, effectiveGain, slopeId, responseDynSumScratch);
+            for (int i = 0; i < width; ++i)
+                responseCombined[(size_t) i] += responseDynSumScratch[(size_t) i];
+        }
+        else
+        {
+            for (int i = 0; i < width; ++i)
+                responseCombined[(size_t) i] += bandBuf[(size_t) i];
+        }
+    };
+
+    std::fill (responseCombined.begin(), responseCombined.end(), 0.0f);
+
+    {
+        const int type = (int) raw ("band1Type");
+        addBandToCombined (processor.getIsBand1On(), dyn1, anyLfoRouted, type,
+                           live1 ? processor.getPublishedBand1Freq() : raw ("band1Frequency"),
+                           live1 ? processor.getPublishedBand1Q() : raw ("band1Q"),
+                           eg1, "band1Slope", responseBand1);
+    }
+    {
+        const int type = (int) raw ("band2Type");
+        addBandToCombined (processor.getIsBand2On(), dyn2, anyLfoRouted, type,
+                           live2 ? processor.getPublishedBand2Freq() : raw ("band2Frequency"),
+                           live2 ? processor.getPublishedBand2Q() : raw ("band2Q"),
+                           eg2, "band2Slope", responseBand2);
+    }
+    {
+        const int type = (int) raw ("band3Type");
+        addBandToCombined (processor.getIsBand3On(), dyn3, anyLfoRouted, type,
+                           live3 ? processor.getPublishedBand3Freq() : raw ("band3Frequency"),
+                           live3 ? processor.getPublishedBand3Q() : raw ("band3Q"),
+                           eg3, "band3Slope", responseBand3);
+    }
+    {
+        const int type = (int) raw ("band4Type");
+        addBandToCombined (processor.getIsBand4On(), dyn4, anyLfoRouted, type,
+                           live4 ? processor.getPublishedBand4Freq() : raw ("band4Frequency"),
+                           live4 ? processor.getPublishedBand4Q() : raw ("band4Q"),
+                           eg4, "band4Slope", responseBand4);
+    }
+    {
+        const int type = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
+        addBandToCombined (processor.getIsHighpassOn(), dynHP, false, type,
+                           raw ("highpassCutoff"), raw ("highpassQ"),
+                           egHP, "highpassSlope", responseHighpass);
+    }
+    {
+        const int type = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
+        addBandToCombined (processor.getIsLowpassOn(), dynLP, false, type,
+                           raw ("lowpassCutoff"), raw ("lowpassQ"),
+                           egLP, "lowpassSlope", responseLowpass);
+    }
+    {
+        const int type = (int) raw ("highShelfType");
+        addBandToCombined (processor.getIsHighShelfOn(), dynHS, anyLfoRouted, type,
+                           liveHS ? processor.getPublishedHighShelfFreq() : raw ("highShelfFrequency"),
+                           liveHS ? processor.getPublishedHighShelfQ() : raw ("highShelfQ"),
+                           egHS, "highShelfSlope", responseHighShelf);
+    }
+    {
+        const int type = (int) raw ("lowShelfType");
+        addBandToCombined (processor.getIsLowShelfOn(), dynLS, anyLfoRouted, type,
+                           liveLS ? processor.getPublishedLowShelfFreq() : raw ("lowShelfFrequency"),
+                           liveLS ? processor.getPublishedLowShelfQ() : raw ("lowShelfQ"),
+                           egLS, "lowShelfSlope", responseLowShelf);
     }
 
     // Extended banks 2–8: cache per-band magnitudes for individual curves + sum.
@@ -986,8 +1143,79 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         if ((int) dest.size() != width)
             continue;
 
-        for (int i = 0; i < width; ++i)
-            responseCombined[(size_t) i] += dest[(size_t) i];
+        const int type = BandChannel::readChoiceIndex (parameters, FilterType::paramIDForGlobal (global), FilterType::bell);
+        const auto dynId = DynamicEq::dynamicParamIDForGlobal (global);
+        const auto scId = BandSidechain::sidechainParamIDForGlobal (global);
+        const bool dynLive = (raw (dynId) > 0.5f) || (raw (scId) > 0.5f);
+        addBandToCombined (true, dynLive, false, type,
+                           raw (EqBand::frequencyParamIDForGlobal (global)),
+                           raw (EqBand::qParamIDForGlobal (global)),
+                           processor.getPublishedEffectiveGainDb (global),
+                           EqBand::slopeParamIDForGlobal (global),
+                           dest);
+    }
+
+    // Spectral Amount curves (second handle): same shape as the band at Amount→dB.
+    // Makeup stays on the normal band curve; Amount is visual only (GR still shapes the sum).
+    if (needsUpdateSpectralAmount || needsUpdateBand1 || needsUpdateBand2 || needsUpdateBand3 || needsUpdateBand4
+        || needsUpdateHighpass || needsUpdateLowpass || needsUpdateHighShelf || needsUpdateLowShelf
+        || needsUpdateCombined)
+    {
+        const float rangeDb = getEqDisplayRangeDb();
+        auto fillAmount = [&] (int slot, bool bandOn, bool spectralOn, int type,
+                               float freq, float qBase, const juce::String& slopeId,
+                               const juce::String& amountId, const juce::String& expandId)
+        {
+            auto& dest = responseSpectralAmount[(size_t) slot];
+            if ((int) dest.size() != width)
+                dest.assign ((size_t) width, 0.0f);
+
+            if (! bandOn || ! spectralOn || ! FilterType::usesGain (type))
+            {
+                std::fill (dest.begin(), dest.end(), 0.0f);
+                return;
+            }
+
+            const float amount = raw (amountId);
+            const bool expand = raw (expandId) > 0.5f;
+            const float gainDb = spectralAmountToDisplayDb (amount, expand, rangeDb);
+            fillBandResponse (type, freq, qBase, gainDb, slopeId, dest);
+        };
+
+        fillAmount (0, processor.getIsBand1On(), spec1, (int) raw ("band1Type"),
+                    live1 ? processor.getPublishedBand1Freq() : raw ("band1Frequency"),
+                    live1 ? processor.getPublishedBand1Q() : raw ("band1Q"),
+                    "band1Slope", "band1SpectralDepth", "band1SpectralExpand");
+        fillAmount (1, processor.getIsBand2On(), spec2, (int) raw ("band2Type"),
+                    live2 ? processor.getPublishedBand2Freq() : raw ("band2Frequency"),
+                    live2 ? processor.getPublishedBand2Q() : raw ("band2Q"),
+                    "band2Slope", "band2SpectralDepth", "band2SpectralExpand");
+        fillAmount (2, processor.getIsBand3On(), spec3, (int) raw ("band3Type"),
+                    live3 ? processor.getPublishedBand3Freq() : raw ("band3Frequency"),
+                    live3 ? processor.getPublishedBand3Q() : raw ("band3Q"),
+                    "band3Slope", "band3SpectralDepth", "band3SpectralExpand");
+        fillAmount (3, processor.getIsBand4On(), spec4, (int) raw ("band4Type"),
+                    live4 ? processor.getPublishedBand4Freq() : raw ("band4Frequency"),
+                    live4 ? processor.getPublishedBand4Q() : raw ("band4Q"),
+                    "band4Slope", "band4SpectralDepth", "band4SpectralExpand");
+        fillAmount (4, processor.getIsHighpassOn(), specHP,
+                    BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass),
+                    raw ("highpassCutoff"), raw ("highpassQ"),
+                    "highpassSlope", "highpassSpectralDepth", "highpassSpectralExpand");
+        fillAmount (5, processor.getIsLowpassOn(), specLP,
+                    BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass),
+                    raw ("lowpassCutoff"), raw ("lowpassQ"),
+                    "lowpassSlope", "lowpassSpectralDepth", "lowpassSpectralExpand");
+        fillAmount (6, processor.getIsHighShelfOn(), specHS, (int) raw ("highShelfType"),
+                    liveHS ? processor.getPublishedHighShelfFreq() : raw ("highShelfFrequency"),
+                    liveHS ? processor.getPublishedHighShelfQ() : raw ("highShelfQ"),
+                    "highShelfSlope", "highShelfSpectralDepth", "highShelfSpectralExpand");
+        fillAmount (7, processor.getIsLowShelfOn(), specLS, (int) raw ("lowShelfType"),
+                    liveLS ? processor.getPublishedLowShelfFreq() : raw ("lowShelfFrequency"),
+                    liveLS ? processor.getPublishedLowShelfQ() : raw ("lowShelfQ"),
+                    "lowShelfSlope", "lowShelfSpectralDepth", "lowShelfSpectralExpand");
+
+        needsUpdateSpectralAmount = true; // tell paint to rebuild amount paths
     }
 
     // Spectral processing shapes only the cumulative display curve.
@@ -1381,6 +1609,60 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
+    // Spectral Amount curves (second curve when S is on — Amount as display-dB shape)
+    {
+        const juce::Colour specCols[8] = {
+            theme.graphBand1, theme.graphBand2, theme.graphBand3, theme.graphBand4,
+            theme.graphBand5, theme.graphBand6, theme.graphBand7, theme.graphBand8
+        };
+        const bool bandOn[8] = {
+            processor.getIsBand1On(), processor.getIsBand2On(), processor.getIsBand3On(), processor.getIsBand4On(),
+            processor.getIsHighpassOn(), processor.getIsLowpassOn(),
+            processor.getIsHighShelfOn(), processor.getIsLowShelfOn()
+        };
+        const char* specIds[8] = {
+            "band1Spectral", "band2Spectral", "band3Spectral", "band4Spectral",
+            "highpassSpectral", "lowpassSpectral", "highShelfSpectral", "lowShelfSpectral"
+        };
+        const char* expandIds[8] = {
+            "band1SpectralExpand", "band2SpectralExpand", "band3SpectralExpand", "band4SpectralExpand",
+            "highpassSpectralExpand", "lowpassSpectralExpand",
+            "highShelfSpectralExpand", "lowShelfSpectralExpand"
+        };
+
+        if (needsUpdateSpectralAmount)
+        {
+            for (int slot = 0; slot < kNumSpectralSlots; ++slot)
+            {
+                auto& path = spectralAmountPaths[(size_t) slot];
+                path.clear();
+                const auto& mag = responseSpectralAmount[(size_t) slot];
+                if (! bandOn[slot] || ! rawBoolParam (parameters, specIds[slot]) || mag.empty())
+                    continue;
+                path = intelligentDownsample (path, mag, w, h);
+            }
+            needsUpdateSpectralAmount = false;
+        }
+
+        for (int slot = 0; slot < kNumSpectralSlots; ++slot)
+        {
+            if (! bandOn[slot] || ! rawBoolParam (parameters, specIds[slot]))
+                continue;
+
+            const auto& path = spectralAmountPaths[(size_t) slot];
+            if (path.isEmpty())
+                continue;
+
+            const bool expand = rawBoolParam (parameters, expandIds[slot]);
+            const auto fillCol = resolveBandFillColour (specCols[slot], expand);
+            g.setColour (fillCol.withMultipliedAlpha (0.85f));
+            g.fillPath (closeShelfFillPath (path, (float) h));
+            g.setColour (bandCurveColour (specCols[slot]));
+            g.strokePath (path, juce::PathStrokeType (getBandPathWidth()));
+        }
+    }
+
+    //=======================================================================================================//
     // Extended bands (Band 9–64) — individual fill + stroke (colour wraps Bank 1 palette)
     {
         const juce::Colour extColours[8] = {
@@ -1559,7 +1841,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand1On())
     {
         // Unified scale factor
-        float scaleFactor = (isMouseHoveringOverHandle1 ? 1.25f : 1.0f)
+        float scaleFactor = ((isMouseHoveringOverHandle1 || isOptionBoxSelectingBand (0)) ? 1.25f : 1.0f)
                             * processor.getModHandlePulseScale (0);
 
         // Get the values from the tree state
@@ -1605,6 +1887,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setFont(11.0f * scaleFactor);  // Apply scale f   actor to font size
         float textOffset = 3.5f * scaleFactor;  // Apply scale factor to text position
         g.drawText("3", band1X - textOffset, band1Y - textOffset, 7.0f * scaleFactor, 7.0f * scaleFactor, juce::Justification::centred, false);
+
+        if (rawBoolParam (parameters, "band1Dynamic"))
+            paintDynamicRangeHandleDecor (g, band1X, band1Y, handleSize, handleColor1, scaleFactor);
     }
     else
     {
@@ -1620,7 +1905,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand2On())
     {
         // Unified scale factor for Band 2
-        float scaleFactor2 = (isMouseHoveringOverHandle2 ? 1.25f : 1.0f)
+        float scaleFactor2 = ((isMouseHoveringOverHandle2 || isOptionBoxSelectingBand (1)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (1);
 
         // Get the values from the tree state
@@ -1666,6 +1951,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setFont(11.0f * scaleFactor2);  // Apply scale factor to font size
         float textOffset2 = 3.5f * scaleFactor2;  // Apply scale factor to text position
         g.drawText("4", band2X - textOffset2, band2Y - textOffset2, 7.0f * scaleFactor2, 7.0f * scaleFactor2, juce::Justification::centred, false);
+
+        if (rawBoolParam (parameters, "band2Dynamic"))
+            paintDynamicRangeHandleDecor (g, band2X, band2Y, handleSize2, handleColor2, scaleFactor2);
     }
     else
     {
@@ -1681,7 +1969,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand3On())
     {
         // Unified scale factor for Band 3
-        float scaleFactor3 = (isMouseHoveringOverHandle3 ? 1.25f : 1.0f)
+        float scaleFactor3 = ((isMouseHoveringOverHandle3 || isOptionBoxSelectingBand (2)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (2);
 
         // Get the values from the tree state
@@ -1728,6 +2016,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setFont(11.0f * scaleFactor3);  // Apply scale factor to font size
         float textOffset3 = 3.5f * scaleFactor3;  // Apply scale factor to text position
         g.drawText("5", band3X - textOffset3, band3Y - textOffset3, 7.0f * scaleFactor3, 7.0f * scaleFactor3, juce::Justification::centred, false);
+
+        if (rawBoolParam (parameters, "band3Dynamic"))
+            paintDynamicRangeHandleDecor (g, band3X, band3Y, handleSize3, handleColor3, scaleFactor3);
     }
     else
     {
@@ -1742,7 +2033,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand4On())
     {
         // Unified scale factor for Band 4
-        float scaleFactor4 = (isMouseHoveringOverHandle4 ? 1.25f : 1.0f)
+        float scaleFactor4 = ((isMouseHoveringOverHandle4 || isOptionBoxSelectingBand (3)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (3);
 
         // Get the values from the tree state
@@ -1789,6 +2080,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setFont(11.0f * scaleFactor4);  // Apply scale factor to font size
         float textOffset4 = 3.5f * scaleFactor4;  // Apply scale factor to text position
         g.drawText("6", band4X - textOffset4, band4Y - textOffset4, 7.0f * scaleFactor4, 7.0f * scaleFactor4, juce::Justification::centred, false);
+
+        if (rawBoolParam (parameters, "band4Dynamic"))
+            paintDynamicRangeHandleDecor (g, band4X, band4Y, handleSize4, handleColor4, scaleFactor4);
     }
     else
     {
@@ -1804,7 +2098,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsHighpassOn())
     {
         // Unified scale factor for Highpass
-        float scaleFactor5 = (isMouseHoveringOverHandle5 ? 1.25f : 1.0f)
+        float scaleFactor5 = ((isMouseHoveringOverHandle5 || isOptionBoxSelectingBand (4)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (4);
 
         float highpassCutoff = processor.treeState.getRawParameterValue("highpassCutoff")->load();
@@ -1860,7 +2154,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsLowpassOn())
     {
         // Unified scale factor for Lowpass
-        float scaleFactor6 = (isMouseHoveringOverHandle6 ? 1.25f : 1.0f)
+        float scaleFactor6 = ((isMouseHoveringOverHandle6 || isOptionBoxSelectingBand (5)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (5);
 
         float lowpassCutoff = processor.treeState.getRawParameterValue("lowpassCutoff")->load();
@@ -1915,7 +2209,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsHighShelfOn())
     {
         // Unified scale factor
-        float scaleFactor7 = (isMouseHoveringOverHandle7 ? 1.25f : 1.0f)
+        float scaleFactor7 = ((isMouseHoveringOverHandle7 || isOptionBoxSelectingBand (6)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (6);
 
         // Get the values from the tree state
@@ -1962,6 +2256,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setFont(11.0f * scaleFactor7);  // Apply scale factor to font size
         float textOffset7 = 3.5f * scaleFactor7;  // Apply scale factor to text position
         g.drawText("7", highShelfX - textOffset7, highShelfY - textOffset7, 7.0f * scaleFactor7, 7.0f * scaleFactor7, juce::Justification::centred, false);
+
+        if (rawBoolParam (parameters, "highShelfDynamic"))
+            paintDynamicRangeHandleDecor (g, highShelfX, highShelfY, handleSize7, handleColor7, scaleFactor7);
     }
     else
     {
@@ -1976,7 +2273,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsLowShelfOn())
     {
         // Unified scale factor for LowShelf
-        float scaleFactor8 = (isMouseHoveringOverHandle8 ? 1.25f : 1.0f)
+        float scaleFactor8 = ((isMouseHoveringOverHandle8 || isOptionBoxSelectingBand (7)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (7);
 
         // Get the values from the tree state
@@ -2023,11 +2320,89 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.setFont(11.0f * scaleFactor8);  // Apply scale factor to font size
         float textOffset8 = 3.5f * scaleFactor8;  // Apply scale factor to text position
         g.drawText("2", lowShelfX - textOffset8, lowShelfY - textOffset8, 7.0f * scaleFactor8, 7.0f * scaleFactor8, juce::Justification::centred, false);
+
+        if (rawBoolParam (parameters, "lowShelfDynamic"))
+            paintDynamicRangeHandleDecor (g, lowShelfX, lowShelfY, handleSize8, handleColor8, scaleFactor8);
     }
     else
     {
         handleX8 = -1000.0f;
         handleY8 = -1000.0f;
+    }
+
+    //=======================================================================================================//
+    // Spectral Amount handles (dynamic-style chrome; Y = Amount on the display dB axis)
+    {
+        const juce::Colour specHandleCols[8] = {
+            handleColor1, handleColor2, handleColor3, handleColor4,
+            handleColor5, handleColor6, handleColor7, handleColor8
+        };
+        const bool bandOn[8] = {
+            processor.getIsBand1On(), processor.getIsBand2On(), processor.getIsBand3On(), processor.getIsBand4On(),
+            processor.getIsHighpassOn(), processor.getIsLowpassOn(),
+            processor.getIsHighShelfOn(), processor.getIsLowShelfOn()
+        };
+        const char* freqIds[8] = {
+            "band1Frequency", "band2Frequency", "band3Frequency", "band4Frequency",
+            "highpassCutoff", "lowpassCutoff", "highShelfFrequency", "lowShelfFrequency"
+        };
+        const char* typeIds[8] = {
+            "band1Type", "band2Type", "band3Type", "band4Type",
+            "highpassType", "lowpassType", "highShelfType", "lowShelfType"
+        };
+        const char* specIds[8] = {
+            "band1Spectral", "band2Spectral", "band3Spectral", "band4Spectral",
+            "highpassSpectral", "lowpassSpectral", "highShelfSpectral", "lowShelfSpectral"
+        };
+        const char* amountIds[8] = {
+            "band1SpectralDepth", "band2SpectralDepth", "band3SpectralDepth", "band4SpectralDepth",
+            "highpassSpectralDepth", "lowpassSpectralDepth",
+            "highShelfSpectralDepth", "lowShelfSpectralDepth"
+        };
+        const char* expandIds[8] = {
+            "band1SpectralExpand", "band2SpectralExpand", "band3SpectralExpand", "band4SpectralExpand",
+            "highpassSpectralExpand", "lowpassSpectralExpand",
+            "highShelfSpectralExpand", "lowShelfSpectralExpand"
+        };
+        const float rangeDb = getEqDisplayRangeDb();
+
+        for (int slot = 0; slot < kNumSpectralSlots; ++slot)
+        {
+            auto& hs = spectralAmountHandles[(size_t) slot];
+            const int type = BandChannel::readChoiceIndex (parameters, typeIds[slot], FilterType::bell);
+
+            if (! bandOn[slot] || ! rawBoolParam (parameters, specIds[slot]) || ! FilterType::usesGain (type))
+            {
+                hs.x = hs.y = -1000.0f;
+                continue;
+            }
+
+            const float fHz = juce::jmax (20.0f, processor.treeState.getRawParameterValue (freqIds[slot])->load());
+            const float amount = processor.treeState.getRawParameterValue (amountIds[slot])->load();
+            const bool expand = rawBoolParam (parameters, expandIds[slot]);
+            const float amountDb = spectralAmountToDisplayDb (amount, expand, rangeDb);
+
+            const float scale = (hs.hovering || hs.dragging || activeSpectralAmountSlot == slot) ? 1.25f : 1.0f;
+            float hx = (getWidth() - 1) * (std::log10 (fHz) - logMin) / (logMax - logMin);
+            float hy = dbToY (amountDb, static_cast<float> (getHeight()));
+            const float handleSize = 12.0f * scale;
+            hx = std::min (std::max (hx, handleSize), static_cast<float> (getWidth()) - handleSize);
+            hy = std::min (std::max (hy, handleSize), static_cast<float> (getHeight()) - handleSize);
+            hs.x = hx;
+            hs.y = hy;
+
+            const auto col = specHandleCols[slot];
+            g.setColour (col);
+            g.fillEllipse (hx - handleSize / 2.0f, hy - handleSize / 2.0f, handleSize, handleSize);
+            g.setColour (outlineColor);
+            g.drawEllipse (hx - 12.5f * scale / 2.0f, hy - 12.5f * scale / 2.0f,
+                           12.5f * scale, 12.5f * scale, outlineThickness);
+            g.setColour (outlineColor2);
+            g.drawEllipse (hx - 11.0f * scale / 2.0f, hy - 11.0f * scale / 2.0f,
+                           11.0f * scale, 11.0f * scale, outlineThickness2);
+
+            paintDynamicRangeHandleDecor (g, hx, hy, handleSize, col, scale);
+        }
     }
 
     //=======================================================================================================//
@@ -2055,7 +2430,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                                      ? processor.treeState.getRawParameterValue (EqBand::gainParamIDForGlobal (global))->load()
                                      : 0.0f;
 
-            const float scale = (hs.hovering || hs.dragging || activeExtendedGlobal == global) ? 1.25f : 1.0f;
+            const float scale = (hs.hovering || hs.dragging || activeExtendedGlobal == global
+                                 || isOptionBoxSelectingBand (global)) ? 1.25f : 1.0f;
             float hx = (getWidth() - 1) * (std::log10 (juce::jmax (20.0f, fHz)) - logMin) / (logMax - logMin);
             float hy = dbToY (gainDb, static_cast<float> (getHeight()));
             const float handleSize = 12.0f * scale;
@@ -2077,6 +2453,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             const auto label = juce::String (global + 1);
             const float tw = juce::jmax (10.0f, (float) label.length() * 6.0f * scale);
             g.drawText (label, hx - tw * 0.5f, hy - 4.0f * scale, tw, 9.0f * scale, juce::Justification::centred, false);
+
+            {
+                const auto dynId = DynamicEq::dynamicParamIDForGlobal (global);
+                if (auto* v = parameters.getRawParameterValue (dynId); v != nullptr && v->load() > 0.5f)
+                    paintDynamicRangeHandleDecor (g, hx, hy, handleSize, col, scale);
+            }
         }
     }
 
@@ -2588,6 +2970,20 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
     isMouseHoveringOverHandle[6] = isMouseHoveringOverHandle7;
     isMouseHoveringOverHandle[7] = isMouseHoveringOverHandle8;
 
+    for (int slot = 0; slot < kNumSpectralSlots; ++slot)
+    {
+        auto& hs = spectralAmountHandles[(size_t) slot];
+        hs.hovering = false;
+        if (hs.x < 0.0f)
+            continue;
+        if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) <= mouseOverThreshold)
+        {
+            hs.hovering = true;
+            isAnyHandleMouseOver = true;
+            activeBand = slot;
+        }
+    }
+
     for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
     {
         auto& hs = extendedHandles[(size_t) (global - EqBand::kBankSize)];
@@ -2625,6 +3021,9 @@ void FrequencyResponseComponent::setOptionBoxVisible (bool shouldBeVisible)
     if (onOptionBoxVisibilityChanged != nullptr
         && (shouldBeVisible || wasVisible != shouldBeVisible))
         onOptionBoxVisibilityChanged();
+
+    if (wasVisible != shouldBeVisible)
+        repaint(); // grow / shrink selected handle with OptionBox visibility
 }
 
 void FrequencyResponseComponent::showOptionBoxForHandle (int bandIndex, float handlePosX, float handlePosY)
@@ -2651,6 +3050,14 @@ void FrequencyResponseComponent::showOptionBoxForHandle (int bandIndex, float ha
     optionBoxMenu->setInteractionFaded (false);
     lastOptionBoxBandIndex = bandIndex;
     lastHandlePopupWasOptionBox = true;
+    repaint(); // grow the selected band handle like hover
+}
+
+bool FrequencyResponseComponent::isOptionBoxSelectingBand (int bandIndex) const noexcept
+{
+    return optionBoxMenu != nullptr
+           && optionBoxMenu->isVisible()
+           && optionBoxMenu->getCurrentBandIndex() == bandIndex;
 }
 
 void FrequencyResponseComponent::showOptionBoxForBand (int bandIndex)
@@ -2873,9 +3280,13 @@ void FrequencyResponseComponent::resetBandToDefaultsAndDeactivate (int bandIndex
             setFloatParam ("band1Frequency", 300.0f);
             setFloatParam ("band1Gain", 0.0f);
             setFloatParam ("band1Q", 0.67f);
+            setFloatParam ("band1DynThreshold", -24.0f);
+            setFloatParam ("band1AttackMs", DynamicEq::attackMs);
+            setFloatParam ("band1ReleaseMs", DynamicEq::releaseMs);
             setBoolParam ("band1OnOff", false);
             setBoolParam ("band1Dynamic", false);
             setBoolParam ("band1Spectral", false);
+            processor.clearDynamicModeGainMemory (0);
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band1Type")))
                 *p = FilterType::bell;
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band1Channel")))
@@ -2885,9 +3296,13 @@ void FrequencyResponseComponent::resetBandToDefaultsAndDeactivate (int bandIndex
             setFloatParam ("band2Frequency", 1000.0f);
             setFloatParam ("band2Gain", 0.0f);
             setFloatParam ("band2Q", 0.67f);
+            setFloatParam ("band2DynThreshold", -24.0f);
+            setFloatParam ("band2AttackMs", DynamicEq::attackMs);
+            setFloatParam ("band2ReleaseMs", DynamicEq::releaseMs);
             setBoolParam ("band2OnOff", false);
             setBoolParam ("band2Dynamic", false);
             setBoolParam ("band2Spectral", false);
+            processor.clearDynamicModeGainMemory (1);
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band2Type")))
                 *p = FilterType::bell;
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band2Channel")))
@@ -2897,9 +3312,13 @@ void FrequencyResponseComponent::resetBandToDefaultsAndDeactivate (int bandIndex
             setFloatParam ("band3Frequency", 4000.0f);
             setFloatParam ("band3Gain", 0.0f);
             setFloatParam ("band3Q", 0.67f);
+            setFloatParam ("band3DynThreshold", -24.0f);
+            setFloatParam ("band3AttackMs", DynamicEq::attackMs);
+            setFloatParam ("band3ReleaseMs", DynamicEq::releaseMs);
             setBoolParam ("band3OnOff", false);
             setBoolParam ("band3Dynamic", false);
             setBoolParam ("band3Spectral", false);
+            processor.clearDynamicModeGainMemory (2);
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band3Type")))
                 *p = FilterType::bell;
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band3Channel")))
@@ -2909,9 +3328,13 @@ void FrequencyResponseComponent::resetBandToDefaultsAndDeactivate (int bandIndex
             setFloatParam ("band4Frequency", 8000.0f);
             setFloatParam ("band4Gain", 0.0f);
             setFloatParam ("band4Q", 0.67f);
+            setFloatParam ("band4DynThreshold", -24.0f);
+            setFloatParam ("band4AttackMs", DynamicEq::attackMs);
+            setFloatParam ("band4ReleaseMs", DynamicEq::releaseMs);
             setBoolParam ("band4OnOff", false);
             setBoolParam ("band4Dynamic", false);
             setBoolParam ("band4Spectral", false);
+            processor.clearDynamicModeGainMemory (3);
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band4Type")))
                 *p = FilterType::bell;
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band4Channel")))
@@ -2939,9 +3362,13 @@ void FrequencyResponseComponent::resetBandToDefaultsAndDeactivate (int bandIndex
             setFloatParam ("highShelfFrequency", 5500.0f);
             setFloatParam ("highShelfGain", 0.0f);
             setFloatParam ("highShelfQ", 0.5f);
+            setFloatParam ("highShelfDynThreshold", -24.0f);
+            setFloatParam ("highShelfAttackMs", DynamicEq::attackMs);
+            setFloatParam ("highShelfReleaseMs", DynamicEq::releaseMs);
             setBoolParam ("highShelfOnOff", false);
             setBoolParam ("highShelfDynamic", false);
             setBoolParam ("highShelfSpectral", false);
+            processor.clearDynamicModeGainMemory (6);
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("highShelfType")))
                 *p = FilterType::highShelf;
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("highShelfChannel")))
@@ -2951,9 +3378,13 @@ void FrequencyResponseComponent::resetBandToDefaultsAndDeactivate (int bandIndex
             setFloatParam ("lowShelfFrequency", 100.0f);
             setFloatParam ("lowShelfGain", 0.0f);
             setFloatParam ("lowShelfQ", 0.5f);
+            setFloatParam ("lowShelfDynThreshold", -24.0f);
+            setFloatParam ("lowShelfAttackMs", DynamicEq::attackMs);
+            setFloatParam ("lowShelfReleaseMs", DynamicEq::releaseMs);
             setBoolParam ("lowShelfOnOff", false);
             setBoolParam ("lowShelfDynamic", false);
             setBoolParam ("lowShelfSpectral", false);
+            processor.clearDynamicModeGainMemory (7);
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("lowShelfType")))
                 *p = FilterType::lowShelf;
             if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("lowShelfChannel")))
@@ -3314,6 +3745,39 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     const bool clickedHandle7 = distanceToHandle7 <= clickThreshold;
     const bool clickedHandle8 = distanceToHandle8 <= clickThreshold;
 
+    int clickedSpectralSlot = -1;
+    float bestSpectralDist = clickThreshold;
+    for (int slot = 0; slot < kNumSpectralSlots; ++slot)
+    {
+        const auto& hs = spectralAmountHandles[(size_t) slot];
+        if (hs.x < 0.0f)
+            continue;
+        const float d = std::hypot (event.position.x - hs.x, event.position.y - hs.y);
+        if (d <= bestSpectralDist)
+        {
+            bestSpectralDist = d;
+            clickedSpectralSlot = slot;
+        }
+    }
+
+    float bestNormalDist = clickThreshold + 1.0f;
+    auto considerNormal = [&] (bool clicked, float dist)
+    {
+        if (clicked)
+            bestNormalDist = juce::jmin (bestNormalDist, dist);
+    };
+    considerNormal (clickedHandle1, distanceToHandle1);
+    considerNormal (clickedHandle2, distanceToHandle2);
+    considerNormal (clickedHandle3, distanceToHandle3);
+    considerNormal (clickedHandle4, distanceToHandle4);
+    considerNormal (clickedHandle5, distanceToHandle5);
+    considerNormal (clickedHandle6, distanceToHandle6);
+    considerNormal (clickedHandle7, distanceToHandle7);
+    considerNormal (clickedHandle8, distanceToHandle8);
+
+    const bool preferSpectralAmount = clickedSpectralSlot >= 0
+                                      && bestSpectralDist <= bestNormalDist;
+
     int clickedExtendedGlobal = -1;
     for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
     {
@@ -3327,8 +3791,10 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
         }
     }
 
-    const bool clickedAnyHandle = clickedHandle1 || clickedHandle2 || clickedHandle3 || clickedHandle4
-                                  || clickedHandle5 || clickedHandle6 || clickedHandle7 || clickedHandle8
+    const bool clickedAnyHandle = (! preferSpectralAmount
+                                   && (clickedHandle1 || clickedHandle2 || clickedHandle3 || clickedHandle4
+                                       || clickedHandle5 || clickedHandle6 || clickedHandle7 || clickedHandle8))
+                                  || preferSpectralAmount
                                   || clickedExtendedGlobal >= 0;
 
     // Hide popup when clicking empty graph space (not when selecting a handle or interacting with the popup).
@@ -3350,6 +3816,35 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     // Clicks inside the option box are for its controls — don't start handle drags.
     if (clickInsideOptionBox)
         return;
+
+    if (preferSpectralAmount && ! anyHandleDragging)
+    {
+        static const char* kFreqIds[8] = {
+            "band1Frequency", "band2Frequency", "band3Frequency", "band4Frequency",
+            "highpassCutoff", "lowpassCutoff", "highShelfFrequency", "lowShelfFrequency"
+        };
+        static const char* kAmountIds[8] = {
+            "band1SpectralDepth", "band2SpectralDepth", "band3SpectralDepth", "band4SpectralDepth",
+            "highpassSpectralDepth", "lowpassSpectralDepth",
+            "highShelfSpectralDepth", "lowShelfSpectralDepth"
+        };
+
+        auto& hs = spectralAmountHandles[(size_t) clickedSpectralSlot];
+        showOptionBoxForHandle (clickedSpectralSlot, hs.x, hs.y);
+        hs.dragging = true;
+        anyHandleDragging = true;
+        activeSpectralAmountSlot = clickedSpectralSlot;
+        setOptionBoxInteractionFaded (true);
+        if (onBandManipulationHighlight)
+            onBandManipulationHighlight (clickedSpectralSlot);
+        hs.dragOffsetX = event.position.x - hs.x;
+        hs.dragOffsetY = event.position.y - hs.y;
+        if (auto* p = processor.treeState.getParameter (kFreqIds[clickedSpectralSlot]))
+            p->beginChangeGesture();
+        if (auto* p = processor.treeState.getParameter (kAmountIds[clickedSpectralSlot]))
+            p->beginChangeGesture();
+        return;
+    }
 
     if (clickedExtendedGlobal >= 0 && ! anyHandleDragging)
     {
@@ -3576,9 +4071,25 @@ void FrequencyResponseComponent::mouseDoubleClick (const juce::MouseEvent& event
                 continue;
             if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) <= 10.0f)
             {
-                // Deactivate extended band (leave defaults ready for reuse).
-                if (auto* p = processor.treeState.getParameter (EqBand::onOffParamIDForGlobal (global)))
-                    p->setValueNotifyingHost (0.0f);
+                // Deactivate extended band and clear dynamic dual-mode memory.
+                auto setF = [this] (const juce::String& id, float v)
+                {
+                    if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter (id)))
+                        param->setValueNotifyingHost (param->convertTo0to1 (v));
+                };
+                auto setB = [this] (const juce::String& id, bool v)
+                {
+                    if (auto* param = processor.treeState.getParameter (id))
+                        param->setValueNotifyingHost (v ? 1.0f : 0.0f);
+                };
+
+                setB (EqBand::onOffParamIDForGlobal (global), false);
+                setB (DynamicEq::dynamicParamIDForGlobal (global), false);
+                setF (EqBand::gainParamIDForGlobal (global), 0.0f);
+                setF (DynamicEq::thresholdParamIDForGlobal (global), -24.0f);
+                setF (DynamicEq::attackMsParamIDForGlobal (global), DynamicEq::attackMs);
+                setF (DynamicEq::releaseMsParamIDForGlobal (global), DynamicEq::releaseMs);
+                processor.clearDynamicModeGainMemory (global);
                 needsUpdateExtended = true;
                 needsUpdateCombined = true;
                 hitExtended = true;
@@ -3613,6 +4124,69 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         cursorX = static_cast<float>(event.x);
         cursorY = static_cast<float>(event.y);
 
+    }
+
+    // Spectral Amount handle drag (Y → Amount, X → shared band frequency)
+    if (activeSpectralAmountSlot >= 0
+        && activeSpectralAmountSlot < kNumSpectralSlots
+        && spectralAmountHandles[(size_t) activeSpectralAmountSlot].dragging)
+    {
+        static const char* kFreqIds[8] = {
+            "band1Frequency", "band2Frequency", "band3Frequency", "band4Frequency",
+            "highpassCutoff", "lowpassCutoff", "highShelfFrequency", "lowShelfFrequency"
+        };
+        static const char* kAmountIds[8] = {
+            "band1SpectralDepth", "band2SpectralDepth", "band3SpectralDepth", "band4SpectralDepth",
+            "highpassSpectralDepth", "lowpassSpectralDepth",
+            "highShelfSpectralDepth", "lowShelfSpectralDepth"
+        };
+        static const char* kExpandIds[8] = {
+            "band1SpectralExpand", "band2SpectralExpand", "band3SpectralExpand", "band4SpectralExpand",
+            "highpassSpectralExpand", "lowpassSpectralExpand",
+            "highShelfSpectralExpand", "lowShelfSpectralExpand"
+        };
+
+        auto& hs = spectralAmountHandles[(size_t) activeSpectralAmountSlot];
+        float newX = juce::jlimit (0.0f, (float) (w - 1), event.position.x - hs.dragOffsetX);
+        float newY = juce::jlimit (0.0f, (float) (h - 1), event.position.y - hs.dragOffsetY);
+        hs.x = newX;
+        hs.y = newY;
+
+        const double logMinHz = std::log10 (20.0);
+        const double logMaxHz = std::log10 (20000.0);
+        const float newFreq = std::pow (10.0f, (float) (logMinHz + (logMaxHz - logMinHz) * newX / (float) (w - 1)));
+        const bool expand = rawBoolParam (parameters, kExpandIds[activeSpectralAmountSlot]);
+        const float amountDb = yToDb (newY, (float) h);
+        const float newAmount = displayDbToSpectralAmount (amountDb, expand, getEqDisplayRangeDb());
+
+        if (auto* paramF = dynamic_cast<juce::RangedAudioParameter*> (
+                processor.treeState.getParameter (kFreqIds[activeSpectralAmountSlot])))
+            paramF->setValueNotifyingHost (paramF->convertTo0to1 (juce::jlimit (20.0f, 20000.0f, newFreq)));
+
+        if (auto* paramA = dynamic_cast<juce::RangedAudioParameter*> (
+                processor.treeState.getParameter (kAmountIds[activeSpectralAmountSlot])))
+            paramA->setValueNotifyingHost (paramA->convertTo0to1 (
+                juce::jlimit (SpectralDynamics::kMinSpectralAmount,
+                              SpectralDynamics::kMaxSpectralAmount,
+                              newAmount)));
+
+        needsUpdateSpectralAmount = true;
+        needsUpdateCombined = true;
+        // Frequency move also shifts the makeup band curve.
+        switch (activeSpectralAmountSlot)
+        {
+            case 0: needsUpdateBand1 = true; break;
+            case 1: needsUpdateBand2 = true; break;
+            case 2: needsUpdateBand3 = true; break;
+            case 3: needsUpdateBand4 = true; break;
+            case 4: needsUpdateHighpass = true; break;
+            case 5: needsUpdateLowpass = true; break;
+            case 6: needsUpdateHighShelf = true; break;
+            case 7: needsUpdateLowShelf = true; break;
+            default: break;
+        }
+        repaint();
+        return;
     }
 
     // Extended-band handle drag (Band 9–64)
@@ -4206,6 +4780,37 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
 {
     juce::ignoreUnused(event);
 
+    if (activeSpectralAmountSlot >= 0
+        && activeSpectralAmountSlot < kNumSpectralSlots
+        && spectralAmountHandles[(size_t) activeSpectralAmountSlot].dragging)
+    {
+        static const char* kFreqIds[8] = {
+            "band1Frequency", "band2Frequency", "band3Frequency", "band4Frequency",
+            "highpassCutoff", "lowpassCutoff", "highShelfFrequency", "lowShelfFrequency"
+        };
+        static const char* kAmountIds[8] = {
+            "band1SpectralDepth", "band2SpectralDepth", "band3SpectralDepth", "band4SpectralDepth",
+            "highpassSpectralDepth", "lowpassSpectralDepth",
+            "highShelfSpectralDepth", "lowShelfSpectralDepth"
+        };
+
+        if (auto* p = processor.treeState.getParameter (kFreqIds[activeSpectralAmountSlot]))
+            p->endChangeGesture();
+        if (auto* p = processor.treeState.getParameter (kAmountIds[activeSpectralAmountSlot]))
+            p->endChangeGesture();
+
+        spectralAmountHandles[(size_t) activeSpectralAmountSlot].dragging = false;
+        activeSpectralAmountSlot = -1;
+        anyHandleDragging = false;
+        setOptionBoxInteractionFaded (false);
+        if (onBandManipulationHighlight)
+            onBandManipulationHighlight (-1);
+        needsUpdateSpectralAmount = true;
+        needsUpdateCombined = true;
+        repaint();
+        return;
+    }
+
     for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
     {
         auto& hs = extendedHandles[(size_t) (global - EqBand::kBankSize)];
@@ -4584,10 +5189,13 @@ bool FrequencyResponseComponent::anyActiveDynamicEq() const
         return false;
     };
 
+    // D/SC: per-band curves stay on the handle; cumulative uses effective gain each tick.
     const bool anyDyn = (on ("band1OnOff") && on ("band1Dynamic"))
         || (on ("band2OnOff") && on ("band2Dynamic"))
         || (on ("band3OnOff") && on ("band3Dynamic"))
         || (on ("band4OnOff") && on ("band4Dynamic"))
+        || (on ("highpassOnOff") && on ("highpassDynamic"))
+        || (on ("lowpassOnOff") && on ("lowpassDynamic"))
         || (on ("highShelfOnOff") && on ("highShelfDynamic"))
         || (on ("lowShelfOnOff") && on ("lowShelfDynamic"));
 
@@ -4595,6 +5203,8 @@ bool FrequencyResponseComponent::anyActiveDynamicEq() const
         || (on ("band2OnOff") && on ("band2Sidechain"))
         || (on ("band3OnOff") && on ("band3Sidechain"))
         || (on ("band4OnOff") && on ("band4Sidechain"))
+        || (on ("highpassOnOff") && on ("highpassSidechain"))
+        || (on ("lowpassOnOff") && on ("lowpassSidechain"))
         || (on ("highShelfOnOff") && on ("highShelfSidechain"))
         || (on ("lowShelfOnOff") && on ("lowShelfSidechain"));
 
@@ -4623,24 +5233,19 @@ void FrequencyResponseComponent::markActiveDynamicBandsDirty()
 
     const bool anyLfo = LfoMod::anyActiveRouting (parameters);
 
-    // Dynamic / sidechain change the per-band IIR shape (effective gain + LFO F/Q).
-    // Spectral GR is sum-only, so spectral animation only needs needsUpdateCombined.
-    auto liveBand = [&] (const char* onId, const char* dynId, const char* scId) -> bool
-    {
-        return on (onId) && (on (dynId) || on (scId) || anyLfo);
-    };
-
-    if (liveBand ("band1OnOff", "band1Dynamic", "band1Sidechain"))
+    // LFO changes per-band IIR shape (published F/G/Q).
+    // D/SC only rebuild the cumulative curve from published effective gains.
+    if (anyLfo && on ("band1OnOff"))
         needsUpdateBand1 = true;
-    if (liveBand ("band2OnOff", "band2Dynamic", "band2Sidechain"))
+    if (anyLfo && on ("band2OnOff"))
         needsUpdateBand2 = true;
-    if (liveBand ("band3OnOff", "band3Dynamic", "band3Sidechain"))
+    if (anyLfo && on ("band3OnOff"))
         needsUpdateBand3 = true;
-    if (liveBand ("band4OnOff", "band4Dynamic", "band4Sidechain"))
+    if (anyLfo && on ("band4OnOff"))
         needsUpdateBand4 = true;
-    if (liveBand ("highShelfOnOff", "highShelfDynamic", "highShelfSidechain"))
+    if (anyLfo && on ("highShelfOnOff"))
         needsUpdateHighShelf = true;
-    if (liveBand ("lowShelfOnOff", "lowShelfDynamic", "lowShelfSidechain"))
+    if (anyLfo && on ("lowShelfOnOff"))
         needsUpdateLowShelf = true;
 
     needsUpdateCombined = true;
@@ -4693,8 +5298,6 @@ void FrequencyResponseComponent::timerCallback()
 
 void FrequencyResponseComponent::parameterChanged(const juce::String& parameterID, float newValue)
 {
-    juce::ignoreUnused(newValue);
-
     // While a handle is being dragged, mouseDrag owns curve updates.
     // Ignoring these callbacks prevents post-release attachment/smooth echoes from re-animating the curve.
     // Dynamic/spectral on/off / band on/off / Side Check still need the animation timer synced.
@@ -4709,6 +5312,19 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
     const bool isSideCheckToggle = parameterID == SideCheck::enabledParamId();
     if (isDynToggle || isBandOnOff || isSideCheckToggle)
         syncDynamicCurveTimer();
+
+    // Static ↔ dynamic-range gain memory when the user toggles D (not Spectral*Dynamic).
+    if (parameterID.endsWith ("Dynamic") && ! parameterID.contains ("Spectral"))
+    {
+        const int bandIdx = bandIndexFromDynamicParamId (parameterID);
+        if (bandIdx >= 0)
+            processor.applyDynamicModeGainSwap (bandIdx, newValue > 0.5f);
+    }
+
+    if (parameterID.endsWith ("Spectral")
+        || parameterID.contains ("SpectralDepth")
+        || parameterID.endsWith ("SpectralExpand"))
+        needsUpdateSpectralAmount = true;
 
     if (anyHandleDragging)
         return;

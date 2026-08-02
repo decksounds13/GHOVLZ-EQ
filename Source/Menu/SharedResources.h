@@ -111,6 +111,8 @@ public:
     juce::Colour meterBackground = createColorWithOptionalAlpha (20, 18, 14, 255);
     juce::Colour meterFill = createColorWithOptionalAlpha (180, 150, 55, 255);
     juce::Colour meterClip = createColorWithOptionalAlpha (220, 40, 40, 255);
+    /** Shared numerical readout colour (level meters, loudness, histogram labels). */
+    juce::Colour meterReadoutText = createColorWithOptionalAlpha (245, 245, 245, 235);
 
     //--------------------------------------------------------------------------
     // Oscilloscope
@@ -129,6 +131,9 @@ public:
     juce::Colour gonGlow = createColorWithOptionalAlpha (220, 190, 120, 160);
     juce::Colour gonCorrPositive = createColorWithOptionalAlpha (80, 200, 100, 255);
     juce::Colour gonCorrNegative = createColorWithOptionalAlpha (220, 70, 70, 255);
+
+    /** Drop-target outline while rearranging Scope mode panes (dice / Graph module). */
+    juce::Colour scopeDropOutline = createColorWithOptionalAlpha (220, 190, 90, 255);
 
     //--------------------------------------------------------------------------
     // Mod section (kept in family with Plugin chrome — syncFaceplateModScheme)

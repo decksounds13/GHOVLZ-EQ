@@ -191,6 +191,7 @@ namespace DynamicEq
         float lastDetectorFreq = -1.0f;
         float lastDetectorQ = -1.0f;
         std::atomic<float> publishedEffectiveGainDb { 0.0f };
+        std::atomic<float> publishedEnvelopeDb { kSilenceFloorDb };
 
         void prepare (const juce::dsp::ProcessSpec& spec, int blockSize)
         {
@@ -201,12 +202,14 @@ namespace DynamicEq
             lastDetectorFreq = -1.0f;
             lastDetectorQ = -1.0f;
             publishedEffectiveGainDb.store (0.0f);
+            publishedEnvelopeDb.store (kSilenceFloorDb);
         }
 
         void reset()
         {
             detector.reset();
             envelopeDb = kSilenceFloorDb;
+            publishedEnvelopeDb.store (kSilenceFloorDb, std::memory_order_relaxed);
         }
 
         void updateEnvelopeCoeffs (float attackTimeMs, float releaseTimeMs,
@@ -252,6 +255,7 @@ namespace DynamicEq
 
             const float coeff = levelDb > envelopeDb ? attackCoeff : releaseCoeff;
             envelopeDb = coeff * envelopeDb + (1.0f - coeff) * levelDb;
+            publishedEnvelopeDb.store (envelopeDb, std::memory_order_relaxed);
 
             return computeAmount (envelopeDb, thresholdDb);
         }
@@ -264,6 +268,11 @@ namespace DynamicEq
         float getPublishedEffectiveGain() const
         {
             return publishedEffectiveGainDb.load (std::memory_order_relaxed);
+        }
+
+        float getPublishedEnvelopeDb() const
+        {
+            return publishedEnvelopeDb.load (std::memory_order_relaxed);
         }
     };
 }

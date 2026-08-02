@@ -13,8 +13,11 @@ class GradientStripEditor : public juce::Component,
 public:
     enum class ModeFamily
     {
-        intensity, // FFT / Spec
-        spatial    // Spectrum Fill
+        intensity,   // FFT / Spec (Quiet↔Loud)
+        spatial,     // Spectrum Fill
+        frequency,   // Stereogram (Low↔High frequency)
+        goniometer,  // Loudness / X / Y / X+Y diversion
+        oscilloscope // Amplitude (Quiet↔Loud) + Frequency (Low↔High)
     };
 
     GradientStripEditor (SharedResources& resources,
@@ -71,10 +74,20 @@ private:
     void syncPresetField();
     void simplifyClicked();
     void densifyClicked();
+    void invertClicked();
     void savePresetClicked();
     void showPresetMenu();
     void samplePathClicked();
+    void randomizeClicked();
     int findMatchingPresetIndex() const;
+
+    /** Square dice control for randomizing this editor's ramp only. */
+    class DiceButton final : public juce::Button
+    {
+    public:
+        DiceButton();
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+    };
 
     SharedResources& sharedResources;
     ModeFamily modeFamily;
@@ -88,8 +101,10 @@ private:
     juce::TextButton densifyButton { "More" };
     /** Pole count; click toggles Hard / Soft blend (no extra toolbar buttons). */
     juce::TextButton stopCountButton;
+    juce::TextButton invertButton { "Invert" };
     juce::TextButton savePresetButton { "Save" };
     PresetFieldButton presetField;
+    DiceButton randomizeButton;
     juce::TextButton samplePathButton { "Sample Path" };
     GradientRamp* ramp = nullptr;
     float uiScale = 1.0f;

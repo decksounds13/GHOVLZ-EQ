@@ -8,23 +8,30 @@ int CustomTabBarLookAndFeel::getTabButtonBestWidth (juce::TabBarButton& button, 
 {
     juce::ignoreUnused (tabDepth);
     const auto& text = button.getButtonText();
+    // Sized so a page of 6 tabs leaves room for the ◀ ▶ page arrows on the right.
     if (text.equalsIgnoreCase ("FFT"))
-        return 80;
+        return 70;
     if (text.equalsIgnoreCase ("Spectrum"))
-        return 110;
+        return 100;
     if (text.equalsIgnoreCase ("Oscilloscope"))
-        return 140;
-    if (text.equalsIgnoreCase ("Goniometer"))
-        return 130;
-    if (text.equalsIgnoreCase ("Spectrogram"))
-        return 140;
-    if (text.equalsIgnoreCase ("Gradients"))
         return 120;
+    if (text.equalsIgnoreCase ("Goniometer"))
+        return 110;
+    if (text.equalsIgnoreCase ("Spectrogram"))
+        return 120;
+    if (text.equalsIgnoreCase ("Gradients"))
+        return 100;
     if (text.equalsIgnoreCase ("Level Meters"))
-        return 130;
+        return 115;
+    if (text.equalsIgnoreCase ("Loudness"))
+        return 100;
+    if (text.equalsIgnoreCase ("Stereogram"))
+        return 110;
+    if (text.equalsIgnoreCase ("Histogram"))
+        return 105;
     if (text.containsIgnoreCase ("Appearance"))
-        return 160; // Appearance (WIP)
-    return 120;
+        return 110;
+    return 100;
 }
 
 void CustomTabBarLookAndFeel::drawTabButton (juce::TabBarButton& button, juce::Graphics& g,

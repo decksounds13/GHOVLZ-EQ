@@ -1,5 +1,6 @@
 #include "GoniometerSettingsComponent.h"
 
+#include "../../MainComponent.h"
 #include "../AnalyserDefaults.h"
 
 namespace
@@ -16,9 +17,12 @@ namespace
 }
 
 GoniometerSettingsComponent::Content::Content (SharedResources& resources,
-                                               juce::AudioProcessorValueTreeState& state)
+                                               juce::AudioProcessorValueTreeState& state,
+                                               ColourRampBank& ramps)
     : sharedResources (resources),
-      treeState (state)
+      treeState (state),
+      colourRamps (ramps),
+      gradientEditor (resources, GradientStripEditor::ModeFamily::goniometer, &ramps.getPresets())
 {
     titleLabel.setText ("Goniometer", juce::dontSendNotification);
     titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
@@ -28,6 +32,31 @@ GoniometerSettingsComponent::Content::Content (SharedResources& resources,
     styleSaveDefaultButton (saveDefaultButton);
     saveDefaultButton.onClick = [this] { saveAnalyserDefaults(); };
     addAndMakeVisible (saveDefaultButton);
+
+    styleToggle (useRampToggle);
+    addAndMakeVisible (useRampToggle);
+    useRampAttachment = std::make_unique<ButtonAttachment> (treeState, "GON_USE_RAMP_ID", useRampToggle);
+    useRampToggle.onClick = [this] { syncRampControlsEnabled(); };
+
+    gradientLabel.setText ("Colour Ramp", juce::dontSendNotification);
+    styleLabel (gradientLabel);
+    gradientLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
+    addAndMakeVisible (gradientLabel);
+
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::goniometer));
+    gradientEditor.onRampChanged = [this] { colourRamps.notifyEdited(); };
+    gradientEditor.onRampPreview = [this] { colourRamps.notifyPreview(); };
+    gradientEditor.onSamplePath = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->beginRampSamplingForTarget (ColourRampBank::Target::goniometer);
+    };
+    gradientEditor.onPreferredHeightChanged = [this]
+    {
+        if (auto* parent = findParentComponentOfClass<GoniometerSettingsComponent>())
+            parent->resized();
+    };
+    addAndMakeVisible (gradientEditor);
 
     qualityLabel.setText ("Quality", juce::dontSendNotification);
     styleQualityCombo (qualityCombo);
@@ -107,7 +136,7 @@ GoniometerSettingsComponent::Content::Content (SharedResources& resources,
                     compactGlowSpreadLabel, compactGlowSpreadSlider, compactGlowSpreadAttachment, "GON_GLOW_SPREAD_ID",
                     compactGlowOpacityLabel, compactGlowOpacitySlider, compactGlowOpacityAttachment, "GON_GLOW_OPACITY_ID");
 
-    expandedSectionLabel.setText ("Expanded", juce::dontSendNotification);
+    expandedSectionLabel.setText ("Expanded / Scope", juce::dontSendNotification);
     styleSectionLabel (expandedSectionLabel);
     addAndMakeVisible (expandedSectionLabel);
 
@@ -129,6 +158,8 @@ GoniometerSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (expandedGlowRadiusLabel);
     styleLabel (expandedGlowSpreadLabel);
     styleLabel (expandedGlowOpacityLabel);
+
+    syncRampControlsEnabled();
 }
 
 GoniometerSettingsComponent::Content::~Content()
@@ -217,6 +248,21 @@ void GoniometerSettingsComponent::Content::layoutComboRow (juce::Rectangle<int>&
     area.removeFromTop (kRowGap);
 }
 
+void GoniometerSettingsComponent::Content::syncGradientFromBank()
+{
+    gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::goniometer));
+    gradientEditor.repaint();
+    syncRampControlsEnabled();
+}
+
+void GoniometerSettingsComponent::Content::syncRampControlsEnabled()
+{
+    const bool rampOn = useRampToggle.getToggleState();
+    gradientLabel.setEnabled (rampOn);
+    gradientEditor.setEnabled (rampOn);
+    gradientEditor.setAlpha (rampOn ? 1.0f : 0.45f);
+}
+
 int GoniometerSettingsComponent::Content::getPreferredHeight() const
 {
     const int sharedRows = 2; // quality, line opacity
@@ -225,6 +271,9 @@ int GoniometerSettingsComponent::Content::getPreferredHeight() const
 
     return kPadY * 2
            + 24 + 8
+           + 22 + kRowGap // use ramp
+           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight()
+           + kSectionGap
            + sharedRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
            + 2 * (perModeExtras + perModeRows * (kLabelH + kLabelGap + kSliderH + kRowGap));
 }
@@ -238,10 +287,21 @@ void GoniometerSettingsComponent::Content::resized()
     titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
 
+    const int controlW = juce::jmin (520, area.getWidth());
+
+    // Ramp first so it is visible without scrolling.
+    useRampToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+    area.removeFromTop (kRowGap);
+    gradientLabel.setBounds (area.removeFromTop (kLabelH));
+    area.removeFromTop (kLabelGap);
+    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                  .removeFromLeft (controlW));
+    area.removeFromTop (kSectionGap);
+
     layoutComboRow (area, qualityLabel, qualityCombo);
     layoutSliderRow (area, lineOpacityLabel, lineOpacitySlider);
 
-    auto layoutModeBlock = [this] (juce::Rectangle<int>& area,
+    auto layoutModeBlock = [this] (juce::Rectangle<int>& areaIn,
                                    juce::Label& section,
                                    juce::Label& widthLabel, juce::Slider& widthSlider,
                                    juce::ToggleButton& glowToggle,
@@ -249,15 +309,15 @@ void GoniometerSettingsComponent::Content::resized()
                                    juce::Label& spreadLabel, juce::Slider& spreadSlider,
                                    juce::Label& opacityLabel, juce::Slider& opacitySlider)
     {
-        section.setBounds (area.removeFromTop (kSectionH));
-        area.removeFromTop (kLabelGap);
-        layoutSliderRow (area, widthLabel, widthSlider);
-        glowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
-        area.removeFromTop (6);
-        layoutSliderRow (area, radiusLabel, radiusSlider);
-        layoutSliderRow (area, spreadLabel, spreadSlider);
-        layoutSliderRow (area, opacityLabel, opacitySlider);
-        area.removeFromTop (kSectionGap);
+        section.setBounds (areaIn.removeFromTop (kSectionH));
+        areaIn.removeFromTop (kLabelGap);
+        layoutSliderRow (areaIn, widthLabel, widthSlider);
+        glowToggle.setBounds (areaIn.removeFromTop (22).removeFromLeft (juce::jmin (220, areaIn.getWidth())));
+        areaIn.removeFromTop (6);
+        layoutSliderRow (areaIn, radiusLabel, radiusSlider);
+        layoutSliderRow (areaIn, spreadLabel, spreadSlider);
+        layoutSliderRow (areaIn, opacityLabel, opacitySlider);
+        areaIn.removeFromTop (kSectionGap);
     };
 
     layoutModeBlock (area, compactSectionLabel,
@@ -276,10 +336,14 @@ void GoniometerSettingsComponent::Content::resized()
 }
 
 GoniometerSettingsComponent::GoniometerSettingsComponent (SharedResources& resources,
-                                                          juce::AudioProcessorValueTreeState& state)
+                                                          juce::AudioProcessorValueTreeState& state,
+                                                          ColourRampBank& ramps)
     : sharedResources (resources),
-      content (resources, state)
+      colourRamps (ramps),
+      content (resources, state, ramps)
 {
+    colourRamps.addChangeListener (this);
+
     viewport.setViewedComponent (&content, false);
     viewport.setScrollBarsShown (false, false);
     viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
@@ -294,7 +358,13 @@ GoniometerSettingsComponent::GoniometerSettingsComponent (SharedResources& resou
 
 GoniometerSettingsComponent::~GoniometerSettingsComponent()
 {
+    colourRamps.removeChangeListener (this);
     viewport.setViewedComponent (nullptr, false);
+}
+
+void GoniometerSettingsComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    content.syncGradientFromBank();
 }
 
 void GoniometerSettingsComponent::syncScrollBarColours()
