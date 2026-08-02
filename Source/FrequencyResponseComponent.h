@@ -531,14 +531,22 @@ private:
     juce::TextButton modButton { "Mod" };
     juce::TextButton proportionalQButton { "P" };
     juce::TextButton autoGainButton { "A" };
-    /** Graph-bottom Match cluster (right of Scope): Match | v | Amount | freeze. */
+    /** Graph-bottom Match cluster: Match | v | Amount | HP | LP | freeze. */
     juce::TextButton matchButton { "Match" };
     juce::TextButton matchCurveButton { "v" };
     juce::TextButton matchFreezeButton { "*" };
     juce::Slider matchAmountKnob;
+    juce::Slider matchHpKnob;
+    juce::Slider matchLpKnob;
+    juce::Label matchHpLabel;
+    juce::Label matchLpLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchAmountAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchHpAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchLpAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> matchFreezeAttachment;
     bool matchEnableDialogOpen = false;
+    bool matchHpLpGapGuard = false;
+    void enforceMatchHpLpGap (juce::Slider* changed);
     /** Last Scope bounds in FRC local space (may be below FRC when Scope sits in editor trim). */
     juce::Rectangle<int> matchChromeScopeAnchor;
     bool matchChromeHasScopeAnchor = false;

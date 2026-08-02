@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <cmath>
 
 /**
     Spectral Match — global shape-match toward a target curve (noise slopes / capture).
@@ -12,12 +13,30 @@ namespace MatchEq
     inline constexpr const char* amountParamId() noexcept { return "matchAmount"; }
     inline constexpr const char* curveParamId() noexcept { return "matchCurve"; }
     inline constexpr const char* speedParamId() noexcept { return "matchSpeed"; }
+    inline constexpr const char* smoothParamId() noexcept { return "matchSmooth"; }
     inline constexpr const char* frozenParamId() noexcept { return "matchFrozen"; }
     inline constexpr const char* placementParamId() noexcept { return "matchPlacement"; }
+    inline constexpr const char* hpHzParamId() noexcept { return "matchHpHz"; }
+    inline constexpr const char* lpHzParamId() noexcept { return "matchLpHz"; }
 
     constexpr float kMinAmount = 0.0f;
     constexpr float kMaxAmount = 1.0f;
     constexpr float kDefaultAmount = 0.5f;
+
+    /** Frequency-domain lattice smooth (0 = sharp slices, 1 = max neighbour blend + wider Q). */
+    constexpr float kMinSmooth = 0.0f;
+    constexpr float kMaxSmooth = 1.0f;
+    constexpr float kDefaultSmooth = 0.35f;
+    /** At Smooth=1, scale packed Q by this (wider bands / more overlap). */
+    constexpr float kSmoothMinQScale = 0.55f;
+    constexpr int kNumSmoothMenuItems = 5;
+
+    /** HP/LP effect window — only slices with centre in [HP, LP] get Match GR (like Side Check). */
+    constexpr float kMaxFreqHz = 20000.0f;
+    constexpr float kMinHpLpHz = 0.0f;
+    constexpr float kDefaultHpHz = 0.0f;
+    constexpr float kDefaultLpHz = 18000.0f;
+    constexpr float kMinHpLpGapHz = 50.0f;
 
     constexpr int kNumSlices = 32;
     constexpr int kMaxUserPresets = 12;
@@ -68,6 +87,48 @@ namespace MatchEq
     inline juce::StringArray getSpeedChoiceNames()
     {
         return { "Fast", "Med", "Slow" };
+    }
+
+    inline juce::StringArray getSmoothMenuNames()
+    {
+        return { "Off", "Light", "Med", "Strong", "Max" };
+    }
+
+    inline float smoothMenuValue (int index) noexcept
+    {
+        switch (juce::jlimit (0, kNumSmoothMenuItems - 1, index))
+        {
+            case 0:  return 0.0f;
+            case 1:  return 0.20f;
+            case 2:  return kDefaultSmooth;
+            case 3:  return 0.60f;
+            default: return 1.0f;
+        }
+    }
+
+    /** Nearest Smooth menu index for the current continuous value. */
+    inline int nearestSmoothMenuIndex (float smooth01) noexcept
+    {
+        const float s = juce::jlimit (kMinSmooth, kMaxSmooth, smooth01);
+        int best = 0;
+        float bestErr = std::abs (s - smoothMenuValue (0));
+        for (int i = 1; i < kNumSmoothMenuItems; ++i)
+        {
+            const float err = std::abs (s - smoothMenuValue (i));
+            if (err < bestErr)
+            {
+                bestErr = err;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /** Q multiply for lattice rebuild: 1 at Smooth=0 → kSmoothMinQScale at Smooth=1. */
+    inline float latticeQScaleForSmooth (float smooth01) noexcept
+    {
+        const float s = juce::jlimit (kMinSmooth, kMaxSmooth, smooth01);
+        return 1.0f + s * (kSmoothMinQScale - 1.0f);
     }
 
     inline juce::StringArray getPlacementChoiceNames()

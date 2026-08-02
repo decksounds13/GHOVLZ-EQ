@@ -30,7 +30,10 @@ namespace MatchEq
                       const float* detectR,
                       bool enabled,
                       float amount,
-                      int speedMode) noexcept;
+                      int speedMode,
+                      float smooth01,
+                      float hpHz,
+                      float lpHz) noexcept;
 
         void setFactoryTarget (int curveIndex) noexcept;
         /** Copy analyser-style magnitude (display 0..1 or linear) onto the working target. */
@@ -42,6 +45,7 @@ namespace MatchEq
         std::array<float, kNumSlices> getCenterHz() const noexcept;
 
         void sampleTargetDb (const float* frequenciesHz, float* destDb, int numPoints) const noexcept;
+        /** Graph sum-curve sample: smooth log-f spline through slice GR (not BP lobe sum). */
         void samplePublishedGrDb (const float* frequenciesHz, float* destDb, int numPoints) const noexcept;
 
         float getPublishedGrDb() const noexcept { return publishedPeakGrDb.load (std::memory_order_relaxed); }
@@ -88,6 +92,7 @@ namespace MatchEq
         void normalizeWorkingTarget() noexcept;
         void publishGrCurve() noexcept;
         void clearPublished() noexcept;
+        void applySmoothToLatticeIfNeeded (float smooth01) noexcept;
 
         double sampleRate = 48000.0;
         int blockSize = 512;
@@ -95,6 +100,7 @@ namespace MatchEq
         bool prepared = false;
         bool wasEnabled = false;
         bool settling = false;
+        float latticeSmooth01 = kDefaultSmooth;
 
         std::array<Slice, kNumSlices> slices {};
         std::array<float, kNumSlices> workingTargetDb {};

@@ -1316,12 +1316,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         MatchEq::speedParamId(), "Match Speed",
         MatchEq::getSpeedChoiceNames(),
         MatchEq::med));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        MatchEq::smoothParamId(), "Match Smooth",
+        juce::NormalisableRange<float> (MatchEq::kMinSmooth, MatchEq::kMaxSmooth, 0.01f),
+        MatchEq::kDefaultSmooth));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         MatchEq::frozenParamId(), "Match Frozen", true));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         MatchEq::placementParamId(), "Match Placement",
         MatchEq::getPlacementChoiceNames(),
         MatchEq::beforeEq));
+    // HP/LP — Match only applies GR on slices whose centre falls between these freqs.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        MatchEq::hpHzParamId(), "Match HP",
+        juce::NormalisableRange<float> (MatchEq::kMinHpLpHz, MatchEq::kMaxFreqHz, 1.0f, 0.2f),
+        MatchEq::kDefaultHpHz));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        MatchEq::lpHzParamId(), "Match LP",
+        juce::NormalisableRange<float> (MatchEq::kMinHpLpHz, MatchEq::kMaxFreqHz, 1.0f, 0.2f),
+        MatchEq::kDefaultLpHz));
 
     // Side Check (S<=M): global post-EQ BP-lattice bus — tuck Side when louder than Mid per slice.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -3426,6 +3439,9 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const float matchAmount = rawFloat (MatchEq::amountParamId(), MatchEq::kDefaultAmount);
     const int matchSpeed = MatchEq::readChoiceIndex (
         treeState, MatchEq::speedParamId(), MatchEq::med, MatchEq::numSpeeds - 1);
+    const float matchSmooth = rawFloat (MatchEq::smoothParamId(), MatchEq::kDefaultSmooth);
+    const float matchHp = rawFloat (MatchEq::hpHzParamId(), MatchEq::kDefaultHpHz);
+    const float matchLp = rawFloat (MatchEq::lpHzParamId(), MatchEq::kDefaultLpHz);
 
     auto runMatchStage = [&] (bool enabledHere)
     {
@@ -3440,7 +3456,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 
         const float* dL = matchDetectBuffer.getReadPointer (0);
         const float* dR = nChMain > 1 ? matchDetectBuffer.getReadPointer (1) : dL;
-        matchEngine.process (mainBuffer, dL, dR, enabledHere, matchAmount, matchSpeed);
+        matchEngine.process (mainBuffer, dL, dR, enabledHere, matchAmount, matchSpeed,
+                             matchSmooth, matchHp, matchLp);
     };
 
     // Match before EQ (default): shape dry, then static bands sculpt on top.

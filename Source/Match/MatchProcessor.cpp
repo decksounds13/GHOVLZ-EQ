@@ -72,6 +72,7 @@ void Processor::rebuildLattice() noexcept
         const float f = (float) std::exp (logMin + t * (logMax - logMin));
 
         // Constant-Q packing so neighbours form a soft partition.
+        // Smooth widens Q (lower Q) so bands overlap more and steps soften.
         float q = 1.0f;
         if (kNumSlices >= 2)
         {
@@ -81,6 +82,8 @@ void Processor::rebuildLattice() noexcept
             const float f1 = (float) std::exp (logMin + t1 * (logMax - logMin));
             const float ratio = juce::jmax (1.001f, f1 / juce::jmax (1.0f, f0));
             q = juce::jlimit (0.35f, 8.0f, 1.0f / std::log (ratio));
+            q *= latticeQScaleForSmooth (latticeSmooth01);
+            q = juce::jlimit (0.25f, 8.0f, q);
         }
 
         auto& s = slices[(size_t) i];
@@ -268,6 +271,10 @@ void Processor::publishGrCurve() noexcept
 
 void Processor::samplePublishedGrDb (const float* frequenciesHz, float* destDb, int numPoints) const noexcept
 {
+    // Display path: log-f Catmull-Rom through slice GR centres (same spirit as the
+    // target overlay). Raised-cosine BP lobes were accurate to the lattice partition
+    // but drew scallops/stairs even when the underlying shape was a smooth slope.
+    // Match Smooth still affects DSP Q + neighbour GR blend; this only changes the curve draw.
     if (frequenciesHz == nullptr || destDb == nullptr || numPoints <= 0)
         return;
 
@@ -282,52 +289,86 @@ void Processor::samplePublishedGrDb (const float* frequenciesHz, float* destDb, 
     const float nyquist = (float) sampleRate * 0.5f;
     const int n = src.count;
     std::array<float, kNumSlices> logC {};
-    std::array<float, kNumSlices> invHalfLog {};
-    std::array<float, kNumSlices> gLinMinus1 {};
-
+    std::array<float, kNumSlices> gr {};
     for (int k = 0; k < n; ++k)
     {
-        const float c = juce::jmax (1.0f, src.centerHz[(size_t) k]);
-        logC[(size_t) k] = std::log (c);
-        float halfLog = 0.15f;
-        if (n >= 2)
-        {
-            if (k == 0)
-                halfLog = juce::jmax (1.0e-4f, std::log (juce::jmax (c * 1.0001f, src.centerHz[1]) / c));
-            else if (k == n - 1)
-                halfLog = juce::jmax (1.0e-4f, std::log (c / juce::jmax (1.0f, src.centerHz[(size_t) (k - 1)])));
-            else
-            {
-                const float c0 = juce::jmax (1.0f, src.centerHz[(size_t) (k - 1)]);
-                const float c1 = juce::jmax (c * 1.0001f, src.centerHz[(size_t) (k + 1)]);
-                halfLog = juce::jmax (1.0e-4f, 0.5f * std::log (c1 / c0));
-            }
-        }
-        invHalfLog[(size_t) k] = 1.0f / halfLog;
-        gLinMinus1[(size_t) k] = juce::Decibels::decibelsToGain (src.grDb[(size_t) k]) - 1.0f;
+        logC[(size_t) k] = std::log (juce::jmax (1.0f, src.centerHz[(size_t) k]));
+        gr[(size_t) k] = src.grDb[(size_t) k];
     }
 
-    int kFirst = 0;
+    auto catmull = [] (float p0, float p1, float p2, float p3, float t) noexcept
+    {
+        const float t2 = t * t;
+        const float t3 = t2 * t;
+        return 0.5f * ((2.0f * p1)
+                       + (-p0 + p2) * t
+                       + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2
+                       + (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
+    };
+
+    int seg = 0;
     for (int i = 0; i < numPoints; ++i)
     {
         const float f = juce::jlimit (1.0f, nyquist, frequenciesHz[i]);
         const float logF = std::log (f);
 
-        while (kFirst < n && (logF - logC[(size_t) kFirst]) * invHalfLog[(size_t) kFirst] > 1.0f)
-            ++kFirst;
-
-        float h = 1.0f;
-        for (int k = kFirst; k < n; ++k)
+        if (n == 1 || logF <= logC[0])
         {
-            const float x = (logF - logC[(size_t) k]) * invHalfLog[(size_t) k];
-            if (x < -1.0f)
-                break;
-            if (x > 1.0f)
-                continue;
-            const float w = 0.5f * (1.0f + std::cos (juce::MathConstants<float>::pi * x));
-            h += w * gLinMinus1[(size_t) k];
+            destDb[i] = gr[0];
+            continue;
         }
-        destDb[i] = juce::Decibels::gainToDecibels (juce::jmax (1.0e-6f, h), -100.0f);
+        if (logF >= logC[(size_t) (n - 1)])
+        {
+            destDb[i] = gr[(size_t) (n - 1)];
+            continue;
+        }
+
+        while (seg + 1 < n && logC[(size_t) (seg + 1)] < logF)
+            ++seg;
+
+        const int i1 = seg;
+        const int i2 = juce::jmin (n - 1, i1 + 1);
+        const int i0 = juce::jmax (0, i1 - 1);
+        const int i3 = juce::jmin (n - 1, i2 + 1);
+
+        const float denom = juce::jmax (1.0e-6f, logC[(size_t) i2] - logC[(size_t) i1]);
+        const float t = juce::jlimit (0.0f, 1.0f, (logF - logC[(size_t) i1]) / denom);
+        destDb[i] = catmull (gr[(size_t) i0], gr[(size_t) i1],
+                             gr[(size_t) i2], gr[(size_t) i3], t);
+    }
+}
+
+void Processor::applySmoothToLatticeIfNeeded (float smooth01) noexcept
+{
+    const float s = juce::jlimit (kMinSmooth, kMaxSmooth, smooth01);
+    if (std::abs (s - latticeSmooth01) < 1.0e-4f)
+        return;
+
+    latticeSmooth01 = s;
+    if (! prepared)
+        return;
+
+    // Preserve envelopes / GR while swapping BP coeffs for the new Q packing.
+    std::array<float, kNumSlices> env {};
+    std::array<float, kNumSlices> grL {};
+    std::array<float, kNumSlices> grT {};
+    for (int i = 0; i < activeSlices; ++i)
+    {
+        env[(size_t) i] = slices[(size_t) i].envDb;
+        grL[(size_t) i] = slices[(size_t) i].grLin;
+        grT[(size_t) i] = slices[(size_t) i].grTarget;
+    }
+
+    rebuildLattice();
+
+    for (int i = 0; i < activeSlices; ++i)
+    {
+        slices[(size_t) i].envDb = env[(size_t) i];
+        slices[(size_t) i].grLin = grL[(size_t) i];
+        slices[(size_t) i].grTarget = grT[(size_t) i];
+        slices[(size_t) i].detect.reset();
+        slices[(size_t) i].applyL.reset();
+        slices[(size_t) i].applyR.reset();
     }
 }
 
@@ -336,7 +377,10 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
                          const float* detectR,
                          bool enabled,
                          float amount,
-                         int speedMode) noexcept
+                         int speedMode,
+                         float smooth01,
+                         float hpHz,
+                         float lpHz) noexcept
 {
     const int numCh = buffer.getNumChannels();
     const int n = buffer.getNumSamples();
@@ -368,6 +412,8 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
     wasEnabled = enabled;
     settling = ! enabled;
 
+    applySmoothToLatticeIfNeeded (smooth01);
+
     const float* detR = detectR != nullptr ? detectR : detectL;
     auto* outL = buffer.getWritePointer (0);
     auto* outR = numCh > 1 ? buffer.getWritePointer (1) : nullptr;
@@ -379,6 +425,9 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
     const float grCoeff = 1.0f - std::exp (-1.0f / juce::jmax (1.0f,
         (float) sampleRate * grSmoothMs * 0.001f));
     const float amountClamped = juce::jlimit (kMinAmount, kMaxAmount, amount);
+    const float spatialSmooth = juce::jlimit (kMinSmooth, kMaxSmooth, smooth01);
+    const float bandLo = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmin (hpHz, lpHz));
+    const float bandHi = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmax (hpHz, lpHz));
 
     std::array<float, kNumSlices> tgt {};
     {
@@ -401,10 +450,12 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Update envelopes + GR targets (level-normalized shape error).
+    // Update envelopes + GR targets (level-normalized shape error inside HP/LP window).
     double measSum = 0.0;
     double tgtSum = 0.0;
+    int inBandCount = 0;
     std::array<float, kNumSlices> measDb {};
+    std::array<bool, kNumSlices> inBand {};
     for (int b = 0; b < activeSlices; ++b)
     {
         auto& s = slices[(size_t) b];
@@ -413,18 +464,25 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
         const float c = level > s.envDb ? atk : rel;
         s.envDb = c * s.envDb + (1.0f - c) * level;
         measDb[(size_t) b] = s.envDb;
-        measSum += (double) s.envDb;
-        tgtSum += (double) tgt[(size_t) b];
+        inBand[(size_t) b] = s.centerHz >= bandLo && s.centerHz <= bandHi;
+        if (inBand[(size_t) b])
+        {
+            measSum += (double) s.envDb;
+            tgtSum += (double) tgt[(size_t) b];
+            ++inBandCount;
+        }
     }
 
-    const float measMean = (float) (measSum / (double) juce::jmax (1, activeSlices));
-    const float tgtMean = (float) (tgtSum / (double) juce::jmax (1, activeSlices));
+    const float measMean = (float) (measSum / (double) juce::jmax (1, inBandCount));
+    const float tgtMean = (float) (tgtSum / (double) juce::jmax (1, inBandCount));
 
     for (int b = 0; b < activeSlices; ++b)
     {
         auto& s = slices[(size_t) b];
         float targetGrDb = 0.0f;
         if (enabled && amountClamped > 1.0e-4f
+            && inBandCount > 0
+            && inBand[(size_t) b]
             && measDb[(size_t) b] > kSilenceFloorDb + 1.0f)
         {
             // Positive err = too loud vs target shape -> cut; negative -> boost.
@@ -438,6 +496,28 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
 
         s.grTarget = juce::Decibels::decibelsToGain (targetGrDb);
     }
+
+    // Spatial GR blend across neighbours (0 = current stepped lattice, 1 = soft).
+    if (spatialSmooth > 1.0e-4f && activeSlices > 1)
+    {
+        std::array<float, kNumSlices> rawGr {};
+        for (int b = 0; b < activeSlices; ++b)
+            rawGr[(size_t) b] = slices[(size_t) b].grTarget;
+
+        for (int b = 0; b < activeSlices; ++b)
+        {
+            const float left = rawGr[(size_t) juce::jmax (0, b - 1)];
+            const float center = rawGr[(size_t) b];
+            const float right = rawGr[(size_t) juce::jmin (activeSlices - 1, b + 1)];
+            const float neigh = 0.25f * (left + 2.0f * center + right);
+            slices[(size_t) b].grTarget = (1.0f - spatialSmooth) * center + spatialSmooth * neigh;
+        }
+    }
+
+    // Keep Match GR strictly inside the HP/LP window after Smooth blend.
+    for (int b = 0; b < activeSlices; ++b)
+        if (! inBand[(size_t) b])
+            slices[(size_t) b].grTarget = 1.0f;
 
     // Apply reconstruct on wet buffer (BP fed from pre-apply sample, like Side Check).
     bool anyGr = false;

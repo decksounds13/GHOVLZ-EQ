@@ -360,15 +360,61 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     matchCurveButton.onClick = [this] { showMatchCurveMenu(); };
     addChildComponent (matchCurveButton);
 
-    matchAmountKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    matchAmountKnob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-    matchAmountKnob.setTooltip ("Match Amount - how strongly to pull toward the target curve");
-    matchAmountKnob.setColour (juce::Slider::rotarySliderFillColourId, colors().pluginButtonAccent);
-    matchAmountKnob.setColour (juce::Slider::rotarySliderOutlineColourId, colors().pluginButtonBackground);
-    matchAmountKnob.setColour (juce::Slider::thumbColourId, colors().pluginButtonText);
-    addChildComponent (matchAmountKnob);
+    auto styleMatchRotary = [this] (juce::Slider& s, const juce::String& tip)
+    {
+        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        s.setTooltip (tip);
+        s.setColour (juce::Slider::rotarySliderFillColourId, colors().pluginButtonAccent);
+        s.setColour (juce::Slider::rotarySliderOutlineColourId, colors().pluginButtonBackground);
+        s.setColour (juce::Slider::thumbColourId, colors().pluginButtonText);
+        addChildComponent (s);
+    };
+    styleMatchRotary (matchAmountKnob, "Match Amount - how strongly to pull toward the target curve");
     matchAmountAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         parameters, MatchEq::amountParamId(), matchAmountKnob);
+
+    auto attachMatchFreqKnob = [this] (juce::Slider& knob, const char* paramId, const juce::String& tip,
+                                       std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att)
+    {
+        knob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        knob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        knob.setTooltip (tip);
+        knob.setTextValueSuffix (" Hz");
+        knob.setColour (juce::Slider::rotarySliderFillColourId, colors().pluginButtonAccent);
+        knob.setColour (juce::Slider::rotarySliderOutlineColourId, colors().pluginButtonBackground);
+        knob.setColour (juce::Slider::thumbColourId, colors().pluginButtonText);
+        knob.setNormalisableRange (juce::NormalisableRange<double> (
+            (double) MatchEq::kMinHpLpHz, (double) MatchEq::kMaxFreqHz, 1.0, 0.2));
+        if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (parameters.getParameter (paramId)))
+        {
+            const auto range = param->getNormalisableRange();
+            knob.setNormalisableRange (juce::NormalisableRange<double> (
+                (double) range.start, (double) range.end, (double) range.interval,
+                (double) range.skew, range.symmetricSkew));
+        }
+        addChildComponent (knob);
+        att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            parameters, paramId, knob);
+    };
+    attachMatchFreqKnob (matchHpKnob, MatchEq::hpHzParamId(),
+        "HP - Match highpass (effect starts above this frequency; 0 = fully open)", matchHpAttachment);
+    attachMatchFreqKnob (matchLpKnob, MatchEq::lpHzParamId(),
+        "LP - Match lowpass (effect stops below this frequency)", matchLpAttachment);
+    matchHpKnob.onValueChange = [this] { enforceMatchHpLpGap (&matchHpKnob); };
+    matchLpKnob.onValueChange = [this] { enforceMatchHpLpGap (&matchLpKnob); };
+
+    auto setupMatchRangeLabel = [this] (juce::Label& label, const juce::String& text)
+    {
+        label.setText (text, juce::dontSendNotification);
+        label.setFont (juce::Font ("Lato Black", 10.0f, juce::Font::plain));
+        label.setJustificationType (juce::Justification::centred);
+        label.setColour (juce::Label::textColourId, colors().pluginButtonText.withAlpha (0.85f));
+        label.setInterceptsMouseClicks (false, false);
+        addChildComponent (label);
+    };
+    setupMatchRangeLabel (matchHpLabel, "HP");
+    setupMatchRangeLabel (matchLpLabel, "LP");
 
     styleRangeButton (matchFreezeButton);
     matchFreezeButton.setClickingTogglesState (true);
@@ -490,9 +536,17 @@ void FrequencyResponseComponent::applyThemeToChildControls()
     splitSeparationKnob.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
     splitSeparationKnob.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
     splitSeparationKnob.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
-    matchAmountKnob.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
-    matchAmountKnob.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
-    matchAmountKnob.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
+    auto themeMatchRotary = [&c] (juce::Slider& s)
+    {
+        s.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
+        s.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
+        s.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
+    };
+    themeMatchRotary (matchAmountKnob);
+    themeMatchRotary (matchHpKnob);
+    themeMatchRotary (matchLpKnob);
+    matchHpLabel.setColour (juce::Label::textColourId, c.pluginButtonText.withAlpha (0.85f));
+    matchLpLabel.setColour (juce::Label::textColourId, c.pluginButtonText.withAlpha (0.85f));
     styleRangeButton (matchButton);
     styleRangeButton (matchCurveButton);
     styleRangeButton (matchFreezeButton);
@@ -593,6 +647,8 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener (MatchEq::frozenParamId(), this);
     matchFreezeButton.removeMouseListener (this);
     matchAmountAttachment.reset();
+    matchHpAttachment.reset();
+    matchLpAttachment.reset();
     matchFreezeAttachment.reset();
     splitSeparationAttachment.reset();
     parameters.removeParameterListener("band1Dynamic", this);
@@ -5587,6 +5643,34 @@ void FrequencyResponseComponent::layoutMatchChromeAfterScope (juce::Rectangle<in
     layoutMatchChrome();
 }
 
+void FrequencyResponseComponent::enforceMatchHpLpGap (juce::Slider* changed)
+{
+    if (matchHpLpGapGuard || changed == nullptr)
+        return;
+    if (changed != &matchHpKnob && changed != &matchLpKnob)
+        return;
+
+    float hp = (float) matchHpKnob.getValue();
+    float lp = (float) matchLpKnob.getValue();
+    if (hp + MatchEq::kMinHpLpGapHz <= lp)
+        return;
+
+    matchHpLpGapGuard = true;
+    if (changed == &matchHpKnob)
+    {
+        const float newLp = juce::jmin (MatchEq::kMaxFreqHz, hp + MatchEq::kMinHpLpGapHz);
+        if (std::abs ((float) matchLpKnob.getValue() - newLp) > 0.5f)
+            matchLpKnob.setValue ((double) newLp, juce::sendNotificationSync);
+    }
+    else
+    {
+        const float newHp = juce::jmax (MatchEq::kMinHpLpHz, lp - MatchEq::kMinHpLpGapHz);
+        if (std::abs ((float) matchHpKnob.getValue() - newHp) > 0.5f)
+            matchHpKnob.setValue ((double) newHp, juce::sendNotificationSync);
+    }
+    matchHpLpGapGuard = false;
+}
+
 void FrequencyResponseComponent::layoutMatchChrome()
 {
     // Bottom of the graph, immediately right of Scope (? / Phase / SideCheck / Scope row).
@@ -5595,7 +5679,8 @@ void FrequencyResponseComponent::layoutMatchChrome()
     constexpr int matchW = 48;
     constexpr int curveW = 22;
     constexpr int freezeW = 22;
-    constexpr int knob = 52; // 2× prior size so Amount reads clearly in the bottom strip
+    constexpr int knob = 42; // 20% smaller than prior 52px Amount size
+    constexpr int labelW = 16;
     constexpr int gap = 4;
     constexpr int scopeGap = 6;
     constexpr int marginBottom = 18;
@@ -5605,7 +5690,9 @@ void FrequencyResponseComponent::layoutMatchChrome()
                           && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
 
     const int stripW = extrasOn
-        ? (matchW + gap + curveW + gap + knob + gap + freezeW)
+        ? (matchW + gap + curveW + gap + knob
+           + gap + labelW + knob + gap + labelW + knob
+           + gap + freezeW)
         : matchW;
     const int rowH = juce::jmax (btnH, knob);
 
@@ -5647,12 +5734,27 @@ void FrequencyResponseComponent::layoutMatchChrome()
         x += curveW + gap;
         matchAmountKnob.setBounds (x, knobY, knob, knob);
         x += knob + gap;
+
+        matchHpLabel.setBounds (x, btnY, labelW, btnH);
+        x += labelW;
+        matchHpKnob.setBounds (x, knobY, knob, knob);
+        x += knob + gap;
+
+        matchLpLabel.setBounds (x, btnY, labelW, btnH);
+        x += labelW;
+        matchLpKnob.setBounds (x, knobY, knob, knob);
+        x += knob + gap;
+
         matchFreezeButton.setBounds (x, btnY, freezeW, btnH);
     }
     else
     {
         matchCurveButton.setBounds ({});
         matchAmountKnob.setBounds ({});
+        matchHpLabel.setBounds ({});
+        matchHpKnob.setBounds ({});
+        matchLpLabel.setBounds ({});
+        matchLpKnob.setBounds ({});
         matchFreezeButton.setBounds ({});
     }
 
@@ -5661,6 +5763,10 @@ void FrequencyResponseComponent::layoutMatchChrome()
     {
         matchCurveButton.toFront (false);
         matchAmountKnob.toFront (false);
+        matchHpLabel.toFront (false);
+        matchHpKnob.toFront (false);
+        matchLpLabel.toFront (false);
+        matchLpKnob.toFront (false);
         matchFreezeButton.toFront (false);
     }
 }
@@ -5674,6 +5780,10 @@ void FrequencyResponseComponent::syncMatchChrome()
 
     matchCurveButton.setVisible (on);
     matchAmountKnob.setVisible (on);
+    matchHpKnob.setVisible (on);
+    matchLpKnob.setVisible (on);
+    matchHpLabel.setVisible (on);
+    matchLpLabel.setVisible (on);
     matchFreezeButton.setVisible (on);
 
     const bool frozen = parameters.getRawParameterValue (MatchEq::frozenParamId()) != nullptr
@@ -5779,6 +5889,16 @@ void FrequencyResponseComponent::showMatchCurveMenu()
         speedMenu.addItem (70 + i, speedNames[i], true, speed == i);
     menu.addSubMenu ("Match speed", speedMenu);
 
+    juce::PopupMenu smoothMenu;
+    const float smoothVal = parameters.getRawParameterValue (MatchEq::smoothParamId()) != nullptr
+                                ? parameters.getRawParameterValue (MatchEq::smoothParamId())->load()
+                                : MatchEq::kDefaultSmooth;
+    const int smoothIdx = MatchEq::nearestSmoothMenuIndex (smoothVal);
+    const auto smoothNames = MatchEq::getSmoothMenuNames();
+    for (int i = 0; i < smoothNames.size(); ++i)
+        smoothMenu.addItem (90 + i, smoothNames[i], true, smoothIdx == i);
+    menu.addSubMenu ("Match smooth", smoothMenu);
+
     menu.addSeparator();
     menu.addItem (80, "Save frozen curve...");
     auto& matchEng = processor.getMatchEngine();
@@ -5831,6 +5951,12 @@ void FrequencyResponseComponent::showMatchCurveMenu()
                 if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
                         parameters.getParameter (MatchEq::speedParamId())))
                     *p = result - 70;
+            }
+            else if (result >= 90 && result < 90 + MatchEq::kNumSmoothMenuItems)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterFloat*> (
+                        parameters.getParameter (MatchEq::smoothParamId())))
+                    *p = MatchEq::smoothMenuValue (result - 90);
             }
             else if (result == 80)
             {
@@ -6035,7 +6161,10 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
     if (parameterID == MatchEq::enabledParamId()
         || parameterID == MatchEq::curveParamId()
         || parameterID == MatchEq::frozenParamId()
-        || parameterID == MatchEq::amountParamId())
+        || parameterID == MatchEq::amountParamId()
+        || parameterID == MatchEq::smoothParamId()
+        || parameterID == MatchEq::hpHzParamId()
+        || parameterID == MatchEq::lpHzParamId())
     {
         if (parameterID == MatchEq::curveParamId())
             processor.syncMatchFactoryTargetFromParam();
