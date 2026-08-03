@@ -170,16 +170,59 @@ void ColourRampBank::randomizeRamp (GradientRamp& ramp,
     std::vector<GradientRamp::Stop> stops;
     stops.reserve ((size_t) n);
 
-    for (int i = 0; i < n; ++i)
+    if (! colours.orderedRampGradation)
     {
-        GradientRamp::Stop s;
-        if (i == 0)           s.position = 0.0f;
-        else if (i == n - 1)  s.position = 1.0f;
-        else                  s.position = rng.nextFloat();
+        for (int i = 0; i < n; ++i)
+        {
+            GradientRamp::Stop s;
+            if (i == 0)           s.position = 0.0f;
+            else if (i == n - 1)  s.position = 1.0f;
+            else                  s.position = rng.nextFloat();
 
-        const float alpha = varyAlpha ? (0.35f + rng.nextFloat() * 0.55f) : 1.0f;
-        s.colour = colours.randomColourInLimits (alpha);
-        stops.push_back (s);
+            const float alpha = varyAlpha ? (0.35f + rng.nextFloat() * 0.55f) : 1.0f;
+            s.colour = colours.randomColourInLimits (alpha);
+            stops.push_back (s);
+        }
+    }
+    else
+    {
+        // Ordered: random endpoint spans inside Appearance limits, evenly spaced stops.
+        auto pickEnds = [&rng] (bool enabled, float lo, float hi) -> std::pair<float, float>
+        {
+            lo = juce::jlimit (0.0f, 1.0f, lo);
+            hi = juce::jlimit (lo, 1.0f, hi);
+            if (! enabled || hi <= lo + 1.0e-5f)
+                return { lo, lo };
+
+            float a = lo + rng.nextFloat() * (hi - lo);
+            float b = lo + rng.nextFloat() * (hi - lo);
+            // Random direction (dark→light / light→dark, etc.).
+            if (rng.nextBool())
+                std::swap (a, b);
+            return { a, b };
+        };
+
+        const auto [h0, h1] = pickEnds (colours.randomizeHue,
+                                        colours.hueLowerLimit, colours.hueUpperLimit);
+        const auto [s0, s1] = pickEnds (colours.randomizeSaturation,
+                                        colours.saturationLowerLimit, colours.saturationUpperLimit);
+        const auto [v0, v1] = pickEnds (colours.randomizeBrightness,
+                                        colours.brightnessLowerLimit, colours.brightnessUpperLimit);
+        const auto [a0, a1] = varyAlpha
+                                  ? pickEnds (true, 0.35f, 0.90f)
+                                  : std::pair<float, float> { 1.0f, 1.0f };
+
+        for (int i = 0; i < n; ++i)
+        {
+            const float t = (n > 1) ? (float) i / (float) (n - 1) : 0.0f;
+            GradientRamp::Stop s;
+            s.position = t;
+            s.colour = juce::Colour::fromHSV (h0 + (h1 - h0) * t,
+                                              s0 + (s1 - s0) * t,
+                                              v0 + (v1 - v0) * t,
+                                              a0 + (a1 - a0) * t);
+            stops.push_back (s);
+        }
     }
 
     ramp.stops = std::move (stops);

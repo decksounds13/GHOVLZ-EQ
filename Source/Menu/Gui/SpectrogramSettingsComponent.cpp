@@ -2,6 +2,7 @@
 
 #include "../../MainComponent.h"
 #include "../AnalyserDefaults.h"
+#include "../Menu.h"
 
 namespace
 {
@@ -208,6 +209,9 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
             parent->resized();
         else
             resized();
+
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
     };
     addAndMakeVisible (gradientEditor);
 

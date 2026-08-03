@@ -2,6 +2,7 @@
 
 #include "../../MainComponent.h"
 #include "../../ScopeModules.h"
+#include "../Menu.h"
 
 namespace
 {
@@ -52,6 +53,8 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     meshQualityCombo.addItem ("Medium", 2);
     meshQualityCombo.addItem ("High", 3);
     meshQualityCombo.addItem ("Ultra", 4);
+    meshQualityCombo.addItem ("Overkill", 5);
+    meshQualityCombo.setTooltip ("Mesh density along time × frequency. Overkill is 512×448 (~230k verts).");
     meshQualityCombo.onChange = [this] { applyStructureControlsToMain(); };
     addAndMakeVisible (meshQualityLabel);
     addAndMakeVisible (meshQualityCombo);
@@ -66,6 +69,17 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     meshHeightSlider.setTooltip ("Peak height of the 3D spectrogram mesh (world units).");
     addAndMakeVisible (meshHeightLabel);
     addAndMakeVisible (meshHeightSlider);
+
+    freqMeshBiasLabel.setText ("HF Mesh Density", juce::dontSendNotification);
+    styleSlider (freqMeshBiasSlider);
+    freqMeshBiasSlider.setRange (0.0, 1.0, 0.01);
+    freqMeshBiasSlider.setValue (0.0, juce::dontSendNotification);
+    freqMeshBiasSlider.onValueChange = [this] { applyStructureControlsToMain(); };
+    freqMeshBiasSlider.setTooltip (
+        "Packs extra frequency quads toward the highs without thinning the lows. "
+        "0 = uniform grid; 1 ≈ 2.7× frequency rows (biased to HF).");
+    addAndMakeVisible (freqMeshBiasLabel);
+    addAndMakeVisible (freqMeshBiasSlider);
 
     msaaLabel.setText ("Antialiasing (MSAA)", juce::dontSendNotification);
     styleCombo (msaaCombo);
@@ -111,7 +125,12 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     {
         styleToggle (t);
         t.setTooltip (tip);
-        t.onClick = [this] { applyLookControlsToMain(); };
+        t.onClick = [this]
+        {
+            updateLookDevVisibility();
+            applyLookControlsToMain();
+            requestParentRelayout();
+        };
         addAndMakeVisible (t);
     };
     auto setupLookSlider = [this] (juce::Label& lab, juce::Slider& s,
@@ -148,18 +167,39 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     setupLookSlider (rimLabel, rimSlider, 0.0, 1.0, 0.01, "View-dependent edge lift.");
     rimSlider.setValue (0.22, juce::dontSendNotification);
 
-    setupLookToggle (contactShadowToggle, "Soft dark disc under the mesh on the floor plane.");
+    setupLookToggle (contactShadowToggle,
+                     "Darkens low mesh regions nestled beside taller neighbours "
+                     "(heightfield covers the floor, so a ground disc cannot show).");
     contactShadowStrengthLabel.setText ("Contact Shadow Strength", juce::dontSendNotification);
-    setupLookSlider (contactShadowStrengthLabel, contactShadowStrengthSlider, 0.0, 1.0, 0.01, "Darkness of the floor contact shadow.");
+    setupLookSlider (contactShadowStrengthLabel, contactShadowStrengthSlider, 0.0, 1.0, 0.01,
+                     "Strength of base / nestled contact darkening.");
     contactShadowStrengthSlider.setValue (0.45, juce::dontSendNotification);
 
     setupLookToggle (selfShadowToggle,
-                     "Heightfield self-shadowing toward the key light. Off by default "
-                     "(useful when the floor is too dark for contact shadows).");
+                     "Directional heightfield shadows toward the key light "
+                     "(horizon + soft ray march). Uses light azimuth/elevation.");
     selfShadowStrengthLabel.setText ("Self-Shadow Strength", juce::dontSendNotification);
-    setupLookSlider (selfShadowStrengthLabel, selfShadowStrengthSlider, 0.0, 1.0, 0.01,
-                     "How strongly occluded ridges darken.");
-    selfShadowStrengthSlider.setValue (0.65, juce::dontSendNotification);
+    setupLookSlider (selfShadowStrengthLabel, selfShadowStrengthSlider, 0.0, 2.0, 0.01,
+                     "How strongly occluded ridges darken (0–2).");
+    selfShadowStrengthSlider.setValue (0.85, juce::dontSendNotification);
+    selfShadowBiasLabel.setText ("Shadow Bias", juce::dontSendNotification);
+    setupLookSlider (selfShadowBiasLabel, selfShadowBiasSlider, 0.0, 1.0, 0.01,
+                     "Raises the shadow ray origin to fight acne / self-intersection.");
+    selfShadowBiasSlider.setValue (0.35, juce::dontSendNotification);
+    selfShadowSoftnessLabel.setText ("Shadow Softness", juce::dontSendNotification);
+    setupLookSlider (selfShadowSoftnessLabel, selfShadowSoftnessSlider, 0.0, 1.0, 0.01,
+                     "Widens the terminator / penumbra (higher = softer edge).");
+    selfShadowSoftnessSlider.setValue (0.85, juce::dontSendNotification);
+    selfShadowQualityLabel.setText ("Shadow Quality", juce::dontSendNotification);
+    styleCombo (selfShadowQualityCombo);
+    selfShadowQualityCombo.addItem ("Low", 1);
+    selfShadowQualityCombo.addItem ("Medium", 2);
+    selfShadowQualityCombo.addItem ("High", 3);
+    selfShadowQualityCombo.setSelectedId (2, juce::dontSendNotification);
+    selfShadowQualityCombo.setTooltip ("Sample density for horizon + ray-march shadows.");
+    selfShadowQualityCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (selfShadowQualityLabel);
+    addAndMakeVisible (selfShadowQualityCombo);
 
     setupLookToggle (ssaoToggle,
                      "Heightfield ambient occlusion in crevices (mesh shader). Off by default.");
@@ -194,29 +234,93 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     };
     gradientEditor.onPreferredHeightChanged = [this]
     {
-        if (auto* parent = findParentComponentOfClass<Spectrogram3DSettingsComponent>())
-            parent->resized();
-        else
-            resized();
+        requestParentRelayout();
     };
     addAndMakeVisible (gradientEditor);
 
     juce::Timer::callAfterDelay (0, [safe = juce::Component::SafePointer<Content> (this)]
     {
-        if (safe != nullptr)
-            safe->syncControlsFromMain();
+        if (safe == nullptr)
+            return;
+        safe->syncControlsFromMain();
+        safe->requestParentRelayout();
     });
 
     styleLabel (titleLabel);
     styleLabel (meshQualityLabel);
     styleLabel (meshHeightLabel);
+    styleLabel (freqMeshBiasLabel);
     styleLabel (msaaLabel);
+    styleLabel (selfShadowQualityLabel);
+
+    updateLookDevVisibility();
 }
 
 Spectrogram3DSettingsComponent::Content::~Content()
 {
     meshQualityCombo.setLookAndFeel (nullptr);
     msaaCombo.setLookAndFeel (nullptr);
+    selfShadowQualityCombo.setLookAndFeel (nullptr);
+}
+
+void Spectrogram3DSettingsComponent::Content::setLookChildVisible (juce::Component& c, bool vis)
+{
+    c.setVisible (vis);
+}
+
+void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
+{
+    const bool lit = lightingToggle.getToggleState();
+    setLookChildVisible (lightingAmountLabel, lit);
+    setLookChildVisible (lightingAmountSlider, lit);
+    setLookChildVisible (lightAzimuthLabel, lit);
+    setLookChildVisible (lightAzimuthSlider, lit);
+    setLookChildVisible (lightElevationLabel, lit);
+    setLookChildVisible (lightElevationSlider, lit);
+    setLookChildVisible (specularLabel, lit);
+    setLookChildVisible (specularSlider, lit);
+    setLookChildVisible (roughnessLabel, lit);
+    setLookChildVisible (roughnessSlider, lit);
+    setLookChildVisible (rimLabel, lit);
+    setLookChildVisible (rimSlider, lit);
+
+    const bool contact = contactShadowToggle.getToggleState();
+    setLookChildVisible (contactShadowStrengthLabel, contact);
+    setLookChildVisible (contactShadowStrengthSlider, contact);
+
+    const bool selfSh = selfShadowToggle.getToggleState();
+    setLookChildVisible (selfShadowStrengthLabel, selfSh);
+    setLookChildVisible (selfShadowStrengthSlider, selfSh);
+    setLookChildVisible (selfShadowBiasLabel, selfSh);
+    setLookChildVisible (selfShadowBiasSlider, selfSh);
+    setLookChildVisible (selfShadowSoftnessLabel, selfSh);
+    setLookChildVisible (selfShadowSoftnessSlider, selfSh);
+    setLookChildVisible (selfShadowQualityLabel, selfSh);
+    setLookChildVisible (selfShadowQualityCombo, selfSh);
+
+    const bool ao = ssaoToggle.getToggleState();
+    setLookChildVisible (ssaoStrengthLabel, ao);
+    setLookChildVisible (ssaoStrengthSlider, ao);
+    setLookChildVisible (ssaoRadiusLabel, ao);
+    setLookChildVisible (ssaoRadiusSlider, ao);
+
+    const bool bloom = bloomToggle.getToggleState();
+    setLookChildVisible (bloomStrengthLabel, bloom);
+    setLookChildVisible (bloomStrengthSlider, bloom);
+    setLookChildVisible (bloomThresholdLabel, bloom);
+    setLookChildVisible (bloomThresholdSlider, bloom);
+}
+
+void Spectrogram3DSettingsComponent::Content::requestParentRelayout()
+{
+    if (auto* parent = findParentComponentOfClass<Spectrogram3DSettingsComponent>())
+        parent->resized();
+    else
+        resized();
+
+    // Viewport scroll range lives on Menu::contentPanel — refresh it when Look rows grow/shrink.
+    if (auto* menu = findParentComponentOfClass<Menu>())
+        menu->notifyContentHeightChanged();
 }
 
 void Spectrogram3DSettingsComponent::Content::styleSlider (juce::Slider& slider)
@@ -309,7 +413,8 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     meshQualityCombo.setSelectedId (
         q == Spectrogram3DComponent::MeshQuality::low ? 1
             : (q == Spectrogram3DComponent::MeshQuality::high ? 3
-               : (q == Spectrogram3DComponent::MeshQuality::ultra ? 4 : 2)),
+               : (q == Spectrogram3DComponent::MeshQuality::ultra ? 4
+                  : (q == Spectrogram3DComponent::MeshQuality::overkill ? 5 : 2))),
         juce::dontSendNotification);
     {
         const auto msaa = main->getSpec3DMsaaLevel();
@@ -321,6 +426,7 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     transparentBgToggle.setToggleState (main->isSpec3DTransparentBackground(), juce::dontSendNotification);
     reverseFreqAxisToggle.setToggleState (main->isSpec3DReverseFrequencyAxis(), juce::dontSendNotification);
     meshHeightSlider.setValue (main->getSpec3DMeshHeight(), juce::dontSendNotification);
+    freqMeshBiasSlider.setValue (main->getSpec3DFreqMeshBias(), juce::dontSendNotification);
 
     lightingToggle.setToggleState (main->isSpec3DLightingEnabled(), juce::dontSendNotification);
     lightingAmountSlider.setValue (main->getSpec3DLightingAmount(), juce::dontSendNotification);
@@ -333,12 +439,23 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     contactShadowStrengthSlider.setValue (main->getSpec3DContactShadowStrength(), juce::dontSendNotification);
     selfShadowToggle.setToggleState (main->isSpec3DSelfShadowEnabled(), juce::dontSendNotification);
     selfShadowStrengthSlider.setValue (main->getSpec3DSelfShadowStrength(), juce::dontSendNotification);
+    selfShadowBiasSlider.setValue (main->getSpec3DSelfShadowBias(), juce::dontSendNotification);
+    selfShadowSoftnessSlider.setValue (main->getSpec3DSelfShadowSoftness(), juce::dontSendNotification);
+    {
+        const auto sq = main->getSpec3DSelfShadowQuality();
+        selfShadowQualityCombo.setSelectedId (
+            sq == Spectrogram3DComponent::ShadowQuality::low ? 1
+                : (sq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 2),
+            juce::dontSendNotification);
+    }
     ssaoToggle.setToggleState (main->isSpec3DSsaoEnabled(), juce::dontSendNotification);
     ssaoStrengthSlider.setValue (main->getSpec3DSsaoStrength(), juce::dontSendNotification);
     ssaoRadiusSlider.setValue (main->getSpec3DSsaoRadius(), juce::dontSendNotification);
     bloomToggle.setToggleState (main->isSpec3DBloomEnabled(), juce::dontSendNotification);
     bloomStrengthSlider.setValue (main->getSpec3DBloomStrength(), juce::dontSendNotification);
     bloomThresholdSlider.setValue (main->getSpec3DBloomThreshold(), juce::dontSendNotification);
+
+    updateLookDevVisibility();
 }
 
 void Spectrogram3DSettingsComponent::Content::applyStructureControlsToMain()
@@ -353,7 +470,8 @@ void Spectrogram3DSettingsComponent::Content::applyStructureControlsToMain()
         id == 1 ? Spectrogram3DComponent::MeshQuality::low
                 : (id == 3 ? Spectrogram3DComponent::MeshQuality::high
                            : (id == 4 ? Spectrogram3DComponent::MeshQuality::ultra
-                                      : Spectrogram3DComponent::MeshQuality::medium)),
+                                      : (id == 5 ? Spectrogram3DComponent::MeshQuality::overkill
+                                                 : Spectrogram3DComponent::MeshQuality::medium))),
         true);
     {
         const int msaaId = msaaCombo.getSelectedId();
@@ -366,6 +484,7 @@ void Spectrogram3DSettingsComponent::Content::applyStructureControlsToMain()
     main->setSpec3DTransparentBackground (transparentBgToggle.getToggleState(), true);
     main->setSpec3DReverseFrequencyAxis (reverseFreqAxisToggle.getToggleState(), true);
     main->setSpec3DMeshHeight ((float) meshHeightSlider.getValue(), true);
+    main->setSpec3DFreqMeshBias ((float) freqMeshBiasSlider.getValue(), true);
 }
 
 void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
@@ -386,6 +505,16 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DContactShadowStrength ((float) contactShadowStrengthSlider.getValue(), true);
     main->setSpec3DSelfShadowEnabled (selfShadowToggle.getToggleState(), true);
     main->setSpec3DSelfShadowStrength ((float) selfShadowStrengthSlider.getValue(), true);
+    main->setSpec3DSelfShadowBias ((float) selfShadowBiasSlider.getValue(), true);
+    main->setSpec3DSelfShadowSoftness ((float) selfShadowSoftnessSlider.getValue(), true);
+    {
+        const int id = selfShadowQualityCombo.getSelectedId();
+        main->setSpec3DSelfShadowQuality (
+            id == 1 ? Spectrogram3DComponent::ShadowQuality::low
+                    : (id == 3 ? Spectrogram3DComponent::ShadowQuality::high
+                               : Spectrogram3DComponent::ShadowQuality::medium),
+            true);
+    }
     main->setSpec3DSsaoEnabled (ssaoToggle.getToggleState(), true);
     main->setSpec3DSsaoStrength ((float) ssaoStrengthSlider.getValue(), true);
     main->setSpec3DSsaoRadius ((float) ssaoRadiusSlider.getValue(), true);
@@ -402,25 +531,37 @@ void Spectrogram3DSettingsComponent::Content::applyControlsToMain()
 
 int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
 {
+    const int rowH = kLabelH + kLabelGap + kSliderH + kRowGap;
+    const int toggleH = 22 + 6;
     const int comboRows = 2; // mesh quality + MSAA
-    const int baseSliderRows = 1;
-    const int lookSliderRows = 13;
-    const int toggles = 4 + 5; // base (no MSAA toggle) + look master toggles
+    const int baseSliderRows = 2; // mesh height + HF density
+    const int toggles = 4 + 5; // base + look master toggles
     const int buttonRows = 1;
+
+    int lookRows = 0;
+    if (lightingToggle.getToggleState()) lookRows += 6;
+    if (contactShadowToggle.getToggleState()) lookRows += 1;
+    if (selfShadowToggle.getToggleState()) lookRows += 4; // strength, bias, softness, quality
+    if (ssaoToggle.getToggleState()) lookRows += 2;
+    if (bloomToggle.getToggleState()) lookRows += 2;
 
     return kPadY * 2
            + 24 + 8
-           + comboRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
-           + baseSliderRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
-           + lookSliderRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
-           + toggles * (22 + 6)
-           + buttonRows * (22 + 6)
+           + comboRows * rowH
+           + baseSliderRows * rowH
+           + lookRows * rowH
+           + toggles * toggleH
+           + buttonRows * toggleH
            + kLabelH + kSectionGap // look section header
            + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
 }
 
 void Spectrogram3DSettingsComponent::Content::resized()
 {
+    // Keep Look sub-controls in sync when the panel is laid out / re-opened.
+    if (findParentComponentOfClass<MainComponent>() != nullptr)
+        syncControlsFromMain();
+
     auto area = getLocalBounds().reduced (kPadX, kPadY);
 
     titleLabel.setBounds (area.removeFromTop (24));
@@ -430,6 +571,7 @@ void Spectrogram3DSettingsComponent::Content::resized()
     layoutToggle (area, enhancedFreq3DToggle);
     layoutComboRow (area, meshQualityLabel, meshQualityCombo);
     layoutSliderRow (area, meshHeightLabel, meshHeightSlider);
+    layoutSliderRow (area, freqMeshBiasLabel, freqMeshBiasSlider);
     layoutComboRow (area, msaaLabel, msaaCombo);
     layoutToggle (area, transparentBgToggle);
     layoutToggle (area, reverseFreqAxisToggle);
@@ -439,30 +581,44 @@ void Spectrogram3DSettingsComponent::Content::resized()
     lookLabel.setBounds (area.removeFromTop (kLabelH));
     area.removeFromTop (kRowGap);
     layoutToggle (area, lightingToggle);
-    layoutSliderRow (area, lightingAmountLabel, lightingAmountSlider);
-    layoutSliderRow (area, lightAzimuthLabel, lightAzimuthSlider);
-    layoutSliderRow (area, lightElevationLabel, lightElevationSlider);
-    layoutSliderRow (area, specularLabel, specularSlider);
-    layoutSliderRow (area, roughnessLabel, roughnessSlider);
-    layoutSliderRow (area, rimLabel, rimSlider);
+    if (lightingToggle.getToggleState())
+    {
+        layoutSliderRow (area, lightingAmountLabel, lightingAmountSlider);
+        layoutSliderRow (area, lightAzimuthLabel, lightAzimuthSlider);
+        layoutSliderRow (area, lightElevationLabel, lightElevationSlider);
+        layoutSliderRow (area, specularLabel, specularSlider);
+        layoutSliderRow (area, roughnessLabel, roughnessSlider);
+        layoutSliderRow (area, rimLabel, rimSlider);
+    }
     layoutToggle (area, contactShadowToggle);
-    layoutSliderRow (area, contactShadowStrengthLabel, contactShadowStrengthSlider);
+    if (contactShadowToggle.getToggleState())
+        layoutSliderRow (area, contactShadowStrengthLabel, contactShadowStrengthSlider);
     layoutToggle (area, selfShadowToggle);
-    layoutSliderRow (area, selfShadowStrengthLabel, selfShadowStrengthSlider);
+    if (selfShadowToggle.getToggleState())
+    {
+        layoutSliderRow (area, selfShadowStrengthLabel, selfShadowStrengthSlider);
+        layoutSliderRow (area, selfShadowBiasLabel, selfShadowBiasSlider);
+        layoutSliderRow (area, selfShadowSoftnessLabel, selfShadowSoftnessSlider);
+        layoutComboRow (area, selfShadowQualityLabel, selfShadowQualityCombo);
+    }
     layoutToggle (area, ssaoToggle);
-    layoutSliderRow (area, ssaoStrengthLabel, ssaoStrengthSlider);
-    layoutSliderRow (area, ssaoRadiusLabel, ssaoRadiusSlider);
+    if (ssaoToggle.getToggleState())
+    {
+        layoutSliderRow (area, ssaoStrengthLabel, ssaoStrengthSlider);
+        layoutSliderRow (area, ssaoRadiusLabel, ssaoRadiusSlider);
+    }
     layoutToggle (area, bloomToggle);
-    layoutSliderRow (area, bloomStrengthLabel, bloomStrengthSlider);
-    layoutSliderRow (area, bloomThresholdLabel, bloomThresholdSlider);
+    if (bloomToggle.getToggleState())
+    {
+        layoutSliderRow (area, bloomStrengthLabel, bloomStrengthSlider);
+        layoutSliderRow (area, bloomThresholdLabel, bloomThresholdSlider);
+    }
     area.removeFromTop (kSectionGap);
 
     gradientLabel.setBounds (area.removeFromTop (kLabelH));
     area.removeFromTop (kLabelGap);
     gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
                                   .removeFromLeft (juce::jmin (520, area.getWidth())));
-
-    syncControlsFromMain();
 }
 
 Spectrogram3DSettingsComponent::Spectrogram3DSettingsComponent (SharedResources& resources,

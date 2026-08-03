@@ -49,6 +49,9 @@ private:
         void layoutSliderRow (juce::Rectangle<int>& area, juce::Label& label, juce::Slider& slider);
         void layoutComboRow (juce::Rectangle<int>& area, juce::Label& label, juce::ComboBox& combo);
         void layoutToggle (juce::Rectangle<int>& area, juce::ToggleButton& toggle);
+        void setLookChildVisible (juce::Component& c, bool vis);
+        void updateLookDevVisibility();
+        void requestParentRelayout();
         void syncControlsFromMain();
         void applyControlsToMain();
         void applyLookControlsToMain();
@@ -68,6 +71,8 @@ private:
         juce::ComboBox meshQualityCombo;
         juce::Label meshHeightLabel;
         juce::Slider meshHeightSlider;
+        juce::Label freqMeshBiasLabel;
+        juce::Slider freqMeshBiasSlider;
         juce::Label msaaLabel;
         juce::ComboBox msaaCombo;
         juce::ToggleButton transparentBgToggle { "Soft background (like Osc/Gon)" };
@@ -96,6 +101,12 @@ private:
         juce::ToggleButton selfShadowToggle { "Self-shadowing" };
         juce::Label selfShadowStrengthLabel;
         juce::Slider selfShadowStrengthSlider;
+        juce::Label selfShadowBiasLabel;
+        juce::Slider selfShadowBiasSlider;
+        juce::Label selfShadowSoftnessLabel;
+        juce::Slider selfShadowSoftnessSlider;
+        juce::Label selfShadowQualityLabel;
+        juce::ComboBox selfShadowQualityCombo;
 
         juce::ToggleButton ssaoToggle { "Ambient occlusion" };
         juce::Label ssaoStrengthLabel;

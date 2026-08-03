@@ -19,10 +19,12 @@ class Spectrogram3DComponent : public juce::Component,
                                private juce::Timer
 {
 public:
-    enum class MeshQuality { low = 0, medium, high, ultra };
+    enum class MeshQuality { low = 0, medium, high, ultra, overkill };
     enum class ChromeMode { floating, docked };
     /** Window / soft-FBO multisample count. Off = 0. */
     enum class MsaaLevel { off = 0, x4 = 4, x8 = 8, x16 = 16 };
+    /** Self-shadow ray / horizon sample density. */
+    enum class ShadowQuality { low = 0, medium, high };
 
     Spectrogram3DComponent();
     ~Spectrogram3DComponent() override;
@@ -34,6 +36,13 @@ public:
 
     void setMeshQuality (MeshQuality q) noexcept;
     MeshQuality getMeshQuality() const noexcept { return meshQuality; }
+
+    /**
+        Extra frequency-row density toward the highs (0 = uniform).
+        Never thins the lows vs the quality's base grid — only adds HF rows.
+    */
+    void setFreqMeshBias (float amount01) noexcept;
+    float getFreqMeshBias() const noexcept { return freqMeshBias; }
 
     void setMsaaLevel (MsaaLevel level) noexcept;
     MsaaLevel getMsaaLevel() const noexcept { return msaaLevel; }
@@ -82,6 +91,12 @@ public:
     bool isSelfShadowEnabled() const noexcept { return selfShadowEnabled; }
     void setSelfShadowStrength (float amount01) noexcept;
     float getSelfShadowStrength() const noexcept { return selfShadowStrength; }
+    void setSelfShadowBias (float bias01) noexcept;
+    float getSelfShadowBias() const noexcept { return selfShadowBias; }
+    void setSelfShadowSoftness (float amount01) noexcept;
+    float getSelfShadowSoftness() const noexcept { return selfShadowSoftness; }
+    void setSelfShadowQuality (ShadowQuality q) noexcept;
+    ShadowQuality getSelfShadowQuality() const noexcept { return selfShadowQuality; }
 
     void setSsaoEnabled (bool shouldEnable) noexcept;
     bool isSsaoEnabled() const noexcept { return ssaoEnabled; }
@@ -119,7 +134,7 @@ public:
         float pitchDeg = 35.0f;   // elevation above floor horizon (0=edge-on, 90=top-down)
         float distance = 3.0f;
         float panX = 0.0f;        // look-at X (time)
-        float panY = kDefaultMeshHeight * 0.35f;
+        float panY = kDefaultMeshHeight * 0.5f;
         float panZ = 0.0f;        // look-at Z (freq)
     };
 
@@ -252,8 +267,15 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSelfShadowUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMeshHeightUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourReverseFreqUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourFreqBiasBUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAoAmountUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAoRadiusUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowDirXZUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowSunTanUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowBiasUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowSoftnessUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowQualityUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourContactUniform;
 
         std::unique_ptr<juce::OpenGLShaderProgram> labelShader;
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> labelPositionAttrib;
@@ -340,9 +362,14 @@ private:
     void timerCallback() override;
     void seedDefaultOrientation() noexcept;
     void clampCamera() noexcept;
-    float lookAtY() const noexcept { return meshHeight * 0.35f; }
-    /** Y-up turntable view: T(pullback) * Rx(+pitch) * Ry(yaw) * T(-lookAt). */
+    /** Orbit pivot height — centre of the heightfield volume. */
+    float lookAtY() const noexcept { return meshHeight * 0.5f; }
+    /** Y-up turntable: orbit around (panX, panY, panZ). */
     juce::Matrix3D<float> getTurntableViewMatrix() const noexcept;
+    /** Camera basis for the current yaw/pitch (for pivot-preserving pan). */
+    void cameraBasis (juce::Vector3D<float>& outRight,
+                      juce::Vector3D<float>& outUp,
+                      juce::Vector3D<float>& outForward) const noexcept;
     juce::Colour getClearColour() const noexcept;
     void applyBackgroundTransparency() noexcept;
     void layoutPresentation() noexcept;
@@ -358,6 +385,14 @@ private:
     void markSoftContentDirty() noexcept;
 
     void meshSizeForQuality (int& outW, int& outH) const noexcept;
+    /** Frequency rows after HF bias expansion (base H from quality). */
+    int effectiveFreqMeshRows (int baseH) const noexcept;
+    /** Bias weight B for w(u)=1+B*u^2 (0 when slider is 0). */
+    float freqMeshBiasB() const noexcept;
+    /** Mesh-row param t∈[0,1] → frequency axis u∈[0,1] (0=low, 1=high). */
+    static float freqAxisFromMeshT (float t, float B) noexcept;
+    /** Inverse: frequency u → mesh-row param t (CDF). */
+    static float meshTFromFreqAxis (float u, float B) noexcept;
     void fillMeshColumn (int meshCol, const float* histCol, int histH);
     void seedMeshFromHistory (const std::vector<float>& history, int histW, int histH);
     void appendMeshColumnsFromHistory (const std::vector<float>& history, int histW, int histH, int numNew);
@@ -385,7 +420,10 @@ private:
     bool reverseFrequencyAxis = true;
     ChromeMode chromeMode = ChromeMode::floating;
     MeshQuality meshQuality = MeshQuality::medium;
+    float freqMeshBias = 0.0f; // 0..1 — HF density boost
     float meshHeight = kDefaultMeshHeight;
+    static constexpr int kMaxFreqMeshRows = 2048;
+    static constexpr float kFreqMeshBiasMaxB = 5.0f; // B at slider=1 → ~2.67× rows
 
     bool lightingEnabled = false;
     float lightingAmount = 0.70f;
@@ -397,7 +435,10 @@ private:
     bool contactShadowEnabled = false;
     float contactShadowStrength = 0.45f;
     bool selfShadowEnabled = false;
-    float selfShadowStrength = 0.65f;
+    float selfShadowStrength = 0.85f;
+    float selfShadowBias = 0.35f;       // acne / self-intersection bias
+    float selfShadowSoftness = 0.85f;   // terminator / penumbra width (higher = softer)
+    ShadowQuality selfShadowQuality = ShadowQuality::medium;
     bool ssaoEnabled = false;
     float ssaoStrength = 0.55f;
     float ssaoRadius = 1.0f;
@@ -431,9 +472,6 @@ private:
 
     CameraState camera;
     CameraState defaultCamera;
-    /** RMB truck/pedestal in view space — independent of MMB floor pan (panX/panZ). */
-    float viewPanRight = 0.0f;
-    float viewPanUp = 0.0f;
     juce::Point<float> lastDrag {};
     juce::Point<float> rightClickStart {};
     bool rightClickCandidate = false;

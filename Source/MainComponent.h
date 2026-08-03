@@ -63,6 +63,8 @@ public:
 
     /** Select a ramp target, close Settings if open, then start UI path sampling. */
     void beginRampSamplingForTarget (ColourRampBank::Target target);
+    void setOrderedRampGradation (bool shouldEnable, bool notifyPrefs = true);
+    bool isOrderedRampGradation() const noexcept;
 
     FrequencyResponseComponent& getFrequencyResponseComponent() noexcept { return frequencyResponseComponent; }
 
@@ -133,6 +135,8 @@ public:
     void setSpec3DMode (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DMode() const noexcept { return spec3DEnabled; }
     void setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs = true);
+    void setSpec3DFreqMeshBias (float amount01, bool notifyPrefs = true);
+    float getSpec3DFreqMeshBias() const noexcept;
     Spectrogram3DComponent::MeshQuality getSpec3DMeshQuality() const noexcept;
     void setSpec3DMsaaLevel (Spectrogram3DComponent::MsaaLevel level, bool notifyPrefs = true);
     Spectrogram3DComponent::MsaaLevel getSpec3DMsaaLevel() const noexcept;
@@ -166,6 +170,12 @@ public:
     bool isSpec3DSelfShadowEnabled() const noexcept;
     void setSpec3DSelfShadowStrength (float amount01, bool notifyPrefs = true);
     float getSpec3DSelfShadowStrength() const noexcept;
+    void setSpec3DSelfShadowBias (float bias01, bool notifyPrefs = true);
+    float getSpec3DSelfShadowBias() const noexcept;
+    void setSpec3DSelfShadowSoftness (float amount01, bool notifyPrefs = true);
+    float getSpec3DSelfShadowSoftness() const noexcept;
+    void setSpec3DSelfShadowQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
+    Spectrogram3DComponent::ShadowQuality getSpec3DSelfShadowQuality() const noexcept;
     void setSpec3DSsaoEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DSsaoEnabled() const noexcept;
     void setSpec3DSsaoStrength (float amount01, bool notifyPrefs = true);
@@ -198,6 +208,9 @@ public:
     /** Restore a maximized overlay after editor reopen (enables the module if needed). */
     void restoreExpandedScope (bool osc, bool gon, bool spec);
     void closeSettingsMenu();
+    /** True when a Settings dismiss-catcher point lies over an expanded analyser window / its tools. */
+    bool isPointOverSettingsDismissExempt (int catcherX, int catcherY,
+                                           const juce::Component& catcher) const noexcept;
 
     /** Union of OSC / Gon / Spec toggle bounds (MainComponent local) for Scope chrome alignment. */
     juce::Rectangle<int> getAnalyserToggleColumnBounds() const noexcept
@@ -578,7 +591,11 @@ private:
 
     OscDimmerComponent oscDimmer;
 
-    /** Closes Settings when clicking outside the menu. */
+    /**
+        Closes Settings when clicking outside the menu.
+        Expanded analyser windows (Osc/Gon/Spec/3D) are exempt so lookdev can
+        be tweaked while orbiting / interacting with those views.
+    */
     class MenuDismissCatcher : public juce::Component
     {
     public:
@@ -589,6 +606,13 @@ private:
         }
 
         void mouseDown (const juce::MouseEvent&) override { owner.closeSettingsMenu(); }
+
+        bool hitTest (int x, int y) override
+        {
+            if (owner.isPointOverSettingsDismissExempt (x, y, *this))
+                return false;
+            return true;
+        }
 
     private:
         MainComponent& owner;

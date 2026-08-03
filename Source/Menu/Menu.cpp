@@ -87,8 +87,11 @@ Menu::Menu (SharedResources& resources,
     constrainer.setMinimumSize (200, 140);
     constrainer.setMaximumSize (4000, 4000);
     constrainer.setMinimumOnscreenAmounts (kDragBarHeight, 40, 40, 40);
-    resizer = std::make_unique<juce::ResizableCornerComponent> (this, &constrainer);
-    addAndMakeVisible (*resizer);
+    borderResizer = std::make_unique<juce::ResizableBorderComponent> (this, &constrainer);
+    // Thin edges on all sides; centre of the panel still receives clicks for scrolling / controls.
+    // Top edge stays thin so most of the drag bar remains available for moving.
+    borderResizer->setBorderThickness ({ 5, 5, 5, 5 });
+    addAndMakeVisible (*borderResizer);
 
     setPaintingIsUnclipped (true);
     setSize (kContentWidth, kContentHeight + kDragBarHeight);
@@ -193,6 +196,13 @@ void Menu::mouseMove (const juce::MouseEvent& e)
 {
     setMouseCursor (isInDragBar (e.getPosition()) ? juce::MouseCursor::DraggingHandCursor
                                                    : juce::MouseCursor::NormalCursor);
+}
+
+void Menu::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    // Scroll the settings page from anywhere in the frame (drag bar, borders, gutters).
+    if (! viewport.useMouseWheelMoveIfNeeded (e.getEventRelativeTo (&viewport), wheel))
+        juce::Component::mouseWheelMove (e, wheel);
 }
 
 void Menu::syncScrollBarColours()
@@ -349,6 +359,16 @@ int Menu::getActiveTabPreferredContentHeight() const
     return kContentHeight - tabBarDepth;
 }
 
+void Menu::disableSliderScrollWheelRecursive (juce::Component& root)
+{
+    if (auto* slider = dynamic_cast<juce::Slider*> (&root))
+        slider->setScrollWheelEnabled (false);
+
+    for (int i = 0; i < root.getNumChildComponents(); ++i)
+        if (auto* child = root.getChildComponent (i))
+            disableSliderScrollWheelRecursive (*child);
+}
+
 void Menu::refreshContentPanelSize()
 {
     constexpr int tabBarDepth = 35;
@@ -367,7 +387,15 @@ void Menu::refreshContentPanelSize()
     tabPrevButton.toFront (false);
     tabNextButton.toFront (false);
 
+    // Wheel over sliders should scroll the page (empty gutter isn't required).
+    disableSliderScrollWheelRecursive (contentPanel);
+
     layoutScrollBars();
+}
+
+void Menu::notifyContentHeightChanged()
+{
+    refreshContentPanelSize();
 }
 
 void Menu::resized()
@@ -377,11 +405,10 @@ void Menu::resized()
     tabBar.setColour (juce::TabbedComponent::outlineColourId,
                       sharedResources.sharedColors.menuTabBarBorderColor);
 
-    if (resizer != nullptr)
+    if (borderResizer != nullptr)
     {
-        constexpr int grip = 18;
-        resizer->setBounds (getWidth() - grip, getHeight() - grip, grip, grip);
-        resizer->toFront (false);
+        borderResizer->setBounds (getLocalBounds());
+        borderResizer->toFront (false);
     }
 }
 

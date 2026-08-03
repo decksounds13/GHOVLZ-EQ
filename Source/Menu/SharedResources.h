@@ -167,6 +167,12 @@ public:
     bool randomizeRampSpectrogram3D = true;
     bool randomizeRampSpectrumFill = true;
 
+    /**
+        When randomizing ramps: pick H/S/V endpoint spans (within Appearance limits)
+        and space stops evenly between them. Off = classic independent random stops.
+    */
+    bool orderedRampGradation = true;
+
     SharedColors();
 
     void setRandomizeHue (bool enabled) { randomizeHue = enabled; }

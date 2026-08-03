@@ -1,6 +1,7 @@
 #include "HistogramSettingsComponent.h"
 
 #include "../../MainComponent.h"
+#include "../Menu.h"
 
 namespace
 {
@@ -62,6 +63,9 @@ HistogramSettingsComponent::Content::Content (SharedResources& resources,
     {
         if (auto* parent = findParentComponentOfClass<HistogramSettingsComponent>())
             parent->resized();
+
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
     };
     addAndMakeVisible (gradientEditor);
 

@@ -79,6 +79,7 @@ private:
     void showPresetMenu();
     void samplePathClicked();
     void randomizeClicked();
+    void showRandomizeModeMenu();
     int findMatchingPresetIndex() const;
 
     /** Square dice control for randomizing this editor's ramp only. */
@@ -87,6 +88,9 @@ private:
     public:
         DiceButton();
         void paintButton (juce::Graphics& g, bool highlighted, bool down) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+
+        std::function<void()> onPopupMenu;
     };
 
     SharedResources& sharedResources;

@@ -48,16 +48,37 @@ namespace
         uniform float uSelfShadow;
         uniform float uMeshHeight;
         uniform float uReverseFreq;
+        uniform float uFreqBiasB; // w(u)=1+B*u^2 HF density; 0 = uniform
         uniform float uAoAmount;
         uniform float uAoRadius;
+        // CPU-prepared light bearing on the floor (avoids GPU normalize edge cases).
+        uniform vec2 uShadowDirXZ;
+        uniform float uShadowSunTan;
+        uniform float uShadowBias;
+        uniform float uShadowSoftness;
+        uniform float uShadowQuality; // 0=low, 1=medium, 2=high
+        uniform float uContactShadow;
+
+        // Frequency axis u (0=low…1=high) → height-map V (mesh-row CDF).
+        float meshTFromFreqAxis (float uAxis)
+        {
+            float u = clamp (uAxis, 0.0, 1.0);
+            float B = max (uFreqBiasB, 0.0);
+            if (B < 1.0e-5)
+                return u;
+            return (u + B * u * u * u / 3.0) / (1.0 + B / 3.0);
+        }
 
         float sampleHeightNorm (vec2 xz)
         {
-            float u = clamp (xz.x * 0.5 + 0.5, 0.001, 0.999);
-            float v = (uReverseFreq > 0.5)
-                        ? clamp (xz.y * 0.5 + 0.5, 0.001, 0.999)
-                        : clamp ((1.0 - xz.y) * 0.5, 0.001, 0.999);
-            return texture (uHeightMap, vec2 (u, v)).r;
+            float texU = clamp (xz.x * 0.5 + 0.5, 0.001, 0.999);
+            // World Z → frequency axis u (0=low, 1=high), matching CPU mesh build.
+            float uAxis = (uReverseFreq > 0.5)
+                            ? clamp (xz.y * 0.5 + 0.5, 0.0, 1.0)
+                            : clamp ((1.0 - xz.y) * 0.5, 0.0, 1.0);
+            // Non-uniform mesh rows: height map is indexed by mesh-row t = CDF(u).
+            float texV = clamp (meshTFromFreqAxis (uAxis), 0.001, 0.999);
+            return texture (uHeightMap, vec2 (texU, texV)).r;
         }
 
         float sampleHeight (vec2 xz)
@@ -65,38 +86,92 @@ namespace
             return sampleHeightNorm (xz) * uMeshHeight;
         }
 
-        // Directional heightfield soft-shadow (march toward the light on XZ).
-        // Slope is capped so mid/high sun elevations still cast readable ridge shadows.
+        /**
+            Heightfield self-shadow — horizon + IQ soft ray-march.
+            Bias fights acne; Softness widens the terminator / penumbra;
+            Quality sets sample density.
+        */
         float heightfieldSelfShadow (vec3 pos)
         {
-            float strength = clamp (uSelfShadow, 0.0, 1.0);
-            if (strength < 1.0e-4 || uMeshHeight < 1.0e-4)
+            float strength = clamp (uSelfShadow, 0.0, 2.0);
+            if (strength <= 0.0 || uMeshHeight <= 1.0e-5)
                 return 1.0;
 
-            vec3 L = normalize (uLightDirWorld);
-            float horiz = length (L.xz);
-            if (horiz < 1.0e-3)
-                return 1.0;
-
-            vec2 dirXZ = L.xz / horiz;
-            // Cap tan(elevation) so rays don't clear the mesh in 1–2 steps.
-            float slope = min (L.y / horiz, 0.55);
-            float centreH = pos.y;
-            float occluded = 0.0;
-            const int kSteps = 24;
-            for (int i = 1; i <= kSteps; ++i)
+            vec2 dirXZ = uShadowDirXZ;
+            float dirLen = length (dirXZ);
+            if (dirLen < 1.0e-4)
             {
-                float dist = float (i) * 0.04;
+                dirXZ = uLightDirWorld.xz;
+                dirLen = length (dirXZ);
+                if (dirLen < 1.0e-4)
+                    dirXZ = vec2 (1.0, 0.0);
+                else
+                    dirXZ /= dirLen;
+            }
+
+            float sunTan = clamp (uShadowSunTan, 0.05, 0.85);
+            float bias01 = clamp (uShadowBias, 0.0, 1.0);
+            float soft01 = clamp (uShadowSoftness, 0.0, 1.0);
+            float heightBias = mix (0.002, 0.05, bias01) * uMeshHeight;
+            // Extra-wide smoothstep = soft terminator / penumbra (UE lookdev Softness).
+            float termLo = mix (0.08, 0.55, soft01);
+            float termHi = mix (0.30, 1.80, soft01);
+            float penumbraK = mix (12.0, 1.8, soft01); // lower = softer falloff
+
+            int q = int (clamp (uShadowQuality + 0.5, 0.0, 2.0));
+            int horizonSteps = (q == 0) ? 10 : ((q == 1) ? 18 : 28);
+            int raySteps = (q == 0) ? 14 : ((q == 1) ? 24 : 36);
+            float stepScale = (q == 0) ? 0.06 : ((q == 1) ? 0.045 : 0.032);
+
+            float h0 = sampleHeight (pos.xz);
+
+            float horizonOcc = 0.0;
+            for (int i = 1; i <= 36; ++i)
+            {
+                if (i > horizonSteps)
+                    break;
+                float dist = float (i) * stepScale;
                 vec2 xz = pos.xz + dirXZ * dist;
                 if (abs (xz.x) > 1.05 || abs (xz.y) > 1.05)
                     break;
-                float terrainH = sampleHeight (xz);
-                float rayH = centreH + slope * dist + 0.002;
-                float rise = (terrainH - rayH) / max (uMeshHeight, 1.0e-3);
-                // Soft penumbra: blockers that clear the light ray darken strongly.
-                occluded = max (occluded, clamp (rise * 2.5, 0.0, 1.0));
+                float h = sampleHeight (xz);
+                float horizonTan = (h - h0 - heightBias) / max (dist, 1.0e-4);
+                horizonOcc = max (horizonOcc,
+                                  smoothstep (sunTan - termLo, sunTan + termHi, horizonTan));
             }
-            return clamp (1.0 - occluded * strength, 0.0, 1.0);
+
+            vec3 rd = normalize (uLightDirWorld);
+            if (dot (rd, rd) < 1.0e-6)
+                rd = normalize (vec3 (dirXZ.x, sunTan, dirXZ.y));
+
+            float lit = 1.0;
+            float t = mix (0.012, 0.045, bias01);
+            vec3 ro = vec3 (pos.x, h0 + heightBias, pos.z);
+            for (int i = 0; i < 40; ++i)
+            {
+                if (i >= raySteps)
+                    break;
+                vec3 p = ro + rd * t;
+                if (abs (p.x) > 1.08 || abs (p.z) > 1.08 || p.y > uMeshHeight * 1.35)
+                    break;
+                float h = p.y - sampleHeight (p.xz);
+                // Soft contact — no hard lit=0 cliff at the terminator.
+                float softHit = smoothstep (-heightBias * mix (0.15, 0.8, soft01),
+                                            heightBias * mix (0.8, 2.4, soft01),
+                                            h);
+                lit = min (lit, softHit * clamp (penumbraK * h / max (t, 1.0e-4), 0.0, 1.0)
+                                     + (1.0 - softHit) * mix (0.0, 0.35, soft01));
+                if (h < -heightBias * mix (0.5, 1.5, soft01))
+                    break;
+                t += clamp (abs (h), stepScale * 0.45, stepScale * 2.4);
+            }
+            lit = clamp (lit, 0.0, 1.0);
+
+            float occ = max (horizonOcc, 1.0 - lit);
+            // Ease occlusion so the terminator ramps instead of clipping.
+            occ = smoothstep (0.0, mix (0.65, 1.45, soft01), occ);
+            occ = pow (occ, mix (1.0, 0.65, soft01));
+            return clamp (1.0 - occ * strength, 0.0, 1.0);
         }
 
         // Crevice / horizon AO from the heightfield (reliable; no depth buffer).
@@ -165,12 +240,32 @@ namespace
             vec3 albedo = vColour;
             float shadow = heightfieldSelfShadow (vWorldPos);
             float ao = heightfieldAO (vWorldPos);
-            float shade = shadow * ao;
+
+            // Contact: the mesh covers the whole floor, so a ground disc never shows.
+            // Approximate as base darkening from surrounding taller terrain.
+            float contact = 1.0;
+            if (uContactShadow > 0.0)
+            {
+                float h0 = sampleHeight (vWorldPos.xz);
+                float surround = 0.0;
+                vec2 cOffs[4] = vec2[] (vec2(1,0), vec2(-1,0), vec2(0,1), vec2(0,-1));
+                for (int i = 0; i < 4; ++i)
+                {
+                    float hn = sampleHeight (vWorldPos.xz + cOffs[i] * 0.08);
+                    surround = max (surround, clamp ((hn - h0) / max (uMeshHeight, 1e-3), 0.0, 1.0));
+                }
+                float nestle = smoothstep (0.22, 0.0, h0 / max (uMeshHeight, 1e-3));
+                contact = clamp (1.0 - surround * nestle * uContactShadow, 0.15, 1.0);
+            }
+
+            // Self/contact shadows are key-light effects — when lighting is off they are
+            // forced to 1.0 via uniforms; AO may still apply (ambient, own toggle).
+            float shade = shadow * ao * contact;
             float amt = clamp (uLightingAmount, 0.0, 1.0);
 
             if (amt < 1.0e-4)
             {
-                fragColour = vec4 (albedo * shade, 1.0);
+                fragColour = vec4 (albedo * ao, 1.0); // flat ramp; AO only if enabled
                 return;
             }
 
@@ -192,7 +287,8 @@ namespace
             vec3 specular = (D * G * F) / max (4.0 * NdotV * max (NdotL, 1.0e-4), 1.0e-4);
             specular *= metalish * shadow;
 
-            float wrap = NdotL * 0.85 + 0.15;
+            // Soft Lambert wrap so the lighting terminator isn't a hard edge either.
+            float wrap = NdotL * 0.72 + 0.28;
             vec3 diffuse = albedo * (0.22 * ao + 0.78 * wrap * shadow);
             float rim = pow (1.0 - NdotV, 2.5) * uRim * ao;
             vec3 lit = diffuse + specular + albedo * rim;
@@ -502,8 +598,15 @@ void Spectrogram3DComponent::GlHost::createShaders()
     colourSelfShadowUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSelfShadow");
     colourMeshHeightUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMeshHeight");
     colourReverseFreqUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uReverseFreq");
+    colourFreqBiasBUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uFreqBiasB");
     colourAoAmountUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAoAmount");
     colourAoRadiusUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAoRadius");
+    colourShadowDirXZUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowDirXZ");
+    colourShadowSunTanUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowSunTan");
+    colourShadowBiasUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowBias");
+    colourShadowSoftnessUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowSoftness");
+    colourShadowQualityUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowQuality");
+    colourContactUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uContactShadow");
 
     labelShader = std::make_unique<juce::OpenGLShaderProgram> (openGLContext);
     if (! labelShader->addVertexShader (kLabelVertexShader)
@@ -579,8 +682,15 @@ void Spectrogram3DComponent::GlHost::createShaders()
 
 void Spectrogram3DComponent::GlHost::destroyShaders()
 {
+    colourContactUniform.reset();
+    colourShadowQualityUniform.reset();
+    colourShadowSoftnessUniform.reset();
+    colourShadowBiasUniform.reset();
+    colourShadowSunTanUniform.reset();
+    colourShadowDirXZUniform.reset();
     colourAoRadiusUniform.reset();
     colourAoAmountUniform.reset();
+    colourFreqBiasBUniform.reset();
     colourReverseFreqUniform.reset();
     colourMeshHeightUniform.reset();
     colourSelfShadowUniform.reset();
@@ -1082,8 +1192,9 @@ void Spectrogram3DComponent::GlHost::uploadHeightMap (const std::vector<Vertex>&
 
     glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
     glBindTexture (GL_TEXTURE_2D, heightMapTex);
-    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // NEAREST keeps ridge edges sharp for horizon / ray-march occlusion tests.
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, heights.data());
@@ -1343,7 +1454,7 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     softFbo.releaseAsRenderingTarget();
 }
 
-void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProgram&) const
+void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProgram& program) const
 {
     const float amt = owner.lightingEnabled ? owner.lightingAmount : 0.0f;
     auto lightWorld = getLightDirectionWorld();
@@ -1354,28 +1465,66 @@ void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProg
     const float lz = view.mat[2] * lightWorld.x + view.mat[6] * lightWorld.y + view.mat[10] * lightWorld.z;
     const float len = juce::jmax (1.0e-5f, std::sqrt (lx * lx + ly * ly + lz * lz));
 
-    if (colourLightDirUniform != nullptr)
-        colourLightDirUniform->set (lx / len, ly / len, lz / len);
-    if (colourLightingAmountUniform != nullptr)
-        colourLightingAmountUniform->set (amt);
-    if (colourSpecularUniform != nullptr)
-        colourSpecularUniform->set (owner.specularAmount);
-    if (colourRoughnessUniform != nullptr)
-        colourRoughnessUniform->set (owner.roughnessAmount);
-    if (colourRimUniform != nullptr)
-        colourRimUniform->set (owner.rimAmount);
-    if (colourLightDirWorldUniform != nullptr)
-        colourLightDirWorldUniform->set (lightWorld.x, lightWorld.y, lightWorld.z);
-    if (colourSelfShadowUniform != nullptr)
-        colourSelfShadowUniform->set (owner.selfShadowEnabled ? owner.selfShadowStrength : 0.0f);
-    if (colourMeshHeightUniform != nullptr)
-        colourMeshHeightUniform->set (owner.meshHeight);
-    if (colourReverseFreqUniform != nullptr)
-        colourReverseFreqUniform->set (owner.reverseFrequencyAxis ? 1.0f : 0.0f);
-    if (colourAoAmountUniform != nullptr)
-        colourAoAmountUniform->set (owner.ssaoEnabled ? owner.ssaoStrength : 0.0f);
-    if (colourAoRadiusUniform != nullptr)
-        colourAoRadiusUniform->set (owner.ssaoRadius);
+    // Floor-plane light bearing + capped sun tan for horizon shadows.
+    const float horiz = std::sqrt (lightWorld.x * lightWorld.x + lightWorld.z * lightWorld.z);
+    float shadowDirX = 1.0f, shadowDirZ = 0.0f;
+    float sunTan = 0.45f;
+    if (horiz > 1.0e-4f)
+    {
+        shadowDirX = lightWorld.x / horiz;
+        shadowDirZ = lightWorld.z / horiz;
+        sunTan = juce::jlimit (0.08f, 0.75f, lightWorld.y / horiz);
+    }
+
+    // Shadows follow the key light — disabled when Lighting is off.
+    const float selfShadow = (owner.lightingEnabled && owner.selfShadowEnabled)
+                                 ? owner.selfShadowStrength : 0.0f;
+    const float aoAmt = owner.ssaoEnabled ? owner.ssaoStrength : 0.0f;
+    const float contact = (owner.lightingEnabled && owner.contactShadowEnabled)
+                              ? owner.contactShadowStrength : 0.0f;
+
+    auto setF1 = [&program] (juce::OpenGLShaderProgram::Uniform* u, const char* name, float v)
+    {
+        if (u != nullptr && u->uniformID >= 0)
+            u->set (v);
+        else
+            program.setUniform (name, v);
+    };
+    auto setF2 = [&program] (juce::OpenGLShaderProgram::Uniform* u, const char* name, float a, float b)
+    {
+        if (u != nullptr && u->uniformID >= 0)
+            u->set (a, b);
+        else
+            program.setUniform (name, a, b);
+    };
+    auto setF3 = [&program] (juce::OpenGLShaderProgram::Uniform* u, const char* name, float a, float b, float c)
+    {
+        if (u != nullptr && u->uniformID >= 0)
+            u->set (a, b, c);
+        else
+            program.setUniform (name, a, b, c);
+    };
+
+    setF3 (colourLightDirUniform.get(), "uLightDirView", lx / len, ly / len, lz / len);
+    setF1 (colourLightingAmountUniform.get(), "uLightingAmount", amt);
+    setF1 (colourSpecularUniform.get(), "uSpecular", owner.specularAmount);
+    setF1 (colourRoughnessUniform.get(), "uRoughness", owner.roughnessAmount);
+    setF1 (colourRimUniform.get(), "uRim", owner.rimAmount);
+    setF3 (colourLightDirWorldUniform.get(), "uLightDirWorld", lightWorld.x, lightWorld.y, lightWorld.z);
+    setF1 (colourSelfShadowUniform.get(), "uSelfShadow", selfShadow);
+    setF1 (colourMeshHeightUniform.get(), "uMeshHeight", owner.meshHeight);
+    setF1 (colourReverseFreqUniform.get(), "uReverseFreq", owner.reverseFrequencyAxis ? 1.0f : 0.0f);
+    setF1 (colourFreqBiasBUniform.get(), "uFreqBiasB", owner.freqMeshBiasB());
+    setF1 (colourAoAmountUniform.get(), "uAoAmount", aoAmt);
+    setF1 (colourAoRadiusUniform.get(), "uAoRadius", owner.ssaoRadius);
+    setF2 (colourShadowDirXZUniform.get(), "uShadowDirXZ", shadowDirX, shadowDirZ);
+    setF1 (colourShadowSunTanUniform.get(), "uShadowSunTan", sunTan);
+    setF1 (colourShadowBiasUniform.get(), "uShadowBias", owner.selfShadowBias);
+    setF1 (colourShadowSoftnessUniform.get(), "uShadowSoftness", owner.selfShadowSoftness);
+    setF1 (colourShadowQualityUniform.get(), "uShadowQuality",
+           owner.selfShadowQuality == ShadowQuality::low ? 0.0f
+               : (owner.selfShadowQuality == ShadowQuality::high ? 2.0f : 1.0f));
+    setF1 (colourContactUniform.get(), "uContactShadow", contact);
 }
 
 juce::Vector3D<float> Spectrogram3DComponent::GlHost::getLightDirectionWorld() const noexcept
@@ -1403,6 +1552,8 @@ void Spectrogram3DComponent::GlHost::drawGroundAndGrid()
         colourSelfShadowUniform->set (0.0f); // floor/grid: no heightfield shadow
     if (colourAoAmountUniform != nullptr)
         colourAoAmountUniform->set (0.0f);
+    if (colourContactUniform != nullptr)
+        colourContactUniform->set (0.0f);
     if (colourProjectionUniform != nullptr)
         colourProjectionUniform->setMatrix4 (getProjectionMatrix().mat, 1, false);
     if (colourViewUniform != nullptr)
@@ -1449,52 +1600,9 @@ void Spectrogram3DComponent::GlHost::drawGroundAndGrid()
 
 void Spectrogram3DComponent::GlHost::drawContactShadow()
 {
-    using namespace juce::gl;
-    if (! owner.contactShadowEnabled || contactShadowShader == nullptr || contactVbo == 0)
-        return;
-
-    // Slightly above the grid so Soft BG still shows the stain; mesh draws after and occludes.
-    const float y = -0.006f;
-    const float verts[] = {
-        -1.35f, y, -1.35f,
-         1.35f, y, -1.35f,
-         1.35f, y,  1.35f,
-        -1.35f, y, -1.35f,
-         1.35f, y,  1.35f,
-        -1.35f, y,  1.35f
-    };
-
-    contactShadowShader->use();
-    if (contactProjectionUniform != nullptr)
-        contactProjectionUniform->setMatrix4 (getProjectionMatrix().mat, 1, false);
-    if (contactViewUniform != nullptr)
-        contactViewUniform->setMatrix4 (getViewMatrix().mat, 1, false);
-    if (contactStrengthUniform != nullptr)
-        contactStrengthUniform->set (owner.contactShadowStrength);
-
-    // No depth test: Soft BG has no ground write, so a depth-tested disc often disappears.
-    glDisable (GL_DEPTH_TEST);
-    glDepthMask (GL_FALSE);
-    glEnable (GL_BLEND);
-    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable (GL_CULL_FACE);
-
-    glBindBuffer (GL_ARRAY_BUFFER, contactVbo);
-    glBufferData (GL_ARRAY_BUFFER, sizeof (verts), verts, GL_STREAM_DRAW);
-    if (contactPositionAttrib != nullptr && contactPositionAttrib->attributeID >= 0)
-    {
-        glEnableVertexAttribArray ((GLuint) contactPositionAttrib->attributeID);
-        glVertexAttribPointer ((GLuint) contactPositionAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
-                               (GLsizei) (3 * sizeof (float)), nullptr);
-    }
-    glDrawArrays (GL_TRIANGLES, 0, 6);
-    if (contactPositionAttrib != nullptr && contactPositionAttrib->attributeID >= 0)
-        glDisableVertexAttribArray ((GLuint) contactPositionAttrib->attributeID);
-
-    glBindBuffer (GL_ARRAY_BUFFER, 0);
-    glDisable (GL_BLEND);
-    glDepthMask (GL_TRUE);
-    glEnable (GL_DEPTH_TEST);
+    // Floor-disc contact is a no-op for this heightfield: the mesh covers the whole
+    // XZ domain, so any ground stain is overwritten. Contact is applied in the mesh
+    // fragment shader via uContactShadow instead.
 }
 
 void Spectrogram3DComponent::GlHost::drawMesh()
@@ -1669,14 +1777,17 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
 
     for (const auto& lb : owner.freqLabels)
     {
+        // Ground plane, just past the playhead edge (x=1) — tight to the grid ticks.
+        constexpr float kLabelWorldX = 1.008f;
+        constexpr float kLabelWorldY = -0.006f; // sit on / slightly above grid
         float ndcX = 0.0f, ndcY = 0.0f, ndcZ = 0.0f;
-        if (! projectWorldToNdc (1.08f, 0.09f, lb.worldZ, ndcX, ndcY, ndcZ))
+        if (! projectWorldToNdc (kLabelWorldX, kLabelWorldY, lb.worldZ, ndcX, ndcY, ndcZ))
             continue;
 
-        const float x0 = ndcX + 0.01f;
+        const float x0 = ndcX + 0.0015f;
         const float x1 = x0 + halfW * 2.0f;
-        const float y0 = ndcY - halfH;
-        const float y1 = ndcY + halfH;
+        const float y0 = ndcY - halfH * 0.85f;
+        const float y1 = ndcY + halfH * 0.85f;
 
         quads.push_back ({ x0, y0, ndcZ, lb.u0, lb.v0 });
         quads.push_back ({ x1, y0, ndcZ, lb.u1, lb.v0 });
@@ -1882,9 +1993,9 @@ Spectrogram3DComponent::~Spectrogram3DComponent()
 Spectrogram3DComponent::CameraState Spectrogram3DComponent::getFactoryCameraState() noexcept
 {
     // ¾ view from above: pitch = elevation above the floor horizon (not a tilted orbit axis).
-    // Distance places the eye roughly 3× mesh-height above the peaks.
+    // Orbit pivot = centre of the mesh volume; distance places the eye ~3× height above peaks.
     constexpr float pitchDeg = 35.0f;
-    constexpr float lookY = kDefaultMeshHeight * 0.35f;
+    constexpr float lookY = kDefaultMeshHeight * 0.5f;
     constexpr float eyeHeightAbovePeaks = 3.0f * kDefaultMeshHeight;
     const float eyeY = kDefaultMeshHeight + eyeHeightAbovePeaks;
     const float pitchRad = juce::degreesToRadians (pitchDeg);
@@ -1958,9 +2069,20 @@ void Spectrogram3DComponent::setMeshHeight (float heightWorld) noexcept
     const float h = juce::jlimit (kMinMeshHeight, kMaxMeshHeight, heightWorld);
     if (std::abs (h - meshHeight) < 1.0e-4f)
         return;
+    const float oldH = meshHeight;
     meshHeight = h;
-    camera.panY = lookAtY();
-    defaultCamera.panY = lookAtY();
+    // Keep the orbit pivot at the same relative height in the volume.
+    if (oldH > 1.0e-4f)
+    {
+        const float t = camera.panY / oldH;
+        camera.panY = t * h;
+        defaultCamera.panY = (defaultCamera.panY / oldH) * h;
+    }
+    else
+    {
+        camera.panY = lookAtY();
+        defaultCamera.panY = lookAtY();
+    }
     // Rescale existing history in place — do not wipe meshDb.
     if (meshW >= 2 && meshH >= 2 && ! meshDb.empty() && lastBrightness >= 0.0f)
         rebuildVerticesFromMeshDb (lastBrightness, lastMinDb, lastMaxDb);
@@ -2002,6 +2124,17 @@ void Spectrogram3DComponent::setMeshQuality (MeshQuality q) noexcept
     if (meshQuality == q)
         return;
     meshQuality = q;
+    invalidateMesh();
+    if (active)
+        updateMeshFromSource();
+}
+
+void Spectrogram3DComponent::setFreqMeshBias (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (freqMeshBias - amount01) < 1.0e-4f)
+        return;
+    freqMeshBias = amount01;
     invalidateMesh();
     if (active)
         updateMeshFromSource();
@@ -2119,9 +2252,32 @@ void Spectrogram3DComponent::setSelfShadowEnabled (bool shouldEnable) noexcept
 
 void Spectrogram3DComponent::setSelfShadowStrength (float amount01) noexcept
 {
-    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    amount01 = juce::jlimit (0.0f, 2.0f, amount01);
     if (std::abs (selfShadowStrength - amount01) < 1.0e-4f) return;
     selfShadowStrength = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSelfShadowBias (float bias01) noexcept
+{
+    bias01 = juce::jlimit (0.0f, 1.0f, bias01);
+    if (std::abs (selfShadowBias - bias01) < 1.0e-4f) return;
+    selfShadowBias = bias01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSelfShadowSoftness (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (selfShadowSoftness - amount01) < 1.0e-4f) return;
+    selfShadowSoftness = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSelfShadowQuality (ShadowQuality q) noexcept
+{
+    if (selfShadowQuality == q) return;
+    selfShadowQuality = q;
     markLookDirty();
 }
 
@@ -2305,8 +2461,6 @@ void Spectrogram3DComponent::setDefaultCameraState (const CameraState& state) no
 void Spectrogram3DComponent::seedDefaultOrientation() noexcept
 {
     camera = defaultCamera;
-    viewPanRight = 0.0f;
-    viewPanUp = 0.0f;
     clampCamera();
 }
 
@@ -2316,36 +2470,58 @@ void Spectrogram3DComponent::clampCamera() noexcept
     // Never allow negative elevation (that would put the camera under the floor).
     camera.pitchDeg = juce::jlimit (kMinPitchDeg, kMaxPitchDeg, camera.pitchDeg);
     camera.distance = juce::jlimit (0.35f, 14.0f, camera.distance);
-    // MMB floor pan keeps look-at on the mesh midline; RMB uses viewPanUp instead.
-    camera.panY = lookAtY();
-    viewPanRight = juce::jlimit (-3.0f, 3.0f, viewPanRight);
-    viewPanUp = juce::jlimit (-2.5f, 2.5f, viewPanUp);
+    // Keep the orbit pivot over the mesh footprint (with a little slack for framing).
+    camera.panX = juce::jlimit (-1.6f, 1.6f, camera.panX);
+    camera.panZ = juce::jlimit (-1.6f, 1.6f, camera.panZ);
+    camera.panY = juce::jlimit (-0.05f, meshHeight * 1.4f, camera.panY);
+}
+
+void Spectrogram3DComponent::cameraBasis (juce::Vector3D<float>& outRight,
+                                          juce::Vector3D<float>& outUp,
+                                          juce::Vector3D<float>& outForward) const noexcept
+{
+    const float yaw = juce::degreesToRadians (camera.yawDeg);
+    const float pitch = juce::degreesToRadians (camera.pitchDeg);
+    const float cp = std::cos (pitch);
+    const float sp = std::sin (pitch);
+    const float cy = std::cos (yaw);
+    const float sy = std::sin (yaw);
+
+    // Matches getTurntableViewMatrix eye offset: (-sy*cp, sp, cy*cp) * distance.
+    outForward = { sy * cp, -sp, -cy * cp };
+    // right = normalize(forward × worldUp)
+    outRight = { -outForward.z, 0.0f, outForward.x };
+    const float rLen = juce::jmax (1.0e-6f, std::sqrt (outRight.x * outRight.x + outRight.z * outRight.z));
+    outRight.x /= rLen;
+    outRight.z /= rLen;
+    // up = right × forward (already unit-ish)
+    outUp = {
+        outRight.y * outForward.z - outRight.z * outForward.y,
+        outRight.z * outForward.x - outRight.x * outForward.z,
+        outRight.x * outForward.y - outRight.y * outForward.x
+    };
+    const float uLen = juce::jmax (1.0e-6f,
+                                   std::sqrt (outUp.x * outUp.x + outUp.y * outUp.y + outUp.z * outUp.z));
+    outUp.x /= uLen;
+    outUp.y /= uLen;
+    outUp.z /= uLen;
 }
 
 juce::Matrix3D<float> Spectrogram3DComponent::getTurntableViewMatrix() const noexcept
 {
-    // Same composition style as JUCE's OpenGLDemo (T * R), constrained to a Y-up turntable:
-    //   1) move look-at to origin
-    //   2) yaw around world +Y  (spin)
-    //   3) pitch around world +X (elevation) — keeps the floor horizontal
-    //   4) pull back along view -Z
-    //   5) RMB view-space truck/pedestal (strafe + raise/lower) — not floor pan
-    //
-    // World: +Y up, floor = XZ, mesh height = +Y. No custom lookAt / quaternion.
+    // Orbit around the look-at (pan). RMB/MMB move that pivot so tumble always
+    // spins around the centre of what you're framing — not a post-view truck.
     const float yaw = juce::degreesToRadians (camera.yawDeg);
     const float pitch = juce::degreesToRadians (camera.pitchDeg);
 
     const auto toOrigin = juce::Matrix3D<float>::fromTranslation (
         { -camera.panX, -camera.panY, -camera.panZ });
     const auto rotYaw = juce::Matrix3D<float>::rotation ({ 0.0f, yaw, 0.0f });
-    // Positive pitch elevates the camera above the floor (negative would go underneath).
     const auto rotPitch = juce::Matrix3D<float>::rotation ({ pitch, 0.0f, 0.0f });
     const auto pullBack = juce::Matrix3D<float>::fromTranslation (
         { 0.0f, 0.0f, -camera.distance });
-    const auto viewTruck = juce::Matrix3D<float>::fromTranslation (
-        { viewPanRight, viewPanUp, 0.0f });
 
-    return viewTruck * pullBack * rotPitch * rotYaw * toOrigin;
+    return pullBack * rotPitch * rotYaw * toOrigin;
 }
 
 juce::Colour Spectrogram3DComponent::getClearColour() const noexcept
@@ -2538,12 +2714,57 @@ void Spectrogram3DComponent::meshSizeForQuality (int& outW, int& outH) const noe
 {
     switch (meshQuality)
     {
-        case MeshQuality::low:    outW = 64;  outH = 48;  break;
-        case MeshQuality::high:   outW = 192; outH = 160; break;
-        case MeshQuality::ultra:  outW = 288; outH = 240; break;
+        case MeshQuality::low:      outW = 64;  outH = 48;  break;
+        case MeshQuality::high:     outW = 192; outH = 160; break;
+        case MeshQuality::ultra:    outW = 288; outH = 240; break;
+        case MeshQuality::overkill: outW = 512; outH = 448; break; // ~230k verts — GPU gym day
         case MeshQuality::medium:
-        default:                  outW = 128; outH = 96;  break;
+        default:                    outW = 128; outH = 96;  break;
     }
+}
+
+float Spectrogram3DComponent::freqMeshBiasB() const noexcept
+{
+    return juce::jlimit (0.0f, 1.0f, freqMeshBias) * kFreqMeshBiasMaxB;
+}
+
+int Spectrogram3DComponent::effectiveFreqMeshRows (int baseH) const noexcept
+{
+    baseH = juce::jmax (2, baseH);
+    const float B = freqMeshBiasB();
+    if (B < 1.0e-5f)
+        return baseH;
+    // Keep low-end density ≥ uniform base: N' = base * ∫w = base * (1 + B/3).
+    const int n = (int) std::ceil ((double) baseH * (1.0 + (double) B / 3.0));
+    return juce::jlimit (baseH, kMaxFreqMeshRows, n);
+}
+
+float Spectrogram3DComponent::meshTFromFreqAxis (float u, float B) noexcept
+{
+    u = juce::jlimit (0.0f, 1.0f, u);
+    if (B < 1.0e-5f)
+        return u;
+    // CDF of w(u)=1+B*u^2
+    return (u + B * u * u * u / 3.0f) / (1.0f + B / 3.0f);
+}
+
+float Spectrogram3DComponent::freqAxisFromMeshT (float t, float B) noexcept
+{
+    t = juce::jlimit (0.0f, 1.0f, t);
+    if (B < 1.0e-5f)
+        return t;
+
+    // Solve u + (B/3) u^3 = t * (1 + B/3) via Newton.
+    const float target = t * (1.0f + B / 3.0f);
+    float u = t; // uniform seed
+    for (int i = 0; i < 8; ++i)
+    {
+        const float f = u + (B / 3.0f) * u * u * u - target;
+        const float df = 1.0f + B * u * u;
+        u -= f / juce::jmax (1.0e-6f, df);
+        u = juce::jlimit (0.0f, 1.0f, u);
+    }
+    return u;
 }
 
 void Spectrogram3DComponent::fillMeshColumn (int meshCol, const float* histCol, int histH)
@@ -2552,10 +2773,14 @@ void Spectrogram3DComponent::fillMeshColumn (int meshCol, const float* histCol, 
         || meshCol < 0 || meshCol >= meshW)
         return;
 
+    const float B = freqMeshBiasB();
     for (int z = 0; z < meshH; ++z)
     {
-        const int srcRow = (z * (histH - 1)) / (meshH - 1);
-        const int row = histH - 1 - srcRow;
+        const float t = meshH > 1 ? (float) z / (float) (meshH - 1) : 0.0f;
+        const float u = freqAxisFromMeshT (t, B); // 0=low … 1=high
+        // History: yNorm 0 = high Hz (top), 1 = low Hz (bottom).
+        const float yNorm = 1.0f - u;
+        const int row = juce::jlimit (0, histH - 1, (int) std::round (yNorm * (float) (histH - 1)));
         meshDb[(size_t) meshCol * (size_t) meshH + (size_t) z] = histCol[row];
     }
 }
@@ -2626,6 +2851,20 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     std::vector<Vertex> verts ((size_t) meshW * (size_t) meshH);
     const float denom = juce::jmax (1.0f, maxDb - minDb);
 
+    const float B = freqMeshBiasB();
+
+    auto freqUForRow = [&] (int z) -> float
+    {
+        const float t = meshH > 1 ? (float) z / (float) (meshH - 1) : 0.0f;
+        return freqAxisFromMeshT (t, B); // 0=low … 1=high
+    };
+
+    auto worldZForU = [&] (float freqU) -> float
+    {
+        return reverseFrequencyAxis ? (freqU * 2.0f - 1.0f)
+                                    : ((1.0f - freqU) * 2.0f - 1.0f);
+    };
+
     auto heightAt = [&] (int x, int z) -> float
     {
         x = juce::jlimit (0, meshW - 1, x);
@@ -2637,7 +2876,8 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
 
     for (int z = 0; z < meshH; ++z)
     {
-        const float v = (float) z / (float) (meshH - 1);
+        const float freqU = freqUForRow (z);
+        const float worldZ = worldZForU (freqU);
         for (int x = 0; x < meshW; ++x)
         {
             const float u = (float) x / (float) (meshW - 1);
@@ -2648,18 +2888,19 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
             auto& vtx = verts[(size_t) z * (size_t) meshW + (size_t) x];
             vtx.x = u * 2.0f - 1.0f;
             vtx.y = norm * meshHeight;
-            vtx.z = reverseFrequencyAxis ? (v * 2.0f - 1.0f)
-                                         : ((1.0f - v) * 2.0f - 1.0f);
+            vtx.z = worldZ;
             vtx.r = c.getFloatRed();
             vtx.g = c.getFloatGreen();
             vtx.b = c.getFloatBlue();
 
-            // Central differences on the heightfield (world X / Z spacing ≈ 2/(N-1)).
+            // Central differences with actual world spacing (HF bias packs rows near highs).
             const float dx = 2.0f / (float) (meshW - 1);
-            const float dz = 2.0f / (float) (meshH - 1);
+            const float zPrev = worldZForU (freqUForRow (z - 1));
+            const float zNext = worldZForU (freqUForRow (z + 1));
+            const float dz = juce::jmax (1.0e-5f, std::abs (zNext - zPrev) * 0.5f);
             const float dHx = (heightAt (x + 1, z) - heightAt (x - 1, z)) / (2.0f * dx);
             float dHz = (heightAt (x, z + 1) - heightAt (x, z - 1)) / (2.0f * dz);
-            if (! reverseFrequencyAxis)
+            if (zNext < zPrev)
                 dHz = -dHz;
             // Normal = normalize((-dH/dx, 1, -dH/dz))
             float nx = -dHx, ny = 1.0f, nz = -dHz;
@@ -2687,10 +2928,11 @@ void Spectrogram3DComponent::updateMeshFromSource()
     if (histW < 2 || histH < 2 || history.empty())
         return;
 
-    int wantW = 0, wantH = 0;
-    meshSizeForQuality (wantW, wantH);
+    int wantW = 0, baseH = 0;
+    meshSizeForQuality (wantW, baseH);
     wantW = juce::jmin (wantW, histW);
-    wantH = juce::jmin (wantH, histH);
+    // Base H may exceed histH (oversample); bias then adds HF rows without thinning lows.
+    const int wantH = effectiveFreqMeshRows (baseH);
 
     const uint64_t serial = dataSource->getHistoryColumnSerial();
     const bool sizeChanged = (wantW != meshW || wantH != meshH || meshDb.empty());
@@ -2831,10 +3073,10 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     rightClickDragged = false;
 
     // Turntable controls (no free tumble / roll):
-    //  LMB drag        = orbit (yaw / elevation)
-    //  RMB drag        = view-space strafe + raise/lower
+    //  LMB drag        = orbit around look-at (yaw / elevation)
+    //  RMB drag        = move look-at (truck / pedestal) — keeps orbit centred
     //  RMB click       = context menu (Save Default / Reset Camera)
-    //  Shift / MMB     = pan on the ground plane
+    //  Shift / MMB     = pan look-at on the ground plane
     //  Alt / Ctrl+LMB  = dolly (distance)
     //  Wheel           = zoom / dolly
     if (isRightMouse (e))
@@ -2877,22 +3119,24 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
 
     if (dragMode == DragMode::orbit)
     {
-        // Yaw around world +Y; pitch = elevation only (floor stays down).
+        // Yaw around world +Y through the look-at; pitch = elevation only.
         camera.yawDeg -= d.x * 0.35f;
         camera.pitchDeg += d.y * 0.35f;
         clampCamera();
     }
     else if (dragMode == DragMode::pan)
     {
-        // Slide the look-at across the floor (XZ), relative to current yaw.
-        const float yaw = juce::degreesToRadians (camera.yawDeg);
+        // Slide the orbit pivot across the floor (XZ), relative to current yaw.
+        juce::Vector3D<float> right, up, forward;
+        cameraBasis (right, up, forward);
         const float scale = 0.0025f * camera.distance;
-        const float rightX = std::cos (yaw);
-        const float rightZ = -std::sin (yaw);
-        const float fwdX = -std::sin (yaw);
-        const float fwdZ = -std::cos (yaw);
-        camera.panX += (rightX * d.x + fwdX * (-d.y)) * scale;
-        camera.panZ += (rightZ * d.x + fwdZ * (-d.y)) * scale;
+        // Flatten forward onto the floor so MMB stays a ground pan.
+        juce::Vector3D<float> fwdXZ { forward.x, 0.0f, forward.z };
+        const float fLen = juce::jmax (1.0e-6f, std::sqrt (fwdXZ.x * fwdXZ.x + fwdXZ.z * fwdXZ.z));
+        fwdXZ.x /= fLen;
+        fwdXZ.z /= fLen;
+        camera.panX += (right.x * d.x + fwdXZ.x * (-d.y)) * scale;
+        camera.panZ += (right.z * d.x + fwdXZ.z * (-d.y)) * scale;
         clampCamera();
     }
     else if (dragMode == DragMode::screenPan)
@@ -2911,10 +3155,15 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
         if (rightClickCandidate && ! rightClickDragged)
             return;
 
-        // View-space truck (X) + pedestal (Y). No floor slide, dolly, or zoom.
+        // Truck / pedestal by moving the orbit pivot in camera right / up —
+        // so subsequent orbits still spin around the framed centre.
+        juce::Vector3D<float> right, up, forward;
+        cameraBasis (right, up, forward);
+        juce::ignoreUnused (forward);
         const float scale = 0.0025f * camera.distance;
-        viewPanRight += d.x * scale;
-        viewPanUp += (-d.y) * scale;
+        camera.panX += (right.x * d.x + up.x * (-d.y)) * scale;
+        camera.panY += (right.y * d.x + up.y * (-d.y)) * scale;
+        camera.panZ += (right.z * d.x + up.z * (-d.y)) * scale;
         clampCamera();
     }
     else if (dragMode == DragMode::dolly)

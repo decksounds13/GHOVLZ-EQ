@@ -1,6 +1,8 @@
 #include "GradientStripEditor.h"
 #include "RampColorPickerPanel.h"
 #include "ColourRampBank.h"
+#include "../ComboBoxLookAndFeel.h"
+#include "../MainComponent.h"
 
 namespace
 {
@@ -197,7 +199,19 @@ GradientStripEditor::DiceButton::DiceButton()
     : juce::Button ({})
 {
     setClickingTogglesState (false);
-    setTooltip ("Randomize this gradient (Appearance H/S/V limits)");
+    setTooltip ("Randomize this gradient (Appearance H/S/V limits). Right-click: Ordered / Standard.");
+}
+
+void GradientStripEditor::DiceButton::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        if (onPopupMenu != nullptr)
+            onPopupMenu();
+        return;
+    }
+
+    juce::Button::mouseDown (e);
 }
 
 void GradientStripEditor::DiceButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
@@ -385,6 +399,7 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
     addAndMakeVisible (presetField);
 
     randomizeButton.onClick = [this] { randomizeClicked(); };
+    randomizeButton.onPopupMenu = [this] { showRandomizeModeMenu(); };
     addAndMakeVisible (randomizeButton);
 
     samplePathButton.setButtonText ("Sample Path");
@@ -655,6 +670,34 @@ void GradientStripEditor::randomizeClicked()
     syncControlsFromRamp();
     notifyChanged();
     repaint();
+}
+
+void GradientStripEditor::showRandomizeModeMenu()
+{
+    auto& c = sharedResources.sharedColors;
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Ramp randomize mode");
+    menu.addItem (1, "Ordered gradation", true, c.orderedRampGradation);
+    menu.addItem (2, "Standard (independent stops)", true, ! c.orderedRampGradation);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&randomizeButton),
+                        [safe = juce::Component::SafePointer<GradientStripEditor> (this)] (int result)
+                        {
+                            if (safe == nullptr || result <= 0)
+                                return;
+
+                            const bool ordered = (result == 1);
+                            if (auto* main = safe->findParentComponentOfClass<MainComponent>())
+                                main->setOrderedRampGradation (ordered, true);
+                            else
+                                safe->sharedResources.sharedColors.orderedRampGradation = ordered;
+
+                            safe->randomizeButton.setTooltip (
+                                safe->sharedResources.sharedColors.orderedRampGradation
+                                    ? "Randomize this gradient (ordered H/S/V spans). Right-click: mode."
+                                    : "Randomize this gradient (independent stops). Right-click: mode.");
+                        });
 }
 
 void GradientStripEditor::showPresetMenu()

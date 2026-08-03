@@ -839,7 +839,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     addAndMakeVisible (uiThemeButton);
 
     uiRandomizeButton.setThemeResources (&sharedResources);
-    uiRandomizeButton.setTooltip ("Randomize checked UI scopes and colour ramps. Right-click to choose what.");
+    uiRandomizeButton.setTooltip (
+        "Randomize checked UI scopes and colour ramps. Right-click: scopes + Ordered/Standard ramp mode.");
     uiRandomizeButton.setAlwaysOnTop (true);
     uiRandomizeButton.onClick = [this] { runDiceRandomize(); };
     uiRandomizeButton.onPopupMenu = [this] { showRandomizeDiceMenu(); };
@@ -995,6 +996,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
         menu.addItem (2, "Mesh: Medium", true, q == Spectrogram3DComponent::MeshQuality::medium);
         menu.addItem (3, "Mesh: High", true, q == Spectrogram3DComponent::MeshQuality::high);
         menu.addItem (4, "Mesh: Ultra", true, q == Spectrogram3DComponent::MeshQuality::ultra);
+        menu.addItem (5, "Mesh: Overkill", true, q == Spectrogram3DComponent::MeshQuality::overkill);
         menu.addSeparator();
         menu.addItem (4, "Reset camera");
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&spec3DButton),
@@ -1011,7 +1013,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
                     result == 1 ? Spectrogram3DComponent::MeshQuality::low
                                 : (result == 3 ? Spectrogram3DComponent::MeshQuality::high
                                                : (result == 4 ? Spectrogram3DComponent::MeshQuality::ultra
-                                                              : Spectrogram3DComponent::MeshQuality::medium)),
+                                                              : (result == 5 ? Spectrogram3DComponent::MeshQuality::overkill
+                                                                             : Spectrogram3DComponent::MeshQuality::medium))),
                     true);
             });
     };
@@ -1500,6 +1503,42 @@ void MainComponent::closeSettingsMenu()
     frequencyResponseComponent.setInterceptsMouseClicks (true, true);
 }
 
+bool MainComponent::isPointOverSettingsDismissExempt (int catcherX, int catcherY,
+                                                      const juce::Component& catcher) const noexcept
+{
+    const auto local = getLocalPoint (&catcher, juce::Point<int> (catcherX, catcherY));
+
+    auto over = [&] (const juce::Component& c) -> bool
+    {
+        return c.isShowing() && c.getBounds().contains (local);
+    };
+
+    // Floating / docked 3D spectrogram — keep Settings open for lookdev while orbiting.
+    if (over (spectrogram3D))
+        return true;
+
+    // Framed expanded Osc / Gon / Spec windows.
+    if (over (oscFrame) || over (gonFrame) || over (specFrame))
+        return true;
+
+    // Full-graph or Scope-mode analyser surfaces (not always-on-top).
+    if (over (oscilloscope) || over (goniometer) || over (spectrogram))
+        return true;
+
+    // Tool columns that sit beside those windows.
+    const juce::Component* tools[] = {
+        &oscZoomInButton, &oscZoomOutButton, &oscChannelModeButton, &oscExpandButton,
+        &gonExpandButton,
+        &specSpeedUpButton, &specSpeedDownButton, &specExpandButton, &spec3DButton,
+        &arrangeButton
+    };
+    for (auto* t : tools)
+        if (t != nullptr && over (*t))
+            return true;
+
+    return false;
+}
+
 void MainComponent::rememberFrameBounds (FramedFloatingScopeWindow& frame,
                                          bool& boundsCustom,
                                          int& prefW, int& prefH, int& prefX, int& prefY)
@@ -1982,6 +2021,18 @@ Spectrogram3DComponent::MeshQuality MainComponent::getSpec3DMeshQuality() const 
     return spectrogram3D.getMeshQuality();
 }
 
+void MainComponent::setSpec3DFreqMeshBias (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setFreqMeshBias (amount01);
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+float MainComponent::getSpec3DFreqMeshBias() const noexcept
+{
+    return spectrogram3D.getFreqMeshBias();
+}
+
 void MainComponent::setSpec3DMsaaLevel (Spectrogram3DComponent::MsaaLevel level, bool notifyPrefs)
 {
     spectrogram3D.setMsaaLevel (level);
@@ -2111,6 +2162,30 @@ void MainComponent::setSpec3DSelfShadowStrength (float amount01, bool notifyPref
     if (notifyPrefs) editor.saveUiPrefs();
 }
 float MainComponent::getSpec3DSelfShadowStrength() const noexcept { return spectrogram3D.getSelfShadowStrength(); }
+
+void MainComponent::setSpec3DSelfShadowBias (float bias01, bool notifyPrefs)
+{
+    spectrogram3D.setSelfShadowBias (bias01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSelfShadowBias() const noexcept { return spectrogram3D.getSelfShadowBias(); }
+
+void MainComponent::setSpec3DSelfShadowSoftness (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSelfShadowSoftness (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSelfShadowSoftness() const noexcept { return spectrogram3D.getSelfShadowSoftness(); }
+
+void MainComponent::setSpec3DSelfShadowQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
+{
+    spectrogram3D.setSelfShadowQuality (q);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSelfShadowQuality() const noexcept
+{
+    return spectrogram3D.getSelfShadowQuality();
+}
 
 void MainComponent::setSpec3DSsaoEnabled (bool shouldEnable, bool notifyPrefs)
 {
@@ -3207,6 +3282,20 @@ void MainComponent::randomizeUiTheme()
     persistSessionUiTheme();
 }
 
+void MainComponent::setOrderedRampGradation (bool shouldEnable, bool notifyPrefs)
+{
+    if (sharedResources.sharedColors.orderedRampGradation == shouldEnable)
+        return;
+    sharedResources.sharedColors.orderedRampGradation = shouldEnable;
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+bool MainComponent::isOrderedRampGradation() const noexcept
+{
+    return sharedResources.sharedColors.orderedRampGradation;
+}
+
 void MainComponent::randomizeColourRamps()
 {
     sharedResources.makeActive();
@@ -3277,6 +3366,10 @@ void MainComponent::showRandomizeDiceMenu()
     menu.addItem (6, "Spectrogram 3D", true, scopes.randomizeRampSpectrogram3D);
     menu.addItem (7, "Spectrum Fill", true, scopes.randomizeRampSpectrumFill);
     menu.addSeparator();
+    menu.addSectionHeader ("Ramp randomize mode");
+    menu.addItem (9, "Ordered gradation", true, scopes.orderedRampGradation);
+    menu.addItem (10, "Standard (independent stops)", true, ! scopes.orderedRampGradation);
+    menu.addSeparator();
     menu.addItem (8, "Disable custom ramps (use schemes)");
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&uiRandomizeButton),
@@ -3294,6 +3387,8 @@ void MainComponent::showRandomizeDiceMenu()
                             else if (result == 6) s.randomizeRampSpectrogram3D = ! s.randomizeRampSpectrogram3D;
                             else if (result == 7) s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill;
                             else if (result == 8) safe->disableCustomColourRamps();
+                            else if (result == 9)  safe->setOrderedRampGradation (true, true);
+                            else if (result == 10) safe->setOrderedRampGradation (false, true);
 
                             if (result >= 1 && result <= 7)
                                 safe->editor.saveUiPrefs();

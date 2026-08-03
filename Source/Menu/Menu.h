@@ -39,6 +39,7 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
     void updateColors (const juce::Array<juce::Colour>& colors);
 
@@ -52,6 +53,9 @@ public:
     {
         return { 0, 0, kContentWidth, kContentHeight };
     }
+
+    /** Call when an active tab's preferred height changes (look toggles, gradients, …). */
+    void notifyContentHeightChanged();
 
 private:
     /** Chevron pager for tab pages (same idea as faceplate bank arrows). */
@@ -139,6 +143,8 @@ private:
     int getNumTabPages() const noexcept;
     void refreshContentPanelSize();
     int getActiveTabPreferredContentHeight() const;
+    /** Sliders would eat the wheel for value tweaks — prefer scrolling the Settings page. */
+    static void disableSliderScrollWheelRecursive (juce::Component& root);
 
     /** Notifies Menu when the active settings tab changes so contentPanel can resize. */
     class MenuTabbedComponent : public juce::TabbedComponent
@@ -179,7 +185,7 @@ private:
     TabPageArrowButton tabNextButton { true };
 
     juce::ComponentBoundsConstrainer constrainer;
-    std::unique_ptr<juce::ResizableCornerComponent> resizer;
+    std::unique_ptr<juce::ResizableBorderComponent> borderResizer;
     juce::ComponentDragger dragger;
     bool dragging = false;
 

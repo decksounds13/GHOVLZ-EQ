@@ -2,6 +2,7 @@
 
 #include "../../MainComponent.h"
 #include "../AnalyserDefaults.h"
+#include "../Menu.h"
 
 namespace
 {
@@ -54,6 +55,9 @@ GoniometerSettingsComponent::Content::Content (SharedResources& resources,
     {
         if (auto* parent = findParentComponentOfClass<GoniometerSettingsComponent>())
             parent->resized();
+
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
     };
     addAndMakeVisible (gradientEditor);
 
