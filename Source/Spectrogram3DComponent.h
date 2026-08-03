@@ -65,6 +65,20 @@ public:
     static constexpr float kMinMeshHeight = 0.15f;
     static constexpr float kMaxMeshHeight = 1.40f;
 
+    /**
+        Closed solid mesh: border extrude + bottom cap (DCC-style close).
+        Independent of SSS — off by default.
+    */
+    void setClosedMeshEnabled (bool shouldEnable) noexcept;
+    bool isClosedMeshEnabled() const noexcept { return closedMeshEnabled; }
+    /** World-Y bias just under the 0-intensity floor for the closed bottom cap. */
+    static constexpr float kClosedMeshFloorBias = 0.003f;
+    /**
+        Closed playhead wall sits at X = 1 + this (past “now”), so it doesn’t
+        z-fight with history just behind the playhead. Scroll direction is -X.
+    */
+    static constexpr float kClosedPlayheadWallBias = 0.006f;
+
     /** Visual polish — all effects default off (flat vertex colours). */
     void setLightingEnabled (bool shouldEnable) noexcept;
     bool isLightingEnabled() const noexcept { return lightingEnabled; }
@@ -112,11 +126,48 @@ public:
     void setBloomThreshold (float amount01) noexcept;
     float getBloomThreshold() const noexcept { return bloomThreshold; }
 
+    /**
+        SSS Look toggle. Thickness path follows Closed Mesh:
+        closed → volume thickness; open → heightfield taps. Off by default.
+    */
+    void setSssEnabled (bool shouldEnable) noexcept;
+    bool isSssEnabled() const noexcept { return sssEnabled; }
+    void setSssStrength (float amount01) noexcept;
+    float getSssStrength() const noexcept { return sssStrength; }
+    void setSssWrap (float amount01) noexcept;
+    float getSssWrap() const noexcept { return sssWrap; }
+    void setSssTransmission (float amount01) noexcept;
+    float getSssTransmission() const noexcept { return sssTransmission; }
+    void setSssTint (juce::Colour c) noexcept;
+    juce::Colour getSssTint() const noexcept { return sssTint; }
+    /** Open mesh SSS: height-map tap distance for thin ridges. */
+    void setSssRadius (float amount01) noexcept;
+    float getSssRadius() const noexcept { return sssRadius; }
+    void setSssContrast (float amount01) noexcept;
+    float getSssContrast() const noexcept { return sssContrast; }
+    void setSssQuality (ShadowQuality q) noexcept;
+    ShadowQuality getSssQuality() const noexcept { return sssQuality; }
+    /** Closed-mesh SSS: maps volume depth → transmission. */
+    void setSssThicknessScale (float amount01) noexcept;
+    float getSssThicknessScale() const noexcept { return sssThicknessScale; }
+    void setSssMaxThickness (float amount01) noexcept;
+    float getSssMaxThickness() const noexcept { return sssMaxThickness; }
+
     void setChromeMode (ChromeMode mode) noexcept;
     ChromeMode getChromeMode() const noexcept { return chromeMode; }
 
     void resetCamera() noexcept;
     void saveAsDefaultView() noexcept;
+
+    /** Auto yaw orbit (turntable). Off by default; period = seconds per full revolution. */
+    void setAutoRotateEnabled (bool shouldEnable, bool notifyPrefsCallback = true) noexcept;
+    bool isAutoRotateEnabled() const noexcept { return autoRotateEnabled; }
+    void setAutoRotatePeriodSec (float secondsPerRevolution, bool notifyPrefsCallback = true) noexcept;
+    float getAutoRotatePeriodSec() const noexcept { return autoRotatePeriodSec; }
+    static constexpr float kAutoRotatePeriodMinSec = 1.0f;
+    static constexpr float kAutoRotatePeriodMaxSec = 60.0f;
+    static constexpr float kAutoRotatePeriodDefaultSec = 10.0f;
+
     void invalidateMesh() noexcept;
     /** Rebuild vertex colours from the current mesh + 3D colour LUT (ramp edits). */
     void recolourMesh() noexcept;
@@ -147,6 +198,8 @@ public:
     std::function<void()> onUserResized;
     std::function<void()> onUserMoved;
     std::function<void()> onDefaultViewChanged;
+    /** Fired when turntable enable/period changes (persist prefs). */
+    std::function<void()> onAutoRotateSettingsChanged;
     /** If set, double-click invokes this instead of resetCamera(). */
     std::function<void()> onDoubleClick;
 
@@ -276,6 +329,17 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowSoftnessUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowQualityUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourContactUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssModeUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssStrengthUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssWrapUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssTransmissionUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssTintUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssRadiusUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssContrastUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssQualityUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssBaseDepthUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssThickScaleUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssMaxThickUniform;
 
         std::unique_ptr<juce::OpenGLShaderProgram> labelShader;
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> labelPositionAttrib;
@@ -446,6 +510,19 @@ private:
     float bloomStrength = 0.45f;
     float bloomThreshold = 0.62f;
 
+    bool closedMeshEnabled = false;
+    bool sssEnabled = false;
+    float sssStrength = 0.45f;
+    float sssWrap = 0.55f;
+    float sssTransmission = 0.65f;
+    juce::Colour sssTint { 0xffe8b090 }; // warm peach
+    float sssRadius = 0.40f;
+    float sssContrast = 0.50f;
+    ShadowQuality sssQuality = ShadowQuality::medium;
+    float sssThicknessScale = 0.50f;
+    float sssMaxThickness = 0.70f;
+    bool meshClosed = false; // last built topology (open vs extrude+cap)
+
     melatonin::DropShadow panelShadow {
         { juce::Colours::black.withAlpha (0.55f), 16, { 0, 6 }, 0 }
     };
@@ -472,6 +549,9 @@ private:
 
     CameraState camera;
     CameraState defaultCamera;
+    bool autoRotateEnabled = false;
+    float autoRotatePeriodSec = kAutoRotatePeriodDefaultSec;
+    double autoRotateLastTimeSec = 0.0;
     juce::Point<float> lastDrag {};
     juce::Point<float> rightClickStart {};
     bool rightClickCandidate = false;

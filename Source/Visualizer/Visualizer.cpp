@@ -90,6 +90,12 @@ void Visualizer::mouseDown (juce::MouseEvent const& e)
         onShowContextMenu();
 }
 
+void Visualizer::mouseDoubleClick (juce::MouseEvent const&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}
+
 
 // ============================================================================
 void Visualizer::setBackgroundColour( const juce::Colour &colour )

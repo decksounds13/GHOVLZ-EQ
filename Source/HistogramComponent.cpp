@@ -568,6 +568,12 @@ void HistogramComponent::mouseDown (const juce::MouseEvent& e)
         showContextMenu();
 }
 
+void HistogramComponent::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}
+
 void HistogramComponent::showContextMenu()
 {
     if (onShowContextMenu != nullptr)

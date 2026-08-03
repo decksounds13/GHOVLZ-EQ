@@ -107,6 +107,18 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     reverseFreqAxisToggle.onClick = [this] { applyStructureControlsToMain(); };
     addAndMakeVisible (reverseFreqAxisToggle);
 
+    styleToggle (closedMeshToggle);
+    closedMeshToggle.setTooltip (
+        "Extrude border edges just under the 0-intensity floor and cap the bottom (solid volume). "
+        "Off by default. Independent of SSS — when SSS is on it uses volume thickness if enabled.");
+    closedMeshToggle.onClick = [this]
+    {
+        updateLookDevVisibility();
+        applyStructureControlsToMain();
+        requestParentRelayout();
+    };
+    addAndMakeVisible (closedMeshToggle);
+
     styleSaveDefaultButton (resetCameraButton);
     resetCameraButton.setButtonText ("Reset 3D Camera");
     resetCameraButton.onClick = [this]
@@ -219,6 +231,58 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     setupLookSlider (bloomThresholdLabel, bloomThresholdSlider, 0.0, 1.0, 0.01, "Luminance gate before glow.");
     bloomThresholdSlider.setValue (0.62, juce::dontSendNotification);
 
+    setupLookToggle (sssToggle,
+                     "Subsurface scatter approx (needs Lighting). Uses volume thickness when "
+                     "Closed mesh is on; otherwise heightfield ridge taps. Off by default.");
+    sssStrengthLabel.setText ("SSS Strength", juce::dontSendNotification);
+    setupLookSlider (sssStrengthLabel, sssStrengthSlider, 0.0, 1.0, 0.01, "Overall subsurface mix.");
+    sssStrengthSlider.setValue (0.45, juce::dontSendNotification);
+    sssWrapLabel.setText ("SSS Wrap", juce::dontSendNotification);
+    setupLookSlider (sssWrapLabel, sssWrapSlider, 0.0, 1.0, 0.01, "Terminator bleed / scatter wrap.");
+    sssWrapSlider.setValue (0.55, juce::dontSendNotification);
+    sssTransmissionLabel.setText ("SSS Transmission", juce::dontSendNotification);
+    setupLookSlider (sssTransmissionLabel, sssTransmissionSlider, 0.0, 1.0, 0.01,
+                     "View-dependent backscatter through thin features.");
+    sssTransmissionSlider.setValue (0.65, juce::dontSendNotification);
+    sssTintRLabel.setText ("SSS Tint R", juce::dontSendNotification);
+    setupLookSlider (sssTintRLabel, sssTintRSlider, 0.0, 1.0, 0.01, "Scatter tint red.");
+    sssTintRSlider.setValue (0.91, juce::dontSendNotification);
+    sssTintGLabel.setText ("SSS Tint G", juce::dontSendNotification);
+    setupLookSlider (sssTintGLabel, sssTintGSlider, 0.0, 1.0, 0.01, "Scatter tint green.");
+    sssTintGSlider.setValue (0.69, juce::dontSendNotification);
+    sssTintBLabel.setText ("SSS Tint B", juce::dontSendNotification);
+    setupLookSlider (sssTintBLabel, sssTintBSlider, 0.0, 1.0, 0.01, "Scatter tint blue.");
+    sssTintBSlider.setValue (0.56, juce::dontSendNotification);
+
+    sssRadiusLabel.setText ("SSS Radius", juce::dontSendNotification);
+    setupLookSlider (sssRadiusLabel, sssRadiusSlider, 0.0, 1.0, 0.01,
+                     "Open mesh: height-map tap distance for thin ridges.");
+    sssRadiusSlider.setValue (0.40, juce::dontSendNotification);
+    sssContrastLabel.setText ("SSS Contrast", juce::dontSendNotification);
+    setupLookSlider (sssContrastLabel, sssContrastSlider, 0.0, 1.0, 0.01,
+                     "Open mesh: how sharply only thin ridges transmit.");
+    sssContrastSlider.setValue (0.50, juce::dontSendNotification);
+
+    sssQualityLabel.setText ("SSS Quality", juce::dontSendNotification);
+    styleCombo (sssQualityCombo);
+    sssQualityCombo.addItem ("Low", 1);
+    sssQualityCombo.addItem ("Medium", 2);
+    sssQualityCombo.addItem ("High", 3);
+    sssQualityCombo.setSelectedId (2, juce::dontSendNotification);
+    sssQualityCombo.setTooltip ("Sample density for thickness taps.");
+    sssQualityCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (sssQualityLabel);
+    addAndMakeVisible (sssQualityCombo);
+
+    sssThickScaleLabel.setText ("SSS Thickness Scale", juce::dontSendNotification);
+    setupLookSlider (sssThickScaleLabel, sssThickScaleSlider, 0.0, 1.0, 0.01,
+                     "Closed mesh: maps volume depth to transmission.");
+    sssThickScaleSlider.setValue (0.50, juce::dontSendNotification);
+    sssMaxThickLabel.setText ("SSS Max Thickness", juce::dontSendNotification);
+    setupLookSlider (sssMaxThickLabel, sssMaxThickSlider, 0.0, 1.0, 0.01,
+                     "Closed mesh: above this optical depth, treat as opaque.");
+    sssMaxThickSlider.setValue (0.70, juce::dontSendNotification);
+
     gradientLabel.setText ("Custom Gradient (3D)", juce::dontSendNotification);
     styleLabel (gradientLabel);
     gradientLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
@@ -252,6 +316,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (freqMeshBiasLabel);
     styleLabel (msaaLabel);
     styleLabel (selfShadowQualityLabel);
+    styleLabel (sssQualityLabel);
 
     updateLookDevVisibility();
 }
@@ -261,6 +326,7 @@ Spectrogram3DSettingsComponent::Content::~Content()
     meshQualityCombo.setLookAndFeel (nullptr);
     msaaCombo.setLookAndFeel (nullptr);
     selfShadowQualityCombo.setLookAndFeel (nullptr);
+    sssQualityCombo.setLookAndFeel (nullptr);
 }
 
 void Spectrogram3DSettingsComponent::Content::setLookChildVisible (juce::Component& c, bool vis)
@@ -309,6 +375,32 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (bloomStrengthSlider, bloom);
     setLookChildVisible (bloomThresholdLabel, bloom);
     setLookChildVisible (bloomThresholdSlider, bloom);
+
+    const bool closed = closedMeshToggle.getToggleState();
+    const bool sssOn = sssToggle.getToggleState();
+    setLookChildVisible (sssStrengthLabel, sssOn);
+    setLookChildVisible (sssStrengthSlider, sssOn);
+    setLookChildVisible (sssWrapLabel, sssOn);
+    setLookChildVisible (sssWrapSlider, sssOn);
+    setLookChildVisible (sssTransmissionLabel, sssOn);
+    setLookChildVisible (sssTransmissionSlider, sssOn);
+    setLookChildVisible (sssTintRLabel, sssOn);
+    setLookChildVisible (sssTintRSlider, sssOn);
+    setLookChildVisible (sssTintGLabel, sssOn);
+    setLookChildVisible (sssTintGSlider, sssOn);
+    setLookChildVisible (sssTintBLabel, sssOn);
+    setLookChildVisible (sssTintBSlider, sssOn);
+    setLookChildVisible (sssQualityLabel, sssOn);
+    setLookChildVisible (sssQualityCombo, sssOn);
+    // Open-mesh SSS taps vs closed-mesh volume thickness controls.
+    setLookChildVisible (sssRadiusLabel, sssOn && ! closed);
+    setLookChildVisible (sssRadiusSlider, sssOn && ! closed);
+    setLookChildVisible (sssContrastLabel, sssOn && ! closed);
+    setLookChildVisible (sssContrastSlider, sssOn && ! closed);
+    setLookChildVisible (sssThickScaleLabel, sssOn && closed);
+    setLookChildVisible (sssThickScaleSlider, sssOn && closed);
+    setLookChildVisible (sssMaxThickLabel, sssOn && closed);
+    setLookChildVisible (sssMaxThickSlider, sssOn && closed);
 }
 
 void Spectrogram3DSettingsComponent::Content::requestParentRelayout()
@@ -425,6 +517,7 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     }
     transparentBgToggle.setToggleState (main->isSpec3DTransparentBackground(), juce::dontSendNotification);
     reverseFreqAxisToggle.setToggleState (main->isSpec3DReverseFrequencyAxis(), juce::dontSendNotification);
+    closedMeshToggle.setToggleState (main->isSpec3DClosedMeshEnabled(), juce::dontSendNotification);
     meshHeightSlider.setValue (main->getSpec3DMeshHeight(), juce::dontSendNotification);
     freqMeshBiasSlider.setValue (main->getSpec3DFreqMeshBias(), juce::dontSendNotification);
 
@@ -454,6 +547,27 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     bloomToggle.setToggleState (main->isSpec3DBloomEnabled(), juce::dontSendNotification);
     bloomStrengthSlider.setValue (main->getSpec3DBloomStrength(), juce::dontSendNotification);
     bloomThresholdSlider.setValue (main->getSpec3DBloomThreshold(), juce::dontSendNotification);
+    sssToggle.setToggleState (main->isSpec3DSssEnabled(), juce::dontSendNotification);
+    sssStrengthSlider.setValue (main->getSpec3DSssStrength(), juce::dontSendNotification);
+    sssWrapSlider.setValue (main->getSpec3DSssWrap(), juce::dontSendNotification);
+    sssTransmissionSlider.setValue (main->getSpec3DSssTransmission(), juce::dontSendNotification);
+    {
+        const auto t = main->getSpec3DSssTint();
+        sssTintRSlider.setValue (t.getFloatRed(), juce::dontSendNotification);
+        sssTintGSlider.setValue (t.getFloatGreen(), juce::dontSendNotification);
+        sssTintBSlider.setValue (t.getFloatBlue(), juce::dontSendNotification);
+    }
+    sssRadiusSlider.setValue (main->getSpec3DSssRadius(), juce::dontSendNotification);
+    sssContrastSlider.setValue (main->getSpec3DSssContrast(), juce::dontSendNotification);
+    {
+        const auto sq = main->getSpec3DSssQuality();
+        sssQualityCombo.setSelectedId (
+            sq == Spectrogram3DComponent::ShadowQuality::low ? 1
+                : (sq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 2),
+            juce::dontSendNotification);
+    }
+    sssThickScaleSlider.setValue (main->getSpec3DSssThicknessScale(), juce::dontSendNotification);
+    sssMaxThickSlider.setValue (main->getSpec3DSssMaxThickness(), juce::dontSendNotification);
 
     updateLookDevVisibility();
 }
@@ -483,6 +597,7 @@ void Spectrogram3DSettingsComponent::Content::applyStructureControlsToMain()
     }
     main->setSpec3DTransparentBackground (transparentBgToggle.getToggleState(), true);
     main->setSpec3DReverseFrequencyAxis (reverseFreqAxisToggle.getToggleState(), true);
+    main->setSpec3DClosedMeshEnabled (closedMeshToggle.getToggleState(), true);
     main->setSpec3DMeshHeight ((float) meshHeightSlider.getValue(), true);
     main->setSpec3DFreqMeshBias ((float) freqMeshBiasSlider.getValue(), true);
 }
@@ -521,6 +636,27 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DBloomEnabled (bloomToggle.getToggleState(), true);
     main->setSpec3DBloomStrength ((float) bloomStrengthSlider.getValue(), true);
     main->setSpec3DBloomThreshold ((float) bloomThresholdSlider.getValue(), true);
+    main->setSpec3DSssEnabled (sssToggle.getToggleState(), true);
+    main->setSpec3DSssStrength ((float) sssStrengthSlider.getValue(), true);
+    main->setSpec3DSssWrap ((float) sssWrapSlider.getValue(), true);
+    main->setSpec3DSssTransmission ((float) sssTransmissionSlider.getValue(), true);
+    main->setSpec3DSssTint (juce::Colour::fromFloatRGBA ((float) sssTintRSlider.getValue(),
+                                                         (float) sssTintGSlider.getValue(),
+                                                         (float) sssTintBSlider.getValue(),
+                                                         1.0f),
+                            true);
+    main->setSpec3DSssRadius ((float) sssRadiusSlider.getValue(), true);
+    main->setSpec3DSssContrast ((float) sssContrastSlider.getValue(), true);
+    {
+        const int id = sssQualityCombo.getSelectedId();
+        main->setSpec3DSssQuality (
+            id == 1 ? Spectrogram3DComponent::ShadowQuality::low
+                    : (id == 3 ? Spectrogram3DComponent::ShadowQuality::high
+                               : Spectrogram3DComponent::ShadowQuality::medium),
+            true);
+    }
+    main->setSpec3DSssThicknessScale ((float) sssThickScaleSlider.getValue(), true);
+    main->setSpec3DSssMaxThickness ((float) sssMaxThickSlider.getValue(), true);
 }
 
 void Spectrogram3DSettingsComponent::Content::applyControlsToMain()
@@ -535,7 +671,7 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     const int toggleH = 22 + 6;
     const int comboRows = 2; // mesh quality + MSAA
     const int baseSliderRows = 2; // mesh height + HF density
-    const int toggles = 4 + 5; // base + look master toggles
+    const int toggles = 5 + 6; // base (+ closed) + look master toggles (+ SSS)
     const int buttonRows = 1;
 
     int lookRows = 0;
@@ -544,6 +680,14 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     if (selfShadowToggle.getToggleState()) lookRows += 4; // strength, bias, softness, quality
     if (ssaoToggle.getToggleState()) lookRows += 2;
     if (bloomToggle.getToggleState()) lookRows += 2;
+    if (sssToggle.getToggleState())
+    {
+        lookRows += 7; // strength, wrap, transmission, tint RGB, quality
+        if (closedMeshToggle.getToggleState())
+            lookRows += 2; // thick scale, max thick
+        else
+            lookRows += 2; // radius, contrast
+    }
 
     return kPadY * 2
            + 24 + 8
@@ -575,6 +719,7 @@ void Spectrogram3DSettingsComponent::Content::resized()
     layoutComboRow (area, msaaLabel, msaaCombo);
     layoutToggle (area, transparentBgToggle);
     layoutToggle (area, reverseFreqAxisToggle);
+    layoutToggle (area, closedMeshToggle);
     resetCameraButton.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (160, area.getWidth())));
     area.removeFromTop (kSectionGap);
 
@@ -612,6 +757,27 @@ void Spectrogram3DSettingsComponent::Content::resized()
     {
         layoutSliderRow (area, bloomStrengthLabel, bloomStrengthSlider);
         layoutSliderRow (area, bloomThresholdLabel, bloomThresholdSlider);
+    }
+    layoutToggle (area, sssToggle);
+    if (sssToggle.getToggleState())
+    {
+        layoutSliderRow (area, sssStrengthLabel, sssStrengthSlider);
+        layoutSliderRow (area, sssWrapLabel, sssWrapSlider);
+        layoutSliderRow (area, sssTransmissionLabel, sssTransmissionSlider);
+        layoutSliderRow (area, sssTintRLabel, sssTintRSlider);
+        layoutSliderRow (area, sssTintGLabel, sssTintGSlider);
+        layoutSliderRow (area, sssTintBLabel, sssTintBSlider);
+        layoutComboRow (area, sssQualityLabel, sssQualityCombo);
+        if (closedMeshToggle.getToggleState())
+        {
+            layoutSliderRow (area, sssThickScaleLabel, sssThickScaleSlider);
+            layoutSliderRow (area, sssMaxThickLabel, sssMaxThickSlider);
+        }
+        else
+        {
+            layoutSliderRow (area, sssRadiusLabel, sssRadiusSlider);
+            layoutSliderRow (area, sssContrastLabel, sssContrastSlider);
+        }
     }
     area.removeFromTop (kSectionGap);
 

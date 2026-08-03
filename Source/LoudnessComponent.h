@@ -21,6 +21,7 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     void pushSamples (const float* left, const float* right, int numSamples) noexcept;
     void prepare (double sampleRate);
@@ -33,6 +34,7 @@ public:
     void resetIntegrated() noexcept;
 
     std::function<void()> onShowContextMenu;
+    std::function<void()> onDoubleClick;
 
 private:
     void timerCallback() override;

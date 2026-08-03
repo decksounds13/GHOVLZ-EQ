@@ -29,8 +29,10 @@ public:
     void paint( juce::Graphics & ) override;
     void resized() override;
     void mouseDown (juce::MouseEvent const&) override;
+    void mouseDoubleClick (juce::MouseEvent const&) override;
 
     std::function<void()> onShowContextMenu;
+    std::function<void()> onDoubleClick;
 
     // ========================================================================
     void setBackgroundColour( const juce::Colour & );

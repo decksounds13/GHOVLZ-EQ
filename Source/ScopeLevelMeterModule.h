@@ -23,6 +23,7 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     void setTap (Tap t) noexcept;
     Tap getTap() const noexcept { return tap; }
@@ -32,6 +33,7 @@ public:
     void setTiledPresentation (bool shouldUseTiled) noexcept;
 
     std::function<void()> onShowContextMenu;
+    std::function<void()> onDoubleClick;
 
 private:
     void showTapMenu();

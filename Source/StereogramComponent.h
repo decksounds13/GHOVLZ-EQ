@@ -23,6 +23,7 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     void pushSamples (const float* left, const float* right, int numSamples) noexcept;
     void prepare (double sampleRate);
@@ -35,6 +36,7 @@ public:
     void clearColourRamp();
 
     std::function<void()> onShowContextMenu;
+    std::function<void()> onDoubleClick;
 
     static constexpr float kMinDisplayHz = 20.0f;
     static constexpr float kMaxDisplayHz = 20000.0f;

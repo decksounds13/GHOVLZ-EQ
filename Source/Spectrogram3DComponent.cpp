@@ -58,6 +58,18 @@ namespace
         uniform float uShadowSoftness;
         uniform float uShadowQuality; // 0=low, 1=medium, 2=high
         uniform float uContactShadow;
+        // SSS: 0=off, 1=open heightfield taps, 2=closed volume (height-to-base + taps)
+        uniform float uSssMode;
+        uniform float uSssStrength;
+        uniform float uSssWrap;
+        uniform float uSssTransmission;
+        uniform vec3 uSssTint;
+        uniform float uSssRadius;
+        uniform float uSssContrast;
+        uniform float uSssQuality; // 0=low, 1=medium, 2=high
+        uniform float uClosedFloorY; // closed mesh bottom (just under 0-intensity plane)
+        uniform float uSssThickScale;
+        uniform float uSssMaxThick;
 
         // Frequency axis u (0=low…1=high) → height-map V (mesh-row CDF).
         float meshTFromFreqAxis (float uAxis)
@@ -225,6 +237,84 @@ namespace
             return F0 + (1.0 - F0) * pow (clamp (1.0 - cosTheta, 0.0, 1.0), 5.0);
         }
 
+        /** Fake thickness: thin ridges along light on the heightfield. */
+        float heightfieldThickness (vec3 pos)
+        {
+            float rad = mix (0.02, 0.22, clamp (uSssRadius, 0.0, 1.0));
+            float contrast = mix (0.35, 2.5, clamp (uSssContrast, 0.0, 1.0));
+            int q = int (clamp (uSssQuality + 0.5, 0.0, 2.0));
+            int steps = (q == 0) ? 4 : ((q == 1) ? 6 : 8);
+
+            vec2 dirXZ = uShadowDirXZ;
+            float dirLen = length (dirXZ);
+            if (dirLen < 1.0e-4)
+            {
+                dirXZ = uLightDirWorld.xz;
+                dirLen = length (dirXZ);
+                if (dirLen < 1.0e-4)
+                    dirXZ = vec2 (1.0, 0.0);
+                else
+                    dirXZ /= dirLen;
+            }
+
+            float h0 = sampleHeight (pos.xz);
+            float thin = 0.0;
+            for (int i = 1; i <= 8; ++i)
+            {
+                if (i > steps)
+                    break;
+                float dist = float (i) * rad / float (steps);
+                float h = sampleHeight (pos.xz - dirXZ * dist);
+                thin += max (0.0, h0 - h);
+            }
+            thin /= max (uMeshHeight * float (steps) * 0.35, 1.0e-4);
+            return clamp (pow (clamp (thin, 0.0, 1.0), mix (1.4, 0.55, clamp (uSssContrast, 0.0, 1.0)))
+                          * contrast, 0.0, 1.0);
+        }
+
+        /** Closed solid: optical depth top→base + ridge taps. */
+        float closedThickness (vec3 pos)
+        {
+            float h0 = sampleHeight (pos.xz);
+            float optical = max (0.0, h0 - uClosedFloorY);
+            float maxT = mix (0.15, 1.35, clamp (uSssMaxThick, 0.0, 1.0)) * uMeshHeight;
+            float scale = mix (0.35, 2.2, clamp (uSssThickScale, 0.0, 1.0));
+            // Thin where the solid is short (peaks / edges).
+            float volumeThin = 1.0 - smoothstep (0.0, maxT, optical * scale);
+            float ridge = heightfieldThickness (pos);
+            return clamp (volumeThin * 0.65 + ridge * 0.55, 0.0, 1.0);
+        }
+
+        vec3 subsurfaceScatter (vec3 albedo, vec3 n, vec3 l, vec3 v, float shadow)
+        {
+            int mode = int (clamp (uSssMode + 0.5, 0.0, 2.0));
+            float strength = clamp (uSssStrength, 0.0, 1.0);
+            if (mode <= 0 || strength < 1.0e-4)
+                return vec3 (0.0);
+
+            // Walls / underside: skip SSS (top surface only).
+            if (n.y < 0.25)
+                return vec3 (0.0);
+
+            float wrapAmt = mix (0.15, 0.95, clamp (uSssWrap, 0.0, 1.0));
+            float NdotL = dot (n, l);
+            float scatterWrap = clamp ((NdotL + wrapAmt) / (1.0 + wrapAmt), 0.0, 1.0);
+
+            float NdotV = max (dot (n, v), 1.0e-4);
+            float transAmt = clamp (uSssTransmission, 0.0, 1.0);
+            float back = pow (1.0 - NdotV, mix (1.2, 3.5, transAmt));
+
+            float thick = (mode >= 2) ? closedThickness (vWorldPos) : heightfieldThickness (vWorldPos);
+            float softSh = mix (0.35, 1.0, shadow); // penumbra still allows SSS
+
+            vec3 tint = max (uSssTint, vec3 (0.0));
+            float kFront = 0.55;
+            float kBack = 0.85 * transAmt;
+            return albedo * tint * scatterWrap
+                 * (kFront + kBack * back * thick)
+                 * strength * softSh;
+        }
+
         void main()
         {
             vec2 halfSize = uResolution * 0.5;
@@ -291,7 +381,8 @@ namespace
             float wrap = NdotL * 0.72 + 0.28;
             vec3 diffuse = albedo * (0.22 * ao + 0.78 * wrap * shadow);
             float rim = pow (1.0 - NdotV, 2.5) * uRim * ao;
-            vec3 lit = diffuse + specular + albedo * rim;
+            vec3 sss = subsurfaceScatter (albedo, n, l, v, shadow);
+            vec3 lit = diffuse + specular + albedo * rim + sss;
             fragColour = vec4 (mix (albedo * shade, lit, amt), 1.0);
         }
     )";
@@ -607,6 +698,17 @@ void Spectrogram3DComponent::GlHost::createShaders()
     colourShadowSoftnessUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowSoftness");
     colourShadowQualityUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowQuality");
     colourContactUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uContactShadow");
+    colourSssModeUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssMode");
+    colourSssStrengthUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssStrength");
+    colourSssWrapUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssWrap");
+    colourSssTransmissionUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssTransmission");
+    colourSssTintUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssTint");
+    colourSssRadiusUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssRadius");
+    colourSssContrastUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssContrast");
+    colourSssQualityUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssQuality");
+    colourSssBaseDepthUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uClosedFloorY");
+    colourSssThickScaleUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssThickScale");
+    colourSssMaxThickUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSssMaxThick");
 
     labelShader = std::make_unique<juce::OpenGLShaderProgram> (openGLContext);
     if (! labelShader->addVertexShader (kLabelVertexShader)
@@ -857,8 +959,10 @@ void Spectrogram3DComponent::GlHost::uploadMeshIfNeeded()
                             inds.data(), juce::gl::GL_DYNAMIC_DRAW);
     meshIndexCount = (int) inds.size();
 
+    // Top surface is always the first meshW*meshH verts (closed mesh appends a bottom copy).
+    // Must refresh every upload — a stale height map makes shadows/AO/SSS scroll vs the waterfall.
     if (owner.meshW >= 2 && owner.meshH >= 2
-        && (int) verts.size() == owner.meshW * owner.meshH)
+        && (int) verts.size() >= owner.meshW * owner.meshH)
         uploadHeightMap (verts, owner.meshW, owner.meshH);
 }
 
@@ -1525,6 +1629,25 @@ void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProg
            owner.selfShadowQuality == ShadowQuality::low ? 0.0f
                : (owner.selfShadowQuality == ShadowQuality::high ? 2.0f : 1.0f));
     setF1 (colourContactUniform.get(), "uContactShadow", contact);
+
+    const bool sssOn = owner.lightingEnabled && owner.sssEnabled;
+    const float sssModeF = ! sssOn ? 0.0f
+                           : (owner.closedMeshEnabled ? 2.0f : 1.0f);
+    setF1 (colourSssModeUniform.get(), "uSssMode", sssModeF);
+    setF1 (colourSssStrengthUniform.get(), "uSssStrength", sssOn ? owner.sssStrength : 0.0f);
+    setF1 (colourSssWrapUniform.get(), "uSssWrap", owner.sssWrap);
+    setF1 (colourSssTransmissionUniform.get(), "uSssTransmission", owner.sssTransmission);
+    setF3 (colourSssTintUniform.get(), "uSssTint",
+           owner.sssTint.getFloatRed(), owner.sssTint.getFloatGreen(), owner.sssTint.getFloatBlue());
+    setF1 (colourSssRadiusUniform.get(), "uSssRadius", owner.sssRadius);
+    setF1 (colourSssContrastUniform.get(), "uSssContrast", owner.sssContrast);
+    setF1 (colourSssQualityUniform.get(), "uSssQuality",
+           owner.sssQuality == ShadowQuality::low ? 0.0f
+               : (owner.sssQuality == ShadowQuality::high ? 2.0f : 1.0f));
+    setF1 (colourSssBaseDepthUniform.get(), "uClosedFloorY",
+           owner.closedMeshEnabled ? -kClosedMeshFloorBias : 0.0f);
+    setF1 (colourSssThickScaleUniform.get(), "uSssThickScale", owner.sssThicknessScale);
+    setF1 (colourSssMaxThickUniform.get(), "uSssMaxThick", owner.sssMaxThickness);
 }
 
 juce::Vector3D<float> Spectrogram3DComponent::GlHost::getLightDirectionWorld() const noexcept
@@ -2330,6 +2453,93 @@ void Spectrogram3DComponent::setBloomThreshold (float amount01) noexcept
     markLookDirty();
 }
 
+void Spectrogram3DComponent::setClosedMeshEnabled (bool shouldEnable) noexcept
+{
+    if (closedMeshEnabled == shouldEnable) return;
+    closedMeshEnabled = shouldEnable;
+    indicesValid = false;
+    if (meshW >= 2 && meshH >= 2 && ! meshDb.empty() && lastBrightness >= 0.0f)
+        rebuildVerticesFromMeshDb (lastBrightness, lastMinDb, lastMaxDb);
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssEnabled (bool shouldEnable) noexcept
+{
+    if (sssEnabled == shouldEnable) return;
+    sssEnabled = shouldEnable;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssStrength (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (sssStrength - amount01) < 1.0e-4f) return;
+    sssStrength = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssWrap (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (sssWrap - amount01) < 1.0e-4f) return;
+    sssWrap = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssTransmission (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (sssTransmission - amount01) < 1.0e-4f) return;
+    sssTransmission = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssTint (juce::Colour c) noexcept
+{
+    if (sssTint == c) return;
+    sssTint = c;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssRadius (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (sssRadius - amount01) < 1.0e-4f) return;
+    sssRadius = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssContrast (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (sssContrast - amount01) < 1.0e-4f) return;
+    sssContrast = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssQuality (ShadowQuality q) noexcept
+{
+    if (sssQuality == q) return;
+    sssQuality = q;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssThicknessScale (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (sssThicknessScale - amount01) < 1.0e-4f) return;
+    sssThicknessScale = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSssMaxThickness (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (sssMaxThickness - amount01) < 1.0e-4f) return;
+    sssMaxThickness = amount01;
+    markLookDirty();
+}
+
 void Spectrogram3DComponent::applyBackgroundTransparency() noexcept
 {
     setOpaque (! usesSoftComposite());
@@ -2444,6 +2654,36 @@ void Spectrogram3DComponent::saveAsDefaultView() noexcept
     defaultCamera = camera;
     if (onDefaultViewChanged != nullptr)
         onDefaultViewChanged();
+}
+
+void Spectrogram3DComponent::setAutoRotateEnabled (bool shouldEnable, bool notifyPrefsCallback) noexcept
+{
+    if (autoRotateEnabled == shouldEnable)
+        return;
+    autoRotateEnabled = shouldEnable;
+    autoRotateLastTimeSec = 0.0; // avoid a dt jump on enable
+    if (notifyPrefsCallback && onAutoRotateSettingsChanged != nullptr)
+        onAutoRotateSettingsChanged();
+    if (autoRotateEnabled)
+    {
+        markSoftContentDirty();
+        if (glHost != nullptr)
+            glHost->triggerRedraw();
+        if (usesSoftComposite())
+            repaint();
+    }
+}
+
+void Spectrogram3DComponent::setAutoRotatePeriodSec (float secondsPerRevolution,
+                                                     bool notifyPrefsCallback) noexcept
+{
+    secondsPerRevolution = juce::jlimit (kAutoRotatePeriodMinSec, kAutoRotatePeriodMaxSec,
+                                         secondsPerRevolution);
+    if (std::abs (autoRotatePeriodSec - secondsPerRevolution) < 1.0e-4f)
+        return;
+    autoRotatePeriodSec = secondsPerRevolution;
+    if (notifyPrefsCallback && onAutoRotateSettingsChanged != nullptr)
+        onAutoRotateSettingsChanged();
 }
 
 void Spectrogram3DComponent::setDefaultCameraState (const CameraState& state) noexcept
@@ -2656,6 +2896,24 @@ void Spectrogram3DComponent::timerCallback()
     if (! active)
         return;
 
+    if (autoRotateEnabled && dragMode == DragMode::none)
+    {
+        const double nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        if (autoRotateLastTimeSec > 0.0)
+        {
+            const float dt = juce::jlimit (0.0f, 0.1f, (float) (nowSec - autoRotateLastTimeSec));
+            const float period = juce::jmax (kAutoRotatePeriodMinSec, autoRotatePeriodSec);
+            // Full revolution every `period` seconds (same yaw sense as LMB orbit).
+            camera.yawDeg -= 360.0f / period * dt;
+            markSoftContentDirty();
+        }
+        autoRotateLastTimeSec = nowSec;
+    }
+    else
+    {
+        autoRotateLastTimeSec = 0.0;
+    }
+
     updateMeshFromSource();
     if (glHost != nullptr)
     {
@@ -2817,11 +3075,17 @@ void Spectrogram3DComponent::appendMeshColumnsFromHistory (const std::vector<flo
 
 void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
 {
-    if (indicesValid && meshW == w && meshH == h && ! cpuIndices.empty())
+    const bool wantClosed = closedMeshEnabled;
+    if (indicesValid && meshW == w && meshH == h && meshClosed == wantClosed && ! cpuIndices.empty())
         return;
 
     std::vector<uint32_t> inds;
-    inds.reserve ((size_t) (w - 1) * (size_t) (h - 1) * 6);
+    const int topCount = w * h;
+
+    // Top heightfield (CCW when viewed from above).
+    inds.reserve ((size_t) (w - 1) * (size_t) (h - 1) * 6
+                  + (wantClosed ? (size_t) (w - 1) * (size_t) (h - 1) * 6
+                                  + (size_t) (w + h) * 12 : 0));
     for (int z = 0; z < h - 1; ++z)
     {
         for (int x = 0; x < w - 1; ++x)
@@ -2835,8 +3099,68 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
         }
     }
 
+    if (wantClosed)
+    {
+        // Bottom cap: verts [topCount .. 2*topCount), winding flipped (normals down).
+        for (int z = 0; z < h - 1; ++z)
+        {
+            for (int x = 0; x < w - 1; ++x)
+            {
+                const uint32_t i0 = (uint32_t) (topCount + z * w + x);
+                const uint32_t i1 = i0 + 1;
+                const uint32_t i2 = i0 + (uint32_t) w;
+                const uint32_t i3 = i2 + 1;
+                inds.push_back (i0); inds.push_back (i1); inds.push_back (i2);
+                inds.push_back (i1); inds.push_back (i3); inds.push_back (i2);
+            }
+        }
+
+        // Walls: each border edge → quad between top and bottom.
+        auto wallQuad = [&] (uint32_t tA, uint32_t tB, uint32_t bA, uint32_t bB)
+        {
+            inds.push_back (tA); inds.push_back (bA); inds.push_back (tB);
+            inds.push_back (tB); inds.push_back (bA); inds.push_back (bB);
+        };
+
+        // z = 0 edge (x increasing)
+        for (int x = 0; x < w - 1; ++x)
+        {
+            const uint32_t tA = (uint32_t) x;
+            const uint32_t tB = (uint32_t) (x + 1);
+            wallQuad (tA, tB, tA + (uint32_t) topCount, tB + (uint32_t) topCount);
+        }
+        // z = h-1 edge (x increasing) — flip for outward normal
+        for (int x = 0; x < w - 1; ++x)
+        {
+            const uint32_t tA = (uint32_t) ((h - 1) * w + x);
+            const uint32_t tB = tA + 1;
+            wallQuad (tB, tA, tB + (uint32_t) topCount, tA + (uint32_t) topCount);
+        }
+        // x = 0 edge (z increasing) — flip
+        for (int z = 0; z < h - 1; ++z)
+        {
+            const uint32_t tA = (uint32_t) (z * w);
+            const uint32_t tB = (uint32_t) ((z + 1) * w);
+            wallQuad (tB, tA, tB + (uint32_t) topCount, tA + (uint32_t) topCount);
+        }
+        // Playhead wall (x = +1): dedicated verts after top+bottom, biased to +X
+        // so the face doesn’t share a depth plane with history behind the playhead.
+        // Layout: [2*topCount .. 2*topCount+h) top row, then bottom row.
+        const uint32_t phTop = (uint32_t) (topCount * 2);
+        const uint32_t phBot = phTop + (uint32_t) h;
+        for (int z = 0; z < h - 1; ++z)
+        {
+            const uint32_t tA = phTop + (uint32_t) z;
+            const uint32_t tB = tA + 1;
+            const uint32_t bA = phBot + (uint32_t) z;
+            const uint32_t bB = bA + 1;
+            wallQuad (tA, tB, bA, bB);
+        }
+    }
+
     const juce::ScopedLock sl (meshLock);
     cpuIndices.swap (inds);
+    meshClosed = wantClosed;
     indicesValid = true;
 }
 
@@ -2848,8 +3172,14 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     dataSource->refreshColourLutFor3D();
     ensureIndexBuffer (meshW, meshH);
 
-    std::vector<Vertex> verts ((size_t) meshW * (size_t) meshH);
+    const bool closed = closedMeshEnabled;
+    const int topCount = meshW * meshH;
+    // Closed: top + bottom + dedicated playhead wall (top/bottom rows along Z).
+    const int vertCount = closed ? (topCount * 2 + meshH * 2) : topCount;
+    std::vector<Vertex> verts ((size_t) vertCount);
     const float denom = juce::jmax (1.0f, maxDb - minDb);
+    const float baseY = closed ? -kClosedMeshFloorBias : 0.0f;
+    const float playheadWallX = 1.0f + kClosedPlayheadWallBias;
 
     const float B = freqMeshBiasB();
 
@@ -2908,6 +3238,48 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
             vtx.nx = nx / len;
             vtx.ny = ny / len;
             vtx.nz = nz / len;
+
+            if (closed)
+            {
+                auto& bot = verts[(size_t) topCount + (size_t) z * (size_t) meshW + (size_t) x];
+                bot = vtx;
+                bot.y = baseY;
+                bot.nx = 0.0f;
+                bot.ny = -1.0f;
+                bot.nz = 0.0f;
+                // Slightly darker underside so the solid reads as volume.
+                bot.r *= 0.55f;
+                bot.g *= 0.55f;
+                bot.b *= 0.55f;
+            }
+        }
+    }
+
+    if (closed)
+    {
+        // Playhead face: copy newest column, push +X past scroll (history moves -X).
+        const int phTop = topCount * 2;
+        const int phBot = phTop + meshH;
+        for (int z = 0; z < meshH; ++z)
+        {
+            const auto& src = verts[(size_t) z * (size_t) meshW + (size_t) (meshW - 1)];
+            auto& top = verts[(size_t) (phTop + z)];
+            top = src;
+            top.x = playheadWallX;
+            top.nx = 1.0f;
+            top.ny = 0.0f;
+            top.nz = 0.0f;
+
+            auto& bot = verts[(size_t) (phBot + z)];
+            bot = src;
+            bot.x = playheadWallX;
+            bot.y = baseY;
+            bot.nx = 1.0f;
+            bot.ny = 0.0f;
+            bot.nz = 0.0f;
+            bot.r *= 0.55f;
+            bot.g *= 0.55f;
+            bot.b *= 0.55f;
         }
     }
 
@@ -3039,12 +3411,86 @@ void Spectrogram3DComponent::rebuildFreqLabels (double sampleRate, bool logFreq)
 }
 
 //==============================================================================
+namespace
+{
+    /** Period slider under Turntable — does not dismiss the menu when dragged. */
+    class AutoRotatePeriodMenuItem final : public juce::PopupMenu::CustomComponent
+    {
+    public:
+        explicit AutoRotatePeriodMenuItem (Spectrogram3DComponent& o)
+            : juce::PopupMenu::CustomComponent (false),
+              owner (o)
+        {
+            label.setText ("Speed", juce::dontSendNotification);
+            label.setJustificationType (juce::Justification::centredLeft);
+            label.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
+            label.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
+            addAndMakeVisible (label);
+
+            valueLabel.setJustificationType (juce::Justification::centredRight);
+            valueLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
+            valueLabel.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
+            addAndMakeVisible (valueLabel);
+
+            slider.setSliderStyle (juce::Slider::LinearHorizontal);
+            slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            slider.setRange (Spectrogram3DComponent::kAutoRotatePeriodMinSec,
+                             Spectrogram3DComponent::kAutoRotatePeriodMaxSec,
+                             1.0);
+            slider.setSkewFactorFromMidPoint (10.0); // denser control near the 10s default
+            slider.setScrollWheelEnabled (false);
+            slider.setColour (juce::Slider::trackColourId, juce::Colours::darkgoldenrod.withAlpha (0.55f));
+            slider.setColour (juce::Slider::thumbColourId, juce::Colours::goldenrod);
+            slider.setColour (juce::Slider::backgroundColourId, juce::Colours::black.withAlpha (0.35f));
+            slider.setValue (owner.getAutoRotatePeriodSec(), juce::dontSendNotification);
+            slider.onValueChange = [this]
+            {
+                owner.setAutoRotatePeriodSec ((float) slider.getValue());
+                refreshValueLabel();
+            };
+            addAndMakeVisible (slider);
+            refreshValueLabel();
+        }
+
+        void getIdealSize (int& idealWidth, int& idealHeight) override
+        {
+            idealWidth = 260;
+            idealHeight = 44;
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (10, 4);
+            auto top = r.removeFromTop (16);
+            label.setBounds (top.removeFromLeft (48));
+            valueLabel.setBounds (top);
+            r.removeFromTop (2);
+            slider.setBounds (r);
+        }
+
+    private:
+        void refreshValueLabel()
+        {
+            const int sec = juce::roundToInt (owner.getAutoRotatePeriodSec());
+            valueLabel.setText ("1× / " + juce::String (sec) + " s", juce::dontSendNotification);
+        }
+
+        Spectrogram3DComponent& owner;
+        juce::Label label;
+        juce::Label valueLabel;
+        juce::Slider slider;
+    };
+}
+
 void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
 {
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addItem (1, "Save as Default View");
     menu.addItem (2, "Reset Camera (F)");
+    menu.addSeparator();
+    menu.addItem (3, "Turntable", true, autoRotateEnabled);
+    menu.addCustomItem (4, std::make_unique<AutoRotatePeriodMenuItem> (*this), nullptr, "Turntable speed");
     menu.showMenuAsync (juce::PopupMenu::Options()
                             .withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 })
                             .withMousePosition(),
@@ -3056,6 +3502,8 @@ void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
                 safe->saveAsDefaultView();
             else if (result == 2)
                 safe->resetCamera();
+            else if (result == 3)
+                safe->setAutoRotateEnabled (! safe->isAutoRotateEnabled());
         });
 }
 

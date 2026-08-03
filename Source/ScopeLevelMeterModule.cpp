@@ -336,6 +336,12 @@ void ScopeLevelMeterModule::mouseDown (const juce::MouseEvent& e)
         showTapMenu();
 }
 
+void ScopeLevelMeterModule::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}
+
 void ScopeLevelMeterModule::showTapMenu()
 {
     if (onShowContextMenu != nullptr)

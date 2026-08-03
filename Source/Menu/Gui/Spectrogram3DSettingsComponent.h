@@ -77,6 +77,7 @@ private:
         juce::ComboBox msaaCombo;
         juce::ToggleButton transparentBgToggle { "Soft background (like Osc/Gon)" };
         juce::ToggleButton reverseFreqAxisToggle { "Reverse frequency axis" };
+        juce::ToggleButton closedMeshToggle { "Closed mesh (solid)" };
         juce::TextButton resetCameraButton { "Reset 3D Camera" };
 
         juce::Label lookLabel;
@@ -119,6 +120,30 @@ private:
         juce::Slider bloomStrengthSlider;
         juce::Label bloomThresholdLabel;
         juce::Slider bloomThresholdSlider;
+
+        juce::ToggleButton sssToggle { "Subsurface (SSS)" };
+        juce::Label sssStrengthLabel;
+        juce::Slider sssStrengthSlider;
+        juce::Label sssWrapLabel;
+        juce::Slider sssWrapSlider;
+        juce::Label sssTransmissionLabel;
+        juce::Slider sssTransmissionSlider;
+        juce::Label sssTintRLabel;
+        juce::Slider sssTintRSlider;
+        juce::Label sssTintGLabel;
+        juce::Slider sssTintGSlider;
+        juce::Label sssTintBLabel;
+        juce::Slider sssTintBSlider;
+        juce::Label sssRadiusLabel;
+        juce::Slider sssRadiusSlider;
+        juce::Label sssContrastLabel;
+        juce::Slider sssContrastSlider;
+        juce::Label sssQualityLabel;
+        juce::ComboBox sssQualityCombo;
+        juce::Label sssThickScaleLabel;
+        juce::Slider sssThickScaleSlider;
+        juce::Label sssMaxThickLabel;
+        juce::Slider sssMaxThickSlider;
 
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;

@@ -601,3 +601,9 @@ void StereogramComponent::mouseDown (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu() && onShowContextMenu != nullptr)
         onShowContextMenu();
 }
+
+void StereogramComponent::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}

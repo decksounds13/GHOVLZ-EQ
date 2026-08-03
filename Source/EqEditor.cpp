@@ -2244,6 +2244,19 @@ void EqEditor::loadUiPrefs()
     bool spec3DBloom = false;
     float spec3DBloomStr = 0.45f;
     float spec3DBloomThr = 0.62f;
+    bool spec3DClosedMesh = false;
+    bool spec3DAutoRotate = false;
+    float spec3DAutoRotatePeriod = Spectrogram3DComponent::kAutoRotatePeriodDefaultSec;
+    bool spec3DSss = false;
+    float spec3DSssStr = 0.45f;
+    float spec3DSssWrap = 0.55f;
+    float spec3DSssTrans = 0.65f;
+    juce::uint32 spec3DSssTint = 0xffe8b090;
+    float spec3DSssRad = 0.40f;
+    float spec3DSssContrast = 0.50f;
+    int spec3DSssQuality = 1; // medium
+    float spec3DSssThickScale = 0.50f;
+    float spec3DSssMaxThick = 0.70f;
     bool oscExpandedOnLoad = false;
     bool gonExpandedOnLoad = false;
     bool specExpandedOnLoad = false;
@@ -2364,6 +2377,29 @@ void EqEditor::loadUiPrefs()
                 spec3DBloom = xml->getBoolAttribute ("spec3dBloom", false);
                 spec3DBloomStr = (float) xml->getDoubleAttribute ("spec3dBloomStr", 0.45);
                 spec3DBloomThr = (float) xml->getDoubleAttribute ("spec3dBloomThr", 0.62);
+                // Migrate legacy SSS mode combo (0=off, 1=heightfield, 2=closed).
+                const int legacySssMode = xml->getIntAttribute ("spec3dSssMode", -1);
+                if (xml->hasAttribute ("spec3dClosedMesh"))
+                    spec3DClosedMesh = xml->getBoolAttribute ("spec3dClosedMesh", false);
+                else
+                    spec3DClosedMesh = (legacySssMode >= 2);
+                spec3DAutoRotate = xml->getBoolAttribute ("spec3dAutoRotate", false);
+                spec3DAutoRotatePeriod = (float) xml->getDoubleAttribute (
+                    "spec3dAutoRotatePeriod",
+                    Spectrogram3DComponent::kAutoRotatePeriodDefaultSec);
+                if (xml->hasAttribute ("spec3dSss"))
+                    spec3DSss = xml->getBoolAttribute ("spec3dSss", false);
+                else
+                    spec3DSss = (legacySssMode >= 1);
+                spec3DSssStr = (float) xml->getDoubleAttribute ("spec3dSssStr", 0.45);
+                spec3DSssWrap = (float) xml->getDoubleAttribute ("spec3dSssWrap", 0.55);
+                spec3DSssTrans = (float) xml->getDoubleAttribute ("spec3dSssTrans", 0.65);
+                spec3DSssTint = (juce::uint32) xml->getIntAttribute ("spec3dSssTint", (int) 0xffe8b090);
+                spec3DSssRad = (float) xml->getDoubleAttribute ("spec3dSssRad", 0.40);
+                spec3DSssContrast = (float) xml->getDoubleAttribute ("spec3dSssContrast", 0.50);
+                spec3DSssQuality = xml->getIntAttribute ("spec3dSssQuality", 1);
+                spec3DSssThickScale = (float) xml->getDoubleAttribute ("spec3dSssThickScale", 0.50);
+                spec3DSssMaxThick = (float) xml->getDoubleAttribute ("spec3dSssMaxThick", 0.70);
                 oscExpandedOnLoad = xml->getBoolAttribute ("oscExpanded", false);
                 gonExpandedOnLoad = xml->getBoolAttribute ("gonExpanded", false);
                 specExpandedOnLoad = xml->getBoolAttribute ("specExpanded", false);
@@ -2438,6 +2474,23 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DBloomEnabled (spec3DBloom, false);
         mainComponent->setSpec3DBloomStrength (spec3DBloomStr, false);
         mainComponent->setSpec3DBloomThreshold (spec3DBloomThr, false);
+        mainComponent->setSpec3DClosedMeshEnabled (spec3DClosedMesh, false);
+        mainComponent->setSpec3DAutoRotateEnabled (spec3DAutoRotate, false);
+        mainComponent->setSpec3DAutoRotatePeriodSec (spec3DAutoRotatePeriod, false);
+        mainComponent->setSpec3DSssEnabled (spec3DSss, false);
+        mainComponent->setSpec3DSssStrength (spec3DSssStr, false);
+        mainComponent->setSpec3DSssWrap (spec3DSssWrap, false);
+        mainComponent->setSpec3DSssTransmission (spec3DSssTrans, false);
+        mainComponent->setSpec3DSssTint (juce::Colour (spec3DSssTint), false);
+        mainComponent->setSpec3DSssRadius (spec3DSssRad, false);
+        mainComponent->setSpec3DSssContrast (spec3DSssContrast, false);
+        mainComponent->setSpec3DSssQuality (
+            spec3DSssQuality <= 0 ? Spectrogram3DComponent::ShadowQuality::low
+                                 : (spec3DSssQuality >= 2 ? Spectrogram3DComponent::ShadowQuality::high
+                                                         : Spectrogram3DComponent::ShadowQuality::medium),
+            false);
+        mainComponent->setSpec3DSssThicknessScale (spec3DSssThickScale, false);
+        mainComponent->setSpec3DSssMaxThickness (spec3DSssMaxThick, false);
         if (spec3DCamCustom)
             mainComponent->setSpec3DDefaultCamera (spec3DCam, true);
         // Cube preference only — do not open maximized 3D/overlays on load.
@@ -2538,6 +2591,25 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dBloom", mainComponent->isSpec3DBloomEnabled());
         xml->setAttribute ("spec3dBloomStr", (double) mainComponent->getSpec3DBloomStrength());
         xml->setAttribute ("spec3dBloomThr", (double) mainComponent->getSpec3DBloomThreshold());
+        xml->setAttribute ("spec3dClosedMesh", mainComponent->isSpec3DClosedMeshEnabled());
+        xml->setAttribute ("spec3dAutoRotate", mainComponent->isSpec3DAutoRotateEnabled());
+        xml->setAttribute ("spec3dAutoRotatePeriod",
+                           (double) mainComponent->getSpec3DAutoRotatePeriodSec());
+        xml->setAttribute ("spec3dSss", mainComponent->isSpec3DSssEnabled());
+        xml->setAttribute ("spec3dSssStr", (double) mainComponent->getSpec3DSssStrength());
+        xml->setAttribute ("spec3dSssWrap", (double) mainComponent->getSpec3DSssWrap());
+        xml->setAttribute ("spec3dSssTrans", (double) mainComponent->getSpec3DSssTransmission());
+        xml->setAttribute ("spec3dSssTint", (int) mainComponent->getSpec3DSssTint().getARGB());
+        xml->setAttribute ("spec3dSssRad", (double) mainComponent->getSpec3DSssRadius());
+        xml->setAttribute ("spec3dSssContrast", (double) mainComponent->getSpec3DSssContrast());
+        {
+            const auto q = mainComponent->getSpec3DSssQuality();
+            xml->setAttribute ("spec3dSssQuality",
+                               q == Spectrogram3DComponent::ShadowQuality::low ? 0
+                                   : (q == Spectrogram3DComponent::ShadowQuality::high ? 2 : 1));
+        }
+        xml->setAttribute ("spec3dSssThickScale", (double) mainComponent->getSpec3DSssThicknessScale());
+        xml->setAttribute ("spec3dSssMaxThick", (double) mainComponent->getSpec3DSssMaxThickness());
         xml->setAttribute ("oscExpanded", mainComponent->isOscExpanded());
         xml->setAttribute ("gonExpanded", mainComponent->isGonExpanded());
         xml->setAttribute ("specExpanded", mainComponent->isSpecExpanded());

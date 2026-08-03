@@ -3,6 +3,7 @@
 
 #include <JuceHeader.h>
 #include <array>
+#include <optional>
 #include "FrequencyResponseComponent.h"
 #include "VerticalGradientMeter.h"
 #include "SettingsButtonLookAndFeel.h"
@@ -147,6 +148,12 @@ public:
     bool isSpec3DReverseFrequencyAxis() const noexcept;
     void setSpec3DMeshHeight (float heightWorld, bool notifyPrefs = true);
     float getSpec3DMeshHeight() const noexcept;
+    void setSpec3DClosedMeshEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DClosedMeshEnabled() const noexcept;
+    void setSpec3DAutoRotateEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DAutoRotateEnabled() const noexcept;
+    void setSpec3DAutoRotatePeriodSec (float secondsPerRevolution, bool notifyPrefs = true);
+    float getSpec3DAutoRotatePeriodSec() const noexcept;
 
     void setSpec3DLightingEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DLightingEnabled() const noexcept;
@@ -188,6 +195,27 @@ public:
     float getSpec3DBloomStrength() const noexcept;
     void setSpec3DBloomThreshold (float amount01, bool notifyPrefs = true);
     float getSpec3DBloomThreshold() const noexcept;
+
+    void setSpec3DSssEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSssEnabled() const noexcept;
+    void setSpec3DSssStrength (float amount01, bool notifyPrefs = true);
+    float getSpec3DSssStrength() const noexcept;
+    void setSpec3DSssWrap (float amount01, bool notifyPrefs = true);
+    float getSpec3DSssWrap() const noexcept;
+    void setSpec3DSssTransmission (float amount01, bool notifyPrefs = true);
+    float getSpec3DSssTransmission() const noexcept;
+    void setSpec3DSssTint (juce::Colour c, bool notifyPrefs = true);
+    juce::Colour getSpec3DSssTint() const noexcept;
+    void setSpec3DSssRadius (float amount01, bool notifyPrefs = true);
+    float getSpec3DSssRadius() const noexcept;
+    void setSpec3DSssContrast (float amount01, bool notifyPrefs = true);
+    float getSpec3DSssContrast() const noexcept;
+    void setSpec3DSssQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
+    Spectrogram3DComponent::ShadowQuality getSpec3DSssQuality() const noexcept;
+    void setSpec3DSssThicknessScale (float amount01, bool notifyPrefs = true);
+    float getSpec3DSssThicknessScale() const noexcept;
+    void setSpec3DSssMaxThickness (float amount01, bool notifyPrefs = true);
+    float getSpec3DSssMaxThickness() const noexcept;
 
     void resetSpec3DCamera() noexcept { spectrogram3D.resetCamera(); }
     void setSpec3DDefaultCamera (const Spectrogram3DComponent::CameraState& state, bool applyNow = true) noexcept;
@@ -266,7 +294,16 @@ private:
     void applyEcoMode (bool shouldEnable);
     void applyScopeMode (bool shouldEnable);
     void layoutScopeModePanes (float scale);
+    void hideAllScopePanes();
     void placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int> pane, int toolH, int toolSize, int toolGap);
+    /** Scope-only: double-click / expand toggles one pane over the full strip/tile area. */
+    void toggleScopePaneFullscreen (ScopeModuleId id);
+    void setScopeFullscreenModule (std::optional<ScopeModuleId> id);
+    bool isScopePaneFullscreen() const noexcept { return scopeFullscreenModule.has_value(); }
+    bool isScopeModuleFullscreen (ScopeModuleId id) const noexcept
+    {
+        return scopeFullscreenModule.has_value() && *scopeFullscreenModule == id;
+    }
     void placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rectangle<int> overlayTools,
                                  int toolH, int toolSize, int toolGap);
     void syncScopeModuleEnabledStates();
@@ -736,6 +773,8 @@ private:
     bool oscExpanded = false;
     bool gonExpanded = false;
     bool specExpanded = false;
+    /** When set in Scope mode, that module fills the strip/tile area; clear restores arrange. */
+    std::optional<ScopeModuleId> scopeFullscreenModule;
     /** When expanded: false = framed floating window, true = edge-to-edge full graph. */
     bool oscFullGraph = false;
     bool gonFullGraph = false;

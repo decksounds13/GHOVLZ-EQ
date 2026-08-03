@@ -337,6 +337,12 @@ void LoudnessComponent::mouseDown (const juce::MouseEvent& e)
         showContextMenu();
 }
 
+void LoudnessComponent::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}
+
 void LoudnessComponent::showContextMenu()
 {
     if (onShowContextMenu != nullptr)
