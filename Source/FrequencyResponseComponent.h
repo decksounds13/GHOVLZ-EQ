@@ -3,15 +3,138 @@
 #include "EqProcessor.h"
 #include "OptionBoxMenu.h"
 #include "Menu/SharedResources.h"
+#include "RotaryImageKnobForOptionBox.h"
 #include <JuceHeader.h>
 #include "BinaryData.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 #include <array>
+#include <cmath>
+#include <functional>
 
 class EqProcessor; // Forward declaration
 class EqEditor;    // Forward declaration
 
 class CustomTimer; // Forward declaration
+
+/** Mini piano-keys icon toggle for the graph bottom chrome. */
+class PianoIconButton : public juce::TextButton
+{
+public:
+    PianoIconButton()
+        : juce::TextButton ("")
+    {
+        setClickingTogglesState (true);
+        setTooltip ("Piano - show note keyboard under the graph for note-snapped band placement");
+    }
+
+    void paintButton (juce::Graphics& g, bool isMouseOverButton, bool isButtonDown) override
+    {
+        const bool on = getToggleState();
+        auto fill = findColour (on ? buttonOnColourId : buttonColourId);
+        if (isButtonDown)
+            fill = fill.darker (0.15f);
+        else if (isMouseOverButton)
+            fill = fill.brighter (0.08f);
+
+        auto r = getLocalBounds().toFloat().reduced (0.5f);
+        g.setColour (fill);
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (findColour (on ? textColourOnId : textColourOffId).withAlpha (0.35f));
+        g.drawRoundedRectangle (r, 3.0f, 1.0f);
+
+        auto keys = r.reduced (3.5f, 4.0f);
+        const auto ink = findColour (on ? textColourOnId : textColourOffId);
+        g.setColour (ink.withAlpha (on ? 0.95f : 0.85f));
+        g.fillRoundedRectangle (keys, 1.5f);
+
+        const float whiteW = keys.getWidth() / 5.0f;
+        g.setColour (fill.withAlpha (0.55f));
+        for (int i = 1; i < 5; ++i)
+            g.drawVerticalLine (juce::roundToInt (keys.getX() + whiteW * (float) i),
+                                keys.getY() + 1.0f, keys.getBottom() - 1.0f);
+
+        g.setColour (juce::Colours::black.withAlpha (on ? 0.75f : 0.65f));
+        const float blackW = whiteW * 0.55f;
+        const float blackH = keys.getHeight() * 0.58f;
+        const float centres[3] = { 1.0f, 2.0f, 4.0f };
+        for (float centre : centres)
+        {
+            const float cx = keys.getX() + whiteW * centre;
+            g.fillRect (cx - blackW * 0.5f, keys.getY(), blackW, blackH);
+        }
+    }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PianoIconButton)
+};
+
+/** Match freeze toggle — large centered snowflake glyph. */
+class MatchFreezeButton : public juce::TextButton
+{
+public:
+    MatchFreezeButton()
+        : juce::TextButton ("")
+    {
+        setClickingTogglesState (true);
+        setTooltip ("Freeze - hold the current match target. Right-click or use the curve menu to save it.");
+    }
+
+    void paintButton (juce::Graphics& g, bool isMouseOverButton, bool isButtonDown) override
+    {
+        const bool on = getToggleState();
+        auto fill = findColour (on ? buttonOnColourId : buttonColourId);
+        if (isButtonDown)
+            fill = fill.darker (0.15f);
+        else if (isMouseOverButton)
+            fill = fill.brighter (0.08f);
+
+        auto r = getLocalBounds().toFloat().reduced (0.5f);
+        g.setColour (fill);
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (findColour (on ? textColourOnId : textColourOffId).withAlpha (0.35f));
+        g.drawRoundedRectangle (r, 3.0f, 1.0f);
+
+        const auto ink = findColour (on ? textColourOnId : textColourOffId)
+                             .withAlpha (on ? 0.95f : 0.88f);
+        const float cx = r.getCentreX();
+        const float cy = r.getCentreY();
+        const float rad = juce::jmin (r.getWidth(), r.getHeight()) * 0.38f;
+        g.setColour (ink);
+
+        auto strokeArm = [&g, cx, cy, rad] (float angle)
+        {
+            juce::Path p;
+            const float c = std::cos (angle);
+            const float s = std::sin (angle);
+            p.startNewSubPath (cx - c * rad, cy - s * rad);
+            p.lineTo (cx + c * rad, cy + s * rad);
+            // Side branches near each tip.
+            const float br = rad * 0.42f;
+            const float tip = rad * 0.62f;
+            for (float dir : { 1.0f, -1.0f })
+            {
+                const float tx = cx + c * tip * dir;
+                const float ty = cy + s * tip * dir;
+                const float px = -s;
+                const float py = c;
+                p.startNewSubPath (tx - c * br * 0.35f, ty - s * br * 0.35f);
+                p.lineTo (tx + px * br * 0.55f, ty + py * br * 0.55f);
+                p.startNewSubPath (tx - c * br * 0.35f, ty - s * br * 0.35f);
+                p.lineTo (tx - px * br * 0.55f, ty - py * br * 0.55f);
+            }
+            g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved,
+                                                   juce::PathStrokeType::rounded));
+        };
+
+        constexpr float pi = juce::MathConstants<float>::pi;
+        for (int i = 0; i < 3; ++i)
+            strokeArm ((float) i * (pi / 3.0f));
+        g.fillEllipse (cx - 1.6f, cy - 1.6f, 3.2f, 3.2f);
+    }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MatchFreezeButton)
+};
 
 /** Compact-UI output gain: click-drag vertically. Shift/Alt = fine (JUCE Slider convention). */
 class OutputGainScrubber : public juce::Component,
@@ -122,8 +245,22 @@ public:
         editor = newEditor;
     }
 
-    /** Place Match cluster at graph bottom, just right of Scope (bounds in FRC local space). */
-    void layoutMatchChromeAfterScope (juce::Rectangle<int> scopeInLocal);
+    /**
+        Place Match cluster: X from leftTopInLocal.x (editor-converted); Y always matches
+        Mod / Proportional Q (piano-aware bottom chrome row). Returns strip bounds in FRC local.
+    */
+    juce::Rectangle<int> layoutMatchChromeAt (juce::Point<int> leftTopInLocal, int btnH, int matchBtnW);
+    /** Bottom inset reserved for piano strip (0 or 50). Window grows by this when enabled. */
+    int getPianoStripHeight() const noexcept;
+    /**
+        Height of Match / Mod / P chrome row above the piano (margin + button).
+        OpenGL expanded Spec must stay clear of this — native peers ignore z-order.
+    */
+    int getBottomGraphChromeHeight() const noexcept;
+    /** Graph / handle / curve height — excludes piano strip so enabling piano does not rescale the EQ. */
+    int getPlotHeight() const noexcept;
+    bool isPianoDisplayOn() const noexcept { return pianoDisplayOn; }
+    void setPianoDisplayOn (bool shouldShow, bool savePrefs = true);
 
     float currentBandGain = 0.0f;
     float currentBandFrequency = 0.0f;
@@ -306,6 +443,12 @@ private:
         }
     };
 
+    /** Soft drop under graph chrome buttons / knobs (separates them from the spectrum). */
+    melatonin::DropShadow chromeDropShadow {
+        { juce::Colours::black.withAlpha (0.42f), 5, { 0, 2 }, 0 }
+    };
+    void paintGraphChromeShadows (juce::Graphics& g);
+
     // Last effective gains used for the magnitude curve (dynamic EQ animation).
     float lastDynCurveGain1 = 1.0e9f;
     float lastDynCurveGain2 = 1.0e9f;
@@ -402,7 +545,7 @@ private:
                                        std::vector<float>& outDb,
                                        int step);
 
-    float getEqDisplayRangeDb() const; // 6, 12, or 24
+    float getEqDisplayRangeDb() const; // 6, 12, 24, or 36
     float dbToY (float db, float height) const; // jmap db from -r..r to height..0
     float yToDb (float y, float height) const; // inverse
     float getBandPathWidth() const; // from EQ_BAND_PATH_WIDTH_ID, default 3
@@ -531,13 +674,14 @@ private:
     juce::TextButton modButton { "Mod" };
     juce::TextButton proportionalQButton { "P" };
     juce::TextButton autoGainButton { "A" };
-    /** Graph-bottom Match cluster: Match | v | Amount | HP | LP | freeze. */
+    /** Graph-bottom Match cluster: Match | v | AMT | HP | LP | freeze. */
     juce::TextButton matchButton { "Match" };
     juce::TextButton matchCurveButton { "v" };
-    juce::TextButton matchFreezeButton { "*" };
-    juce::Slider matchAmountKnob;
-    juce::Slider matchHpKnob;
-    juce::Slider matchLpKnob;
+    MatchFreezeButton matchFreezeButton;
+    RotaryImageKnobForOptionBox matchAmountKnob;
+    juce::Label matchAmountLabel;
+    RotaryImageKnobForOptionBox matchHpKnob;
+    RotaryImageKnobForOptionBox matchLpKnob;
     juce::Label matchHpLabel;
     juce::Label matchLpLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchAmountAttachment;
@@ -547,9 +691,25 @@ private:
     bool matchEnableDialogOpen = false;
     bool matchHpLpGapGuard = false;
     void enforceMatchHpLpGap (juce::Slider* changed);
-    /** Last Scope bounds in FRC local space (may be below FRC when Scope sits in editor trim). */
-    juce::Rectangle<int> matchChromeScopeAnchor;
-    bool matchChromeHasScopeAnchor = false;
+    void showMatchHpLpSlopeMenu (bool forHp);
+    /** Anchor for Match left edge X (Y ignored — Match uses Mod/P bottom chrome row). */
+    juce::Point<int> matchChromeLeftTop {};
+    int matchChromeBtnH = 18;
+    int matchChromeMatchW = 48;
+    bool matchChromeHasAnchor = false;
+    juce::Rectangle<int> matchChromeBounds {};
+
+    /** FabFilter-style piano under bottom chrome (50 px when on). Hidden by default. */
+    static constexpr int kPianoStripHeightPx = 50;
+    PianoIconButton pianoDisplayButton;
+    bool pianoDisplayOn = false;
+    int pianoDragBandIndex = -1;
+    void paintPianoStrip (juce::Graphics& g);
+    bool handlePianoMouseDown (const juce::MouseEvent& event);
+    bool handlePianoMouseDrag (const juce::MouseEvent& event);
+    bool handlePianoMouseUp (const juce::MouseEvent& event);
+    float frequencyToX (float freqHz) const;
+    void setBandFrequencySnappedToNote (int bandIndex, float freqHz);
     /** Bottom-center Transient / Sustain solo + Separation (visible when any split mode != Off). */
     juce::TextButton splitSoloTButton { "T" };
     juce::TextButton splitSoloSButton { "S" };
@@ -558,4 +718,6 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoGainAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> splitSeparationAttachment;
     OutputGainScrubber outputGainScrubber;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrequencyResponseComponent)
 };

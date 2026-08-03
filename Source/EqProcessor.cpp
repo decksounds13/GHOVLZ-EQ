@@ -904,11 +904,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPECTRUM_FFT_BINS_ID", "SpectrumFftBins", analyserDefaults.getBool ("SPECTRUM_FFT_BINS_ID", true)));
 
-    // EQ curve display vertical range (±6 / ±12 / ±24 dB). Default ±24.
+    // EQ curve display vertical range (±6 / ±12 / ±24 / ±36 dB). Default ±24.
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "EQ_DISPLAY_RANGE_ID", "EqDisplayRange",
-        juce::StringArray { "6", "12", "24" },
-        juce::jlimit (0, 2, analyserDefaults.getInt ("EQ_DISPLAY_RANGE_ID", 2))));
+        juce::StringArray { "6", "12", "24", "36" },
+        juce::jlimit (0, 3, analyserDefaults.getInt ("EQ_DISPLAY_RANGE_ID", 2))));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "EQ_BAND_PATH_WIDTH_ID", "EqBandPathWidth",
         juce::NormalisableRange<float> (0.5f, 8.0f, 0.05f),
@@ -1096,9 +1096,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "SPEC_LOG_FREQ_ID", "SpecLogFreq",
         analyserDefaults.getBool ("SPEC_LOG_FREQ_ID", true)));
     // Wave Candy–style frequency reassignment (thin LF ridges). Off = classic STFT.
+    // 2D waterfall and 3D heightfield can enable this independently.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_ENHANCED_FREQ_ID", "SpecEnhancedFreq",
         analyserDefaults.getBool ("SPEC_ENHANCED_FREQ_ID", false)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPEC_ENHANCED_FREQ_3D_ID", "SpecEnhancedFreq3D",
+        analyserDefaults.getBool ("SPEC_ENHANCED_FREQ_3D_ID", false)));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "SPEC_ENHANCED_STRENGTH_ID", "SpecEnhancedStrength",
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
@@ -1320,6 +1324,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         MatchEq::smoothParamId(), "Match Smooth",
         juce::NormalisableRange<float> (MatchEq::kMinSmooth, MatchEq::kMaxSmooth, 0.01f),
         MatchEq::kDefaultSmooth));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        MatchEq::resolutionParamId(), "Match Resolution",
+        MatchEq::getResolutionChoiceNames(),
+        MatchEq::resHigh));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         MatchEq::frozenParamId(), "Match Frozen", true));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
@@ -1335,6 +1343,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         MatchEq::lpHzParamId(), "Match LP",
         juce::NormalisableRange<float> (MatchEq::kMinHpLpHz, MatchEq::kMaxFreqHz, 1.0f, 0.2f),
         MatchEq::kDefaultLpHz));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        MatchEq::hpSlopeParamId(), "Match HP Slope",
+        FilterSlope::getChoiceNames(), FilterSlope::db12));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        MatchEq::lpSlopeParamId(), "Match LP Slope",
+        FilterSlope::getChoiceNames(), FilterSlope::db12));
 
     // Side Check (S<=M): global post-EQ BP-lattice bus — tuck Side when louder than Mid per slice.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -1352,6 +1366,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         SideCheck::lpHzParamId(), "Side Check LP",
         juce::NormalisableRange<float> (SideCheck::kMinHpLpHz, SideCheck::kMaxFreqHz, 1.0f, 0.2f),
         SideCheck::kDefaultLpHz));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        SideCheck::hpSlopeParamId(), "Side Check HP Slope",
+        FilterSlope::getChoiceNames(), FilterSlope::db12));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        SideCheck::lpSlopeParamId(), "Side Check LP Slope",
+        FilterSlope::getChoiceNames(), FilterSlope::db12));
     // Fast / Med / Slow envelope ballistics (no exposed A/R knobs). Default Fast for harshness tuck.
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         SideCheck::modeParamId(), "Side Check Speed",
@@ -3442,6 +3462,12 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const float matchSmooth = rawFloat (MatchEq::smoothParamId(), MatchEq::kDefaultSmooth);
     const float matchHp = rawFloat (MatchEq::hpHzParamId(), MatchEq::kDefaultHpHz);
     const float matchLp = rawFloat (MatchEq::lpHzParamId(), MatchEq::kDefaultLpHz);
+    const int matchResolution = MatchEq::readChoiceIndex (
+        treeState, MatchEq::resolutionParamId(), MatchEq::resHigh, MatchEq::numResolutions - 1);
+    const int matchHpSlope = MatchEq::readChoiceIndex (
+        treeState, MatchEq::hpSlopeParamId(), FilterSlope::db12, FilterSlope::numChoices - 1);
+    const int matchLpSlope = MatchEq::readChoiceIndex (
+        treeState, MatchEq::lpSlopeParamId(), FilterSlope::db12, FilterSlope::numChoices - 1);
 
     auto runMatchStage = [&] (bool enabledHere)
     {
@@ -3457,7 +3483,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         const float* dL = matchDetectBuffer.getReadPointer (0);
         const float* dR = nChMain > 1 ? matchDetectBuffer.getReadPointer (1) : dL;
         matchEngine.process (mainBuffer, dL, dR, enabledHere, matchAmount, matchSpeed,
-                             matchSmooth, matchHp, matchLp);
+                             matchSmooth, matchHp, matchLp, matchResolution,
+                             matchHpSlope, matchLpSlope);
     };
 
     // Match before EQ (default): shape dry, then static bands sculpt on top.
@@ -3843,9 +3870,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     spectralEngine.setPerBandLatticeEnabled (perBandLattice);
 
     spectralEngine.clearBands();
-    // Match owns global spectral shaping — skip per-band S while Match is on.
-    if (! matchOn)
-    {
+    // Match + per-band Spectral can run together (Match shapes globally; S sculpts per band).
     armSpectral (isHighShelfOn, FilterType::usesGain (hsType), rawBool ("highShelfSpectral"),
                  rawBool ("highShelfSidechain"),
                  SpectralDynamics::slotForBandIndex (6),
@@ -3934,7 +3959,6 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                  rawFloat ("lowpassAttackMs", DynamicEq::attackMs),
                  rawFloat ("lowpassReleaseMs", DynamicEq::releaseMs),
                  SpectralDynamics::shapeFromFilterType (lpType));
-    }
 
     // Always call process: hard-bypasses (no filters) when idle, and clears UI GR on S→off.
     {
@@ -3994,7 +4018,11 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         const int scMode = SideCheck::readModeIndex (treeState, SideCheck::fast);
         const bool scHq = treeState.getRawParameterValue (SideCheck::hqParamId()) == nullptr
                           || treeState.getRawParameterValue (SideCheck::hqParamId())->load() > 0.5f;
-        sideCheck.process (mainBuffer, scOn, scAmount, scHp, scLp, scMode, scHq);
+        const int scHpSlope = MatchEq::readChoiceIndex (
+            treeState, SideCheck::hpSlopeParamId(), FilterSlope::db12, FilterSlope::numChoices - 1);
+        const int scLpSlope = MatchEq::readChoiceIndex (
+            treeState, SideCheck::lpSlopeParamId(), FilterSlope::db12, FilterSlope::numChoices - 1);
+        sideCheck.process (mainBuffer, scOn, scAmount, scHp, scLp, scMode, scHq, scHpSlope, scLpSlope);
     }
 
     // T/S solo: unity isolation of pre-EQ dry (mask ≤ 1 so level cannot exceed dry).

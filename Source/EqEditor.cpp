@@ -357,6 +357,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     sideCheckButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
     sideCheckButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
     sideCheckButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    sideCheckButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
+    sideCheckButton.setPaintingIsUnclipped (true);
     addAndMakeVisible (sideCheckButton);
     sideCheckAttachment = std::make_unique<ButtonAttachment> (
         audioProcessor.treeState, SideCheck::enabledParamId(), sideCheckButton);
@@ -372,19 +374,25 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
             mainComponent->setScopeMode (scopeModeButton.getToggleState(), true);
     };
     scopeModeButton.onPopupMenu = [this] { showScopeTapMenu(); };
+    scopeModeButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
+    scopeModeButton.setPaintingIsUnclipped (true);
     addAndMakeVisible (scopeModeButton);
     syncScopeModeButton();
 
-    sideCheckAmountSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    sideCheckAmountSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-    sideCheckAmountSlider.setRange (SideCheck::kMinAmount, SideCheck::kMaxAmount, 0.01);
-    sideCheckAmountSlider.setTooltip ("Amount - Side Check strength (how hard Side is tucked when louder than Mid)");
-    sideCheckAmountSlider.setColour (juce::Slider::backgroundColourId, juce::Colour::fromRGBA (40, 35, 28, 255));
-    sideCheckAmountSlider.setColour (juce::Slider::trackColourId, juce::Colour::fromRGBA (180, 150, 55, 220));
-    sideCheckAmountSlider.setColour (juce::Slider::thumbColourId, juce::Colour::fromRGBA (220, 200, 120, 255));
-    addChildComponent (sideCheckAmountSlider);
+    sideCheckAmountKnob.setCompactNoValueBox (true);
+    sideCheckAmountKnob.setTooltip ("Amount - Side Check strength (how hard Side is tucked when louder than Mid)");
+    sideCheckAmountKnob.setRange (SideCheck::kMinAmount, SideCheck::kMaxAmount, 0.01);
+    if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (
+            audioProcessor.treeState.getParameter (SideCheck::amountParamId())))
+    {
+        const auto range = param->getNormalisableRange();
+        sideCheckAmountKnob.setNormalisableRange (juce::NormalisableRange<double> (
+            (double) range.start, (double) range.end, (double) range.interval,
+            (double) range.skew, range.symmetricSkew));
+    }
+    addChildComponent (sideCheckAmountKnob);
     sideCheckAmountAttachment = std::make_unique<SliderAttachment> (
-        audioProcessor.treeState, SideCheck::amountParamId(), sideCheckAmountSlider);
+        audioProcessor.treeState, SideCheck::amountParamId(), sideCheckAmountKnob);
 
     // Fast / Med / Slow ballistics — toggle button shows current state (no ComboBox).
     sideCheckSpeedButton.setClickingTogglesState (false);
@@ -394,6 +402,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     sideCheckSpeedButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
     sideCheckSpeedButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     sideCheckSpeedButton.onClick = [this] { toggleSideCheckSpeed(); };
+    sideCheckSpeedButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
+    sideCheckSpeedButton.setPaintingIsUnclipped (true);
     addChildComponent (sideCheckSpeedButton);
     updateSideCheckSpeedButtonText();
 
@@ -406,6 +416,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     sideCheckHqButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
     sideCheckHqButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
     sideCheckHqButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    sideCheckHqButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
+    sideCheckHqButton.setPaintingIsUnclipped (true);
     addChildComponent (sideCheckHqButton);
     sideCheckHqAttachment = std::make_unique<ButtonAttachment> (
         audioProcessor.treeState, SideCheck::hqParamId(), sideCheckHqButton);
@@ -446,19 +458,23 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
         attachment = std::make_unique<SliderAttachment> (audioProcessor.treeState, paramID, knob);
     };
     attachSideCheckFreqKnob (sideCheckHpKnob, SideCheck::hpHzParamId(),
-        "HP - Side Check highpass (0 Hz–20 kHz; effect starts above this frequency; default 0 = fully open)", sideCheckHpAttachment);
+        "HP - Side Check highpass (0 Hz–20 kHz; effect starts above this frequency; default 0 = fully open). Right-click: slope", sideCheckHpAttachment);
     attachSideCheckFreqKnob (sideCheckLpKnob, SideCheck::lpHzParamId(),
-        "LP - Side Check lowpass (effect stops below this frequency)", sideCheckLpAttachment);
+        "LP - Side Check lowpass (effect stops below this frequency). Right-click: slope", sideCheckLpAttachment);
+    sideCheckHpKnob.onPopupMenu = [this] { showSideCheckHpLpSlopeMenu (true); };
+    sideCheckLpKnob.onPopupMenu = [this] { showSideCheckHpLpSlopeMenu (false); };
 
     auto setupSideCheckRangeLabel = [this] (juce::Label& label, const juce::String& text)
     {
         label.setText (text, juce::NotificationType::dontSendNotification);
-        label.setFont (juce::Font ("Lato Black", 10.0f, juce::Font::plain));
+        // Same caption style as Match AMT / HP / LP (11 pt, centred).
+        label.setFont (juce::Font (11.0f));
         label.setJustificationType (juce::Justification::centred);
         label.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.85f));
         label.setInterceptsMouseClicks (false, false);
         addChildComponent (label);
     };
+    setupSideCheckRangeLabel (sideCheckAmountLabel, "AMT");
     setupSideCheckRangeLabel (sideCheckHpLabel, "HP");
     setupSideCheckRangeLabel (sideCheckLpLabel, "LP");
 
@@ -483,6 +499,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
         applyTooltipsEnabled();
         saveUiPrefs();
     };
+    helpTooltipsButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
+    helpTooltipsButton.setPaintingIsUnclipped (true);
     addAndMakeVisible (helpTooltipsButton);
 
     // Bottom chrome: Phase / Processing Mode (preset-style popup, not ComboBox).
@@ -726,6 +744,13 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 EqEditor::~EqEditor()
 {
     stopTimer();
+    saveUiPrefs();
+
+    helpTooltipsButton.setLookAndFeel (nullptr);
+    sideCheckButton.setLookAndFeel (nullptr);
+    scopeModeButton.setLookAndFeel (nullptr);
+    sideCheckSpeedButton.setLookAndFeel (nullptr);
+    sideCheckHqButton.setLookAndFeel (nullptr);
 
     audioProcessor.treeState.removeParameterListener (SideCheck::enabledParamId(), this);
     audioProcessor.treeState.removeParameterListener (SideCheck::modeParamId(), this);
@@ -734,6 +759,8 @@ EqEditor::~EqEditor()
         audioProcessor.treeState.removeParameterListener (typeId, this);
     sideCheckHpKnob.removeListener (this);
     sideCheckLpKnob.removeListener (this);
+    sideCheckHpKnob.onPopupMenu = nullptr;
+    sideCheckLpKnob.onPopupMenu = nullptr;
     sideCheckHpAttachment.reset();
     sideCheckLpAttachment.reset();
     sideCheckAmountAttachment.reset();
@@ -1445,6 +1472,9 @@ void EqEditor::layoutHelpTooltipsButton()
     // Scope quad: osc tools sit in the BL pane — nudge ? / Phase / SideCheck / Scope right.
     const int scopeShift = (mainComponent != nullptr && mainComponent->isScopeMode()) ? 100 : 0;
 
+    const int pianoH = (mainComponent != nullptr)
+        ? mainComponent->getFrequencyResponseComponent().getPianoStripHeight() : 0;
+
     if (uiCompact)
     {
         // Sit just right of Proportional Q at the bottom of the spectrum graph
@@ -1455,7 +1485,7 @@ void EqEditor::layoutHelpTooltipsButton()
         constexpr int bottomMargin = 18;
         const int graphBottom = (mainComponent != nullptr) ? mainComponent->getBottom() : getHeight();
         const int x = pLeft + pW + gap + scopeShift;
-        const int y = graphBottom - btnSize - bottomMargin;
+        const int y = graphBottom - btnSize - bottomMargin - pianoH;
         helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
     }
     else
@@ -1465,7 +1495,7 @@ void EqEditor::layoutHelpTooltipsButton()
         {
             constexpr int bottomMargin = 18;
             const int x = margin + scopeShift;
-            const int y = mainComponent->getBottom() - btnSize - bottomMargin;
+            const int y = mainComponent->getBottom() - btnSize - bottomMargin - pianoH;
             helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
         }
         else
@@ -1509,6 +1539,32 @@ void EqEditor::layoutPhaseModeCombo()
 }
 
 
+int EqEditor::getPianoWindowExtra() const noexcept
+{
+    // Keep in sync with FrequencyResponseComponent::kPianoStripHeightPx.
+    constexpr int kStrip = 50;
+    if (mainComponent != nullptr
+        && mainComponent->getFrequencyResponseComponent().isPianoDisplayOn())
+        return kStrip;
+    return 0;
+}
+
+void EqEditor::applyPianoStripWindowHeight (bool pianoOn)
+{
+    constexpr int kStrip = 50; // keep in sync with FrequencyResponseComponent::kPianoStripHeightPx
+    if (pianoOn == pianoStripWindowApplied)
+    {
+        resized();
+        return;
+    }
+
+    const int minH = (getConstrainer() != nullptr) ? getConstrainer()->getMinimumHeight() : 500;
+    const int newH = pianoOn ? (getHeight() + kStrip)
+                             : juce::jmax (minH, getHeight() - kStrip);
+    pianoStripWindowApplied = pianoOn;
+    setSize (getWidth(), newH);
+}
+
 void EqEditor::layoutScopeModeButton()
 {
     scopeModeButton.setVisible (true);
@@ -1520,7 +1576,10 @@ void EqEditor::layoutScopeModeButton()
     constexpr int trimH = 30;
     const int btnSize = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
     const int btnW = juce::jmax (btnSize, px (uiCompact ? 52.0f : 58.0f));
+    const int matchBtnW = juce::jmax (btnSize, px (uiCompact ? 52.0f : 58.0f));
     const int gap = px (6.0f);
+    const int pianoH = (mainComponent != nullptr)
+        ? mainComponent->getFrequencyResponseComponent().getPianoStripHeight() : 0;
 
     const bool stripOverlay = mainComponent != nullptr && mainComponent->isScopeMode()
                               && mainComponent->isScopeStripLayout();
@@ -1529,56 +1588,69 @@ void EqEditor::layoutScopeModeButton()
     int y = 0;
     if (stripOverlay)
     {
-        // Square control, bottom-left — matches UI / Dice / Arrange at top-left (pad 8).
+        // Square control, bottom-left above piano strip — keep Scope on this Y (not Match row centre).
         x = px (8.0f);
-        y = juce::jmax (0, getHeight() - btnSize - px (8.0f));
-        scopeModeButton.setBounds (x, y, btnSize, btnSize);
+        y = juce::jmax (0, getHeight() - btnSize - px (8.0f) - pianoH);
+        const int scopeY = y;
+        if (mainComponent != nullptr)
+        {
+            auto& frc = mainComponent->getFrequencyResponseComponent();
+            const auto matchBounds = frc.layoutMatchChromeAt (
+                frc.getLocalPoint (this, juce::Point<int> (x, y)), btnSize, matchBtnW);
+            const auto matchEditor = getLocalArea (&frc, matchBounds);
+            x = matchEditor.getRight() + gap;
+        }
+        scopeModeButton.setBounds (x, scopeY, btnSize, btnSize);
         scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
                                         juce::dontSendNotification);
         scopeModeButton.setIdleAlpha (0.5f);
         scopeModeButton.toFront (false);
-
-        if (mainComponent != nullptr)
-        {
-            auto& frc = mainComponent->getFrequencyResponseComponent();
-            frc.layoutMatchChromeAfterScope (frc.getLocalArea (this, scopeModeButton.getBounds()));
-        }
         return;
     }
-    else
-    {
-        // Anchor Y to help; X after SideCheck / Phase when those are shown, else after ?.
-        y = helpTooltipsButton.getY() + (helpTooltipsButton.getHeight() - btnSize) / 2;
-        x = helpTooltipsButton.getRight() + gap;
-        if (sideCheckButton.isVisible() && sideCheckButton.getWidth() > 0)
-            x = sideCheckButton.getRight() + gap;
-        else if (phaseModeCombo.isVisible() && phaseModeCombo.getWidth() > 0)
-            x = phaseModeCombo.getRight() + gap;
 
-        if (! uiCompact && onOffButton8 != nullptr && onOffButton8->getWidth() > 0
-            && ! (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome()))
-        {
-            // Expanded faceplate: under band 6 (column of onOffButton8) so it clears the logo.
-            x = onOffButton8->getBounds().getCentreX() - btnW / 2;
-        }
-        else if (sideCheckAmountSlider.isVisible())
-        {
-            x = juce::jmax (x, sideCheckLpKnob.getRight() + gap);
-        }
-    }
+    // Horizontal cluster follows Help / Phase / SideCheck; Match/Scope Y always uses
+    // the graph chrome row (Mod/P), never the faceplate trim when Help is parked there.
+    y = helpTooltipsButton.getY() + (helpTooltipsButton.getHeight() - btnSize) / 2;
+    if (sideCheckButton.isVisible() && sideCheckButton.getHeight() > 0)
+        y = sideCheckButton.getY() + (sideCheckButton.getHeight() - btnSize) / 2;
+    else if (phaseModeCombo.isVisible() && phaseModeCombo.getHeight() > 0)
+        y = phaseModeCombo.getY() + (phaseModeCombo.getHeight() - btnSize) / 2;
 
-    scopeModeButton.setBounds (x, y, btnW, btnSize);
-    scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
-                                    juce::dontSendNotification);
-    scopeModeButton.setIdleAlpha (stripOverlay ? 0.5f : 1.0f);
-    scopeModeButton.toFront (false);
+    x = helpTooltipsButton.getRight() + gap;
+    if (sideCheckButton.isVisible() && sideCheckButton.getWidth() > 0)
+        x = sideCheckButton.getRight() + gap;
+    else if (phaseModeCombo.isVisible() && phaseModeCombo.getWidth() > 0)
+        x = phaseModeCombo.getRight() + gap;
 
-    // Match cluster lives on the graph, immediately right of Scope.
+    if (sideCheckAmountKnob.isVisible())
+        x = juce::jmax (x, sideCheckLpKnob.getRight() + gap);
+
+    const int chromeY = y;
+
+    int scopeX = getWidth() - btnW - px (8.0f);
+    int scopeY = chromeY;
     if (mainComponent != nullptr)
     {
         auto& frc = mainComponent->getFrequencyResponseComponent();
-        frc.layoutMatchChromeAfterScope (frc.getLocalArea (this, scopeModeButton.getBounds()));
+        // X only from editor; FRC places Match on the Mod/P piano-aware baseline.
+        const auto matchBounds = frc.layoutMatchChromeAt (
+            frc.getLocalPoint (this, juce::Point<int> (x, chromeY)), btnSize, matchBtnW);
+        const auto matchEditor = getLocalArea (&frc, matchBounds);
+        scopeY = matchEditor.getY() + (matchEditor.getHeight() - btnSize) / 2;
+
+        const auto col = mainComponent->getAnalyserToggleColumnBounds();
+        if (! col.isEmpty())
+        {
+            const auto colInEditor = getLocalArea (mainComponent.get(), col);
+            scopeX = colInEditor.getX() + (colInEditor.getWidth() - btnW) / 2;
+        }
     }
+
+    scopeModeButton.setBounds (scopeX, scopeY, btnW, btnSize);
+    scopeModeButton.setToggleState (mainComponent != nullptr && mainComponent->isScopeMode(),
+                                    juce::dontSendNotification);
+    scopeModeButton.setIdleAlpha (1.0f);
+    scopeModeButton.toFront (false);
 }
 
 void EqEditor::layoutSideCheckButton()
@@ -1587,7 +1659,8 @@ void EqEditor::layoutSideCheckButton()
     if (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome())
     {
         sideCheckButton.setVisible (false);
-        sideCheckAmountSlider.setVisible (false);
+        sideCheckAmountKnob.setVisible (false);
+        sideCheckAmountLabel.setVisible (false);
         sideCheckSpeedButton.setVisible (false);
         sideCheckHqButton.setVisible (false);
         sideCheckHpKnob.setVisible (false);
@@ -1595,7 +1668,8 @@ void EqEditor::layoutSideCheckButton()
         sideCheckHpLabel.setVisible (false);
         sideCheckLpLabel.setVisible (false);
         sideCheckButton.setBounds ({});
-        sideCheckAmountSlider.setBounds ({});
+        sideCheckAmountKnob.setBounds ({});
+        sideCheckAmountLabel.setBounds ({});
         sideCheckSpeedButton.setBounds ({});
         sideCheckHqButton.setBounds ({});
         sideCheckHpKnob.setBounds ({});
@@ -1627,7 +1701,8 @@ void EqEditor::layoutSideCheckButton()
     const bool scOn = sideCheckButton.getToggleState()
         || (audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId()) != nullptr
             && audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId())->load() > 0.5f);
-    sideCheckAmountSlider.setVisible (scOn);
+    sideCheckAmountKnob.setVisible (scOn);
+    sideCheckAmountLabel.setVisible (scOn);
     sideCheckSpeedButton.setVisible (scOn);
     sideCheckHqButton.setVisible (scOn);
     sideCheckHpKnob.setVisible (scOn);
@@ -1636,36 +1711,40 @@ void EqEditor::layoutSideCheckButton()
     sideCheckLpLabel.setVisible (scOn);
     if (scOn)
     {
-        const int sliderW = juce::jmax (px (44.0f), btnSize * 2);
-        sideCheckAmountSlider.setBounds (sideCheckButton.getRight() + gap, y, sliderW, btnSize);
-        sideCheckAmountSlider.toFront (false);
+        // Match-style cluster: AMT | knob | Speed | HQ | HP | knob | LP | knob
+        const int knobSize = btnSize;
+        const int labelW = juce::jmax (px (22.0f), 18);
+        const int labelGap = px (1.0f);
+        const int pairGap = px (2.0f);
+
+        int cx = sideCheckButton.getRight() + gap;
+        sideCheckAmountLabel.setBounds (cx, y, labelW, btnSize);
+        cx += labelW + labelGap;
+        sideCheckAmountKnob.setBounds (cx, y, knobSize, knobSize);
+        cx += knobSize + gap;
 
         // Compact Fast/Med/Slow toggle — short enough for both compact and expanded chrome.
         const int speedW = juce::jmax (px (48.0f), uiCompact ? 52 : 58);
-        sideCheckSpeedButton.setBounds (sideCheckAmountSlider.getRight() + gap, y, speedW, btnSize);
-        sideCheckSpeedButton.toFront (false);
+        sideCheckSpeedButton.setBounds (cx, y, speedW, btnSize);
+        cx = sideCheckSpeedButton.getRight() + gap;
 
         const int hqW = juce::jmax (btnSize, px (28.0f));
-        sideCheckHqButton.setBounds (sideCheckSpeedButton.getRight() + gap, y, hqW, btnSize);
-        sideCheckHqButton.toFront (false);
+        sideCheckHqButton.setBounds (cx, y, hqW, btnSize);
+        cx = sideCheckHqButton.getRight() + px (4.0f);
 
-        // Compact rotary knobs (OptionBox A/R style), labels left of each knob.
-        // Tight cluster just after HQ with a few pixels of padding.
-        const int knobSize = btnSize;
-        const int labelW = juce::jmax (px (14.0f), 12);
-        const int labelGap = px (1.0f);
-        const int pairGap = px (2.0f);
-        const int afterHqPad = px (4.0f);
-
-        int cx = sideCheckHqButton.getRight() + afterHqPad;
-        sideCheckHpLabel.setBounds (cx, y, labelW, btnSize);
-        cx += labelW + labelGap;
+        const int hpLpLabelW = juce::jmax (px (14.0f), 12);
+        sideCheckHpLabel.setBounds (cx, y, hpLpLabelW, btnSize);
+        cx += hpLpLabelW + labelGap;
         sideCheckHpKnob.setBounds (cx, y, knobSize, knobSize);
         cx += knobSize + pairGap;
-        sideCheckLpLabel.setBounds (cx, y, labelW, btnSize);
-        cx += labelW + labelGap;
+        sideCheckLpLabel.setBounds (cx, y, hpLpLabelW, btnSize);
+        cx += hpLpLabelW + labelGap;
         sideCheckLpKnob.setBounds (cx, y, knobSize, knobSize);
 
+        sideCheckAmountLabel.toFront (false);
+        sideCheckAmountKnob.toFront (false);
+        sideCheckSpeedButton.toFront (false);
+        sideCheckHqButton.toFront (false);
         sideCheckHpLabel.toFront (false);
         sideCheckHpKnob.toFront (false);
         sideCheckLpLabel.toFront (false);
@@ -1674,7 +1753,8 @@ void EqEditor::layoutSideCheckButton()
     else
     {
         // Park off-layout so a stale visible flag can never flash knobs at (0,0).
-        sideCheckAmountSlider.setBounds ({});
+        sideCheckAmountKnob.setBounds ({});
+        sideCheckAmountLabel.setBounds ({});
         sideCheckSpeedButton.setBounds ({});
         sideCheckHqButton.setBounds ({});
         sideCheckHpKnob.setBounds ({});
@@ -1690,7 +1770,8 @@ void EqEditor::updateSideCheckAmountVisibility()
 {
     if (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome())
     {
-        sideCheckAmountSlider.setVisible (false);
+        sideCheckAmountKnob.setVisible (false);
+        sideCheckAmountLabel.setVisible (false);
         sideCheckSpeedButton.setVisible (false);
         sideCheckHqButton.setVisible (false);
         sideCheckHpKnob.setVisible (false);
@@ -1703,7 +1784,8 @@ void EqEditor::updateSideCheckAmountVisibility()
     const bool scOn = sideCheckButton.getToggleState()
         || (audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId()) != nullptr
             && audioProcessor.treeState.getRawParameterValue (SideCheck::enabledParamId())->load() > 0.5f);
-    sideCheckAmountSlider.setVisible (scOn);
+    sideCheckAmountKnob.setVisible (scOn);
+    sideCheckAmountLabel.setVisible (scOn);
     sideCheckSpeedButton.setVisible (scOn);
     sideCheckHqButton.setVisible (scOn);
     sideCheckHpKnob.setVisible (scOn);
@@ -1735,6 +1817,32 @@ void EqEditor::toggleSideCheckSpeed()
     choice->setValueNotifyingHost (choice->convertTo0to1 ((float) next));
     choice->endChangeGesture();
     updateSideCheckSpeedButtonText();
+}
+
+void EqEditor::showSideCheckHpLpSlopeMenu (bool forHp)
+{
+    const char* paramId = forHp ? SideCheck::hpSlopeParamId() : SideCheck::lpSlopeParamId();
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+        audioProcessor.treeState.getParameter (paramId));
+    if (choice == nullptr)
+        return;
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    const auto names = FilterSlope::getChoiceNames();
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (1 + i, names[i], true, choice->getIndex() == i);
+
+    auto* target = forHp ? (juce::Component*) &sideCheckHpKnob : (juce::Component*) &sideCheckLpKnob;
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
+        [this, paramId] (int result)
+        {
+            if (result <= 0)
+                return;
+            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                    audioProcessor.treeState.getParameter (paramId)))
+                *p = result - 1;
+        });
 }
 
 void EqEditor::enforceSideCheckHpLpOrder (juce::Slider* changed)
@@ -1868,12 +1976,13 @@ void EqEditor::applyTiledScopeWindowSize()
     {
         const int graphH = getGraphHeightForWidth (w);
         const int modH = modPanelOpen ? getModPanelHeightForGraphHeight (graphH) : 0;
-        setSize (w, graphH + modH);
+        setSize (w, graphH + modH + getPianoWindowExtra());
     }
     else
     {
         setSize (w, getExpandedEditorHeight (w, modPanelOpen));
     }
+    pianoStripWindowApplied = (getPianoWindowExtra() > 0);
 }
 
 void EqEditor::syncScopeModeLayout()
@@ -1898,8 +2007,9 @@ void EqEditor::syncScopeModeLayout()
 
         if (enteringScope)
         {
+            // Piano-free height so leave-scope restore + getExpandedEditorHeight don't double-count.
             savedEditorWidth = getWidth();
-            savedEditorHeight = getHeight();
+            savedEditorHeight = juce::jmax (1, getHeight() - getPianoWindowExtra());
             holdingSizeBeforeScope = true;
         }
         else if (switchingArrange)
@@ -1937,9 +2047,11 @@ void EqEditor::syncScopeModeLayout()
         holdingSizeBeforeScope = false;
         appliedScopeStrip = false;
         const int rw = savedEditorWidth > 0 ? savedEditorWidth : designWidth;
-        const int rh = savedEditorHeight > 0 ? savedEditorHeight
-                                             : (uiCompact ? getGraphHeightForWidth (rw)
-                                                          : getExpandedEditorHeight (rw, modPanelOpen));
+        const int pianoExtra = getPianoWindowExtra();
+        const int rh = savedEditorHeight > 0
+            ? (savedEditorHeight + pianoExtra)
+            : (uiCompact ? (getGraphHeightForWidth (rw) + pianoExtra)
+                         : getExpandedEditorHeight (rw, modPanelOpen));
         if (uiCompact)
         {
             setConstrainer (nullptr);
@@ -1952,10 +2064,12 @@ void EqEditor::syncScopeModeLayout()
             setConstrainer (&resizeConstrainer);
             setSize (rw, juce::jmax (rh, getExpandedEditorHeight (rw, modPanelOpen)));
         }
+        pianoStripWindowApplied = (pianoExtra > 0);
     }
     else if (! uiCompact)
     {
         setSize (w, getExpandedEditorHeight (w, modPanelOpen));
+        pianoStripWindowApplied = (getPianoWindowExtra() > 0);
     }
 
     layoutBrandWordmark (-1);
@@ -2097,7 +2211,18 @@ void EqEditor::loadUiPrefs()
     juce::String scopeFractionsStr;
     std::vector<ScopeModuleId> scopeModules = ScopeModules::defaultEnabledOrder();
     bool randFaceplate = true, randGraph = true, randMenu = true;
-    bool randRampFft = true, randRampSpec = true, randRampFill = true;
+    bool randRampFft = true, randRampSpec = true, randRampSpec3D = true, randRampFill = true;
+    bool pianoDisplayOnLoad = false;
+    bool spec3DOnLoad = false;
+    int spec3DMeshQuality = 1; // medium
+    bool spec3DMsaa = false;
+    bool spec3DTransparentBg = false;
+    float spec3DMeshHeight = Spectrogram3DComponent::kDefaultMeshHeight;
+    bool oscExpandedOnLoad = false;
+    bool gonExpandedOnLoad = false;
+    bool specExpandedOnLoad = false;
+    bool spec3DCamCustom = false;
+    auto spec3DCam = Spectrogram3DComponent::getFactoryCameraState();
 
     const auto file = getUiPrefsFile();
     if (file.existsAsFile())
@@ -2170,9 +2295,30 @@ void EqEditor::loadUiPrefs()
                 randMenu = xml->getBoolAttribute ("randMenu", true);
                 randRampFft = xml->getBoolAttribute ("randRampFft", true);
                 randRampSpec = xml->getBoolAttribute ("randRampSpec", true);
+                randRampSpec3D = xml->getBoolAttribute ("randRampSpec3D", true);
                 randRampFill = xml->getBoolAttribute ("randRampFill", true);
                 faceplateBank = juce::jlimit (0, EqBand::kMaxBanks - 1,
                                               xml->getIntAttribute ("faceplateBank", 0));
+                pianoDisplayOnLoad = xml->getBoolAttribute ("pianoDisplay", false);
+                spec3DOnLoad = xml->getBoolAttribute ("spec3d", false);
+                spec3DMeshQuality = xml->getIntAttribute ("spec3dMeshQuality", 1);
+                spec3DMsaa = xml->getBoolAttribute ("spec3dMsaa", false);
+                spec3DTransparentBg = xml->getBoolAttribute ("spec3dTransparentBg", false);
+                spec3DMeshHeight = (float) xml->getDoubleAttribute (
+                    "spec3dMeshHeight", Spectrogram3DComponent::kDefaultMeshHeight);
+                oscExpandedOnLoad = xml->getBoolAttribute ("oscExpanded", false);
+                gonExpandedOnLoad = xml->getBoolAttribute ("gonExpanded", false);
+                specExpandedOnLoad = xml->getBoolAttribute ("specExpanded", false);
+                spec3DCamCustom = xml->getBoolAttribute ("spec3dCamCustom", false);
+                if (spec3DCamCustom)
+                {
+                    spec3DCam.yawDeg = (float) xml->getDoubleAttribute ("spec3dCamYaw", spec3DCam.yawDeg);
+                    spec3DCam.pitchDeg = (float) xml->getDoubleAttribute ("spec3dCamPitch", spec3DCam.pitchDeg);
+                    spec3DCam.distance = (float) xml->getDoubleAttribute ("spec3dCamDist", spec3DCam.distance);
+                    spec3DCam.panX = (float) xml->getDoubleAttribute ("spec3dCamPanX", spec3DCam.panX);
+                    spec3DCam.panY = (float) xml->getDoubleAttribute ("spec3dCamPanY", spec3DCam.panY);
+                    spec3DCam.panZ = (float) xml->getDoubleAttribute ("spec3dCamPanZ", spec3DCam.panZ);
+                }
             }
         }
     }
@@ -2191,6 +2337,21 @@ void EqEditor::loadUiPrefs()
                 ScopeLayoutPresets::decodeFractions (scopeFractionsStr, (int) scopeModules.size()));
         // Scope itself stays off at load; geometry above is restored when Scope is re-opened.
         mainComponent->setScopeMode (false, false);
+        mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (pianoDisplayOnLoad, false);
+        mainComponent->setSpec3DMeshQuality (
+            spec3DMeshQuality <= 0 ? Spectrogram3DComponent::MeshQuality::low
+                                  : (spec3DMeshQuality >= 2 ? Spectrogram3DComponent::MeshQuality::high
+                                                           : Spectrogram3DComponent::MeshQuality::medium),
+            false);
+        mainComponent->setSpec3DMultisampling (spec3DMsaa, false);
+        mainComponent->setSpec3DTransparentBackground (spec3DTransparentBg, false);
+        mainComponent->setSpec3DMeshHeight (spec3DMeshHeight, false);
+        if (spec3DCamCustom)
+            mainComponent->setSpec3DDefaultCamera (spec3DCam, true);
+        mainComponent->setSpec3DMode (spec3DOnLoad, false);
+
+        // Restore maximized analyser overlays as left when the editor was closed.
+        mainComponent->restoreExpandedScope (oscExpandedOnLoad, gonExpandedOnLoad, specExpandedOnLoad);
 
         auto& c = mainComponent->getSharedResources().sharedColors;
         c.randomizeFaceplateMod = randFaceplate;
@@ -2198,6 +2359,7 @@ void EqEditor::loadUiPrefs()
         c.randomizeMenuModule = randMenu;
         c.randomizeRampFftBars = randRampFft;
         c.randomizeRampSpectrogram = randRampSpec;
+        c.randomizeRampSpectrogram3D = randRampSpec3D;
         c.randomizeRampSpectrumFill = randRampFill;
     }
 
@@ -2228,6 +2390,7 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("randMenu", c.randomizeMenuModule);
         xml->setAttribute ("randRampFft", c.randomizeRampFftBars);
         xml->setAttribute ("randRampSpec", c.randomizeRampSpectrogram);
+        xml->setAttribute ("randRampSpec3D", c.randomizeRampSpectrogram3D);
         xml->setAttribute ("randRampFill", c.randomizeRampSpectrumFill);
     }
     xml->setAttribute ("lastScopeWidth", lastScopeWidth);
@@ -2239,6 +2402,41 @@ void EqEditor::saveUiPrefs() const
     xml->setAttribute ("lastTiledScopeHeight", lastTiledScopeHeight);
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
     xml->setAttribute ("faceplateBank", faceplateBank);
+    xml->setAttribute ("pianoDisplay",
+                       mainComponent != nullptr
+                           && mainComponent->getFrequencyResponseComponent().isPianoDisplayOn());
+    xml->setAttribute ("spec3d", mainComponent != nullptr && mainComponent->isSpec3DMode());
+    if (mainComponent != nullptr)
+    {
+        const auto q = mainComponent->getSpec3DMeshQuality();
+        xml->setAttribute ("spec3dMeshQuality",
+                           q == Spectrogram3DComponent::MeshQuality::low ? 0
+                               : (q == Spectrogram3DComponent::MeshQuality::high ? 2 : 1));
+        xml->setAttribute ("spec3dMsaa", mainComponent->isSpec3DMultisampling());
+        xml->setAttribute ("spec3dTransparentBg", mainComponent->isSpec3DTransparentBackground());
+        xml->setAttribute ("spec3dMeshHeight", (double) mainComponent->getSpec3DMeshHeight());
+        xml->setAttribute ("oscExpanded", mainComponent->isOscExpanded());
+        xml->setAttribute ("gonExpanded", mainComponent->isGonExpanded());
+        xml->setAttribute ("specExpanded", mainComponent->isSpecExpanded());
+        const auto cam = mainComponent->getSpec3DDefaultCamera();
+        const auto factory = Spectrogram3DComponent::getFactoryCameraState();
+        const bool camCustom = std::abs (cam.yawDeg - factory.yawDeg) > 1.0e-3f
+                            || std::abs (cam.pitchDeg - factory.pitchDeg) > 1.0e-3f
+                            || std::abs (cam.distance - factory.distance) > 1.0e-3f
+                            || std::abs (cam.panX - factory.panX) > 1.0e-3f
+                            || std::abs (cam.panY - factory.panY) > 1.0e-3f
+                            || std::abs (cam.panZ - factory.panZ) > 1.0e-3f;
+        xml->setAttribute ("spec3dCamCustom", camCustom);
+        if (camCustom)
+        {
+            xml->setAttribute ("spec3dCamYaw", (double) cam.yawDeg);
+            xml->setAttribute ("spec3dCamPitch", (double) cam.pitchDeg);
+            xml->setAttribute ("spec3dCamDist", (double) cam.distance);
+            xml->setAttribute ("spec3dCamPanX", (double) cam.panX);
+            xml->setAttribute ("spec3dCamPanY", (double) cam.panY);
+            xml->setAttribute ("spec3dCamPanZ", (double) cam.panZ);
+        }
+    }
 
     auto file = getUiPrefsFile();
     file.getParentDirectory().createDirectory();
@@ -2717,12 +2915,23 @@ void EqEditor::applyFaceplateTheme()
         b.repaint();
     };
 
+    auto attachGraphShadow = [this] (juce::TextButton& b)
+    {
+        b.setLookAndFeel (&graphOverlayButtonLookAndFeel);
+        // Melatonin drop extends past local bounds; without this the blur is clipped away.
+        b.setPaintingIsUnclipped (true);
+    };
     styleChrome (helpTooltipsButton);
     styleChrome (autoGainButton);
     styleChrome (sideCheckButton);
     styleChrome (scopeModeButton);
     styleChrome (sideCheckSpeedButton);
     styleChrome (sideCheckHqButton);
+    attachGraphShadow (helpTooltipsButton);
+    attachGraphShadow (sideCheckButton);
+    attachGraphShadow (scopeModeButton);
+    attachGraphShadow (sideCheckSpeedButton);
+    attachGraphShadow (sideCheckHqButton);
 
     faceplateBankPrevButton.setChromeColours (c.pluginButtonBackground,
                                               c.pluginButtonText.withAlpha (0.9f));
@@ -2736,6 +2945,7 @@ void EqEditor::applyFaceplateTheme()
         lab.repaint();
     };
 
+    themeLabel (sideCheckAmountLabel);
     themeLabel (sideCheckHpLabel);
     themeLabel (sideCheckLpLabel);
 
@@ -2793,6 +3003,7 @@ void EqEditor::setThemeColors (SharedResources* r) noexcept
     applyKnob (knob21);
     applyKnob (knob22);
     applyKnob (outputGainKnob);
+    applyKnob (sideCheckAmountKnob);
     applyKnob (sideCheckHpKnob);
     applyKnob (sideCheckLpKnob);
 
@@ -2857,7 +3068,8 @@ int EqEditor::getExpandedEditorHeight (int width, bool includeModPanel) const
     const int stripH = isFaceplateSuppressed() ? 0 : getFaceplateHeightForWidth (width);
     const int modH = includeModPanel ? getModPanelHeightForGraphHeight (graphH) : 0;
     const int trimH = juce::jmax (22, juce::roundToInt (30.0f * scale));
-    return graphTop + graphH + modH + stripH + trimH;
+    // Piano grows the graph host (MainComponent), not the faceplate — plot height stays via getPlotHeight().
+    return graphTop + graphH + getPianoWindowExtra() + modH + stripH + trimH;
 }
 
 void EqEditor::setFaceplateVisible (bool shouldShow)
@@ -2916,15 +3128,18 @@ void EqEditor::applyCompactUi()
     if (mainComponent != nullptr)
         mainComponent->getFrequencyResponseComponent().syncUiModeButton (uiCompact);
 
+    const int pianoExtra = getPianoWindowExtra();
+
     if (uiCompact)
     {
+        // Store height without piano so restore + getExpandedEditorHeight don't double-count.
         savedEditorWidth = getWidth();
-        savedEditorHeight = getHeight();
+        savedEditorHeight = juce::jmax (1, getHeight() - pianoExtra);
 
         const int w = juce::jmax (600, savedEditorWidth);
         const int graphH = getGraphHeightForWidth (w);
         const int modH = modPanelOpen ? getModPanelHeightForGraphHeight (graphH) : 0;
-        const int h = graphH + modH;
+        const int h = graphH + modH + pianoExtra;
 
         setConstrainer (nullptr);
         setSize (w, h);
@@ -2932,7 +3147,8 @@ void EqEditor::applyCompactUi()
     else
     {
         const int w = savedEditorWidth > 0 ? savedEditorWidth : designWidth;
-        const int h = savedEditorHeight > 0 ? savedEditorHeight
+        // savedEditorHeight is piano-free; absolute helpers already add piano when open.
+        const int h = savedEditorHeight > 0 ? (savedEditorHeight + pianoExtra)
                                             : getExpandedEditorHeight (w, modPanelOpen);
 
         // Free aspect — any ratio within size limits.
@@ -2941,6 +3157,9 @@ void EqEditor::applyCompactUi()
         setConstrainer (&resizeConstrainer);
         setSize (w, juce::jmax (h, getExpandedEditorHeight (w, modPanelOpen)));
     }
+
+    // Absolute setSize paths must keep the delta-grow flag in sync with reality.
+    pianoStripWindowApplied = (pianoExtra > 0);
 
     if (modSection != nullptr)
         modSection->setVisible (modPanelOpen);

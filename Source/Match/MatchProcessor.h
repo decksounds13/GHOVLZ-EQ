@@ -7,6 +7,7 @@
 #include <cmath>
 #include "MatchSettings.h"
 #include "../DynamicEq.h"
+#include "../FilterSlope.h"
 
 namespace MatchEq
 {
@@ -24,6 +25,7 @@ namespace MatchEq
             Process stereo (or mono) buffer in-place toward the working target.
             @param detectL/R  pre-Match tap (may equal buffer channels when detecting in-place
                               is unsafe — caller should pass a copy when needed).
+            @param resolutionMode  Resolution enum (Low/Med/High → 16/24/32 slices).
         */
         void process (juce::AudioBuffer<float>& buffer,
                       const float* detectL,
@@ -33,7 +35,10 @@ namespace MatchEq
                       int speedMode,
                       float smooth01,
                       float hpHz,
-                      float lpHz) noexcept;
+                      float lpHz,
+                      int resolutionMode,
+                      int hpSlope = FilterSlope::db12,
+                      int lpSlope = FilterSlope::db12) noexcept;
 
         void setFactoryTarget (int curveIndex) noexcept;
         /** Copy analyser-style magnitude (display 0..1 or linear) onto the working target. */
@@ -71,7 +76,7 @@ namespace MatchEq
             float envDb = kSilenceFloorDb;
             float grLin = 1.0f;
             float grTarget = 1.0f;
-            double sumSq = 0.0;
+            float sumSq = 0.0f;
         };
 
         struct PublishedCurve
@@ -92,11 +97,14 @@ namespace MatchEq
         void normalizeWorkingTarget() noexcept;
         void publishGrCurve() noexcept;
         void clearPublished() noexcept;
-        void applySmoothToLatticeIfNeeded (float smooth01) noexcept;
+        /** Rebuild when Smooth and/or Resolution change; remaps target in log-f when count changes. */
+        void ensureLatticeConfig (float smooth01, int resolutionMode) noexcept;
+        static float interpTargetDb (const float* centersHz, const float* db, int n, float fHz) noexcept;
 
         double sampleRate = 48000.0;
         int blockSize = 512;
         int activeSlices = 0;
+        int desiredSliceCount = kNumSlices;
         bool prepared = false;
         bool wasEnabled = false;
         bool settling = false;

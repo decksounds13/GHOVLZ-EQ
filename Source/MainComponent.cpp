@@ -485,9 +485,10 @@ namespace
             auto layoutCb = [this] { relayout(); };
             auto activeCb = [this]
             {
-                if (fftRow != nullptr)  fftRow->refreshFromBank();
-                if (specRow != nullptr) specRow->refreshFromBank();
-                if (fillRow != nullptr) fillRow->refreshFromBank();
+                if (fftRow != nullptr)     fftRow->refreshFromBank();
+                if (specRow != nullptr)    specRow->refreshFromBank();
+                if (spec3DRow != nullptr)  spec3DRow->refreshFromBank();
+                if (fillRow != nullptr)    fillRow->refreshFromBank();
             };
 
             fftRow = std::make_unique<RampTargetAccordion> (
@@ -496,11 +497,15 @@ namespace
             specRow = std::make_unique<RampTargetAccordion> (
                 resources, colourRamps, ColourRampBank::Target::spectrogram,
                 GradientStripEditor::ModeFamily::intensity, kUiScale, layoutCb, activeCb);
+            spec3DRow = std::make_unique<RampTargetAccordion> (
+                resources, colourRamps, ColourRampBank::Target::spectrogram3D,
+                GradientStripEditor::ModeFamily::intensity, kUiScale, layoutCb, activeCb);
             fillRow = std::make_unique<RampTargetAccordion> (
                 resources, colourRamps, ColourRampBank::Target::spectrumFill,
                 GradientStripEditor::ModeFamily::spatial, kUiScale, layoutCb, activeCb);
             addAndMakeVisible (*fftRow);
             addAndMakeVisible (*specRow);
+            addAndMakeVisible (*spec3DRow);
             addAndMakeVisible (*fillRow);
 
             listContainer.setWantsKeyboardFocus (false);
@@ -583,6 +588,11 @@ namespace
                 specRow->setBounds (area.removeFromTop (specRow->getPreferredHeight()));
                 area.removeFromTop (px (4));
             }
+            if (spec3DRow != nullptr)
+            {
+                spec3DRow->setBounds (area.removeFromTop (spec3DRow->getPreferredHeight()));
+                area.removeFromTop (px (4));
+            }
             if (fillRow != nullptr)
             {
                 fillRow->setBounds (area.removeFromTop (fillRow->getPreferredHeight()));
@@ -607,6 +617,7 @@ namespace
             const auto px = [] (float v) { return juce::roundToInt (v * kUiScale); };
             const int rampH = (fftRow != nullptr ? fftRow->getPreferredHeight() : 0)
                               + (specRow != nullptr ? specRow->getPreferredHeight() : 0)
+                              + (spec3DRow != nullptr ? spec3DRow->getPreferredHeight() : 0)
                               + (fillRow != nullptr ? fillRow->getPreferredHeight() : 0)
                               + px (8) + px (8);
             const int h = px (8) + px (28) + px (4) + px (28) + px (10) + px (18) + px (4) + px (28) + px (6)
@@ -624,7 +635,7 @@ namespace
         int themeListH = 0;
         juce::TextButton saveButton, glowButton, sampleButton;
         juce::Label rampHeader;
-        std::unique_ptr<RampTargetAccordion> fftRow, specRow, fillRow;
+        std::unique_ptr<RampTargetAccordion> fftRow, specRow, spec3DRow, fillRow;
         juce::Viewport viewport;
         juce::Component listContainer;
         juce::OwnedArray<UiThemePresetRow> rows;
@@ -710,7 +721,9 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     frequencyResponseComponent.setEditor (&editor);
 
     // Stay on JUCE's native Windows renderer (Direct2D in JUCE 8) instead of OpenGL.
+    // OpenGL is scoped only to Spectrogram3DComponent when 3D Spec is active.
     setOpaque(true);
+    setWantsKeyboardFocus (true);
 
     m_controls.setMarginInPixels(m_marginInPixels);
     m_visualizer.setMarginInPixels(m_marginInPixels);
@@ -736,13 +749,15 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
         if (shouldShowMenu)
         {
             layoutSettingsMenu();
+            // Relayout so expanded 3D parks left of Settings (pin left, shrink from right).
+            resized();
             syncExpandedOscOverlayStack();
             menu.setInterceptsMouseClicks(true, true);
             frequencyResponseComponent.setInterceptsMouseClicks(false, false);
         }
         else
         {
-            // Keep Settings / overlays correct relative to an expanded oscilloscope.
+            resized();
             syncExpandedOscOverlayStack();
             frequencyResponseComponent.setInterceptsMouseClicks(true, true);
         }
@@ -952,18 +967,55 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     specSpeedUpButton.setTooltip ("Speed up spectrogram scroll");
     specSpeedDownButton.setTooltip ("Slow down spectrogram scroll");
     specExpandButton.setTooltip ("Expand spectrogram over the full graph");
+    spec3DButton.setTooltip ("3D spectrogram - orbit (drag), pan (Shift+drag), zoom (wheel). Double-click resets. Expanded/Scope only.");
     specSpeedUpButton.setAlwaysOnTop (true);
     specSpeedDownButton.setAlwaysOnTop (true);
     specExpandButton.setAlwaysOnTop (true);
+    spec3DButton.setAlwaysOnTop (true);
     specSpeedUpButton.onClick = [this] { spectrogram.speedUp(); };
     specSpeedDownButton.onClick = [this] { spectrogram.speedDown(); };
     specExpandButton.onClick = [this] { setSpecExpanded (! specExpanded); };
+    spec3DButton.setClickingTogglesState (true);
+    spec3DButton.onClick = [this]
+    {
+        // Outside Scope: expanded 3D overlay. Inside Scope: independent Spectrogram 3D module.
+        setSpec3DMode (spec3DButton.getToggleState(), true);
+    };
+    spec3DButton.onPopupMenu = [this]
+    {
+        juce::PopupMenu menu;
+        menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+        const auto q = spectrogram3D.getMeshQuality();
+        menu.addItem (1, "Mesh: Low", true, q == Spectrogram3DComponent::MeshQuality::low);
+        menu.addItem (2, "Mesh: Medium", true, q == Spectrogram3DComponent::MeshQuality::medium);
+        menu.addItem (3, "Mesh: High", true, q == Spectrogram3DComponent::MeshQuality::high);
+        menu.addSeparator();
+        menu.addItem (4, "Reset camera");
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&spec3DButton),
+            [safe = juce::Component::SafePointer<MainComponent> (this)] (int result)
+            {
+                if (safe == nullptr || result <= 0)
+                    return;
+                if (result == 4)
+                {
+                    safe->spectrogram3D.resetCamera();
+                    return;
+                }
+                safe->setSpec3DMeshQuality (
+                    result == 1 ? Spectrogram3DComponent::MeshQuality::low
+                                : (result == 3 ? Spectrogram3DComponent::MeshQuality::high
+                                               : Spectrogram3DComponent::MeshQuality::medium),
+                    true);
+            });
+    };
     specSpeedUpButton.setVisible (false);
     specSpeedDownButton.setVisible (false);
     specExpandButton.setVisible (false);
+    spec3DButton.setVisible (false);
     addChildComponent (specSpeedUpButton);
     addChildComponent (specSpeedDownButton);
     addChildComponent (specExpandButton);
+    addChildComponent (spec3DButton);
 
     oscDimmer.setInterceptsMouseClicks (false, false);
     oscDimmer.setAlwaysOnTop (true);
@@ -1005,6 +1057,28 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram.setParameterTree (&processor.treeState);
     addChildComponent (spectrogram);
     processor.setSpectrogramTarget (&spectrogram);
+
+    spectrogram3D.setDataSource (&spectrogram);
+    spectrogram3D.setAlwaysOnTop (false);
+    spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
+    spectrogram3D.onDefaultViewChanged = [this] { editor.saveUiPrefs(); };
+    spectrogram3D.onUserResized = [this]
+    {
+        spec3DPreferredW = spectrogram3D.getWidth();
+        spec3DPreferredH = spectrogram3D.getHeight();
+        spec3DPreferredX = spectrogram3D.getX();
+        spec3DPreferredY = spectrogram3D.getY();
+        spec3DBoundsCustom = true;
+    };
+    spectrogram3D.onUserMoved = [this]
+    {
+        spec3DPreferredX = spectrogram3D.getX();
+        spec3DPreferredY = spectrogram3D.getY();
+        spec3DPreferredW = spectrogram3D.getWidth();
+        spec3DPreferredH = spectrogram3D.getHeight();
+        spec3DBoundsCustom = true;
+    };
+    addChildComponent (spectrogram3D);
 
     addChildComponent (levelMeterIn);
     addChildComponent (levelMeterOut);
@@ -1120,6 +1194,24 @@ MainComponent::~MainComponent()
     processor.setHistogramTarget (nullptr);
 
     menuToggleButton.setLookAndFeel (nullptr);
+    auto clearChromeLf = [] (juce::Button& b) { b.setLookAndFeel (nullptr); };
+    clearChromeLf (bypassButton);
+    clearChromeLf (slotAButton);
+    clearChromeLf (slotBButton);
+    clearChromeLf (slotCButton);
+    clearChromeLf (slotDButton);
+    clearChromeLf (presetPrevButton);
+    clearChromeLf (presetMenuButton);
+    clearChromeLf (presetNextButton);
+    clearChromeLf (presetSaveButton);
+    clearChromeLf (uiThemeButton);
+    clearChromeLf (undoButton);
+    clearChromeLf (redoButton);
+    clearChromeLf (ecoButton);
+    clearChromeLf (oscButton);
+    clearChromeLf (gonButton);
+    clearChromeLf (specButton);
+    clearChromeLf (meterChannelModeButton);
     bypassAttachment.reset();
 
     if (m_controls.getParentComponent() != nullptr)
@@ -1136,6 +1228,9 @@ void MainComponent::styleChromeButton (juce::TextButton& button)
     button.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
     button.setColour (juce::TextButton::textColourOffId, c.pluginButtonText.withAlpha (0.85f));
     button.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    button.setLookAndFeel (&chromeButtonLookAndFeel);
+    // Melatonin drop extends past local bounds; without this the blur is clipped away.
+    button.setPaintingIsUnclipped (true);
 }
 
 void MainComponent::applyThemeToChildComponents()
@@ -1174,6 +1269,7 @@ void MainComponent::applyThemeToChildComponents()
     specSpeedUpButton.setThemeResources (&sharedResources);
     specSpeedDownButton.setThemeResources (&sharedResources);
     specExpandButton.setThemeResources (&sharedResources);
+    spec3DButton.setThemeResources (&sharedResources);
     uiRandomizeButton.setThemeResources (&sharedResources);
     arrangeButton.setThemeResources (&sharedResources);
 
@@ -1182,6 +1278,7 @@ void MainComponent::applyThemeToChildComponents()
     oscilloscope.setThemeColors (&sharedResources);
     goniometer.setThemeColors (&sharedResources);
     spectrogram.setThemeColors (&sharedResources);
+    spectrogram3D.setThemeColors (&sharedResources);
     levelMeterIn.setThemeColors (&sharedResources);
     levelMeterOut.setThemeColors (&sharedResources);
     loudnessMeter.setThemeColors (&sharedResources);
@@ -1229,15 +1326,15 @@ void MainComponent::syncOscToolButtons()
     oscExpandButton.setToggleState (oscExpanded, juce::dontSendNotification);
 }
 
-void MainComponent::setOscExpanded (bool shouldExpand)
+void MainComponent::setOscExpanded (bool shouldExpand, bool notifyPrefs)
 {
     if (oscExpanded == shouldExpand)
         return;
 
     if (shouldExpand)
     {
-        setGonExpanded (false);
-        setSpecExpanded (false);
+        setGonExpanded (false, false);
+        setSpecExpanded (false, false);
     }
 
     oscExpanded = shouldExpand;
@@ -1246,17 +1343,21 @@ void MainComponent::setOscExpanded (bool shouldExpand)
     syncOscToolButtons();
     resized();
     syncExpandedOscOverlayStack();
+    if (shouldExpand)
+        grabKeyboardFocus();
+    if (notifyPrefs)
+        editor.saveUiPrefs();
 }
 
-void MainComponent::setGonExpanded (bool shouldExpand)
+void MainComponent::setGonExpanded (bool shouldExpand, bool notifyPrefs)
 {
     if (gonExpanded == shouldExpand)
         return;
 
     if (shouldExpand)
     {
-        setOscExpanded (false);
-        setSpecExpanded (false);
+        setOscExpanded (false, false);
+        setSpecExpanded (false, false);
     }
 
     gonExpanded = shouldExpand;
@@ -1265,17 +1366,21 @@ void MainComponent::setGonExpanded (bool shouldExpand)
     syncScopeChromeButtonOpacity();
     resized();
     syncExpandedOscOverlayStack();
+    if (shouldExpand)
+        grabKeyboardFocus();
+    if (notifyPrefs)
+        editor.saveUiPrefs();
 }
 
-void MainComponent::setSpecExpanded (bool shouldExpand)
+void MainComponent::setSpecExpanded (bool shouldExpand, bool notifyPrefs)
 {
     if (specExpanded == shouldExpand)
         return;
 
     if (shouldExpand)
     {
-        setOscExpanded (false);
-        setGonExpanded (false);
+        setOscExpanded (false, false);
+        setGonExpanded (false, false);
     }
 
     specExpanded = shouldExpand;
@@ -1284,6 +1389,34 @@ void MainComponent::setSpecExpanded (bool shouldExpand)
     syncScopeChromeButtonOpacity();
     resized();
     syncExpandedOscOverlayStack();
+    if (shouldExpand)
+        grabKeyboardFocus();
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+void MainComponent::restoreExpandedScope (bool osc, bool gon, bool spec)
+{
+    if (spec)
+    {
+        applySpectrogramActive (true);
+        setSpecExpanded (true, false);
+    }
+    else if (gon)
+    {
+        applyGoniometerActive (true);
+        setGonExpanded (true, false);
+    }
+    else if (osc)
+    {
+        if (! oscButton.getToggleState())
+        {
+            oscButton.setToggleState (true, juce::dontSendNotification);
+            oscilloscope.setEnabled (true);
+            syncOscToolButtons();
+        }
+        setOscExpanded (true, false);
+    }
 }
 
 void MainComponent::syncGonToolButtons()
@@ -1313,9 +1446,19 @@ void MainComponent::applyGoniometerActive (bool shouldEnable)
 void MainComponent::syncSpecToolButtons()
 {
     const bool on = specButton.getToggleState();
+    // 3D toggle stays visible whenever Spec is on (preference applies on expand / Scope).
     specSpeedUpButton.setVisible (on);
     specSpeedDownButton.setVisible (on);
     specExpandButton.setVisible (on);
+    spec3DButton.setVisible (on);
+    spec3DButton.setToggleState (
+        scopeModeEnabled ? isScopeModuleEnabled (ScopeModuleId::spectrogram3D) : spec3DEnabled,
+        juce::dontSendNotification);
+    spec3DButton.setThemeResources (&sharedResources);
+    spec3DButton.setTooltip (
+        (specExpanded || scopeModeEnabled)
+            ? "3D spectrogram - orbit (drag), pan (Shift+drag), zoom (wheel). Double-click resets. Right-click: mesh quality."
+            : "3D spectrogram (applies when expanded or in Scope). Right-click: mesh quality.");
 
     specExpandButton.setGlyph (specExpanded ? OscToolButton::Glyph::Collapse
                                             : OscToolButton::Glyph::Expand);
@@ -1323,6 +1466,309 @@ void MainComponent::syncSpecToolButtons()
                                      ? "Collapse spectrogram back to the strip"
                                      : "Expand spectrogram over the full graph");
     specExpandButton.setToggleState (specExpanded, juce::dontSendNotification);
+    syncSpec3DPresentation();
+}
+
+void MainComponent::raiseSpecToolButtons()
+{
+    specSpeedUpButton.toFront (false);
+    specSpeedDownButton.toFront (false);
+    specExpandButton.toFront (false);
+    spec3DButton.toFront (false);
+}
+
+juce::Rectangle<int> MainComponent::getExpandedScopeContentBounds() const
+{
+    auto b = frequencyResponseComponent.getBounds();
+    const int pianoH = frequencyResponseComponent.getPianoStripHeight();
+    if (pianoH > 0)
+        b = b.withTrimmedBottom (pianoH);
+    return b;
+}
+
+int MainComponent::getTopChromeClearY() const
+{
+    int bottom = 0;
+    auto consider = [&bottom] (const juce::Component& c)
+    {
+        if (c.isVisible() && c.getWidth() > 0 && c.getHeight() > 0)
+            bottom = juce::jmax (bottom, c.getBottom());
+    };
+    consider (bypassButton);
+    consider (slotAButton);
+    consider (presetPrevButton);
+    consider (presetNameEditor);
+    consider (menuToggleButton);
+    consider (undoButton);
+    consider (redoButton);
+    consider (uiThemeButton);
+    consider (uiRandomizeButton);
+    consider (ecoButton);
+    consider (oscButton);
+    consider (specButton);
+    return bottom + 6;
+}
+
+void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
+{
+    // OpenGL peer is inset inside spectrogram3D's framed window — keep tools / Settings
+    // outside the GL host rect (native HWND ignores JUCE z-order).
+    auto area = getExpandedScopeContentBounds();
+    if (area.isEmpty())
+        area = getLocalBounds();
+
+    area.setTop (juce::jmax (area.getY(), getTopChromeClearY()));
+
+    // Match / Mod / P / Help / SideCheck sit above the piano — keep GL clear of that row.
+    const int bottomChrome = frequencyResponseComponent.getBottomGraphChromeHeight();
+    if (bottomChrome > 0 && area.getHeight() > bottomChrome + 40)
+        area.removeFromBottom (bottomChrome);
+
+    if (verticalGradientMeterR.isVisible())
+        area.setLeft (juce::jmax (area.getX(), verticalGradientMeterR.getRight() + 6));
+    if (verticalGradientMeterPostL.isVisible())
+        area.setRight (juce::jmin (area.getRight(), verticalGradientMeterPostL.getX() - 6));
+
+    // Settings open: pin left, shrink from the right so the 3D window clears the menu.
+    if (menu.isVisible())
+        area.setRight (juce::jmin (area.getRight(), menu.getX() - 10));
+
+    const int toolW = btnSize + 8;
+    if (area.getWidth() <= toolW + 80 || area.getHeight() <= btnSize + 40)
+    {
+        spectrogram.setBounds (area);
+        spectrogram3D.setBounds (area);
+        return;
+    }
+
+    auto toolCol = area.removeFromRight (toolW);
+
+    // Restore the user's preferred size/position when it fits; otherwise fill.
+    int w = area.getWidth();
+    int h = area.getHeight();
+    int frameX = area.getX();
+    int frameY = area.getY();
+    if (spec3DBoundsCustom && spec3DPreferredW > 0 && spec3DPreferredH > 0)
+    {
+        w = juce::jlimit (220, area.getWidth(), spec3DPreferredW);
+        h = juce::jlimit (160, area.getHeight(), spec3DPreferredH);
+        frameX = juce::jlimit (area.getX(), area.getRight() - w, spec3DPreferredX);
+        frameY = juce::jlimit (area.getY(), area.getBottom() - h, spec3DPreferredY);
+    }
+
+    const auto placed = juce::Rectangle<int> (frameX, frameY, w, h);
+    const bool show3D = spec3DEnabled && specButton.getToggleState();
+    spectrogram3D.setChromeMode (Spectrogram3DComponent::ChromeMode::floating);
+    spectrogram3D.setResizeLimits (area.getWidth(), area.getHeight());
+    spectrogram3D.setMovementBounds (area);
+    spectrogram3D.setBounds (placed);
+
+    // 2D fills the window; when 3D is on it tracks the inner frame under the GL host.
+    const int pad = show3D ? spectrogram3D.getShadowPad() : 0;
+    spectrogram.setBounds (pad > 0 ? placed.reduced (pad) : placed);
+
+    // Tools sit just to the right of the framed window (not over GL).
+    const int toolX = placed.getRight() + 2;
+    int y = placed.getY() + juce::jmax (4, pad) + 4;
+    const int x = toolX + juce::jmax (0, (toolCol.getRight() - toolX - btnSize) / 2);
+    auto placeTool = [&] (OscToolButton& b)
+    {
+        b.setVisible (true);
+        b.setBounds (x, y, btnSize, btnSize);
+        y += btnSize + btnGap;
+        b.toFront (false);
+    };
+    placeTool (specSpeedUpButton);
+    placeTool (specSpeedDownButton);
+    placeTool (specExpandButton);
+    placeTool (spec3DButton);
+    raiseSpecToolButtons();
+}
+
+bool MainComponent::collapseAnyExpandedScope()
+{
+    bool collapsed = false;
+    if (specExpanded) { setSpecExpanded (false); collapsed = true; }
+    if (oscExpanded)  { setOscExpanded (false);  collapsed = true; }
+    if (gonExpanded)  { setGonExpanded (false);  collapsed = true; }
+    return collapsed;
+}
+
+bool MainComponent::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::escapeKey && collapseAnyExpandedScope())
+        return true;
+    return false;
+}
+
+void MainComponent::syncSpec3DPresentation()
+{
+    const bool has3DModule = scopeModeEnabled && isScopeModuleEnabled (ScopeModuleId::spectrogram3D);
+    const bool hasSpecModule = scopeModeEnabled && isScopeModuleEnabled (ScopeModuleId::spectrogram);
+    // Scope: 3D only via its own module. Expanded (non-Scope): cube flag on Spec expand.
+    const bool show3D = (scopeModeEnabled && has3DModule)
+                        || (! scopeModeEnabled && specExpanded && spec3DEnabled
+                            && specButton.getToggleState());
+
+    spectrogram3D.setAlwaysOnTop (false);
+    spectrogram3D.setThemeColors (&sharedResources);
+    spectrogram3D.setChromeMode (scopeModeEnabled && show3D
+                                     ? Spectrogram3DComponent::ChromeMode::docked
+                                     : Spectrogram3DComponent::ChromeMode::floating);
+    spectrogram3D.setActive (show3D);
+
+    // Mesh history comes from the 2D spectrogram feeder — keep analysing whenever 3D is up.
+    if (show3D)
+        spectrogram.setEnabled (true);
+
+    const bool show2D = (! scopeModeEnabled && specButton.getToggleState() && ! show3D)
+                        || (scopeModeEnabled && hasSpecModule)
+                        || (! scopeModeEnabled && specButton.getToggleState() && specExpanded && ! spec3DEnabled);
+    // Expanded non-Scope with 3D on: hide 2D under the floating 3D frame.
+    const bool show2DFinal = scopeModeEnabled
+                                 ? hasSpecModule
+                                 : (specButton.getToggleState() && ! (specExpanded && spec3DEnabled));
+
+    spectrogram.setVisible (show2DFinal);
+    spectrogram.setInterceptsMouseClicks (show2DFinal && (specExpanded || scopeModeEnabled), true);
+    juce::ignoreUnused (show2D);
+
+    if (show3D)
+    {
+        spectrogram3D.setInterceptsMouseClicks (true, true);
+        spectrogram3D.toFront (false);
+        raiseSpecToolButtons();
+        if (menu.isVisible())
+            menu.toFront (false);
+        menuToggleButton.toFront (false);
+        bypassButton.toFront (false);
+        undoButton.toFront (false);
+        redoButton.toFront (false);
+    }
+    else if (show2DFinal)
+    {
+        raiseSpecToolButtons();
+    }
+}
+
+void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
+{
+    if (spec3DEnabled == shouldEnable && ! scopeModeEnabled)
+    {
+        syncSpec3DPresentation();
+        return;
+    }
+
+    spec3DEnabled = shouldEnable;
+
+    // Settings / cube outside Scope: expanded overlay preference.
+    // Inside Scope: also toggle the independent Spectrogram 3D module.
+    if (scopeModeEnabled)
+        setScopeModuleEnabled (ScopeModuleId::spectrogram3D, shouldEnable, false);
+
+    syncSpecToolButtons();
+    resized();
+    syncExpandedOscOverlayStack();
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+void MainComponent::setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs)
+{
+    spectrogram3D.setMeshQuality (q);
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+Spectrogram3DComponent::MeshQuality MainComponent::getSpec3DMeshQuality() const noexcept
+{
+    return spectrogram3D.getMeshQuality();
+}
+
+void MainComponent::setSpec3DMultisampling (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setMultisamplingEnabled (shouldEnable);
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+bool MainComponent::isSpec3DMultisampling() const noexcept
+{
+    return spectrogram3D.isMultisamplingEnabled();
+}
+
+void MainComponent::setSpec3DTransparentBackground (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setTransparentBackground (shouldEnable);
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+bool MainComponent::isSpec3DTransparentBackground() const noexcept
+{
+    return spectrogram3D.isTransparentBackground();
+}
+
+void MainComponent::setSpec3DMeshHeight (float heightWorld, bool notifyPrefs)
+{
+    spectrogram3D.setMeshHeight (heightWorld);
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+float MainComponent::getSpec3DMeshHeight() const noexcept
+{
+    return spectrogram3D.getMeshHeight();
+}
+
+void MainComponent::placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rectangle<int> overlayTools,
+                                            int toolH, int toolSize, int toolGap)
+{
+    juce::Rectangle<int> toolRow = overlayTools;
+    auto placeArea = view;
+    if (toolH > 0)
+    {
+        placeArea = view.withTrimmedBottom (toolH + 2);
+        toolRow = juce::Rectangle<int> (view.getX() + 2,
+                                        placeArea.getBottom() + 1,
+                                        view.getWidth() - 4,
+                                        toolH);
+    }
+
+    spectrogram3D.setChromeMode (Spectrogram3DComponent::ChromeMode::docked);
+    spectrogram3D.setResizeLimits (placeArea.getWidth(), placeArea.getHeight());
+    spectrogram3D.setBounds (placeArea);
+
+    // Keep a hidden 2D feeder under the docked frame for mesh history.
+    const int pad = spectrogram3D.getShadowPad();
+    if (! spectrogram.isVisible())
+        spectrogram.setBounds (placeArea.reduced (pad));
+
+    if (toolH > 0)
+    {
+        auto row = toolRow;
+        auto placeOverlayTool = [&] (OscToolButton& b)
+        {
+            b.setVisible (true);
+            b.setBounds (row.removeFromLeft (toolSize).withSizeKeepingCentre (toolSize, toolSize));
+            row.removeFromLeft (toolGap);
+            b.toFront (false);
+        };
+        placeOverlayTool (specSpeedUpButton);
+        placeOverlayTool (specSpeedDownButton);
+        placeOverlayTool (specExpandButton);
+        placeOverlayTool (spec3DButton);
+    }
+}
+
+void MainComponent::setSpec3DDefaultCamera (const Spectrogram3DComponent::CameraState& state, bool) noexcept
+{
+    spectrogram3D.setDefaultCameraState (state);
+}
+
+Spectrogram3DComponent::CameraState MainComponent::getSpec3DDefaultCamera() const noexcept
+{
+    return spectrogram3D.getDefaultCameraState();
 }
 
 void MainComponent::applySpectrogramActive (bool shouldEnable)
@@ -1471,6 +1917,7 @@ void MainComponent::applyColourRampsToMeters()
 {
     const auto* fftRamp = &colourRamps.get (ColourRampBank::Target::fftBars);
     const auto* specRamp = &colourRamps.get (ColourRampBank::Target::spectrogram);
+    const auto* spec3DRamp = &colourRamps.get (ColourRampBank::Target::spectrogram3D);
     const auto* fillRamp = &colourRamps.get (ColourRampBank::Target::spectrumFill);
     const auto* oscRamp = &colourRamps.get (ColourRampBank::Target::oscilloscope);
     const auto* gonRamp = &colourRamps.get (ColourRampBank::Target::goniometer);
@@ -1480,6 +1927,8 @@ void MainComponent::applyColourRampsToMeters()
     m_visualizer.setBinOverlayColourRamp (fftRamp->isUsable() ? fftRamp : nullptr);
     m_visualizer.setSpectrumFillRamp (fillRamp->isUsable() ? fillRamp : nullptr);
     spectrogram.setCustomColourRamp (specRamp->isUsable() ? specRamp : nullptr);
+    spectrogram.setCustomColourRamp3D (spec3DRamp->isUsable() ? spec3DRamp : nullptr);
+    spectrogram3D.recolourMesh();
 
     if (oscRamp->isUsable())
         oscilloscope.setColourRamp (*oscRamp);
@@ -1927,7 +2376,8 @@ void MainComponent::syncScopeModuleEnabledStates()
 
     oscilloscope.setEnabled (enabled (ScopeModuleId::oscilloscope));
     applyGoniometerActive (enabled (ScopeModuleId::goniometer));
-    applySpectrogramActive (enabled (ScopeModuleId::spectrogram));
+    applySpectrogramActive (enabled (ScopeModuleId::spectrogram)
+                            || enabled (ScopeModuleId::spectrogram3D));
     loudnessMeter.setEnabled (enabled (ScopeModuleId::loudness));
     stereogram.setEnabled (enabled (ScopeModuleId::stereogram));
     histogram.setEnabled (enabled (ScopeModuleId::histogram));
@@ -2311,12 +2761,12 @@ void MainComponent::randomizeColourRamps()
 {
     sharedResources.makeActive();
     const auto& c = sharedResources.sharedColors;
-    const bool mask[3] = {
-        c.randomizeRampFftBars,
-        c.randomizeRampSpectrogram,
-        c.randomizeRampSpectrumFill
-    };
-    colourRamps.randomizeRamps (c, mask, 3);
+    bool mask[(int) ColourRampBank::Target::numTargets] {};
+    mask[(int) ColourRampBank::Target::fftBars] = c.randomizeRampFftBars;
+    mask[(int) ColourRampBank::Target::spectrogram] = c.randomizeRampSpectrogram;
+    mask[(int) ColourRampBank::Target::spectrogram3D] = c.randomizeRampSpectrogram3D;
+    mask[(int) ColourRampBank::Target::spectrumFill] = c.randomizeRampSpectrumFill;
+    colourRamps.randomizeRamps (c, mask, (int) ColourRampBank::Target::numTargets);
     applyColourRampsToMeters();
     persistSessionUiTheme();
 }
@@ -2351,7 +2801,8 @@ void MainComponent::runDiceRandomize()
 {
     const auto& c = sharedResources.sharedColors;
     const bool anyUi = c.randomizeFaceplateMod || c.randomizeGraphModule || c.randomizeMenuModule;
-    const bool anyRamp = c.randomizeRampFftBars || c.randomizeRampSpectrogram || c.randomizeRampSpectrumFill;
+    const bool anyRamp = c.randomizeRampFftBars || c.randomizeRampSpectrogram
+                         || c.randomizeRampSpectrogram3D || c.randomizeRampSpectrumFill;
 
     if (anyUi)
         randomizeUiTheme();
@@ -2372,10 +2823,11 @@ void MainComponent::showRandomizeDiceMenu()
     menu.addSeparator();
     menu.addSectionHeader ("Colour ramps");
     menu.addItem (4, "FFT Bars", true, scopes.randomizeRampFftBars);
-    menu.addItem (5, "Spectrogram", true, scopes.randomizeRampSpectrogram);
-    menu.addItem (6, "Spectrum Fill", true, scopes.randomizeRampSpectrumFill);
+    menu.addItem (5, "Spectrogram (2D)", true, scopes.randomizeRampSpectrogram);
+    menu.addItem (6, "Spectrogram 3D", true, scopes.randomizeRampSpectrogram3D);
+    menu.addItem (7, "Spectrum Fill", true, scopes.randomizeRampSpectrumFill);
     menu.addSeparator();
-    menu.addItem (7, "Disable custom ramps (use schemes)");
+    menu.addItem (8, "Disable custom ramps (use schemes)");
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&uiRandomizeButton),
                         [safe = juce::Component::SafePointer<MainComponent> (this)] (int result)
@@ -2389,10 +2841,11 @@ void MainComponent::showRandomizeDiceMenu()
                             else if (result == 3) s.randomizeMenuModule = ! s.randomizeMenuModule;
                             else if (result == 4) s.randomizeRampFftBars = ! s.randomizeRampFftBars;
                             else if (result == 5) s.randomizeRampSpectrogram = ! s.randomizeRampSpectrogram;
-                            else if (result == 6) s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill;
-                            else if (result == 7) safe->disableCustomColourRamps();
+                            else if (result == 6) s.randomizeRampSpectrogram3D = ! s.randomizeRampSpectrogram3D;
+                            else if (result == 7) s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill;
+                            else if (result == 8) safe->disableCustomColourRamps();
 
-                            if (result >= 1 && result <= 6)
+                            if (result >= 1 && result <= 7)
                                 safe->editor.saveUiPrefs();
                         });
 }
@@ -3031,20 +3484,42 @@ void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int>
         }
 
         case ScopeModuleId::spectrogram:
-        default:
         {
-            spectrogram.setBounds (pane);
+            // Always 2D — Spectrogram 3D is a separate selectable Scope module.
+            auto view = pane;
+            if (menu.isVisible())
+                view.setRight (juce::jmin (view.getRight(), menu.getX() - 8));
+
             spectrogram.setVisible (true);
             spectrogram.setInterceptsMouseClicks (true, true);
+            spectrogram.setBounds (view);
+
             if (toolH > 0)
             {
                 auto row = overlayTools;
                 placeOverlayTool (specSpeedUpButton, row);
                 placeOverlayTool (specSpeedDownButton, row);
                 placeOverlayTool (specExpandButton, row);
+                // Cube lives on the 3D module pane when that module is enabled.
+                if (! isScopeModuleEnabled (ScopeModuleId::spectrogram3D))
+                    placeOverlayTool (spec3DButton, row);
             }
+            syncSpec3DPresentation();
             break;
         }
+
+        case ScopeModuleId::spectrogram3D:
+        {
+            auto view = pane;
+            if (menu.isVisible())
+                view.setRight (juce::jmin (view.getRight(), menu.getX() - 8));
+            placeSpectrogram3DPane (view, overlayTools, toolH, toolSize, toolGap);
+            syncSpec3DPresentation();
+            break;
+        }
+
+        default:
+            break;
     }
 }
 
@@ -3054,8 +3529,8 @@ void MainComponent::layoutScopeModePanes (float scale)
 
     const int n = (int) scopeEnabledOrder.size();
     const int gap = px (3.0f);
-    // Strip: no tools. Tiled: compact buttons overlaid on the pane (not a reserved row).
-    const int toolH = scopeStripLayout ? 0 : px (16.0f);
+    // Compact tool overlay for both strip and tiled (cube / speed / expand on Spec panes).
+    const int toolH = px (16.0f);
     const int toolGap = px (1.0f);
     const int toolSize = toolH > 0 ? juce::jmax (12, toolH - 2) : 12;
 
@@ -3076,6 +3551,8 @@ void MainComponent::layoutScopeModePanes (float scale)
     specSpeedUpButton.setVisible (false);
     specSpeedDownButton.setVisible (false);
     specExpandButton.setVisible (false);
+    spec3DButton.setVisible (false);
+    spectrogram3D.setVisible (false);
 
     std::vector<juce::Rectangle<int>> slots ((size_t) juce::jmax (0, n));
     juce::Rectangle<int> stripForOverlay {};
@@ -3290,10 +3767,13 @@ void MainComponent::resized()
 
     const int editorWidth = getWidth();
     const int editorHeight = getHeight();
+    // Keep meters in the plot area — never grow into / over the piano strip.
+    const int pianoH = frequencyResponseComponent.getPianoStripHeight();
+    const int layoutH = juce::jmax (1, editorHeight - pianoH);
     const int meterWidth = static_cast<int>(editorWidth * 0.015);
-    const int meterHeight = static_cast<int>(editorHeight * 0.90);
+    const int meterHeight = static_cast<int>(layoutH * 0.90);
     const int meterSpacing = static_cast<int>(meterWidth * 0.4f);
-    const int centerY = (editorHeight - meterHeight) / 2;
+    const int centerY = (layoutH - meterHeight) / 2;
     const int totalMeterGroupWidth = 2 * meterWidth + meterSpacing;
     const int padding = static_cast<int>(totalMeterGroupWidth * 0.4);
     const int xLeft = static_cast<int>(padding * 1.5);
@@ -3541,15 +4021,23 @@ void MainComponent::resized()
                 spectrogram.setVisible (specExpanded);
                 oscDimmer.setBounds (getLocalBounds());
                 oscDimmer.setVisible (true);
+                const auto expandBounds = getExpandedScopeContentBounds().isEmpty()
+                                              ? getLocalBounds()
+                                              : getExpandedScopeContentBounds();
                 if (oscExpanded)
-                    oscilloscope.setBounds (getLocalBounds());
+                    oscilloscope.setBounds (expandBounds);
                 if (gonExpanded)
-                    goniometer.setBounds (getLocalBounds());
-                if (specExpanded)
-                    spectrogram.setBounds (getLocalBounds());
+                    goniometer.setBounds (expandBounds);
                 syncOscToolButtons();
                 syncGonToolButtons();
                 syncSpecToolButtons();
+                if (specExpanded)
+                {
+                    const int btnGap = px (2.0f);
+                    const int btnSize = juce::jmax (14, (OscilloscopeComponent::kWindowHeightPx - 3 * btnGap) / 4);
+                    layoutExpandedSpectrogramWithTools (btnSize, btnGap);
+                    syncSpec3DPresentation();
+                }
             }
         }
         else
@@ -3601,7 +4089,7 @@ void MainComponent::resized()
             {
                 oscDimmer.setBounds (getLocalBounds());
                 oscDimmer.setVisible (true);
-                oscilloscope.setBounds (frequencyResponseComponent.getBounds());
+                oscilloscope.setBounds (getExpandedScopeContentBounds());
             }
             else
             {
@@ -3630,9 +4118,8 @@ void MainComponent::resized()
             {
                 oscDimmer.setBounds (getLocalBounds());
                 oscDimmer.setVisible (true);
-                // Full graph area; correlation sits on the dark square's right edge
-                // (raised above post meters in raiseMenuSystemAboveWordmark).
-                goniometer.setBounds (frequencyResponseComponent.getBounds());
+                // Plot area only (above piano); correlation on the dark square's right edge.
+                goniometer.setBounds (getExpandedScopeContentBounds());
             }
             else
             {
@@ -3676,17 +4163,22 @@ void MainComponent::resized()
                 {
                     oscDimmer.setBounds (getLocalBounds());
                     oscDimmer.setVisible (true);
-                    spectrogram.setBounds (frequencyResponseComponent.getBounds());
+                    layoutExpandedSpectrogramWithTools (btnSize, btnGap);
                 }
                 else
                 {
                     spectrogram.setBounds (blockX, specY, specW, specH);
+                    spectrogram3D.setBounds (spectrogram.getBounds());
+                    // Compact strip: tools sit beside the view (never over GL).
+                    specSpeedUpButton.setBounds (btnX, specY, btnSize, btnSize);
+                    specSpeedDownButton.setBounds (btnX, specY + btnSize + btnGap, btnSize, btnSize);
+                    specExpandButton.setBounds (btnX, specY + 2 * (btnSize + btnGap), btnSize, btnSize);
+                    spec3DButton.setBounds (btnX, specY + 3 * (btnSize + btnGap), btnSize, btnSize);
+                    raiseSpecToolButtons();
                 }
 
                 spectrogram.setVisible (true);
-                specSpeedUpButton.setBounds (btnX, specY, btnSize, btnSize);
-                specSpeedDownButton.setBounds (btnX, specY + btnSize + btnGap, btnSize, btnSize);
-                specExpandButton.setBounds (btnX, specY + 2 * (btnSize + btnGap), btnSize, btnSize);
+                syncSpec3DPresentation();
             }
             else
             {
@@ -3760,6 +4252,19 @@ void MainComponent::componentMovedOrResized (juce::Component& component, bool wa
 
     settingsMenuBounds = menu.getBounds();
     settingsMenuBoundsFromUser = true;
+
+    // Keep expanded 3D parked left of Settings as the menu is dragged/resized.
+    if (menu.isVisible() && spectrogram3D.isActive() && specExpanded)
+    {
+        constexpr float designWidth = 1200.0f;
+        const float scale = (float) getWidth() / designWidth;
+        const int btnGap = juce::roundToInt (2.0f * scale);
+        const int btnSize = juce::jmax (14, (OscilloscopeComponent::kWindowHeightPx - 3 * btnGap) / 4);
+        layoutExpandedSpectrogramWithTools (btnSize, btnGap);
+        syncSpec3DPresentation();
+        if (menu.isVisible())
+            menu.toFront (false);
+    }
 }
 
 void MainComponent::hostBrandWordmark (juce::Component& wordmark)
@@ -3867,14 +4372,33 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     oscChannelModeButton.toFront (false);
     oscExpandButton.toFront (false);
     gonExpandButton.toFront (false);
-    specSpeedUpButton.toFront (false);
-    specSpeedDownButton.toFront (false);
-    specExpandButton.toFront (false);
+
+    // GL last among peers that share its inset bounds — chrome / tools stay outside those
+    // bounds (native HWND ignores JUCE z-order on overlap).
+    if (spectrogram3D.isActive())
+        spectrogram3D.toFront (false);
+    raiseSpecToolButtons();
+
+    // Re-raise top chrome after GL so lightweight hits win in any residual overlap.
+    bypassButton.toFront (false);
+    presetPrevButton.toFront (false);
+    presetNameEditor.toFront (false);
+    presetMenuButton.toFront (false);
+    presetNextButton.toFront (false);
+    presetSaveButton.toFront (false);
+    undoButton.toFront (false);
+    redoButton.toFront (false);
+    uiThemeButton.toFront (false);
+    uiRandomizeButton.toFront (false);
+    ecoButton.toFront (false);
+    verticalGradientMeterL.toFront (false);
+    verticalGradientMeterR.toFront (false);
+    verticalGradientMeterPostL.toFront (false);
+    verticalGradientMeterPostR.toFront (false);
+
     if (scopeModeEnabled && ! oscExp && ! gonExp && ! specExp)
         scopeSplitOverlay.toFront (false);
     meterChannelModeButton.toFront (false);
-    undoButton.toFront (false);
-    redoButton.toFront (false);
 
     // OptionBox + menu must win over the expanded waveform.
     auto* box = frequencyResponseComponent.getOptionBoxMenu();
@@ -3926,10 +4450,13 @@ void MainComponent::parameterChanged(const juce::String& parameterID, float newV
         return;
     }
 
-    // Built-in schemes must win over a leftover custom Use toggle.
+    // Built-in schemes must win over a leftover custom Use toggle (2D only;
+    // Spectrogram 3D keeps its own independent custom ramp).
     if (parameterID == "SPEC_COLOUR_SCHEME_ID")
     {
         colourRamps.disableCustomRamp (ColourRampBank::Target::spectrogram);
+        spectrogram.refreshColourLutFor3D();
+        spectrogram3D.recolourMesh();
         return;
     }
 

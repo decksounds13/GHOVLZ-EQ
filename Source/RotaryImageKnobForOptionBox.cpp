@@ -19,6 +19,8 @@ RotaryImageKnobForOptionBox::RotaryImageKnobForOptionBox()
     setTextBoxStyle(Slider::TextBoxBelow, false, 45, 20);
     setTextBoxIsEditable(true);
     setRange(0.36, 0.80, .01);
+    // Melatonin disc drop extends past local bounds; without this the blur is clipped away.
+    setPaintingIsUnclipped (true);
 
     float startAngleDegrees = 40.0;
     float endAngleDegrees = 320.0;
@@ -59,6 +61,14 @@ void RotaryImageKnobForOptionBox::paint(juce::Graphics& g)
     const int x = (drawW - side) / 2;
     const int y = (drawH - side) / 2;
 
+    if (SharedResources::glowShadowEffectsEnabled() && side > 2)
+    {
+        juce::Path disc;
+        disc.addEllipse ((float) x + 1.0f, (float) y + 1.0f,
+                         (float) side - 2.0f, (float) side - 2.0f);
+        knobDropShadow.render (g, disc);
+    }
+
     rotaryImageKnobLookAndFeel1.drawRotarySlider (g, x, y, side, side,
         static_cast<float> (getValue()), 0.0f, 1.0f, *this);
 }
@@ -76,6 +86,17 @@ void RotaryImageKnobForOptionBox::setCompactNoValueBox (bool shouldBeCompact)
         setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     else
         refreshValuePopup (false);
+}
+
+void RotaryImageKnobForOptionBox::mouseDown (const juce::MouseEvent& event)
+{
+    if (event.mods.isPopupMenu() && onPopupMenu != nullptr)
+    {
+        onPopupMenu();
+        return;
+    }
+
+    juce::Slider::mouseDown (event);
 }
 
 void RotaryImageKnobForOptionBox::mouseEnter(const juce::MouseEvent& event)

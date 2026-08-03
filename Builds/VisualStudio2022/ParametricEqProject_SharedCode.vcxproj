@@ -148,6 +148,7 @@
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp"/>
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp"/>
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp"/>
+    <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp"/>
     <ClCompile Include="..\..\Source\ScopeLevelMeterModule.cpp"/>
     <ClCompile Include="..\..\Source\LoudnessComponent.cpp"/>
     <ClCompile Include="..\..\Source\ScopeLayoutPresets.cpp"/>
@@ -3473,6 +3474,7 @@
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.h"/>
     <ClInclude Include="..\..\Source\GoniometerComponent.h"/>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
+    <ClInclude Include="..\..\Source\Spectrogram3DComponent.h"/>
     <ClInclude Include="..\..\Source\ScopeModules.h"/>
     <ClInclude Include="..\..\Source\ScopeLayoutPresets.h"/>
     <ClInclude Include="..\..\Source\ScopeLevelMeterModule.h"/>

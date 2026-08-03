@@ -164,6 +164,7 @@ public:
     /** Dice: per colour-ramp randomization gates (left-click honours these). */
     bool randomizeRampFftBars = true;
     bool randomizeRampSpectrogram = true;
+    bool randomizeRampSpectrogram3D = true;
     bool randomizeRampSpectrumFill = true;
 
     SharedColors();

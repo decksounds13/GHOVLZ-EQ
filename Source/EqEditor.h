@@ -20,6 +20,7 @@
 #include "ModSectionComponent.h"
 #include "ComboBoxLookAndFeel.h"
 #include "Menu/SharedResources.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 
 // Forward declaration
 class MainComponent;
@@ -79,6 +80,8 @@ public:
     bool isScopeModeActive() const noexcept;
     /** Editor height for Scope strip mode: chrome + strip (default strip 200 design px). */
     int getScopeStripWindowHeight (int width) const;
+    /** Grow/shrink editor height by the piano strip (called from FrequencyResponseComponent). */
+    void applyPianoStripWindowHeight (bool pianoOn);
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -117,6 +120,7 @@ private:
     void layoutPhaseModeCombo();
     void layoutSideCheckButton();
     void layoutScopeModeButton();
+    void showSideCheckHpLpSlopeMenu (bool forHp);
     void updateSideCheckAmountVisibility();
     void updateSideCheckSpeedButtonText();
     void toggleSideCheckSpeed();
@@ -131,7 +135,9 @@ private:
     /** Faceplate knob section height — same as mod strip when expanded. */
     int getFaceplateHeightForWidth (int width) const;
     int getBottomTrimHeight() const;
-    /** Total editor height for expanded (non-compact) layout. */
+    /** Extra editor height for the piano strip (0 when hidden). Kept out of the plot via getPlotHeight(). */
+    int getPianoWindowExtra() const noexcept;
+    /** Total editor height for expanded (non-compact) layout, including piano when open. */
     int getExpandedEditorHeight (int width, bool includeModPanel) const;
 
     float leftMargin;
@@ -289,8 +295,9 @@ private:
 
     /** Quad Scope metering view; right-click chooses Pre (analyzer) / Post (DSP on). */
     ScopeModeButton scopeModeButton;
-    /** Amount 0-1; visible only while Side Check is enabled. */
-    juce::Slider sideCheckAmountSlider;
+    /** Amount 0-1 image knob; visible only while Side Check is enabled. */
+    RotaryImageKnobForOptionBox sideCheckAmountKnob;
+    juce::Label sideCheckAmountLabel;
     /** Fast / Med / Slow ballistics toggle; shows current state; visible with Amount while SC on. */
     juce::TextButton sideCheckSpeedButton { "Fast" };
     /** HQ on = BP lattice (default); off = 3-band shelf/bell eco. Visible with Amount while SC on. */
@@ -425,6 +432,7 @@ private:
 
     /** Bottom chrome: toggle plugin tooltips (lit = enabled). Visible in compact and expanded. */
     juce::TextButton helpTooltipsButton { "?" };
+    GraphOverlayButtonLookAndFeel graphOverlayButtonLookAndFeel;
     bool tooltipsEnabled = true;
 
     /** Bottom chrome: Minimum Phase / Linear Phase processing mode. */
@@ -476,6 +484,9 @@ private:
 
     bool modPanelOpen = false;
     std::unique_ptr<ModSectionComponent> modSection;
+
+    /** True after editor height has been grown for the piano strip. */
+    bool pianoStripWindowApplied = false;
 
     int faceplateBank = 0;
     BankArrowButton faceplateBankPrevButton { false };

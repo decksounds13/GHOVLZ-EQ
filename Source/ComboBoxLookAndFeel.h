@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "Menu/SharedResources.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 
 /** Shared popup / combo menu colours — matches Mod section LFO shape < > toggles. */
 namespace PluginMenuTheme
@@ -141,6 +142,8 @@ public:
         : treeState (stateToUse), paramId (parameterID)
     {
         setRepaintsOnMouseActivity (true);
+        // Melatonin drop extends past local bounds; without this the blur is clipped away.
+        setPaintingIsUnclipped (true);
         treeState.addParameterListener (paramId, this);
         syncFromParameter();
     }
@@ -172,6 +175,7 @@ public:
         else if (isMouseOver())
             fill = fill.brighter (0.1f);
 
+        GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, bounds.reduced (0.5f), 2.0f);
         g.setColour (fill);
         g.fillRoundedRectangle (bounds, 2.0f);
         g.setColour (lf.findColour (juce::ComboBox::outlineColourId));

@@ -18,6 +18,7 @@ public:
         goniometer,
         stereogram,
         histogram,
+        spectrogram3D, // appended — keep prior ordinals stable for prefs / masks
         numTargets
     };
 

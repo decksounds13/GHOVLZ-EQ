@@ -12,6 +12,7 @@
 #include "EqBand.h"
 #include "LfoMod.h"
 #include "ComboBoxLookAndFeel.h"
+#include "MusicNote.h"
 #include <JuceHeader.h>
 
 namespace
@@ -306,7 +307,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     eqRangeMinusButton.onClick = [this] { adjustEqDisplayRange (-1); };
     eqRangePlusButton.onClick = [this] { adjustEqDisplayRange (1); };
     // Plain ASCII tip: vertical EQ curve scale (not frequency octaves).
-    const juce::String eqRangeTip ("EQ display range - vertical scale of the curve (+/-6, +/-12, or +/-24 dB)");
+    const juce::String eqRangeTip ("EQ display range - vertical scale of the curve (+/-6, +/-12, +/-24, or +/-36 dB)");
     eqRangeMinusButton.setTooltip (eqRangeTip);
     eqRangePlusButton.setTooltip (eqRangeTip);
     addAndMakeVisible (eqRangeMinusButton);
@@ -339,6 +340,15 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     proportionalQAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         parameters, "PROPORTIONAL_Q_ID", proportionalQButton);
 
+    styleRangeButton (pianoDisplayButton);
+    pianoDisplayButton.setClickingTogglesState (true); // styleRangeButton clears this
+    pianoDisplayButton.setToggleState (false, juce::dontSendNotification);
+    pianoDisplayButton.onClick = [this]
+    {
+        setPianoDisplayOn (pianoDisplayButton.getToggleState(), true);
+    };
+    addAndMakeVisible (pianoDisplayButton);
+
     styleRangeButton (matchButton);
     matchButton.setClickingTogglesState (true);
     matchButton.setTooltip (
@@ -360,32 +370,20 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     matchCurveButton.onClick = [this] { showMatchCurveMenu(); };
     addChildComponent (matchCurveButton);
 
-    auto styleMatchRotary = [this] (juce::Slider& s, const juce::String& tip)
+    auto attachMatchImageKnob = [this] (RotaryImageKnobForOptionBox& knob,
+                                        const char* paramId,
+                                        const juce::String& tip,
+                                        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att,
+                                        bool isFreq)
     {
-        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        s.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-        s.setTooltip (tip);
-        s.setColour (juce::Slider::rotarySliderFillColourId, colors().pluginButtonAccent);
-        s.setColour (juce::Slider::rotarySliderOutlineColourId, colors().pluginButtonBackground);
-        s.setColour (juce::Slider::thumbColourId, colors().pluginButtonText);
-        addChildComponent (s);
-    };
-    styleMatchRotary (matchAmountKnob, "Match Amount - how strongly to pull toward the target curve");
-    matchAmountAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        parameters, MatchEq::amountParamId(), matchAmountKnob);
-
-    auto attachMatchFreqKnob = [this] (juce::Slider& knob, const char* paramId, const juce::String& tip,
-                                       std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>& att)
-    {
-        knob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        knob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        knob.setCompactNoValueBox (true);
         knob.setTooltip (tip);
-        knob.setTextValueSuffix (" Hz");
-        knob.setColour (juce::Slider::rotarySliderFillColourId, colors().pluginButtonAccent);
-        knob.setColour (juce::Slider::rotarySliderOutlineColourId, colors().pluginButtonBackground);
-        knob.setColour (juce::Slider::thumbColourId, colors().pluginButtonText);
-        knob.setNormalisableRange (juce::NormalisableRange<double> (
-            (double) MatchEq::kMinHpLpHz, (double) MatchEq::kMaxFreqHz, 1.0, 0.2));
+        if (isFreq)
+        {
+            knob.setTextValueSuffix (" Hz");
+            knob.setNormalisableRange (juce::NormalisableRange<double> (
+                (double) MatchEq::kMinHpLpHz, (double) MatchEq::kMaxFreqHz, 1.0, 0.2));
+        }
         if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (parameters.getParameter (paramId)))
         {
             const auto range = param->getNormalisableRange();
@@ -393,33 +391,40 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
                 (double) range.start, (double) range.end, (double) range.interval,
                 (double) range.skew, range.symmetricSkew));
         }
+        if (themeColors != nullptr)
+            knob.setThemeColors (themeColors);
         addChildComponent (knob);
         att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
             parameters, paramId, knob);
     };
-    attachMatchFreqKnob (matchHpKnob, MatchEq::hpHzParamId(),
-        "HP - Match highpass (effect starts above this frequency; 0 = fully open)", matchHpAttachment);
-    attachMatchFreqKnob (matchLpKnob, MatchEq::lpHzParamId(),
-        "LP - Match lowpass (effect stops below this frequency)", matchLpAttachment);
+    attachMatchImageKnob (matchAmountKnob, MatchEq::amountParamId(),
+        "Match Amount - how strongly to pull toward the target curve", matchAmountAttachment, false);
+    attachMatchImageKnob (matchHpKnob, MatchEq::hpHzParamId(),
+        "HP - Match highpass (effect starts above this frequency; 0 = fully open). Right-click: slope",
+        matchHpAttachment, true);
+    attachMatchImageKnob (matchLpKnob, MatchEq::lpHzParamId(),
+        "LP - Match lowpass (effect stops below this frequency). Right-click: slope",
+        matchLpAttachment, true);
     matchHpKnob.onValueChange = [this] { enforceMatchHpLpGap (&matchHpKnob); };
     matchLpKnob.onValueChange = [this] { enforceMatchHpLpGap (&matchLpKnob); };
+    matchHpKnob.onPopupMenu = [this] { showMatchHpLpSlopeMenu (true); };
+    matchLpKnob.onPopupMenu = [this] { showMatchHpLpSlopeMenu (false); };
 
     auto setupMatchRangeLabel = [this] (juce::Label& label, const juce::String& text)
     {
         label.setText (text, juce::dontSendNotification);
-        label.setFont (juce::Font ("Lato Black", 10.0f, juce::Font::plain));
+        // Match Range caption size/weight (eqRangeLabel uses 11 pt).
+        label.setFont (juce::Font (11.0f));
         label.setJustificationType (juce::Justification::centred);
-        label.setColour (juce::Label::textColourId, colors().pluginButtonText.withAlpha (0.85f));
+        label.setColour (juce::Label::textColourId, colors().graphAxisText.withAlpha (0.75f));
         label.setInterceptsMouseClicks (false, false);
         addChildComponent (label);
     };
+    setupMatchRangeLabel (matchAmountLabel, "AMT");
     setupMatchRangeLabel (matchHpLabel, "HP");
     setupMatchRangeLabel (matchLpLabel, "LP");
 
     styleRangeButton (matchFreezeButton);
-    matchFreezeButton.setClickingTogglesState (true);
-    matchFreezeButton.setTooltip (
-        "Freeze - hold the current match target. Right-click or use the curve menu to save it.");
     addChildComponent (matchFreezeButton);
     matchFreezeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         parameters, MatchEq::frozenParamId(), matchFreezeButton);
@@ -487,7 +492,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     eqRangeLabel.setFont (juce::Font (11.0f));
     // Intercept so the Range caption can show its tooltip (same tip as - / +).
     eqRangeLabel.setInterceptsMouseClicks (true, false);
-    eqRangeLabel.setTooltip ("EQ display range - vertical scale of the curve (+/-6, +/-12, or +/-24 dB)");
+    eqRangeLabel.setTooltip ("EQ display range - vertical scale of the curve (+/-6, +/-12, +/-24, or +/-36 dB)");
     addAndMakeVisible (eqRangeLabel);
     syncEqRangeControls();
 
@@ -529,6 +534,7 @@ void FrequencyResponseComponent::applyThemeToChildControls()
     styleRangeButton (modButton);
     styleRangeButton (uiModeButton);
     styleRangeButton (proportionalQButton);
+    styleRangeButton (pianoDisplayButton);
     styleRangeButton (autoGainButton);
     styleRangeButton (splitSoloTButton);
     styleRangeButton (splitSoloSButton);
@@ -536,17 +542,12 @@ void FrequencyResponseComponent::applyThemeToChildControls()
     splitSeparationKnob.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
     splitSeparationKnob.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
     splitSeparationKnob.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
-    auto themeMatchRotary = [&c] (juce::Slider& s)
-    {
-        s.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
-        s.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
-        s.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
-    };
-    themeMatchRotary (matchAmountKnob);
-    themeMatchRotary (matchHpKnob);
-    themeMatchRotary (matchLpKnob);
-    matchHpLabel.setColour (juce::Label::textColourId, c.pluginButtonText.withAlpha (0.85f));
-    matchLpLabel.setColour (juce::Label::textColourId, c.pluginButtonText.withAlpha (0.85f));
+    matchAmountKnob.setThemeColors (themeColors);
+    matchHpKnob.setThemeColors (themeColors);
+    matchLpKnob.setThemeColors (themeColors);
+    matchAmountLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
+    matchHpLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
+    matchLpLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
     styleRangeButton (matchButton);
     styleRangeButton (matchCurveButton);
     styleRangeButton (matchFreezeButton);
@@ -722,6 +723,8 @@ float FrequencyResponseComponent::getEqDisplayRangeDb() const
         {
             case 0:  return 6.0f;
             case 1:  return 12.0f;
+            case 2:  return 24.0f;
+            case 3:  return 36.0f;
             default: return 24.0f;
         }
     }
@@ -818,14 +821,14 @@ void FrequencyResponseComponent::syncEqRangeControls()
     // Keep a stable "Range" caption; current +/-dB is on the graph axis and in the tip.
     eqRangeLabel.setText ("Range", juce::dontSendNotification);
     const juce::String tip ("EQ display range - currently +/-" + juce::String (range)
-                            + " dB. Use - / + for +/-6, +/-12, or +/-24.");
+                            + " dB. Use - / + for +/-6, +/-12, +/-24, or +/-36.");
     eqRangeMinusButton.setTooltip (tip);
     eqRangePlusButton.setTooltip (tip);
     eqRangeLabel.setTooltip (tip);
 
-    const int index = (range <= 6) ? 0 : (range <= 12) ? 1 : 2;
+    const int index = (range <= 6) ? 0 : (range <= 12) ? 1 : (range <= 24) ? 2 : 3;
     eqRangeMinusButton.setEnabled (index > 0);
-    eqRangePlusButton.setEnabled (index < 2);
+    eqRangePlusButton.setEnabled (index < 3);
 }
 
 void FrequencyResponseComponent::adjustEqDisplayRange (int delta)
@@ -834,7 +837,7 @@ void FrequencyResponseComponent::adjustEqDisplayRange (int delta)
     if (choice == nullptr)
         return;
 
-    const int newIndex = juce::jlimit (0, 2, choice->getIndex() + delta);
+    const int newIndex = juce::jlimit (0, 3, choice->getIndex() + delta);
     if (newIndex == choice->getIndex())
         return;
 
@@ -1437,8 +1440,53 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
 }
 
 //=======================================================================================================//
+void FrequencyResponseComponent::paintGraphChromeShadows (juce::Graphics& g)
+{
+    if (! SharedResources::glowShadowEffectsEnabled())
+        return;
+
+    auto shadowRounded = [this, &g] (juce::Component& c, float corner = 3.0f)
+    {
+        if (! c.isVisible() || c.getWidth() <= 1 || c.getHeight() <= 1)
+            return;
+        juce::Path p;
+        p.addRoundedRectangle (c.getBounds().toFloat(), corner);
+        chromeDropShadow.render (g, p);
+    };
+    auto shadowEllipse = [this, &g] (juce::Component& c)
+    {
+        if (! c.isVisible() || c.getWidth() <= 1 || c.getHeight() <= 1)
+            return;
+        juce::Path p;
+        p.addEllipse (c.getBounds().toFloat().reduced (1.0f));
+        chromeDropShadow.render (g, p);
+    };
+
+    shadowRounded (uiModeButton);
+    shadowRounded (proportionalQButton);
+    shadowRounded (pianoDisplayButton);
+    shadowRounded (modButton);
+    shadowRounded (eqRangeMinusButton);
+    shadowRounded (eqRangePlusButton);
+    shadowRounded (autoGainButton);
+    shadowRounded (outputGainScrubber, 4.0f);
+
+    shadowRounded (matchButton);
+    shadowRounded (matchCurveButton);
+    shadowRounded (matchFreezeButton);
+    // Match AMT/HP/LP image knobs draw their own Melatonin disc shadow.
+
+    shadowRounded (splitSoloTButton);
+    shadowRounded (splitSoloSButton);
+    shadowEllipse (splitSeparationKnob);
+}
+
 void FrequencyResponseComponent::paint(juce::Graphics& g)
 {
+    // Graph content uses an inset clip; chrome drop shadows paint after (full bounds)
+    // so they sit under the buttons/knobs without being cropped.
+    {
+    juce::Graphics::ScopedSaveState clipScope (g);
 
     // Get the current component bounds
     juce::Rectangle<int> componentBounds = getLocalBounds();
@@ -1456,7 +1504,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     auto area = getLocalBounds();
     auto w = area.getWidth();
-    auto h = area.getHeight();
+    // Exclude piano strip so enabling piano expands the window without rescaling the EQ.
+    auto h = getPlotHeight();
 
     // Define your custom colors for the gradient
     const auto& theme = colors();
@@ -1513,7 +1562,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         // Calculate the position to place the label
         float labelX = gridLineX + 5; // Adjust as needed
-        float labelY = getHeight() - 10; // Adjust as needed
+        float labelY = (float) getPlotHeight() - 10; // Adjust as needed
 
         // Set the font and color for the label
         g.setFont(labelFont);
@@ -1527,10 +1576,11 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     // Labels sit at the left edge of the window (~5px padding).
     {
         const int rangeInt = juce::roundToInt (getEqDisplayRangeDb());
-        const int step = (rangeInt <= 6) ? 1 : (rangeInt <= 12) ? 2 : 3;
+        const int step = (rangeInt <= 6) ? 1 : (rangeInt <= 12) ? 2 : (rangeInt <= 24) ? 3 : 6;
+        const float plotH = (float) getPlotHeight();
 
         std::vector<int> specialDbLevels;
-        for (int major : { 6, 12, 18, 24 })
+        for (int major : { 6, 12, 18, 24, 30, 36 })
             if (major <= rangeInt)
                 specialDbLevels.push_back (major);
 
@@ -1541,14 +1591,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         for (int db = -rangeInt; db <= rangeInt; db += step)
         {
-            const float y = dbToY (static_cast<float> (db), static_cast<float> (getHeight()));
+            const float y = dbToY (static_cast<float> (db), plotH);
             const bool isSpecial = (db == 0)
                 || std::find (specialDbLevels.begin(), specialDbLevels.end(), std::abs (db)) != specialDbLevels.end();
 
             g.setColour (isSpecial ? specialGridLineColor : standardGridLineColor);
             //g.drawLine(0, y, getWidth(), y, 1.0f);
 
-            const float labelY = juce::jlimit (0.0f, static_cast<float> (getHeight()) - 14.0f, y - 7.0f);
+            const float labelY = juce::jlimit (0.0f, plotH - 14.0f, y - 7.0f);
             g.setColour (theme.graphAxisText.withAlpha (isSpecial ? 0.82f : 0.58f));
             g.drawText (juce::String (db) + " dB",
                         labelLeft,
@@ -2037,14 +2087,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         // Calculate the x and y coordinates for the circle
         float band1X = (getWidth() - 1) * (std::log10(band1Frequency) - logMin) / (logMax - logMin);
-        float band1Y = dbToY(band1Gain, static_cast<float>(getHeight()));
+        float band1Y = dbToY(band1Gain, (float) getPlotHeight());
 
         // Apply scale factor to handle and outlines
         float handleSize = 12.0f * scaleFactor;
 
         // Limit handle position by the edge of the window, taking full diameter into account
         band1X = std::min(std::max(band1X, handleSize), static_cast<float>(getWidth()) - handleSize);
-        band1Y = std::min(std::max(band1Y, handleSize), static_cast<float>(getHeight()) - handleSize);
+        band1Y = std::min(std::max(band1Y, handleSize), (float) getPlotHeight() - handleSize);
 
         // Update handle positions to reflect these constraints
         handleX = band1X;
@@ -2101,14 +2151,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         // Calculate the x and y coordinates for the circle
         float band2X = (getWidth() - 1) * (std::log10(band2Frequency) - logMin) / (logMax - logMin);
-        float band2Y = dbToY(band2Gain, static_cast<float>(getHeight()));
+        float band2Y = dbToY(band2Gain, (float) getPlotHeight());
 
         // Apply scale factor to handle and outlines
         float handleSize2 = 12.0f * scaleFactor2;
 
         // Limit handle position by the edge of the window, taking full diameter into account
         band2X = std::min(std::max(band2X, handleSize2), static_cast<float>(getWidth()) - handleSize2);
-        band2Y = std::min(std::max(band2Y, handleSize2), static_cast<float>(getHeight()) - handleSize2);
+        band2Y = std::min(std::max(band2Y, handleSize2), (float) getPlotHeight() - handleSize2);
 
         // Update handle positions to align with the graphical representation
         handleX2 = band2X;
@@ -2165,14 +2215,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         // Calculate the x and y coordinates for the circle
         float band3X = (getWidth() - 1) * (std::log10(band3Frequency) - logMin) / (logMax - logMin);
-        float band3Y = dbToY(band3Gain, static_cast<float>(getHeight()));
+        float band3Y = dbToY(band3Gain, (float) getPlotHeight());
 
         // Apply scale factor to handle and outlines
         float handleSize3 = 12.0f * scaleFactor3;
 
         // Limit handle position by the edge of the window, taking full diameter into account
         band3X = std::min(std::max(band3X, handleSize3), static_cast<float>(getWidth()) - handleSize3);
-        band3Y = std::min(std::max(band3Y, handleSize3), static_cast<float>(getHeight()) - handleSize3);
+        band3Y = std::min(std::max(band3Y, handleSize3), (float) getPlotHeight() - handleSize3);
 
         // Update handle positions to align with the graphical representation
         handleX3 = band3X;
@@ -2229,14 +2279,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         // Calculate the x and y coordinates for the circle
         float band4X = (getWidth() - 1) * (std::log10(band4Frequency) - logMin) / (logMax - logMin);
-        float band4Y = dbToY(band4Gain, static_cast<float>(getHeight()));
+        float band4Y = dbToY(band4Gain, (float) getPlotHeight());
 
         // Apply scale factor to handle and outlines
         float handleSize4 = 12.0f * scaleFactor4;
 
         // Limit handle position by the edge of the window, taking full diameter into account
         band4X = std::min(std::max(band4X, handleSize4), static_cast<float>(getWidth()) - handleSize4);
-        band4Y = std::min(std::max(band4Y, handleSize4), static_cast<float>(getHeight()) - handleSize4);
+        band4Y = std::min(std::max(band4Y, handleSize4), (float) getPlotHeight() - handleSize4);
 
         // Update handle positions to align with the graphical representation
         handleX4 = band4X;
@@ -2292,12 +2342,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                                : 0.0f;
 
         float highpassX = (getWidth() - 1) * (std::log10(highpassCutoff) - logMin) / (logMax - logMin);
-        float highpassY = dbToY (hpGain, static_cast<float> (getHeight()));
+        float highpassY = dbToY (hpGain, (float) getPlotHeight());
 
         float handleSize5 = 12.0f * scaleFactor5;
 
         highpassX = std::min(std::max(highpassX, handleSize5), static_cast<float>(getWidth()) - handleSize5);
-        highpassY = std::min(std::max(highpassY, handleSize5), static_cast<float>(getHeight()) - handleSize5);
+        highpassY = std::min(std::max(highpassY, handleSize5), (float) getPlotHeight() - handleSize5);
 
         handleX5 = highpassX;
         handleY5 = highpassY;
@@ -2348,12 +2398,12 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                                : 0.0f;
 
         float lowpassX = (getWidth() - 1) * (std::log10(lowpassCutoff) - logMin) / (logMax - logMin);
-        float lowpassY = dbToY (lpGain, static_cast<float> (getHeight()));
+        float lowpassY = dbToY (lpGain, (float) getPlotHeight());
 
         float handleSize6 = 12.0f * scaleFactor6;
 
         lowpassX = std::min(std::max(lowpassX, handleSize6), static_cast<float>(getWidth()) - handleSize6);
-        lowpassY = std::min(std::max(lowpassY, handleSize6), static_cast<float>(getHeight()) - handleSize6);
+        lowpassY = std::min(std::max(lowpassY, handleSize6), (float) getPlotHeight() - handleSize6);
 
         handleX6 = lowpassX;
         handleY6 = lowpassY;
@@ -2405,14 +2455,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         // Calculate the x and y coordinates for the circle
         float highShelfX = (getWidth() - 1) * (std::log10(highShelfFrequency) - logMin) / (logMax - logMin);
-        float highShelfY = dbToY(highShelfGain, static_cast<float>(getHeight()));
+        float highShelfY = dbToY(highShelfGain, (float) getPlotHeight());
 
         // Apply scale factor
         float handleSize7 = 12.0f * scaleFactor7;
 
         // Limit handle positions by the edge of the window
         highShelfX = std::min(std::max(highShelfX, handleSize7), static_cast<float>(getWidth()) - handleSize7);
-        highShelfY = std::min(std::max(highShelfY, handleSize7), static_cast<float>(getHeight()) - handleSize7);
+        highShelfY = std::min(std::max(highShelfY, handleSize7), (float) getPlotHeight() - handleSize7);
 
 
         // Update handle positions
@@ -2469,14 +2519,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
         // Calculate the x and y coordinates for the circle
         float lowShelfX = (getWidth() - 1) * (std::log10(lowShelfFrequency) - logMin) / (logMax - logMin);
-        float lowShelfY = dbToY(lowShelfGain, static_cast<float>(getHeight()));
+        float lowShelfY = dbToY(lowShelfGain, (float) getPlotHeight());
 
         // Apply scale factor to handle
         float handleSize8 = 12.0f * scaleFactor8;
 
         // Limit handle position by the edge of the window, taking full diameter into account
         lowShelfX = std::min(std::max(lowShelfX, handleSize8), static_cast<float>(getWidth()) - handleSize8);
-        lowShelfY = std::min(std::max(lowShelfY, handleSize8), static_cast<float>(getHeight()) - handleSize8);
+        lowShelfY = std::min(std::max(lowShelfY, handleSize8), (float) getPlotHeight() - handleSize8);
 
         // Update handle positions to reflect these constraints
         handleX8 = lowShelfX;
@@ -2568,10 +2618,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
             const float scale = (hs.hovering || hs.dragging || activeSpectralAmountSlot == slot) ? 1.25f : 1.0f;
             float hx = (getWidth() - 1) * (std::log10 (fHz) - logMin) / (logMax - logMin);
-            float hy = dbToY (amountDb, static_cast<float> (getHeight()));
+            float hy = dbToY (amountDb, (float) getPlotHeight());
             const float handleSize = 12.0f * scale;
             hx = std::min (std::max (hx, handleSize), static_cast<float> (getWidth()) - handleSize);
-            hy = std::min (std::max (hy, handleSize), static_cast<float> (getHeight()) - handleSize);
+            hy = std::min (std::max (hy, handleSize), (float) getPlotHeight() - handleSize);
             hs.x = hx;
             hs.y = hy;
 
@@ -2617,10 +2667,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             const float scale = (hs.hovering || hs.dragging || activeExtendedGlobal == global
                                  || isOptionBoxSelectingBand (global)) ? 1.25f : 1.0f;
             float hx = (getWidth() - 1) * (std::log10 (juce::jmax (20.0f, fHz)) - logMin) / (logMax - logMin);
-            float hy = dbToY (gainDb, static_cast<float> (getHeight()));
+            float hy = dbToY (gainDb, (float) getPlotHeight());
             const float handleSize = 12.0f * scale;
             hx = std::min (std::max (hx, handleSize), static_cast<float> (getWidth()) - handleSize);
-            hy = std::min (std::max (hy, handleSize), static_cast<float> (getHeight()) - handleSize);
+            hy = std::min (std::max (hy, handleSize), (float) getPlotHeight() - handleSize);
             hs.x = hx;
             hs.y = hy;
 
@@ -2737,14 +2787,14 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 // Crosshairs
     if (isShowCrosshair() && mouseInside && !isAnyHandleMouseOver && !optionBoxMenu->isVisible()) {
         g.setColour (theme.graphHandleText);  // Medium/Dark grey
-        g.drawLine(cursorX, 0, cursorX, getHeight(), 1.0f);
+        g.drawLine(cursorX, 0, cursorX, (float) getPlotHeight(), 1.0f);
         g.drawLine(0, cursorY, getWidth(), cursorY, 1.0f);
     }
 
 
     // Calculate frequency and dB from mouse position
     float cursorFreq = static_cast<float>(std::pow(10.0, static_cast<double>(juce::jmap(static_cast<float>(cursorX), 0.0f, static_cast<float>(getWidth()), static_cast<float>(logMin), static_cast<float>(logMax)))));
-    float cursorDB = yToDb(cursorY, static_cast<float>(getHeight()));
+    float cursorDB = yToDb(cursorY, (float) getPlotHeight());
 
     // Create the numerical readout strings for cursor position
     juce::String cursorReadoutDb = juce::String(cursorDB, 2) + " dB";
@@ -2887,6 +2937,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         g.drawText (readoutQ, labelX, labelY + 3 * lineHeight, labelWidth, lineHeight, juce::Justification::bottomLeft, false);
     }
 
+    paintPianoStrip (g);
+    } // clipScope — restore full-component clip for chrome shadows
+
+    paintGraphChromeShadows (g);
 }
 
 
@@ -3685,7 +3739,7 @@ float FrequencyResponseComponent::xToFrequency (float x) const
 void FrequencyResponseComponent::updateAuditionBandpassFromMouse (const juce::MouseEvent& event)
 {
     const float freq = xToFrequency (event.position.x);
-    const float h = juce::jmax (1.0f, (float) getHeight());
+    const float h = juce::jmax (1.0f, (float) getPlotHeight());
     // Top of graph = tight Q, bottom = wide (avoids whistling via processor clamp 0.55–8).
     const float t = 1.0f - juce::jlimit (0.0f, 1.0f, event.position.y / h);
     const float q = juce::jmap (t, 0.55f, 8.0f);
@@ -4008,6 +4062,9 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
 //=======================================================================================================//
 void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
 {
+    if (handlePianoMouseDown (event))
+        return;
+
     if (event.eventComponent == &matchFreezeButton && event.mods.isPopupMenu())
     {
         if (auto* f = dynamic_cast<juce::AudioParameterBool*> (
@@ -4433,6 +4490,9 @@ void FrequencyResponseComponent::mouseDoubleClick (const juce::MouseEvent& event
 //=======================================================================================================//
 void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 {
+    if (handlePianoMouseDrag (event))
+        return;
+
     if (auditionBandpassDragging)
     {
         updateAuditionBandpassFromMouse (event);
@@ -4441,7 +4501,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 
     auto area = getLocalBounds();
     auto w = area.getWidth();
-    auto h = area.getHeight();
+    auto h = getPlotHeight();
 
     float newBand1Gain = 0.0f;
     float newBand1Frequency = 0.0f;
@@ -5108,6 +5168,9 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
     //=======================================================================================================//
 void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
 {
+    if (handlePianoMouseUp (event))
+        return;
+
     juce::ignoreUnused(event);
 
     if (auditionBandpassDragging || processor.isAuditionBandpassActive())
@@ -5421,10 +5484,10 @@ void FrequencyResponseComponent::resized()
 
     // Keep handle caches (and a placed OptionBox) proportional to graph size.
     // Do not snap OptionBox back to the handle — user placement sticks until another band is selected.
-    if (previousGraphWidth > 0 && previousGraphHeight > 0 && getWidth() > 0 && getHeight() > 0)
+    if (previousGraphWidth > 0 && previousGraphHeight > 0 && getWidth() > 0 && getPlotHeight() > 0)
     {
         const float sx = (float) getWidth() / (float) previousGraphWidth;
-        const float sy = (float) getHeight() / (float) previousGraphHeight;
+        const float sy = (float) getPlotHeight() / (float) previousGraphHeight;
 
         auto scaleHandle = [sx, sy] (float& x, float& y)
         {
@@ -5447,7 +5510,7 @@ void FrequencyResponseComponent::resized()
     }
 
     previousGraphWidth = getWidth();
-    previousGraphHeight = getHeight();
+    previousGraphHeight = getPlotHeight();
 
     if (optionBoxMenu != nullptr)
         optionBoxMenu->updateUiScaleFromParent();
@@ -5460,16 +5523,18 @@ void FrequencyResponseComponent::resized()
         uiModeButton.toFront (false);
     }
 
-    // Proportional Q — bottom-left (unchanged).
+    // Proportional Q — bottom-left, above piano strip.
     {
         constexpr int btnW = 22;
         constexpr int btnH = 18;
         constexpr int marginLeft = 18;
-        constexpr int marginBottom = 18;
+        constexpr int marginBottomBase = 18;
+        const int marginBottom = marginBottomBase + getPianoStripHeight();
         auto area = getLocalBounds();
         area.removeFromLeft (marginLeft);
         area.removeFromBottom (marginBottom);
-        proportionalQButton.setBounds (area.removeFromBottom (btnH).removeFromLeft (btnW));
+        auto row = area.removeFromBottom (btnH);
+        proportionalQButton.setBounds (row.removeFromLeft (btnW));
         proportionalQButton.toFront (false);
     }
 
@@ -5477,15 +5542,17 @@ void FrequencyResponseComponent::resized()
     syncStructuralSplitChrome();
     layoutStructuralSplitChrome();
 
-    // Vertical scale controls — bottom-right (intercept mouse so +/- work over the graph)
+    // Bottom-right: Mod / Range / piano icon / AutoGain / Output (piano left of A + Out).
     {
         constexpr int btnW = 22;
         constexpr int btnH = 18;
         constexpr int gap = 4;
         constexpr int marginRight = 18;
-        constexpr int marginBottom = 18;
+        constexpr int marginBottomBase = 18;
+        const int marginBottom = marginBottomBase + getPianoStripHeight();
         constexpr int outGainW = 58;
         constexpr int autoGainW = 22;
+        constexpr int pianoW = 22;
         constexpr int rangeLabelW = 40; // "Range" caption
         constexpr int modBtnW = 34;
         auto area = getLocalBounds();
@@ -5507,6 +5574,10 @@ void FrequencyResponseComponent::resized()
             autoGainButton.toFront (false);
         }
 
+        pianoDisplayButton.setBounds (row.removeFromRight (pianoW));
+        row.removeFromRight (gap);
+        pianoDisplayButton.toFront (false);
+
         eqRangePlusButton.setBounds (row.removeFromRight (btnW));
         row.removeFromRight (gap);
         eqRangeMinusButton.setBounds (row.removeFromRight (btnW));
@@ -5520,7 +5591,7 @@ void FrequencyResponseComponent::resized()
         modButton.toFront (false);
     }
 
-    // Match — graph bottom, right of Scope (EqEditor refreshes anchor after Scope layout).
+    // Match — graph bottom, left of Scope (EqEditor refreshes anchor after Scope layout).
     layoutMatchChrome();
     syncMatchChrome();
 
@@ -5598,7 +5669,7 @@ void FrequencyResponseComponent::layoutStructuralSplitChrome()
     constexpr int marginBottom = 14;
     const int stripW = btnW + gap + knob + gap + btnW;
     const int x = (getWidth() - stripW) / 2;
-    const int y = getHeight() - marginBottom - juce::jmax (btnH, knob);
+    const int y = getHeight() - (marginBottom + getPianoStripHeight()) - juce::jmax (btnH, knob);
     splitSoloTButton.setBounds (x, y + (knob - btnH) / 2, btnW, btnH);
     splitSeparationKnob.setBounds (x + btnW + gap, y, knob, knob);
     splitSoloSButton.setBounds (x + btnW + gap + knob + gap, y + (knob - btnH) / 2, btnW, btnH);
@@ -5636,11 +5707,251 @@ void FrequencyResponseComponent::syncStructuralSplitChrome()
     splitSoloSButton.setToggleState (solo == StructuralSplit::Solo::sustain, juce::dontSendNotification);
 }
 
-void FrequencyResponseComponent::layoutMatchChromeAfterScope (juce::Rectangle<int> scopeInLocal)
+juce::Rectangle<int> FrequencyResponseComponent::layoutMatchChromeAt (juce::Point<int> leftTopInLocal,
+                                                                     int btnH, int matchBtnW)
 {
-    matchChromeScopeAnchor = scopeInLocal;
-    matchChromeHasScopeAnchor = scopeInLocal.getWidth() > 0 && scopeInLocal.getHeight() > 0;
+    matchChromeLeftTop = leftTopInLocal;
+    matchChromeBtnH = juce::jmax (16, btnH);
+    matchChromeMatchW = juce::jmax (matchChromeBtnH, matchBtnW);
+    matchChromeHasAnchor = true;
     layoutMatchChrome();
+    return matchChromeBounds;
+}
+
+int FrequencyResponseComponent::getPianoStripHeight() const noexcept
+{
+    return pianoDisplayOn ? kPianoStripHeightPx : 0;
+}
+
+int FrequencyResponseComponent::getBottomGraphChromeHeight() const noexcept
+{
+    // Keep in sync with layoutMatchChrome marginBottomBase + btnH (above piano).
+    constexpr int marginBottomBase = 18;
+    return marginBottomBase + juce::jmax (18, matchChromeBtnH);
+}
+
+int FrequencyResponseComponent::getPlotHeight() const noexcept
+{
+    return juce::jmax (1, getHeight() - getPianoStripHeight());
+}
+
+void FrequencyResponseComponent::setPianoDisplayOn (bool shouldShow, bool savePrefs)
+{
+    if (pianoDisplayOn == shouldShow)
+        return;
+    pianoDisplayOn = shouldShow;
+    pianoDisplayButton.setToggleState (pianoDisplayOn, juce::dontSendNotification);
+
+    // Expand/shrink the editor window downward; graph plot height stays the same via getPlotHeight().
+    if (editor != nullptr)
+        editor->applyPianoStripWindowHeight (pianoDisplayOn);
+    else
+        resized();
+
+    if (editor != nullptr && savePrefs)
+        editor->saveUiPrefs();
+}
+
+void FrequencyResponseComponent::showMatchHpLpSlopeMenu (bool forHp)
+{
+    const char* paramId = forHp ? MatchEq::hpSlopeParamId() : MatchEq::lpSlopeParamId();
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (parameters.getParameter (paramId));
+    if (choice == nullptr)
+        return;
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    const auto names = FilterSlope::getChoiceNames();
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (1 + i, names[i], true, choice->getIndex() == i);
+
+    auto* target = forHp ? &matchHpKnob : &matchLpKnob;
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
+        [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this), paramId] (int result)
+        {
+            if (safe == nullptr || result <= 0)
+                return;
+            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                    safe->parameters.getParameter (paramId)))
+                *p = result - 1;
+        });
+}
+
+float FrequencyResponseComponent::frequencyToX (float freqHz) const
+{
+    const int w = getWidth();
+    if (w <= 1)
+        return 0.0f;
+    const double logMin = std::log10 (20.0);
+    const double logMax = std::log10 (20000.0);
+    const float f = juce::jlimit (20.0f, 20000.0f, freqHz);
+    return (float) (w - 1) * (float) ((std::log10 ((double) f) - logMin) / (logMax - logMin));
+}
+
+void FrequencyResponseComponent::paintPianoStrip (juce::Graphics& g)
+{
+    if (! pianoDisplayOn)
+        return;
+
+    const int h = kPianoStripHeightPx;
+    const int y0 = getHeight() - h;
+    auto strip = juce::Rectangle<int> (0, y0, getWidth(), h);
+    g.setColour (juce::Colour (0xff1a1a1a));
+    g.fillRect (strip);
+    g.setColour (juce::Colours::white.withAlpha (0.15f));
+    g.drawHorizontalLine (y0, 0.0f, (float) getWidth());
+
+    // FabFilter Pro-Q: highlighted 88-key grand A0..C8 (~27.5 Hz .. 4186 Hz).
+    // Each semitone is one column on the log-f axis. White-note columns are full-height
+    // white keys; black-note columns are a light key-bed with a shorter black key on top
+    // (never leave black columns as empty dark gaps — those looked like "black white keys").
+    const float keyTop = (float) y0 + 2.0f;
+    const float keyH = (float) h - 4.0f;
+    const float blackH = keyH * 0.58f;
+    const float xLo = frequencyToX (MusicNote::midiToHz (MusicNote::kPianoLowestMidi));
+    const float xHi = frequencyToX (MusicNote::midiToHz (MusicNote::kPianoHighestMidi + 1));
+
+    auto semitoneX0 = [this] (int midi) { return frequencyToX (MusicNote::midiToHz (midi)); };
+    auto semitoneX1 = [this] (int midi) { return frequencyToX (MusicNote::midiToHz (midi + 1)); };
+    auto semitoneCentreX = [&] (int midi)
+    {
+        return 0.5f * (semitoneX0 (midi) + semitoneX1 (midi));
+    };
+
+    // White key bed across the whole A0..C8 span, then carve black-key columns.
+    if (xHi > xLo)
+    {
+        g.setColour (juce::Colours::whitesmoke.withAlpha (0.94f));
+        g.fillRect (xLo, keyTop, xHi - xLo, keyH);
+    }
+
+    for (int midi = MusicNote::kPianoLowestMidi; midi <= MusicNote::kPianoHighestMidi; ++midi)
+    {
+        const float x0 = semitoneX0 (midi);
+        const float x1 = semitoneX1 (midi);
+        const float w = juce::jmax (1.0f, x1 - x0);
+
+        if (MusicNote::isBlackKey (midi))
+        {
+            // Key bed under the black key stays white (already filled); black key on top.
+            g.setColour (juce::Colours::black.withAlpha (0.92f));
+            g.fillRect (x0, keyTop, w, blackH);
+        }
+        else
+        {
+            // Subtle separators between white keys (left edge of each white column).
+            g.setColour (juce::Colours::black.withAlpha (0.28f));
+            g.drawVerticalLine (juce::roundToInt (x0), keyTop, keyTop + keyH);
+        }
+    }
+
+    // Right edge of C8.
+    g.setColour (juce::Colours::black.withAlpha (0.28f));
+    g.drawVerticalLine (juce::roundToInt (xHi), keyTop, keyTop + keyH);
+
+    // Band dots centered in the snapped note's semitone column (not on the left border).
+    auto drawDot = [&] (float freqHz, juce::Colour c)
+    {
+        const int midi = MusicNote::hzToNearestMidi (freqHz);
+        if (midi < MusicNote::kPianoLowestMidi || midi > MusicNote::kPianoHighestMidi)
+            return;
+        const float x = semitoneCentreX (midi);
+        const float dotY = MusicNote::isBlackKey (midi)
+            ? keyTop + blackH * 0.55f
+            : keyTop + keyH * 0.72f;
+        g.setColour (c);
+        g.fillEllipse (x - 4.0f, dotY - 4.0f, 8.0f, 8.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.drawEllipse (x - 4.0f, dotY - 4.0f, 8.0f, 8.0f, 1.0f);
+    };
+
+    const juce::Colour dots[] = {
+        juce::Colour (0xffe07a3a), juce::Colour (0xff3aa0e0), juce::Colour (0xff7ae03a),
+        juce::Colour (0xffe03a9a), juce::Colour (0xffe0c03a), juce::Colour (0xff3ae0c0),
+        juce::Colour (0xffa03ae0), juce::Colour (0xffe06060)
+    };
+    for (int gi = 0; gi < EqBand::kMaxBands; ++gi)
+    {
+        if (auto* on = parameters.getRawParameterValue (EqBand::onOffParamIDForGlobal (gi)))
+            if (on->load() <= 0.5f)
+                continue;
+        float f = 1000.0f;
+        if (auto* v = parameters.getRawParameterValue (EqBand::frequencyParamIDForGlobal (gi)))
+            f = v->load();
+        drawDot (f, dots[gi % 8]);
+    }
+}
+
+bool FrequencyResponseComponent::handlePianoMouseDown (const juce::MouseEvent& event)
+{
+    if (! pianoDisplayOn || event.mods.isPopupMenu())
+        return false;
+    const int y0 = getHeight() - kPianoStripHeightPx;
+    if (event.y < y0)
+        return false;
+
+    const float freq = MusicNote::snapHzToNearestNote (xToFrequency ((float) event.x));
+    // Prefer dragging an existing On band nearest in log-f; else create/select.
+    int best = -1;
+    float bestDist = 1.0e9f;
+    for (int g = 0; g < EqBand::kMaxBands; ++g)
+    {
+        if (auto* on = parameters.getRawParameterValue (EqBand::onOffParamIDForGlobal (g)))
+            if (on->load() <= 0.5f)
+                continue;
+        float f = 1000.0f;
+        if (auto* v = parameters.getRawParameterValue (EqBand::frequencyParamIDForGlobal (g)))
+            f = v->load();
+        const float d = std::abs (std::log (juce::jmax (1.0f, f)) - std::log (freq));
+        if (d < bestDist)
+        {
+            bestDist = d;
+            best = g;
+        }
+    }
+
+    if (best >= 0 && bestDist < 0.35f) // ~half octave
+    {
+        pianoDragBandIndex = best;
+        setBandFrequencySnappedToNote (best, freq);
+        return true;
+    }
+
+    activateOrSelectBandAtFrequency (freq);
+    return true;
+}
+
+bool FrequencyResponseComponent::handlePianoMouseDrag (const juce::MouseEvent& event)
+{
+    if (pianoDragBandIndex < 0 || ! pianoDisplayOn)
+        return false;
+    const float freq = MusicNote::snapHzToNearestNote (xToFrequency ((float) event.x));
+    setBandFrequencySnappedToNote (pianoDragBandIndex, freq);
+    return true;
+}
+
+bool FrequencyResponseComponent::handlePianoMouseUp (const juce::MouseEvent& event)
+{
+    juce::ignoreUnused (event);
+    if (pianoDragBandIndex < 0)
+        return false;
+    pianoDragBandIndex = -1;
+    return true;
+}
+
+void FrequencyResponseComponent::setBandFrequencySnappedToNote (int bandIndex, float freqHz)
+{
+    const float f = juce::jlimit (20.0f, 20000.0f, freqHz);
+    juce::String id;
+    id = EqBand::frequencyParamIDForGlobal (bandIndex);
+    if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (parameters.getParameter (id)))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 (f));
+        p->endChangeGesture();
+    }
+    needsUpdateCombined = true;
+    repaint();
 }
 
 void FrequencyResponseComponent::enforceMatchHpLpGap (juce::Slider* changed)
@@ -5673,57 +5984,48 @@ void FrequencyResponseComponent::enforceMatchHpLpGap (juce::Slider* changed)
 
 void FrequencyResponseComponent::layoutMatchChrome()
 {
-    // Bottom of the graph, immediately right of Scope (? / Phase / SideCheck / Scope row).
-    // Only free strip left under the preset field — between Scope and Mod/Range.
-    constexpr int btnH = 18;
-    constexpr int matchW = 48;
+    // Match X from EqEditor anchor; Y always matches Mod / Proportional Q (above piano).
+    const int btnH = matchChromeBtnH;
+    const int matchW = matchChromeMatchW;
     constexpr int curveW = 22;
     constexpr int freezeW = 22;
-    constexpr int knob = 42; // 20% smaller than prior 52px Amount size
-    constexpr int labelW = 16;
+    // Same size as SideCheck AMT/HP/LP image knobs (chrome button height).
+    const int knob = btnH;
+    constexpr int labelW = 20; // HP / LP — same 11 pt as Range
     constexpr int gap = 4;
-    constexpr int scopeGap = 6;
-    constexpr int marginBottom = 18;
+    constexpr int marginBottomBase = 18;
     constexpr int marginSide = 8;
 
     const bool extrasOn = parameters.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
                           && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
 
+    constexpr int amtLabelW = 28;
     const int stripW = extrasOn
-        ? (matchW + gap + curveW + gap + knob
+        ? (matchW + gap + curveW + gap + amtLabelW + knob
            + gap + labelW + knob + gap + labelW + knob
            + gap + freezeW)
         : matchW;
-    const int rowH = juce::jmax (btnH, knob);
 
-    // Stay left of Mod / Range / Out cluster.
     int rightLimit = getWidth() - marginSide;
     if (modButton.isVisible() && modButton.getWidth() > 0)
         rightLimit = juce::jmin (rightLimit, modButton.getX() - gap);
 
+    // Same bottom chrome row as Mod / P — never follow faceplate-trim anchors for Y.
+    const int marginBottom = marginBottomBase + getPianoStripHeight();
+    auto chromeArea = getLocalBounds();
+    chromeArea.removeFromBottom (marginBottom);
+    const int btnY = chromeArea.removeFromBottom (btnH).getY();
+
     int x0 = 0;
-    int y0 = getHeight() - rowH - marginBottom;
-
-    if (matchChromeHasScopeAnchor)
-    {
-        x0 = matchChromeScopeAnchor.getRight() + scopeGap;
-
-        // Scope on the graph: share its vertical center. Scope in editor trim: pin to graph bottom.
-        if (matchChromeScopeAnchor.getY() < getHeight() && matchChromeScopeAnchor.getBottom() > 0)
-            y0 = matchChromeScopeAnchor.getCentreY() - rowH / 2;
-    }
+    if (matchChromeHasAnchor)
+        x0 = matchChromeLeftTop.x;
     else
-    {
-        // Fallback before EqEditor has laid out Scope: center of free bottom strip.
         x0 = juce::jmax (marginSide, (rightLimit - stripW) / 2);
-    }
 
     x0 = juce::jlimit (marginSide, juce::jmax (marginSide, rightLimit - stripW), x0);
-    y0 = juce::jlimit (0, juce::jmax (0, getHeight() - rowH), y0);
 
     int x = x0;
-    const int btnY = y0 + (rowH - btnH) / 2;
-    const int knobY = y0 + (rowH - knob) / 2;
+    const int knobY = btnY + (btnH - knob) / 2;
 
     matchButton.setBounds (x, btnY, matchW, btnH);
     x += matchW + gap;
@@ -5732,6 +6034,9 @@ void FrequencyResponseComponent::layoutMatchChrome()
     {
         matchCurveButton.setBounds (x, btnY, curveW, btnH);
         x += curveW + gap;
+
+        matchAmountLabel.setBounds (x, btnY, amtLabelW, btnH);
+        x += amtLabelW;
         matchAmountKnob.setBounds (x, knobY, knob, knob);
         x += knob + gap;
 
@@ -5746,10 +6051,12 @@ void FrequencyResponseComponent::layoutMatchChrome()
         x += knob + gap;
 
         matchFreezeButton.setBounds (x, btnY, freezeW, btnH);
+        x += freezeW;
     }
     else
     {
         matchCurveButton.setBounds ({});
+        matchAmountLabel.setBounds ({});
         matchAmountKnob.setBounds ({});
         matchHpLabel.setBounds ({});
         matchHpKnob.setBounds ({});
@@ -5758,10 +6065,13 @@ void FrequencyResponseComponent::layoutMatchChrome()
         matchFreezeButton.setBounds ({});
     }
 
+    matchChromeBounds = juce::Rectangle<int> (x0, btnY, juce::jmax (matchW, x - x0), btnH);
+
     matchButton.toFront (false);
     if (extrasOn)
     {
         matchCurveButton.toFront (false);
+        matchAmountLabel.toFront (false);
         matchAmountKnob.toFront (false);
         matchHpLabel.toFront (false);
         matchHpKnob.toFront (false);
@@ -5779,6 +6089,7 @@ void FrequencyResponseComponent::syncMatchChrome()
     matchButton.setVisible (true);
 
     matchCurveButton.setVisible (on);
+    matchAmountLabel.setVisible (on);
     matchAmountKnob.setVisible (on);
     matchHpKnob.setVisible (on);
     matchLpKnob.setVisible (on);
@@ -5899,6 +6210,14 @@ void FrequencyResponseComponent::showMatchCurveMenu()
         smoothMenu.addItem (90 + i, smoothNames[i], true, smoothIdx == i);
     menu.addSubMenu ("Match smooth", smoothMenu);
 
+    juce::PopupMenu resMenu;
+    const int res = MatchEq::readChoiceIndex (
+        parameters, MatchEq::resolutionParamId(), MatchEq::resHigh, MatchEq::numResolutions - 1);
+    const auto resNames = MatchEq::getResolutionChoiceNames();
+    for (int i = 0; i < resNames.size(); ++i)
+        resMenu.addItem (120 + i, resNames[i], true, res == i);
+    menu.addSubMenu ("Match resolution", resMenu);
+
     menu.addSeparator();
     menu.addItem (80, "Save frozen curve...");
     auto& matchEng = processor.getMatchEngine();
@@ -5957,6 +6276,12 @@ void FrequencyResponseComponent::showMatchCurveMenu()
                 if (auto* p = dynamic_cast<juce::AudioParameterFloat*> (
                         parameters.getParameter (MatchEq::smoothParamId())))
                     *p = MatchEq::smoothMenuValue (result - 90);
+            }
+            else if (result >= 120 && result < 120 + MatchEq::numResolutions)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                        parameters.getParameter (MatchEq::resolutionParamId())))
+                    *p = result - 120;
             }
             else if (result == 80)
             {
@@ -6163,6 +6488,7 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
         || parameterID == MatchEq::frozenParamId()
         || parameterID == MatchEq::amountParamId()
         || parameterID == MatchEq::smoothParamId()
+        || parameterID == MatchEq::resolutionParamId()
         || parameterID == MatchEq::hpHzParamId()
         || parameterID == MatchEq::lpHzParamId())
     {

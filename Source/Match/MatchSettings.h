@@ -14,10 +14,13 @@ namespace MatchEq
     inline constexpr const char* curveParamId() noexcept { return "matchCurve"; }
     inline constexpr const char* speedParamId() noexcept { return "matchSpeed"; }
     inline constexpr const char* smoothParamId() noexcept { return "matchSmooth"; }
+    inline constexpr const char* resolutionParamId() noexcept { return "matchResolution"; }
     inline constexpr const char* frozenParamId() noexcept { return "matchFrozen"; }
     inline constexpr const char* placementParamId() noexcept { return "matchPlacement"; }
     inline constexpr const char* hpHzParamId() noexcept { return "matchHpHz"; }
     inline constexpr const char* lpHzParamId() noexcept { return "matchLpHz"; }
+    inline constexpr const char* hpSlopeParamId() noexcept { return "matchHpSlope"; }
+    inline constexpr const char* lpSlopeParamId() noexcept { return "matchLpSlope"; }
 
     constexpr float kMinAmount = 0.0f;
     constexpr float kMaxAmount = 1.0f;
@@ -38,6 +41,7 @@ namespace MatchEq
     constexpr float kDefaultLpHz = 18000.0f;
     constexpr float kMinHpLpGapHz = 50.0f;
 
+    /** Max lattice capacity — High resolution. Never exceed (CPU ceiling). */
     constexpr int kNumSlices = 32;
     constexpr int kMaxUserPresets = 12;
     constexpr float kRefHz = 1000.0f;
@@ -64,12 +68,32 @@ namespace MatchEq
         numSpeeds
     };
 
+    /** Lattice density — capped at kNumSlices. */
+    enum Resolution : int
+    {
+        resLow = 0,  // 16
+        resMed,      // 24
+        resHigh,     // 32
+        numResolutions
+    };
+
     enum Placement : int
     {
         beforeEq = 0,
         afterEq,
         numPlacements
     };
+
+    inline int sliceCountForResolution (int resolution) noexcept
+    {
+        switch (juce::jlimit (0, numResolutions - 1, resolution))
+        {
+            case resLow:  return 16;
+            case resMed:  return 24;
+            case resHigh:
+            default:      return kNumSlices;
+        }
+    }
 
     inline juce::StringArray getCurveChoiceNames()
     {
@@ -87,6 +111,11 @@ namespace MatchEq
     inline juce::StringArray getSpeedChoiceNames()
     {
         return { "Fast", "Med", "Slow" };
+    }
+
+    inline juce::StringArray getResolutionChoiceNames()
+    {
+        return { "Low (16)", "Med (24)", "High (32)" };
     }
 
     inline juce::StringArray getSmoothMenuNames()

@@ -56,6 +56,10 @@
             file="Source/SpectrogramComponent.cpp"/>
       <FILE id="sP3cHd" name="SpectrogramComponent.h" compile="0" resource="0"
             file="Source/SpectrogramComponent.h"/>
+      <FILE id="sP3dCp" name="Spectrogram3DComponent.cpp" compile="1" resource="0"
+            file="Source/Spectrogram3DComponent.cpp"/>
+      <FILE id="sP3dHd" name="Spectrogram3DComponent.h" compile="0" resource="0"
+            file="Source/Spectrogram3DComponent.h"/>
       <GROUP name="ColourRamp" id="SCMpqC">
         <FILE id="cRamp01" name="GradientRamp.h" compile="0" resource="0" file="Source/ColourRamp/GradientRamp.h"/>
         <FILE id="cRamp02" name="ColourRampBank.cpp" compile="1" resource="0"

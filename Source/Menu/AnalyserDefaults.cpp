@@ -78,6 +78,7 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "SPEC_SOFTEN_ID",
         "SPEC_LOG_FREQ_ID",
         "SPEC_ENHANCED_FREQ_ID",
+        "SPEC_ENHANCED_FREQ_3D_ID",
         "SPEC_ENHANCED_STRENGTH_ID",
         "SPEC_ENHANCED_LF_DETAIL_ID",
         "SPEC_ENHANCED_CROSSOVER_ID",

@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include "DynamicEq.h"
+#include "FilterSlope.h"
 
 /**
     Side Check (S<=M) — global post-EQ Mid/Side balance policeman.
@@ -39,6 +40,8 @@ namespace SideCheck
     inline constexpr const char* amountParamId() noexcept { return "sideCheckAmount"; }
     inline constexpr const char* hpHzParamId() noexcept { return "sideCheckHpHz"; }
     inline constexpr const char* lpHzParamId() noexcept { return "sideCheckLpHz"; }
+    inline constexpr const char* hpSlopeParamId() noexcept { return "sideCheckHpSlope"; }
+    inline constexpr const char* lpSlopeParamId() noexcept { return "sideCheckLpSlope"; }
     inline constexpr const char* modeParamId() noexcept { return "sideCheckMode"; }
     /** HQ on = full BP lattice (default); off = 3-band shelf/bell eco path. */
     inline constexpr const char* hqParamId() noexcept { return "sideCheckHq"; }
@@ -239,7 +242,8 @@ namespace SideCheck
             @param hq  true = BP lattice (default); false = 3-band shelf/bell eco path.
         */
         void process (juce::AudioBuffer<float>& buffer, bool enabled, float amount,
-                      float hpHz, float lpHz, int speedMode = fast, bool hq = kDefaultHq) noexcept
+                      float hpHz, float lpHz, int speedMode = fast, bool hq = kDefaultHq,
+                      int hpSlope = FilterSlope::db12, int lpSlope = FilterSlope::db12) noexcept
         {
             const int numCh = buffer.getNumChannels();
             const int n = buffer.getNumSamples();
@@ -286,9 +290,9 @@ namespace SideCheck
             settling = ! enabled; // fade out while off until GR ≈ 0
 
             if (hq)
-                processHq (buffer, enabled, amount, hpHz, lpHz, speedMode);
+                processHq (buffer, enabled, amount, hpHz, lpHz, speedMode, hpSlope, lpSlope);
             else
-                processEco (buffer, enabled, amount, hpHz, lpHz, speedMode);
+                processEco (buffer, enabled, amount, hpHz, lpHz, speedMode, hpSlope, lpSlope);
         }
 
         /** Most-negative slice GR target this block (dB; 0 when idle). */
@@ -573,12 +577,19 @@ namespace SideCheck
         }
 
         void processHq (juce::AudioBuffer<float>& buffer, bool enabled, float amount,
-                        float hpHz, float lpHz, int speedMode) noexcept
+                        float hpHz, float lpHz, int speedMode,
+                        int hpSlope, int lpSlope) noexcept
         {
             const int n = buffer.getNumSamples();
             const float amountClamped = juce::jlimit (kMinAmount, kMaxAmount, amount);
-            const float bandLo = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmin (hpHz, lpHz));
-            const float bandHi = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmax (hpHz, lpHz));
+            const bool useHp = hpHz > 1.0f;
+            const bool useLp = lpHz > 1.0f && lpHz < (float) sampleRate * 0.49f;
+            const auto hpStages = useHp
+                ? FilterSlope::makeHighpassCoeffs (sampleRate, hpHz, 0.70710678f, hpSlope)
+                : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+            const auto lpStages = useLp
+                ? FilterSlope::makeLowpassCoeffs (sampleRate, lpHz, 0.70710678f, lpSlope)
+                : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
 
             auto* left = buffer.getWritePointer (0);
             auto* right = buffer.getWritePointer (1);
@@ -639,14 +650,19 @@ namespace SideCheck
                 s.envSDb = cS * s.envSDb + (1.0f - cS) * levelS;
 
                 float targetGrDb = 0.0f;
-                const bool inEffectBand = s.centerHz >= bandLo && s.centerHz <= bandHi;
-                if (enabled && amountClamped > 1.0e-4f && inEffectBand)
+                float edgeW = 1.0f;
+                if (useHp)
+                    edgeW *= FilterSlope::cascadeMagnitudeAt (hpStages, (double) s.centerHz, sampleRate);
+                if (useLp)
+                    edgeW *= FilterSlope::cascadeMagnitudeAt (lpStages, (double) s.centerHz, sampleRate);
+                edgeW = juce::jlimit (0.0f, 1.0f, edgeW);
+                if (enabled && amountClamped > 1.0e-4f && edgeW > 0.02f)
                 {
                     const float excess = s.envSDb - s.envMDb;
                     if (excess > kExcessEpsilonDb
                         && (s.envMDb > kSilenceFloorDb + 1.0f || s.envSDb > kSilenceFloorDb + 1.0f))
                     {
-                        targetGrDb = -juce::jmin (kMaxGrDb, excess * amountClamped);
+                        targetGrDb = -juce::jmin (kMaxGrDb, excess * amountClamped * edgeW);
                     }
                 }
 
@@ -665,12 +681,19 @@ namespace SideCheck
         }
 
         void processEco (juce::AudioBuffer<float>& buffer, bool enabled, float amount,
-                         float hpHz, float lpHz, int speedMode) noexcept
+                         float hpHz, float lpHz, int speedMode,
+                         int hpSlope, int lpSlope) noexcept
         {
             const int n = buffer.getNumSamples();
             const float amountClamped = juce::jlimit (kMinAmount, kMaxAmount, amount);
-            const float bandLo = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmin (hpHz, lpHz));
-            const float bandHi = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmax (hpHz, lpHz));
+            const bool useHp = hpHz > 1.0f;
+            const bool useLp = lpHz > 1.0f && lpHz < (float) sampleRate * 0.49f;
+            const auto hpStages = useHp
+                ? FilterSlope::makeHighpassCoeffs (sampleRate, hpHz, 0.70710678f, hpSlope)
+                : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+            const auto lpStages = useLp
+                ? FilterSlope::makeLowpassCoeffs (sampleRate, lpHz, 0.70710678f, lpSlope)
+                : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
 
             auto* left = buffer.getWritePointer (0);
             auto* right = buffer.getWritePointer (1);
@@ -730,14 +753,19 @@ namespace SideCheck
                 band.envSDb = cS * band.envSDb + (1.0f - cS) * levelS;
 
                 float targetGrDb = 0.0f;
-                if (enabled && amountClamped > 1.0e-4f
-                    && ecoBandIntersectsEffectRange (band.kind, bandLo, bandHi))
+                float edgeW = 1.0f;
+                if (useHp)
+                    edgeW *= FilterSlope::cascadeMagnitudeAt (hpStages, (double) band.centerHz, sampleRate);
+                if (useLp)
+                    edgeW *= FilterSlope::cascadeMagnitudeAt (lpStages, (double) band.centerHz, sampleRate);
+                edgeW = juce::jlimit (0.0f, 1.0f, edgeW);
+                if (enabled && amountClamped > 1.0e-4f && edgeW > 0.02f)
                 {
                     const float excess = band.envSDb - band.envMDb;
                     if (excess > kExcessEpsilonDb
                         && (band.envMDb > kSilenceFloorDb + 1.0f || band.envSDb > kSilenceFloorDb + 1.0f))
                     {
-                        targetGrDb = -juce::jmin (kMaxGrDb, excess * amountClamped);
+                        targetGrDb = -juce::jmin (kMaxGrDb, excess * amountClamped * edgeW);
                     }
                 }
 

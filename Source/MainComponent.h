@@ -15,6 +15,7 @@
 #include "OscilloscopeComponent.h"
 #include "GoniometerComponent.h"
 #include "SpectrogramComponent.h"
+#include "Spectrogram3DComponent.h"
 #include "ScopeModules.h"
 #include "ScopeLayoutPresets.h"
 #include "ScopeLevelMeterModule.h"
@@ -24,6 +25,7 @@
 #include "EqPresetStore.h"
 #include "ColourRamp/ColourRampBank.h"
 #include "ColourRamp/PathSampleOverlay.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 
 class MainComponent : public juce::Component,
     public juce::ComponentListener,
@@ -38,6 +40,7 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress& key) override;
 
     void parameterChanged (const juce::String& parameterID, float newValue) override;
 
@@ -125,6 +128,38 @@ public:
     SharedResources& getSharedResources() noexcept { return sharedResources; }
     const SharedResources& getSharedResources() const noexcept { return sharedResources; }
 
+    /** Expanded/Scope OpenGL spectrogram heightfield. Compact strip stays 2D. */
+    void setSpec3DMode (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DMode() const noexcept { return spec3DEnabled; }
+    void setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs = true);
+    Spectrogram3DComponent::MeshQuality getSpec3DMeshQuality() const noexcept;
+    void setSpec3DMultisampling (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DMultisampling() const noexcept;
+    void setSpec3DTransparentBackground (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DTransparentBackground() const noexcept;
+    void setSpec3DMeshHeight (float heightWorld, bool notifyPrefs = true);
+    float getSpec3DMeshHeight() const noexcept;
+    void resetSpec3DCamera() noexcept { spectrogram3D.resetCamera(); }
+    void setSpec3DDefaultCamera (const Spectrogram3DComponent::CameraState& state, bool applyNow = true) noexcept;
+    Spectrogram3DComponent::CameraState getSpec3DDefaultCamera() const noexcept;
+
+    void setOscExpanded (bool shouldExpand, bool notifyPrefs = true);
+    void setGonExpanded (bool shouldExpand, bool notifyPrefs = true);
+    void setSpecExpanded (bool shouldExpand, bool notifyPrefs = true);
+    bool isOscExpanded() const noexcept { return oscExpanded; }
+    bool isGonExpanded() const noexcept { return gonExpanded; }
+    bool isSpecExpanded() const noexcept { return specExpanded; }
+    /** Restore a maximized overlay after editor reopen (enables the module if needed). */
+    void restoreExpandedScope (bool osc, bool gon, bool spec);
+
+    /** Union of OSC / Gon / Spec toggle bounds (MainComponent local) for Scope chrome alignment. */
+    juce::Rectangle<int> getAnalyserToggleColumnBounds() const noexcept
+    {
+        return oscButton.getBounds()
+            .getUnion (gonButton.getBounds())
+            .getUnion (specButton.getBounds());
+    }
+
 private:
     /** TextButton that exposes a right-click callback for A/B/C/D snapshot menus. */
     class AbSlotButton : public juce::TextButton
@@ -172,17 +207,28 @@ private:
     void applyScopeMode (bool shouldEnable);
     void layoutScopeModePanes (float scale);
     void placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int> pane, int toolH, int toolSize, int toolGap);
+    void placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rectangle<int> overlayTools,
+                                 int toolH, int toolSize, int toolGap);
     void syncScopeModuleEnabledStates();
     void applyScopePaneReorder (int fromSlot, int toSlot, bool insertBefore);
     void syncMeterChannelModeButton();
     void toggleMeterChannelMode();
-    void setOscExpanded (bool shouldExpand);
-    void setGonExpanded (bool shouldExpand);
-    void setSpecExpanded (bool shouldExpand);
     void syncOscToolButtons();
     void syncGonToolButtons();
     void syncSpecToolButtons();
+    void syncSpec3DPresentation();
+    void raiseSpecToolButtons();
+    /** Expanded Osc/Gon/Spec bounds — excludes piano strip when open. */
+    juce::Rectangle<int> getExpandedScopeContentBounds() const;
+    /** Bottom of top chrome (bypass/presets/settings) — GL must stay below this. */
+    int getTopChromeClearY() const;
+    /**
+        Expanded Spec: place view + tool column with zero overlap.
+        Required for 3D — OpenGL uses a native HWND that ignores JUCE z-order.
+    */
+    void layoutExpandedSpectrogramWithTools (int btnSize, int btnGap);
     void syncScopeChromeButtonOpacity();
+    bool collapseAnyExpandedScope();
     void syncExpandedOscOverlayStack();
     void beginRampSampling();
     void applyColourRampsToMeters();
@@ -198,12 +244,14 @@ private:
     {
     public:
         enum class Glyph { Plus, Minus, SummedStereo, SplitStereo, Expand, Collapse, Dice,
-                           StripLayout, GridLayout };
+                           StripLayout, GridLayout, Cube };
 
         explicit OscToolButton (Glyph g)
             : juce::Button ({}), glyph (g)
         {
             setClickingTogglesState (false);
+            // Melatonin drop extends past local bounds; without this the blur is clipped away.
+            setPaintingIsUnclipped (true);
         }
 
         void setGlyph (Glyph g)
@@ -248,6 +296,7 @@ private:
             else if (highlighted)
                 fill = fill.brighter (0.08f);
 
+            GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, r, corner);
             g.setColour (fill);
             g.fillRoundedRectangle (r, corner);
             g.setColour (pal.pluginButtonAccent.withAlpha (200.0f / 255.0f));
@@ -329,6 +378,24 @@ private:
                                 juce::jmax (1.5f, thick * 0.85f));
                     break;
                 }
+                case Glyph::Cube:
+                {
+                    // Isometric cube for Spec 3D mode.
+                    const float s = arm * 1.05f;
+                    juce::Path p;
+                    p.startNewSubPath (c.x, c.y - s);
+                    p.lineTo (c.x + s, c.y - s * 0.35f);
+                    p.lineTo (c.x + s, c.y + s * 0.55f);
+                    p.lineTo (c.x, c.y + s);
+                    p.lineTo (c.x - s, c.y + s * 0.55f);
+                    p.lineTo (c.x - s, c.y - s * 0.35f);
+                    p.closeSubPath();
+                    g.strokePath (p, juce::PathStrokeType (juce::jmax (1.2f, thick * 0.7f)));
+                    g.drawLine (c.x, c.y - s, c.x, c.y + s * 0.15f, juce::jmax (1.0f, thick * 0.55f));
+                    g.drawLine (c.x - s, c.y - s * 0.35f, c.x, c.y + s * 0.15f, juce::jmax (1.0f, thick * 0.55f));
+                    g.drawLine (c.x + s, c.y - s * 0.35f, c.x, c.y + s * 0.15f, juce::jmax (1.0f, thick * 0.55f));
+                    break;
+                }
             }
         }
 
@@ -375,6 +442,7 @@ private:
     // LookAndFeels must outlive any components that use them.
     SettingsButtonLookAndFeel customLookAndFeel;
     TextButtonLookAndFeel textButtonLookAndFeel;
+    GraphOverlayButtonLookAndFeel chromeButtonLookAndFeel;
 
     FrequencyResponseComponent frequencyResponseComponent;
     Visualizer m_visualizer;
@@ -440,6 +508,7 @@ private:
     /** Spec toggle — spectrogram strip between UI dice and the EQ preset bar. */
     juce::TextButton specButton { "Spec" };
     SpectrogramComponent spectrogram;
+    Spectrogram3DComponent spectrogram3D;
 
     ScopeLevelMeterModule levelMeterIn;
     ScopeLevelMeterModule levelMeterOut;
@@ -550,6 +619,7 @@ private:
     OscToolButton specSpeedUpButton { OscToolButton::Glyph::Plus };
     OscToolButton specSpeedDownButton { OscToolButton::Glyph::Minus };
     OscToolButton specExpandButton { OscToolButton::Glyph::Expand };
+    OscToolButton spec3DButton { OscToolButton::Glyph::Cube };
     ScopeSplitOverlay scopeSplitOverlay { *this };
     ScopeArrangeOverlay scopeArrangeOverlay { *this };
 
@@ -574,6 +644,13 @@ private:
     bool oscExpanded = false;
     bool gonExpanded = false;
     bool specExpanded = false;
+    bool spec3DEnabled = false;
+    /** User-dragged expanded 3D window size/position (component bounds, includes shadow pad). */
+    bool spec3DBoundsCustom = false;
+    int spec3DPreferredW = 0;
+    int spec3DPreferredH = 0;
+    int spec3DPreferredX = 0;
+    int spec3DPreferredY = 0;
     bool scopesBeforeEcoOsc = true;
     bool scopesBeforeEcoGon = false;
     bool scopesBeforeEcoSpec = true;

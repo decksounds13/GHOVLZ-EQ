@@ -166,6 +166,44 @@ namespace FilterSlope
         return stages;
     }
 
+    /** Linear magnitude of cascaded stages at one frequency (1 = unity). */
+    inline float cascadeMagnitudeAt (
+        const juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>& stages,
+        double frequencyHz,
+        double sampleRate) noexcept
+    {
+        if (stages.isEmpty() || sampleRate <= 0.0)
+            return 1.0f;
+        float mag = 1.0f;
+        for (auto* coeffs : stages)
+            if (coeffs != nullptr)
+                mag *= (float) coeffs->getMagnitudeForFrequency (frequencyHz, sampleRate);
+        return juce::jmax (0.0f, mag);
+    }
+
+    /**
+        HP×LP window weight at f for Match / Side Check range limiting.
+        HP fully open (≤0 Hz) or LP at/above Nyquist → that side contributes 1.
+    */
+    inline float hpLpWindowWeight (double sampleRate, float freqHz,
+                                   float hpHz, float lpHz,
+                                   int hpSlope, int lpSlope) noexcept
+    {
+        const float f = juce::jmax (1.0f, freqHz);
+        float w = 1.0f;
+        if (hpHz > 1.0f)
+        {
+            const auto stages = makeHighpassCoeffs (sampleRate, hpHz, 0.70710678f, hpSlope);
+            w *= cascadeMagnitudeAt (stages, (double) f, sampleRate);
+        }
+        if (lpHz > 1.0f && lpHz < (float) sampleRate * 0.49f)
+        {
+            const auto stages = makeLowpassCoeffs (sampleRate, lpHz, 0.70710678f, lpSlope);
+            w *= cascadeMagnitudeAt (stages, (double) f, sampleRate);
+        }
+        return juce::jlimit (0.0f, 1.0f, w);
+    }
+
     inline void fillCascadedMagnitude (const juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>& stages,
                                        const std::vector<float>& frequencies,
                                        double sampleRate,

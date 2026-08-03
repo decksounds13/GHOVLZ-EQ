@@ -8,14 +8,16 @@ namespace
 GradientsSettingsComponent::Content::Content (SharedResources& resources, ColourRampBank& b)
     : fftEditor (resources, GradientStripEditor::ModeFamily::intensity, &b.getPresets()),
       specEditor (resources, GradientStripEditor::ModeFamily::intensity, &b.getPresets()),
+      spec3DEditor (resources, GradientStripEditor::ModeFamily::intensity, &b.getPresets()),
       fillEditor (resources, GradientStripEditor::ModeFamily::spatial, &b.getPresets()),
       bank (b)
 {
     fftLabel.setText ("FFT Bars", juce::dontSendNotification);
-    specLabel.setText ("Spectrogram", juce::dontSendNotification);
+    specLabel.setText ("Spectrogram (2D)", juce::dontSendNotification);
+    spec3DLabel.setText ("Spectrogram 3D", juce::dontSendNotification);
     fillLabel.setText ("Spectrum Fill", juce::dontSendNotification);
 
-    for (auto* l : { &fftLabel, &specLabel, &fillLabel })
+    for (auto* l : { &fftLabel, &specLabel, &spec3DLabel, &fillLabel })
     {
         l->setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
         l->setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
@@ -24,6 +26,7 @@ GradientsSettingsComponent::Content::Content (SharedResources& resources, Colour
 
     addAndMakeVisible (fftEditor);
     addAndMakeVisible (specEditor);
+    addAndMakeVisible (spec3DEditor);
     addAndMakeVisible (fillEditor);
 
     auto wire = [this] (GradientStripEditor& ed, ColourRampBank::Target t)
@@ -42,6 +45,7 @@ GradientsSettingsComponent::Content::Content (SharedResources& resources, Colour
 
     wire (fftEditor, ColourRampBank::Target::fftBars);
     wire (specEditor, ColourRampBank::Target::spectrogram);
+    wire (spec3DEditor, ColourRampBank::Target::spectrogram3D);
     wire (fillEditor, ColourRampBank::Target::spectrumFill);
 }
 
@@ -50,6 +54,7 @@ int GradientsSettingsComponent::Content::getPreferredHeight() const
     return 16
            + 20 + fftEditor.getPreferredHeight() + 12
            + 20 + specEditor.getPreferredHeight() + 12
+           + 20 + spec3DEditor.getPreferredHeight() + 12
            + 20 + fillEditor.getPreferredHeight() + 14;
 }
 
@@ -62,6 +67,9 @@ void GradientsSettingsComponent::Content::resized()
     area.removeFromTop (12);
     specLabel.setBounds (area.removeFromTop (20));
     specEditor.setBounds (area.removeFromTop (specEditor.getPreferredHeight()));
+    area.removeFromTop (12);
+    spec3DLabel.setBounds (area.removeFromTop (20));
+    spec3DEditor.setBounds (area.removeFromTop (spec3DEditor.getPreferredHeight()));
     area.removeFromTop (12);
     fillLabel.setBounds (area.removeFromTop (20));
     fillEditor.setBounds (area.removeFromTop (fillEditor.getPreferredHeight()));
@@ -98,6 +106,7 @@ void GradientsSettingsComponent::syncFromBank()
 {
     content.fftEditor.setRamp (&bank.get (ColourRampBank::Target::fftBars));
     content.specEditor.setRamp (&bank.get (ColourRampBank::Target::spectrogram));
+    content.spec3DEditor.setRamp (&bank.get (ColourRampBank::Target::spectrogram3D));
     content.fillEditor.setRamp (&bank.get (ColourRampBank::Target::spectrumFill));
     content.repaint();
 }

@@ -24,9 +24,10 @@ void Processor::prepare (double newSampleRate, int samplesPerBlock) noexcept
         s.envDb = kSilenceFloorDb;
         s.grLin = 1.0f;
         s.grTarget = 1.0f;
-        s.sumSq = 0.0;
+        s.sumSq = 0.0f;
     }
 
+    desiredSliceCount = kNumSlices;
     rebuildLattice();
     fillFactoryTarget (pink);
     clearPublished();
@@ -46,11 +47,32 @@ void Processor::reset() noexcept
         s.envDb = kSilenceFloorDb;
         s.grLin = 1.0f;
         s.grTarget = 1.0f;
-        s.sumSq = 0.0;
+        s.sumSq = 0.0f;
     }
     clearPublished();
     wasEnabled = false;
     settling = false;
+}
+
+float Processor::interpTargetDb (const float* centersHz, const float* db, int n, float fHz) noexcept
+{
+    if (centersHz == nullptr || db == nullptr || n <= 0)
+        return 0.0f;
+
+    const float f = juce::jmax (1.0f, fHz);
+    if (n == 1 || f <= centersHz[0])
+        return db[0];
+    if (f >= centersHz[n - 1])
+        return db[n - 1];
+
+    int k = 0;
+    while (k + 1 < n && centersHz[k + 1] < f)
+        ++k;
+
+    const float c0 = juce::jmax (1.0f, centersHz[k]);
+    const float c1 = juce::jmax (c0 * 1.0001f, centersHz[k + 1]);
+    const float t = (std::log (f) - std::log (c0)) / juce::jmax (1.0e-6f, std::log (c1) - std::log (c0));
+    return db[k] + (db[k + 1] - db[k]) * juce::jlimit (0.0f, 1.0f, t);
 }
 
 void Processor::rebuildLattice() noexcept
@@ -59,25 +81,27 @@ void Processor::rebuildLattice() noexcept
     const float minHz = 20.0f;
     activeSlices = 0;
 
+    const int count = juce::jlimit (1, kNumSlices, desiredSliceCount);
+
     if (! (maxHz > minHz * 1.01f) || sampleRate <= 0.0)
         return;
 
     const double logMin = std::log ((double) minHz);
     const double logMax = std::log ((double) maxHz);
 
-    for (int i = 0; i < kNumSlices; ++i)
+    for (int i = 0; i < count; ++i)
     {
-        const double t = (kNumSlices == 1) ? 0.5
-            : (double) i / (double) (kNumSlices - 1);
+        const double t = (count == 1) ? 0.5
+            : (double) i / (double) (count - 1);
         const float f = (float) std::exp (logMin + t * (logMax - logMin));
 
         // Constant-Q packing so neighbours form a soft partition.
         // Smooth widens Q (lower Q) so bands overlap more and steps soften.
         float q = 1.0f;
-        if (kNumSlices >= 2)
+        if (count >= 2)
         {
-            const double t0 = (double) juce::jmax (0, i - 1) / (double) (kNumSlices - 1);
-            const double t1 = (double) juce::jmin (kNumSlices - 1, i + 1) / (double) (kNumSlices - 1);
+            const double t0 = (double) juce::jmax (0, i - 1) / (double) (count - 1);
+            const double t1 = (double) juce::jmin (count - 1, i + 1) / (double) (count - 1);
             const float f0 = (float) std::exp (logMin + t0 * (logMax - logMin));
             const float f1 = (float) std::exp (logMin + t1 * (logMax - logMin));
             const float ratio = juce::jmax (1.001f, f1 / juce::jmax (1.0f, f0));
@@ -338,34 +362,70 @@ void Processor::samplePublishedGrDb (const float* frequenciesHz, float* destDb, 
     }
 }
 
-void Processor::applySmoothToLatticeIfNeeded (float smooth01) noexcept
+void Processor::ensureLatticeConfig (float smooth01, int resolutionMode) noexcept
 {
     const float s = juce::jlimit (kMinSmooth, kMaxSmooth, smooth01);
-    if (std::abs (s - latticeSmooth01) < 1.0e-4f)
+    const int wantSlices = sliceCountForResolution (resolutionMode);
+    const bool smoothChanged = std::abs (s - latticeSmooth01) >= 1.0e-4f;
+    const bool resChanged = wantSlices != desiredSliceCount || activeSlices != wantSlices;
+
+    if (! smoothChanged && ! resChanged)
         return;
 
-    latticeSmooth01 = s;
-    if (! prepared)
-        return;
-
-    // Preserve envelopes / GR while swapping BP coeffs for the new Q packing.
+    std::array<float, kNumSlices> oldCenters {};
+    std::array<float, kNumSlices> oldTgt {};
     std::array<float, kNumSlices> env {};
     std::array<float, kNumSlices> grL {};
     std::array<float, kNumSlices> grT {};
-    for (int i = 0; i < activeSlices; ++i)
+    const int oldN = activeSlices;
     {
+        const juce::SpinLock::ScopedLockType lock (targetLock);
+        oldTgt = publishedTargetDb;
+    }
+    for (int i = 0; i < oldN; ++i)
+    {
+        oldCenters[(size_t) i] = slices[(size_t) i].centerHz;
         env[(size_t) i] = slices[(size_t) i].envDb;
         grL[(size_t) i] = slices[(size_t) i].grLin;
         grT[(size_t) i] = slices[(size_t) i].grTarget;
     }
 
+    latticeSmooth01 = s;
+    desiredSliceCount = wantSlices;
+
+    if (! prepared)
+        return;
+
     rebuildLattice();
 
-    for (int i = 0; i < activeSlices; ++i)
+    if (resChanged && oldN > 0 && activeSlices > 0)
+    {
+        for (int i = 0; i < activeSlices; ++i)
+            workingTargetDb[(size_t) i] = interpTargetDb (oldCenters.data(), oldTgt.data(),
+                                                          oldN, slices[(size_t) i].centerHz);
+        for (int i = activeSlices; i < kNumSlices; ++i)
+            workingTargetDb[(size_t) i] = 0.0f;
+        normalizeWorkingTarget();
+        const juce::SpinLock::ScopedLockType lock (targetLock);
+        publishedTargetDb = workingTargetDb;
+    }
+
+    // Preserve envelopes / GR where indices still overlap; reset IIR state after coeff swap.
+    const int keep = juce::jmin (oldN, activeSlices);
+    for (int i = 0; i < keep; ++i)
     {
         slices[(size_t) i].envDb = env[(size_t) i];
         slices[(size_t) i].grLin = grL[(size_t) i];
         slices[(size_t) i].grTarget = grT[(size_t) i];
+    }
+    for (int i = keep; i < activeSlices; ++i)
+    {
+        slices[(size_t) i].envDb = kSilenceFloorDb;
+        slices[(size_t) i].grLin = 1.0f;
+        slices[(size_t) i].grTarget = 1.0f;
+    }
+    for (int i = 0; i < activeSlices; ++i)
+    {
         slices[(size_t) i].detect.reset();
         slices[(size_t) i].applyL.reset();
         slices[(size_t) i].applyR.reset();
@@ -380,7 +440,10 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
                          int speedMode,
                          float smooth01,
                          float hpHz,
-                         float lpHz) noexcept
+                         float lpHz,
+                         int resolutionMode,
+                         int hpSlope,
+                         int lpSlope) noexcept
 {
     const int numCh = buffer.getNumChannels();
     const int n = buffer.getNumSamples();
@@ -412,7 +475,7 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
     wasEnabled = enabled;
     settling = ! enabled;
 
-    applySmoothToLatticeIfNeeded (smooth01);
+    ensureLatticeConfig (smooth01, resolutionMode);
 
     const float* detR = detectR != nullptr ? detectR : detectL;
     auto* outL = buffer.getWritePointer (0);
@@ -422,131 +485,160 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
     getBallisticsMs (speedMode, attackMs, releaseMs, grSmoothMs);
     const float atk = DynamicEq::coeffForTimeMs (attackMs, sampleRate, n);
     const float rel = DynamicEq::coeffForTimeMs (releaseMs, sampleRate, n);
-    const float grCoeff = 1.0f - std::exp (-1.0f / juce::jmax (1.0f,
-        (float) sampleRate * grSmoothMs * 0.001f));
+    // Block-rate GR smooth (same time constant as former per-sample path).
+    const float grSmooth = DynamicEq::coeffForTimeMs (grSmoothMs, sampleRate, n);
     const float amountClamped = juce::jlimit (kMinAmount, kMaxAmount, amount);
     const float spatialSmooth = juce::jlimit (kMinSmooth, kMaxSmooth, smooth01);
     const float bandLo = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmin (hpHz, lpHz));
     const float bandHi = juce::jlimit (kMinHpLpHz, kMaxFreqHz, juce::jmax (hpHz, lpHz));
 
+    juce::ignoreUnused (bandLo, bandHi);
+
+    // Cache HP/LP stages once per block (not per slice).
+    const bool useHp = hpHz > 1.0f;
+    const bool useLp = lpHz > 1.0f && lpHz < (float) sampleRate * 0.49f;
+    const auto hpStages = useHp
+        ? FilterSlope::makeHighpassCoeffs (sampleRate, hpHz, 0.70710678f, hpSlope)
+        : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+    const auto lpStages = useLp
+        ? FilterSlope::makeLowpassCoeffs (sampleRate, lpHz, 0.70710678f, lpSlope)
+        : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+
+    std::array<float, kNumSlices> edgeW {};
+    std::array<int, kNumSlices> activeIdx {};
+    int numActive = 0;
+    for (int b = 0; b < activeSlices; ++b)
+    {
+        float w = 1.0f;
+        if (useHp)
+            w *= FilterSlope::cascadeMagnitudeAt (hpStages, (double) slices[(size_t) b].centerHz, sampleRate);
+        if (useLp)
+            w *= FilterSlope::cascadeMagnitudeAt (lpStages, (double) slices[(size_t) b].centerHz, sampleRate);
+        edgeW[(size_t) b] = juce::jlimit (0.0f, 1.0f, w);
+        if (edgeW[(size_t) b] > 0.02f)
+            activeIdx[(size_t) numActive++] = b;
+    }
+
     std::array<float, kNumSlices> tgt {};
+    if (numActive > 0 && (enabled || settling))
     {
         const juce::SpinLock::ScopedLockType lock (targetLock);
         tgt = publishedTargetDb;
     }
 
-    for (int i = 0; i < activeSlices; ++i)
-        slices[(size_t) i].sumSq = 0.0;
+    for (int a = 0; a < numActive; ++a)
+        slices[(size_t) activeIdx[(size_t) a]].sumSq = 0.0f;
 
-    // Detect pass (mono mid).
+    // Detect pass — only in-band slices.
     for (int i = 0; i < n; ++i)
     {
         const float mid = 0.5f * (detectL[i] + detR[i]);
-        for (int b = 0; b < activeSlices; ++b)
+        for (int a = 0; a < numActive; ++a)
         {
-            auto& s = slices[(size_t) b];
+            auto& s = slices[(size_t) activeIdx[(size_t) a]];
             const float d = s.detect.processSample (mid);
-            s.sumSq += (double) d * (double) d;
+            s.sumSq += d * d;
         }
     }
 
-    // Update envelopes + GR targets (level-normalized shape error inside HP/LP window).
-    double measSum = 0.0;
-    double tgtSum = 0.0;
-    int inBandCount = 0;
+    // Envelopes + shape-error GR (in-band only).
+    float measSum = 0.0f;
+    float tgtSum = 0.0f;
     std::array<float, kNumSlices> measDb {};
-    std::array<bool, kNumSlices> inBand {};
-    for (int b = 0; b < activeSlices; ++b)
+    for (int a = 0; a < numActive; ++a)
     {
+        const int b = activeIdx[(size_t) a];
         auto& s = slices[(size_t) b];
-        const float rms = std::sqrt ((float) (s.sumSq / (double) n));
+        const float rms = std::sqrt (s.sumSq / (float) n);
         const float level = juce::Decibels::gainToDecibels (rms, kSilenceFloorDb);
         const float c = level > s.envDb ? atk : rel;
         s.envDb = c * s.envDb + (1.0f - c) * level;
         measDb[(size_t) b] = s.envDb;
-        inBand[(size_t) b] = s.centerHz >= bandLo && s.centerHz <= bandHi;
-        if (inBand[(size_t) b])
-        {
-            measSum += (double) s.envDb;
-            tgtSum += (double) tgt[(size_t) b];
-            ++inBandCount;
-        }
+        measSum += s.envDb;
+        tgtSum += tgt[(size_t) b];
     }
 
-    const float measMean = (float) (measSum / (double) juce::jmax (1, inBandCount));
-    const float tgtMean = (float) (tgtSum / (double) juce::jmax (1, inBandCount));
+    const float measMean = numActive > 0 ? measSum / (float) numActive : 0.0f;
+    const float tgtMean = numActive > 0 ? tgtSum / (float) numActive : 0.0f;
 
     for (int b = 0; b < activeSlices; ++b)
     {
         auto& s = slices[(size_t) b];
         float targetGrDb = 0.0f;
         if (enabled && amountClamped > 1.0e-4f
-            && inBandCount > 0
-            && inBand[(size_t) b]
+            && numActive > 0
+            && edgeW[(size_t) b] > 0.02f
             && measDb[(size_t) b] > kSilenceFloorDb + 1.0f)
         {
-            // Positive err = too loud vs target shape -> cut; negative -> boost.
             const float err = (measDb[(size_t) b] - measMean) - (tgt[(size_t) b] - tgtMean);
-            targetGrDb = juce::jlimit (-kMaxGrDb, kMaxGrDb, -err * amountClamped);
+            targetGrDb = juce::jlimit (-kMaxGrDb, kMaxGrDb, -err * amountClamped * edgeW[(size_t) b]);
         }
-        else if (! enabled)
-        {
-            targetGrDb = 0.0f;
-        }
-
         s.grTarget = juce::Decibels::decibelsToGain (targetGrDb);
     }
 
-    // Spatial GR blend across neighbours (0 = current stepped lattice, 1 = soft).
-    if (spatialSmooth > 1.0e-4f && activeSlices > 1)
+    // Spatial GR blend (active neighbours only; outside window forced to unity after).
+    if (spatialSmooth > 1.0e-4f && numActive > 1)
     {
         std::array<float, kNumSlices> rawGr {};
         for (int b = 0; b < activeSlices; ++b)
             rawGr[(size_t) b] = slices[(size_t) b].grTarget;
 
-        for (int b = 0; b < activeSlices; ++b)
+        for (int a = 0; a < numActive; ++a)
         {
-            const float left = rawGr[(size_t) juce::jmax (0, b - 1)];
+            const int b = activeIdx[(size_t) a];
+            const int bL = activeIdx[(size_t) juce::jmax (0, a - 1)];
+            const int bR = activeIdx[(size_t) juce::jmin (numActive - 1, a + 1)];
+            const float left = rawGr[(size_t) bL];
             const float center = rawGr[(size_t) b];
-            const float right = rawGr[(size_t) juce::jmin (activeSlices - 1, b + 1)];
+            const float right = rawGr[(size_t) bR];
             const float neigh = 0.25f * (left + 2.0f * center + right);
             slices[(size_t) b].grTarget = (1.0f - spatialSmooth) * center + spatialSmooth * neigh;
         }
     }
 
-    // Keep Match GR strictly inside the HP/LP window after Smooth blend.
     for (int b = 0; b < activeSlices; ++b)
-        if (! inBand[(size_t) b])
+        if (edgeW[(size_t) b] <= 0.02f)
             slices[(size_t) b].grTarget = 1.0f;
 
-    // Apply reconstruct on wet buffer (BP fed from pre-apply sample, like Side Check).
+    // Block-rate GR smooth + build apply list (skip unity GR).
+    std::array<int, kNumSlices> applyIdx {};
+    int numApply = 0;
     bool anyGr = false;
-    for (int i = 0; i < n; ++i)
+    for (int b = 0; b < activeSlices; ++b)
     {
-        const float inL = outL[i];
-        const float inR = outR != nullptr ? outR[i] : inL;
-        float l = inL;
-        float r = inR;
-
-        for (int b = 0; b < activeSlices; ++b)
+        auto& s = slices[(size_t) b];
+        s.grLin = grSmooth * s.grLin + (1.0f - grSmooth) * s.grTarget;
+        if (std::abs (s.grLin - 1.0f) > 1.0e-4f || std::abs (s.grTarget - 1.0f) > 1.0e-4f)
         {
-            auto& s = slices[(size_t) b];
-            s.grLin += (s.grTarget - s.grLin) * grCoeff;
-            if (std::abs (s.grLin - 1.0f) > 1.0e-4f)
-                anyGr = true;
-
-            const float bpL = s.applyL.processSample (inL);
-            l += bpL * (s.grLin - 1.0f);
-            if (outR != nullptr)
-            {
-                const float bpR = s.applyR.processSample (inR);
-                r += bpR * (s.grLin - 1.0f);
-            }
+            anyGr = true;
+            if (edgeW[(size_t) b] > 0.02f || std::abs (s.grLin - 1.0f) > 1.0e-4f)
+                applyIdx[(size_t) numApply++] = b;
         }
+    }
 
-        outL[i] = l;
-        if (outR != nullptr)
-            outR[i] = r;
+    // Apply reconstruct — only slices that still move the signal.
+    if (numApply > 0)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const float inL = outL[i];
+            const float inR = outR != nullptr ? outR[i] : inL;
+            float l = inL;
+            float r = inR;
+
+            for (int a = 0; a < numApply; ++a)
+            {
+                auto& s = slices[(size_t) applyIdx[(size_t) a]];
+                const float g = s.grLin - 1.0f;
+                l += s.applyL.processSample (inL) * g;
+                if (outR != nullptr)
+                    r += s.applyR.processSample (inR) * g;
+            }
+
+            outL[i] = l;
+            if (outR != nullptr)
+                outR[i] = r;
+        }
     }
 
     if (! enabled && ! anyGr)

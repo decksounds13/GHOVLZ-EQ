@@ -1381,21 +1381,18 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
     const bool showS = currentBandSupportsSpectral();
     const bool showSplit = currentBandSupportsSplitMode();
     const bool showSc = currentBandSupportsSidechain();
-    const bool matchOwnsSpectral = treeState.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
-                                   && treeState.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
     dynamicButton.setVisible (showD);
     transientModeButton.setVisible (showSplit);
     spectralButton.setVisible (showS);
-    spectralButton.setEnabled (! matchOwnsSpectral);
-    spectralButton.setTooltip (matchOwnsSpectral
-        ? "Spectral - unavailable while Match is on (Match owns global spectral shaping)"
-        : "Spectral - process resonances inside the band Q; Amount + Res + Expand + A/R. "
-          "Right-click for post-spectral saturation, lattice pack, and per-band lattice.");
+    spectralButton.setEnabled (true);
+    spectralButton.setTooltip (
+        "Spectral - process resonances inside the band Q; Amount + Res + Expand + A/R. "
+        "Works with Match. Right-click for post-spectral saturation, lattice pack, and per-band lattice.");
     sidechainButton.setVisible (showSc);
     syncTransientModeButton();
 
     const bool dOn = showD && dynamicButton.getToggleState();
-    const bool sOn = showS && spectralButton.getToggleState() && ! matchOwnsSpectral;
+    const bool sOn = showS && spectralButton.getToggleState();
     const bool scOn = showSc && sidechainButton.getToggleState();
     sidechainMidiButton.setVisible (scOn);
 

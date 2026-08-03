@@ -1015,6 +1015,9 @@
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp">
       <Filter>ParametricEqProject\Source\ColourRamp</Filter>
     </ClCompile>
@@ -4756,6 +4759,9 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Spectrogram3DComponent.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\GradientRamp.h">

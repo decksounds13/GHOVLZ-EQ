@@ -66,6 +66,32 @@ public:
 
     /** Optional custom LUT ramp (path-sampled). Null / disabled → scheme combo. */
     void setCustomColourRamp (const GradientRamp* ramp) noexcept;
+    /** Independent colour ramp for the 3D heightfield (does not affect 2D Spec). */
+    void setCustomColourRamp3D (const GradientRamp* ramp) noexcept;
+
+    /**
+        Snapshot history for 3D mesh (message thread). Out sizes are display history W/H;
+        column-major dB. Uses the 3D enhanced/classic buffer when it differs from 2D.
+    */
+    void getHistorySnapshot (std::vector<float>& outColumnMajorDb, int& outW, int& outH,
+                             float& outBrightness, float& outMinDb, float& outMaxDb) const;
+    /** Monotonic count of appended history columns (for stable 3D scroll). */
+    uint64_t getHistoryColumnSerial() const noexcept
+    {
+        return historyColumnSerial.load (std::memory_order_relaxed);
+    }
+    /** Refresh 3D colour LUT (message thread) before sampling mesh colours. */
+    void refreshColourLutFor3D() { rebuildColourLut3D(); }
+    /** Map dB → 2D LUT colour using current Spec brightness / range (message thread). */
+    juce::Colour colourFromHistoryDb (float db, float brightness, float minDb, float maxDb) const;
+    /** Map dB → 3D LUT colour (independent ramp / scheme fallback). */
+    juce::Colour colourFromHistoryDb3D (float db, float brightness, float minDb, float maxDb) const;
+
+    double getDisplaySampleRate() const noexcept
+    {
+        return sampleRateHz.load (std::memory_order_relaxed);
+    }
+    bool isLogFrequencyAxis() const { return loadBoolParam ("SPEC_LOG_FREQ_ID", true); }
 
     static constexpr int kWindowHeightPx = 80;
     /** Preferred compact width relative to a typical oscilloscope strip. */
@@ -102,12 +128,16 @@ private:
     void appendColumn (const float* magnitudesDb, int numBins);
     /** Deposit a finished display-row dB column (Enhanced Frequency path). */
     void appendDisplayColumn (const float* displayDbRows);
+    /** Scroll-only 3D history column (no 2D image update) when 2D/3D enhanced modes differ. */
+    void appendHistory3DColumn (const float* displayDbRows);
+    void buildClassicDisplayColumn (const float* magnitudesDb, int numBins, std::vector<float>& outRows);
     /** Scatter energy at IF into log rows; optional previous-column time reassignment.
         Returns true if the previous history column was written. */
     bool depositEnhanced (float* columnRows, float* prevColumnRows,
                           float ifHz, float db, double sr, bool logFreq,
                           float timeOffsetSamples, float hopSamples) const;
     void rebuildColourLut();
+    void rebuildColourLut3D();
     void resolveDisplaySize (int& outW, int& outH) const;
     void rebuildScreenSoftened();
     void softenColumnVertical (std::vector<float>& column, int numRows);
@@ -135,6 +165,8 @@ private:
     SharedResources* themeColors = nullptr;
     const GradientRamp* customColourRamp = nullptr;
     uint32_t customRampRevision = 0;
+    const GradientRamp* customColourRamp3D = nullptr;
+    uint32_t customRampRevision3D = 0;
 
     std::unique_ptr<juce::dsp::FFT> fft;
     std::unique_ptr<juce::dsp::WindowingFunction<float>> window;
@@ -183,11 +215,18 @@ private:
     melatonin::CachedBlur screenBlur { 2 };
     std::vector<float> columnScratch; // vertical soften before colourise
     std::vector<float> columnSoftTmp;
+    std::vector<float> columnClassic; // classic STFT rows when dual 2D/3D enhanced modes
     /** Display-row dB history (column-major, internalW * internalH) for full-strip recolour. */
     std::vector<float> historyDb;
+    /** Parallel history when 3D enhanced mode differs from 2D. */
+    std::vector<float> historyDb3D;
+    std::atomic<uint64_t> historyColumnSerial { 0 };
+    bool lastEnhanced2D = false;
+    bool lastEnhanced3D = false;
     uint32_t lastLookFingerprint = 0;
 
     std::array<juce::PixelARGB, kLutSize> colourLut {};
+    std::array<juce::PixelARGB, kLutSize> colourLut3D {};
     ColourScheme lutScheme = ColourScheme::numSchemes;
     bool logFreqCached = true;
     int fftSizeCachedForBins = 0;

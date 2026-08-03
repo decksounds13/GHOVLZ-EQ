@@ -26,6 +26,17 @@ ColourRampBank::ColourRampBank()
     }
     {
         GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+        r.stops = {
+            { 0.0f, juce::Colour::fromRGB (2, 0, 12) },
+            { 0.4f, juce::Colour::fromRGB (40, 120, 255) },
+            { 0.75f, juce::Colour::fromRGB (255, 90, 180) },
+            { 1.0f, juce::Colour::fromRGB (255, 245, 200) }
+        };
+        ramps[(int) Target::spectrogram3D] = std::move (r);
+    }
+    {
+        GradientRamp r;
         r.mapMode = GradientRamp::MapMode::bottomToTop;
         r.stops = {
             { 0.0f, juce::Colour::fromRGBA (58, 42, 32, 180) },
@@ -82,14 +93,15 @@ juce::String ColourRampBank::targetName (Target t)
 {
     switch (t)
     {
-        case Target::fftBars:      return "FFT Bars";
-        case Target::spectrogram:  return "Spectrogram";
-        case Target::spectrumFill: return "Spectrum Fill";
-        case Target::oscilloscope: return "Oscilloscope";
-        case Target::goniometer:   return "Goniometer";
-        case Target::stereogram:   return "Stereogram";
-        case Target::histogram:    return "Histogram";
-        default:                   return "Ramp";
+        case Target::fftBars:       return "FFT Bars";
+        case Target::spectrogram:   return "Spectrogram";
+        case Target::spectrogram3D: return "Spectrogram 3D";
+        case Target::spectrumFill:  return "Spectrum Fill";
+        case Target::oscilloscope:  return "Oscilloscope";
+        case Target::goniometer:    return "Goniometer";
+        case Target::stereogram:    return "Stereogram";
+        case Target::histogram:     return "Histogram";
+        default:                    return "Ramp";
     }
 }
 
@@ -242,6 +254,7 @@ juce::ValueTree ColourRampBank::toValueTree() const
     tree.setProperty ("activeTarget", (int) activeTarget, nullptr);
     tree.appendChild (ramps[(int) Target::fftBars].toValueTree ("FftBars"), nullptr);
     tree.appendChild (ramps[(int) Target::spectrogram].toValueTree ("Spectrogram"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrogram3D].toValueTree ("Spectrogram3D"), nullptr);
     tree.appendChild (ramps[(int) Target::spectrumFill].toValueTree ("SpectrumFill"), nullptr);
     tree.appendChild (ramps[(int) Target::oscilloscope].toValueTree ("Oscilloscope"), nullptr);
     tree.appendChild (ramps[(int) Target::goniometer].toValueTree ("Goniometer"), nullptr);
@@ -269,6 +282,7 @@ void ColourRampBank::applyFromValueTree (const juce::ValueTree& tree, bool force
 
     loadOne (Target::fftBars, "FftBars");
     loadOne (Target::spectrogram, "Spectrogram");
+    loadOne (Target::spectrogram3D, "Spectrogram3D");
     loadOne (Target::spectrumFill, "SpectrumFill");
     loadOne (Target::oscilloscope, "Oscilloscope");
     loadOne (Target::goniometer, "Goniometer");
@@ -303,9 +317,9 @@ void ColourRampBank::load()
             return;
 
         bool anyWereEnabled = false;
-        for (auto id : { juce::Identifier ("FftBars"), juce::Identifier ("Spectrogram"), juce::Identifier ("SpectrumFill"),
-                         juce::Identifier ("Oscilloscope"), juce::Identifier ("Goniometer"), juce::Identifier ("Stereogram"),
-                         juce::Identifier ("Histogram") })
+        for (auto id : { juce::Identifier ("FftBars"), juce::Identifier ("Spectrogram"), juce::Identifier ("Spectrogram3D"),
+                         juce::Identifier ("SpectrumFill"), juce::Identifier ("Oscilloscope"), juce::Identifier ("Goniometer"),
+                         juce::Identifier ("Stereogram"), juce::Identifier ("Histogram") })
         {
             auto child = tree.getChildWithName (id);
             if (child.isValid() && (bool) child.getProperty ("enabled", false))
@@ -323,7 +337,8 @@ void ColourRampBank::load()
 void ColourRampBank::sanitizeMapModes()
 {
     // FFT / Spec / Stereogram / Histogram = intensity; Osc = amp+freq; Fill = spatial; Gon = diversion.
-    for (auto t : { Target::fftBars, Target::spectrogram, Target::stereogram, Target::histogram })
+    for (auto t : { Target::fftBars, Target::spectrogram, Target::spectrogram3D,
+                    Target::stereogram, Target::histogram })
     {
         auto& r = ramps[(int) t];
         if (! r.isIntensityMap())

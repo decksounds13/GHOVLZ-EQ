@@ -152,7 +152,8 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     : sharedResources (resources),
       treeState (state),
       colourRamps (ramps),
-      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
+      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
+      gradient3DEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
     colourSchemeLookAndFeel.setThemeColors (&sharedResources);
@@ -189,7 +190,7 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (brightnessSlider);
     brightnessAttachment = std::make_unique<SliderAttachment> (treeState, "SPEC_BRIGHTNESS_ID", brightnessSlider);
 
-    gradientLabel.setText ("Custom Gradient", juce::dontSendNotification);
+    gradientLabel.setText ("Custom Gradient (2D)", juce::dontSendNotification);
     styleLabel (gradientLabel);
     gradientLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
     addAndMakeVisible (gradientLabel);
@@ -210,6 +211,28 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
             resized();
     };
     addAndMakeVisible (gradientEditor);
+
+    gradient3DLabel.setText ("Custom Gradient (3D)", juce::dontSendNotification);
+    styleLabel (gradient3DLabel);
+    gradient3DLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
+    addAndMakeVisible (gradient3DLabel);
+
+    gradient3DEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrogram3D));
+    gradient3DEditor.onRampChanged = [this] { colourRamps.notifyEdited(); };
+    gradient3DEditor.onRampPreview = [this] { colourRamps.notifyPreview(); };
+    gradient3DEditor.onSamplePath = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->beginRampSamplingForTarget (ColourRampBank::Target::spectrogram3D);
+    };
+    gradient3DEditor.onPreferredHeightChanged = [this]
+    {
+        if (auto* parent = findParentComponentOfClass<SpectrogramSettingsComponent>())
+            parent->resized();
+        else
+            resized();
+    };
+    addAndMakeVisible (gradient3DEditor);
 
     behaviourSectionLabel.setText ("Behaviour", juce::dontSendNotification);
     styleSectionLabel (behaviourSectionLabel);
@@ -286,8 +309,9 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
 
     styleToggle (enhancedFreqToggle);
     enhancedFreqToggle.setTooltip (
-        "Multi-resolution analysis + instantaneous-frequency reassignment: "
-        "thinner tonal ridges (especially bass). Uses more CPU — tune Strength / LF Detail below.");
+        "2D waterfall: multi-resolution analysis + instantaneous-frequency reassignment "
+        "(thinner tonal ridges, especially bass). Uses more CPU — tune Strength / LF Detail below. "
+        "Independent of the 3D toggle.");
     addAndMakeVisible (enhancedFreqToggle);
     enhancedFreqAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_ENHANCED_FREQ_ID", enhancedFreqToggle);
 
@@ -327,6 +351,74 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (freezeToggle);
     freezeAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_FREEZE_ID", freezeToggle);
 
+    view3dSectionLabel.setText ("3D View", juce::dontSendNotification);
+    styleSectionLabel (view3dSectionLabel);
+    addAndMakeVisible (view3dSectionLabel);
+
+    styleToggle (enable3DToggle);
+    enable3DToggle.setButtonText ("Enable 3D (expanded / Scope module)");
+    enable3DToggle.setTooltip (
+        "Expanded: show 3D over Spec. Scope: toggles the independent Spectrogram 3D module "
+        "(2D Spectrograph stays available separately).");
+    enable3DToggle.onClick = [this] { apply3DControlsToMain(); };
+    addAndMakeVisible (enable3DToggle);
+
+    styleToggle (enhancedFreq3DToggle);
+    enhancedFreq3DToggle.setTooltip (
+        "3D heightfield: same enhanced-frequency analysis as the 2D toggle, but independent. "
+        "When 2D and 3D disagree, both classic and enhanced columns are computed (extra CPU). "
+        "Strength / LF Detail / Crossover are shared.");
+    addAndMakeVisible (enhancedFreq3DToggle);
+    enhancedFreq3DAttachment = std::make_unique<ButtonAttachment> (
+        treeState, "SPEC_ENHANCED_FREQ_3D_ID", enhancedFreq3DToggle);
+
+    meshQualityLabel.setText ("Mesh Quality", juce::dontSendNotification);
+    styleCombo (meshQualityCombo);
+    meshQualityCombo.addItem ("Low", 1);
+    meshQualityCombo.addItem ("Medium", 2);
+    meshQualityCombo.addItem ("High", 3);
+    meshQualityCombo.onChange = [this] { apply3DControlsToMain(); };
+    addAndMakeVisible (meshQualityLabel);
+    addAndMakeVisible (meshQualityCombo);
+
+    meshHeightLabel.setText ("Mesh Height", juce::dontSendNotification);
+    styleSlider (meshHeightSlider);
+    meshHeightSlider.setRange (Spectrogram3DComponent::kMinMeshHeight,
+                               Spectrogram3DComponent::kMaxMeshHeight,
+                               0.01);
+    meshHeightSlider.setValue (Spectrogram3DComponent::kDefaultMeshHeight, juce::dontSendNotification);
+    meshHeightSlider.onValueChange = [this] { apply3DControlsToMain(); };
+    meshHeightSlider.setTooltip ("Peak height of the 3D spectrogram mesh (world units).");
+    addAndMakeVisible (meshHeightLabel);
+    addAndMakeVisible (meshHeightSlider);
+
+    styleToggle (msaaToggle);
+    msaaToggle.setTooltip ("4× multisample antialiasing for the 3D spectrogram (off by default).");
+    msaaToggle.onClick = [this] { apply3DControlsToMain(); };
+    addAndMakeVisible (msaaToggle);
+
+    styleToggle (transparentBgToggle);
+    transparentBgToggle.setTooltip (
+        "Samples the EQ graph under the 3D view and draws it behind the mesh "
+        "(true OpenGL HWND transparency is not available on Windows/Direct2D).");
+    transparentBgToggle.onClick = [this] { apply3DControlsToMain(); };
+    addAndMakeVisible (transparentBgToggle);
+
+    styleSaveDefaultButton (resetCameraButton);
+    resetCameraButton.setButtonText ("Reset 3D Camera");
+    resetCameraButton.onClick = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->resetSpec3DCamera();
+    };
+    addAndMakeVisible (resetCameraButton);
+
+    juce::Timer::callAfterDelay (0, [safe = juce::Component::SafePointer<Content> (this)]
+    {
+        if (safe != nullptr)
+            safe->sync3DControlsFromMain();
+    });
+
     styleLabel (titleLabel);
     styleLabel (colourSchemeLabel);
     styleLabel (brightnessLabel);
@@ -350,6 +442,7 @@ SpectrogramSettingsComponent::Content::~Content()
     displayResCombo.setLookAndFeel (nullptr);
     channelCombo.setLookAndFeel (nullptr);
     enhancedLfDetailCombo.setLookAndFeel (nullptr);
+    meshQualityCombo.setLookAndFeel (nullptr);
 }
 
 void SpectrogramSettingsComponent::Content::styleSlider (juce::Slider& slider)
@@ -437,21 +530,64 @@ void SpectrogramSettingsComponent::Content::syncGradientFromBank()
 {
     gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrogram));
     gradientEditor.repaint();
+    gradient3DEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrogram3D));
+    gradient3DEditor.repaint();
+}
+
+void SpectrogramSettingsComponent::Content::sync3DControlsFromMain()
+{
+    auto* main = findParentComponentOfClass<MainComponent>();
+    if (main == nullptr)
+        return;
+
+    enable3DToggle.setToggleState (
+        main->isScopeMode() ? main->isScopeModuleEnabled (ScopeModuleId::spectrogram3D)
+                            : main->isSpec3DMode(),
+        juce::dontSendNotification);
+    const auto q = main->getSpec3DMeshQuality();
+    meshQualityCombo.setSelectedId (
+        q == Spectrogram3DComponent::MeshQuality::low ? 1
+            : (q == Spectrogram3DComponent::MeshQuality::high ? 3 : 2),
+        juce::dontSendNotification);
+    msaaToggle.setToggleState (main->isSpec3DMultisampling(), juce::dontSendNotification);
+    transparentBgToggle.setToggleState (main->isSpec3DTransparentBackground(), juce::dontSendNotification);
+    meshHeightSlider.setValue (main->getSpec3DMeshHeight(), juce::dontSendNotification);
+}
+
+void SpectrogramSettingsComponent::Content::apply3DControlsToMain()
+{
+    auto* main = findParentComponentOfClass<MainComponent>();
+    if (main == nullptr)
+        return;
+
+    main->setSpec3DMode (enable3DToggle.getToggleState(), true);
+    const int id = meshQualityCombo.getSelectedId();
+    main->setSpec3DMeshQuality (
+        id == 1 ? Spectrogram3DComponent::MeshQuality::low
+                : (id == 3 ? Spectrogram3DComponent::MeshQuality::high
+                           : Spectrogram3DComponent::MeshQuality::medium),
+        true);
+    main->setSpec3DMultisampling (msaaToggle.getToggleState(), true);
+    main->setSpec3DTransparentBackground (transparentBgToggle.getToggleState(), true);
+    main->setSpec3DMeshHeight ((float) meshHeightSlider.getValue(), true);
 }
 
 int SpectrogramSettingsComponent::Content::getPreferredHeight() const
 {
-    const int comboRows = 5;   // colour, fft, display, channel, enhanced LF detail
-    const int sliderRows = 8;  // brightness, speed, min/max, smooth, soften, strength, crossover
-    const int toggles = 3;     // log, enhanced, freeze
+    const int comboRows = 6;   // colour, fft, display, channel, enhanced LF detail, mesh quality
+    const int sliderRows = 9;  // brightness, speed, min/max, smooth, soften, strength, crossover, mesh height
+    const int toggles = 7;     // log, enhanced 2D, freeze, enable 3D, enhanced 3D, 4x AA, soft BG
+    const int sections = 3;    // look, behaviour, 3D
 
     return kPadY * 2
            + 24 + 8
-           + 2 * (kSectionH + kLabelGap + kSectionGap)
+           + sections * (kSectionH + kLabelGap + kSectionGap)
            + comboRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
            + sliderRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
            + toggles * (22 + 6)
-           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
+           + (22 + 6) // reset camera
+           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap
+           + kLabelH + kLabelGap + gradient3DEditor.getPreferredHeight() + kRowGap;
 }
 
 void SpectrogramSettingsComponent::Content::resized()
@@ -467,6 +603,11 @@ void SpectrogramSettingsComponent::Content::resized()
     area.removeFromTop (kLabelGap);
     gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
                                   .removeFromLeft (juce::jmin (520, area.getWidth())));
+    area.removeFromTop (kRowGap);
+    gradient3DLabel.setBounds (area.removeFromTop (kLabelH));
+    area.removeFromTop (kLabelGap);
+    gradient3DEditor.setBounds (area.removeFromTop (gradient3DEditor.getPreferredHeight())
+                                    .removeFromLeft (juce::jmin (520, area.getWidth())));
     area.removeFromTop (kSectionGap);
 
     lookSectionLabel.setBounds (area.removeFromTop (kSectionH));
@@ -494,6 +635,23 @@ void SpectrogramSettingsComponent::Content::resized()
     layoutComboRow (area, enhancedLfDetailLabel, enhancedLfDetailCombo);
     layoutSliderRow (area, enhancedCrossoverLabel, enhancedCrossoverSlider);
     freezeToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+    area.removeFromTop (kSectionGap);
+
+    view3dSectionLabel.setBounds (area.removeFromTop (kSectionH));
+    area.removeFromTop (kLabelGap);
+    enable3DToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (320, area.getWidth())));
+    area.removeFromTop (6);
+    enhancedFreq3DToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (320, area.getWidth())));
+    area.removeFromTop (6);
+    layoutComboRow (area, meshQualityLabel, meshQualityCombo);
+    layoutSliderRow (area, meshHeightLabel, meshHeightSlider);
+    msaaToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+    area.removeFromTop (6);
+    transparentBgToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (320, area.getWidth())));
+    area.removeFromTop (6);
+    resetCameraButton.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (160, area.getWidth())));
+
+    sync3DControlsFromMain();
 }
 
 SpectrogramSettingsComponent::SpectrogramSettingsComponent (SharedResources& resources,

@@ -15,6 +15,7 @@ enum class ScopeModuleId : uint8_t
     loudness = 6,
     levelOut = 7,      // Level Meter 2 (default Output)
     histogram = 8,
+    spectrogram3D = 9, // OpenGL heightfield (optional; strip + tiled)
     numModules
 };
 
@@ -34,8 +35,9 @@ inline const char* idToKey (ScopeModuleId id) noexcept
         case ScopeModuleId::stereogram:   return "Stereogram";
         case ScopeModuleId::loudness:     return "Loudness";
         case ScopeModuleId::levelOut:     return "LevelOut";
-        case ScopeModuleId::histogram:    return "Histogram";
-        default:                          return "Unknown";
+        case ScopeModuleId::histogram:     return "Histogram";
+        case ScopeModuleId::spectrogram3D: return "Spectrogram3D";
+        default:                           return "Unknown";
     }
 }
 
@@ -43,30 +45,32 @@ inline juce::String idToLabel (ScopeModuleId id)
 {
     switch (id)
     {
-        case ScopeModuleId::levelIn:      return "Level Meter 1";
-        case ScopeModuleId::spectrogram:  return "Spectrograph";
-        case ScopeModuleId::spectrum:     return "Analyzer";
-        case ScopeModuleId::goniometer:   return "Goniometer";
-        case ScopeModuleId::oscilloscope: return "Oscilloscope";
-        case ScopeModuleId::stereogram:   return "Stereogram";
-        case ScopeModuleId::loudness:     return "Loudness";
-        case ScopeModuleId::levelOut:     return "Level Meter 2 (Output)";
-        case ScopeModuleId::histogram:    return "Histogram";
-        default:                          return "Module";
+        case ScopeModuleId::levelIn:       return "Level Meter 1";
+        case ScopeModuleId::spectrogram:   return "Spectrograph";
+        case ScopeModuleId::spectrum:      return "Analyzer";
+        case ScopeModuleId::goniometer:    return "Goniometer";
+        case ScopeModuleId::oscilloscope:  return "Oscilloscope";
+        case ScopeModuleId::stereogram:    return "Stereogram";
+        case ScopeModuleId::loudness:      return "Loudness";
+        case ScopeModuleId::levelOut:      return "Level Meter 2 (Output)";
+        case ScopeModuleId::histogram:     return "Histogram";
+        case ScopeModuleId::spectrogram3D: return "Spectrogram 3D";
+        default:                           return "Module";
     }
 }
 
 inline ScopeModuleId keyToId (const juce::String& key) noexcept
 {
-    if (key == "LevelIn")      return ScopeModuleId::levelIn;
-    if (key == "Spectrogram")  return ScopeModuleId::spectrogram;
-    if (key == "Spectrum")     return ScopeModuleId::spectrum;
-    if (key == "Goniometer")   return ScopeModuleId::goniometer;
-    if (key == "Oscilloscope") return ScopeModuleId::oscilloscope;
-    if (key == "Stereogram")   return ScopeModuleId::stereogram;
-    if (key == "Loudness")     return ScopeModuleId::loudness;
-    if (key == "LevelOut")     return ScopeModuleId::levelOut;
-    if (key == "Histogram")    return ScopeModuleId::histogram;
+    if (key == "LevelIn")       return ScopeModuleId::levelIn;
+    if (key == "Spectrogram")   return ScopeModuleId::spectrogram;
+    if (key == "Spectrum")      return ScopeModuleId::spectrum;
+    if (key == "Goniometer")    return ScopeModuleId::goniometer;
+    if (key == "Oscilloscope")  return ScopeModuleId::oscilloscope;
+    if (key == "Stereogram")    return ScopeModuleId::stereogram;
+    if (key == "Loudness")      return ScopeModuleId::loudness;
+    if (key == "LevelOut")      return ScopeModuleId::levelOut;
+    if (key == "Histogram")     return ScopeModuleId::histogram;
+    if (key == "Spectrogram3D") return ScopeModuleId::spectrogram3D;
     return ScopeModuleId::spectrum;
 }
 

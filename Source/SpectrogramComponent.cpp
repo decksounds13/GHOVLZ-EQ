@@ -222,6 +222,18 @@ void SpectrogramComponent::ensureHistoryBuffer()
     const size_t n = (size_t) juce::jmax (0, internalW) * (size_t) juce::jmax (0, internalH);
     if (historyDb.size() != n)
         historyDb.assign (n, -120.0f);
+
+    const bool dual = loadBoolParam ("SPEC_ENHANCED_FREQ_ID", false)
+                   != loadBoolParam ("SPEC_ENHANCED_FREQ_3D_ID", false);
+    if (dual)
+    {
+        if (historyDb3D.size() != n)
+            historyDb3D = historyDb; // seed so 3D isn't blank on first diverge
+    }
+    else if (! historyDb3D.empty())
+    {
+        historyDb3D.clear();
+    }
 }
 
 void SpectrogramComponent::ensureScratchImage()
@@ -244,6 +256,8 @@ void SpectrogramComponent::ensureScratchImage()
     scrollImage = juce::Image (juce::Image::ARGB, internalW, internalH, true);
     scrollImage.clear (scrollImage.getBounds(), juce::Colours::black);
     historyDb.assign ((size_t) internalW * (size_t) internalH, -120.0f);
+    historyDb3D.clear();
+    historyColumnSerial.store (0, std::memory_order_relaxed);
     if (sizeChanged)
     {
         srCachedForBins = 0.0;
@@ -259,6 +273,8 @@ void SpectrogramComponent::resetDisplay()
     if (scrollImage.isValid())
         scrollImage.clear (scrollImage.getBounds(), juce::Colours::black);
     historyDb.assign ((size_t) internalW * (size_t) internalH, -120.0f);
+    historyDb3D.clear();
+    historyColumnSerial.store (0, std::memory_order_relaxed);
     havePrevPhase = false;
     havePrevPhaseLf = false;
     havePrevPhaseMid = false;
@@ -399,6 +415,13 @@ void SpectrogramComponent::setCustomColourRamp (const GradientRamp* ramp) noexce
     repaint();
 }
 
+void SpectrogramComponent::setCustomColourRamp3D (const GradientRamp* ramp) noexcept
+{
+    customColourRamp3D = ramp;
+    customRampRevision3D = ramp != nullptr ? ramp->revision : 0;
+    rebuildColourLut3D();
+}
+
 void SpectrogramComponent::rebuildColourLut()
 {
     const auto scheme = currentScheme();
@@ -415,6 +438,24 @@ void SpectrogramComponent::rebuildColourLut()
     {
         const float t = (float) i / (float) (kLutSize - 1);
         colourLut[(size_t) i] = colourForScheme (scheme, t).getPixelARGB();
+    }
+}
+
+void SpectrogramComponent::rebuildColourLut3D()
+{
+    if (customColourRamp3D != nullptr && customColourRamp3D->isUsable())
+    {
+        customRampRevision3D = customColourRamp3D->revision;
+        customColourRamp3D->fillLut (colourLut3D.data(), kLutSize);
+        return;
+    }
+
+    // No custom 3D ramp: fall back to the same built-in scheme as 2D Spec.
+    const auto scheme = currentScheme();
+    for (int i = 0; i < kLutSize; ++i)
+    {
+        const float t = (float) i / (float) (kLutSize - 1);
+        colourLut3D[(size_t) i] = colourForScheme (scheme, t).getPixelARGB();
     }
 }
 
@@ -506,21 +547,25 @@ void SpectrogramComponent::advanceFromRing()
     if (fft == nullptr || fftSize <= 0 || internalW <= 0 || internalH <= 0)
         return;
 
-    const bool enhanced = loadBoolParam ("SPEC_ENHANCED_FREQ_ID", false);
-    const int lfDetail = enhanced ? juce::jlimit (0, 2, loadChoiceIndex ("SPEC_ENHANCED_LF_DETAIL_ID", 2)) : 0;
+    const bool enhanced2D = loadBoolParam ("SPEC_ENHANCED_FREQ_ID", false);
+    const bool enhanced3D = loadBoolParam ("SPEC_ENHANCED_FREQ_3D_ID", false);
+    const bool needEnhanced = enhanced2D || enhanced3D;
+    const bool needClassic = ! enhanced2D || ! enhanced3D;
+    const bool dualHistory = (enhanced2D != enhanced3D);
+    const int lfDetail = needEnhanced ? juce::jlimit (0, 2, loadChoiceIndex ("SPEC_ENHANCED_LF_DETAIL_ID", 2)) : 0;
     const int lfBoost = lfDetail;                 // 0=off, 1=2×, 2=4×
     const bool useMid = (lfDetail >= 2);          // mid 2× only with 4× LF
-    const float enhancedStrength = enhanced
+    const float enhancedStrength = needEnhanced
         ? juce::jlimit (0.0f, 1.0f, loadFloatParam ("SPEC_ENHANCED_STRENGTH_ID", 100.0f) / 100.0f)
         : 0.0f;
     const float crossoverHz = juce::jlimit (200.0f, 600.0f,
                                             loadFloatParam ("SPEC_ENHANCED_CROSSOVER_ID", 350.0f));
 
-    if (enhanced && lfBoost > 0)
+    if (needEnhanced && lfBoost > 0)
         ensureAuxFft (fftOrder, lfBoost, lfFft, lfWindow, lfFftOrder, lfFftSize,
                       lfFftWork, lfWindowed, columnDbLf, prevPhaseLf,
                       havePrevPhaseLf, lfFftSizeCachedForBins);
-    if (enhanced && useMid)
+    if (needEnhanced && useMid)
         ensureAuxFft (fftOrder, 1, midFft, midWindow, midFftOrder, midFftSize,
                       midFftWork, midWindowed, columnDbMid, prevPhaseMid,
                       havePrevPhaseMid, midFftSizeCachedForBins);
@@ -544,7 +589,7 @@ void SpectrogramComponent::advanceFromRing()
         available += cap;
 
     // Enhanced needs the longest aux window available before the first column.
-    const int analysisWindow = enhanced
+    const int analysisWindow = needEnhanced
         ? juce::jmax (fftSize, juce::jmax (lfFftSize, midFftSize))
         : fftSize;
 
@@ -563,16 +608,26 @@ void SpectrogramComponent::advanceFromRing()
     const bool logFreq = loadBoolParam ("SPEC_LOG_FREQ_ID", true);
     lastHopSamples = hop;
 
-    if (enhanced != lastEnhancedMode)
+    if (needEnhanced != lastEnhancedMode
+        || enhanced2D != lastEnhanced2D
+        || enhanced3D != lastEnhanced3D)
     {
-        lastEnhancedMode = enhanced;
+        lastEnhancedMode = needEnhanced;
+        lastEnhanced2D = enhanced2D;
+        lastEnhanced3D = enhanced3D;
         havePrevPhase = false;
         havePrevPhaseLf = false;
         havePrevPhaseMid = false;
         enhancedLfFrameCounter = 0;
+        if (dualHistory)
+            ensureHistoryBuffer();
+        else
+            historyDb3D.clear();
+        // Force 3D mesh to reseed — history content source may have switched.
+        historyColumnSerial.store (0, std::memory_order_relaxed);
     }
 
-    if (enhanced && (int) prevPhase.size() != numBins)
+    if (needEnhanced && (int) prevPhase.size() != numBins)
     {
         prevPhase.assign ((size_t) numBins, 0.0f);
         havePrevPhase = false;
@@ -633,7 +688,7 @@ void SpectrogramComponent::advanceFromRing()
         std::fill (fftWork.begin(), fftWork.end(), 0.0f);
         std::copy (windowed.begin(), windowed.end(), fftWork.begin());
 
-        if (enhanced)
+        if (needEnhanced)
         {
             constexpr float kTwoPi = juce::MathConstants<float>::twoPi;
             ++enhancedLfFrameCounter;
@@ -741,11 +796,20 @@ void SpectrogramComponent::advanceFromRing()
                 columnScratch[(size_t) y] = db;
             }
 
+            // Classic display rows from the same main STFT (for dual 2D/3D modes).
+            if (needClassic)
+                buildClassicDisplayColumn (columnDb.data(), numBins, columnClassic);
+
             // Reassigned column starts as continuum; IF deposits sharpen on top.
             columnSoftTmp = columnScratch;
             ensureHistoryBuffer();
-            float* prevHistoryCol = (internalW > 1 && ! historyDb.empty())
-                ? historyDb.data() + (size_t) (internalW - 1) * (size_t) internalH
+            // Time-reassignment writes into whichever history stores the enhanced view.
+            std::vector<float>* enhancedHistory = enhanced2D ? &historyDb
+                                                : (enhanced3D ? &historyDb3D : nullptr);
+            float* prevHistoryCol = (enhancedHistory != nullptr
+                                     && internalW > 1
+                                     && enhancedHistory->size() == historyDb.size())
+                ? enhancedHistory->data() + (size_t) (internalW - 1) * (size_t) internalH
                 : nullptr;
             bool touchedPrevColumn = false;
 
@@ -865,7 +929,8 @@ void SpectrogramComponent::advanceFromRing()
                 columnScratch.swap (columnSoftTmp);
             }
 
-            if (touchedPrevColumn && prevHistoryCol != nullptr)
+            // Recolour 2D scroll only when the enhanced history is the 2D buffer.
+            if (touchedPrevColumn && prevHistoryCol != nullptr && enhanced2D)
             {
                 const float brightness = juce::jlimit (10.0f, 200.0f,
                                                        loadFloatParam ("SPEC_BRIGHTNESS_ID", 100.0f)) / 100.0f;
@@ -898,7 +963,11 @@ void SpectrogramComponent::advanceFromRing()
                 }
             }
 
-            appendDisplayColumn (columnScratch.data());
+            const float* col2D = enhanced2D ? columnScratch.data() : columnClassic.data();
+            const float* col3D = enhanced3D ? columnScratch.data() : columnClassic.data();
+            appendDisplayColumn (col2D);
+            if (dualHistory)
+                appendHistory3DColumn (col3D);
         }
         else
         {
@@ -938,6 +1007,55 @@ uint32_t SpectrogramComponent::lookFingerprint() const
                                  ? (uint32_t) customColourRamp->mapMode : 0u;
     return scheme ^ (bright << 3) ^ (minDb << 7) ^ (maxDb << 13) ^ (soften << 19) ^ (logF << 29)
            ^ (rampOn << 1) ^ (rampMap << 22) ^ (rampRev * 2654435761u);
+}
+
+void SpectrogramComponent::getHistorySnapshot (std::vector<float>& outColumnMajorDb,
+                                               int& outW, int& outH,
+                                               float& outBrightness, float& outMinDb, float& outMaxDb) const
+{
+    outW = internalW;
+    outH = internalH;
+    outBrightness = juce::jlimit (10.0f, 200.0f, loadFloatParam ("SPEC_BRIGHTNESS_ID", 100.0f)) / 100.0f;
+    outMinDb = loadFloatParam ("SPEC_MIN_DB_ID", -90.0f);
+    outMaxDb = juce::jmax (outMinDb + 6.0f, loadFloatParam ("SPEC_MAX_DB_ID", -6.0f));
+
+    const size_t n = (size_t) juce::jmax (1, outW * outH);
+    const bool dual = loadBoolParam ("SPEC_ENHANCED_FREQ_ID", false)
+                   != loadBoolParam ("SPEC_ENHANCED_FREQ_3D_ID", false);
+    const auto& src = (dual && historyDb3D.size() == historyDb.size() && ! historyDb3D.empty())
+                          ? historyDb3D
+                          : historyDb;
+
+    if (src.size() != (size_t) internalW * (size_t) internalH)
+    {
+        outColumnMajorDb.assign (n, -120.0f);
+        return;
+    }
+
+    outColumnMajorDb = src;
+}
+
+juce::Colour SpectrogramComponent::colourFromHistoryDb (float db, float brightness,
+                                                        float minDb, float maxDb) const
+{
+    // Assumes colourLut is current (caller should rebuildColourLut / warm once per mesh).
+    const float dbGain = juce::Decibels::gainToDecibels (juce::jmax (brightness, 1.0e-3f), -100.0f);
+    const float denom = juce::jmax (1.0f, maxDb - minDb);
+    const float norm = juce::jlimit (0.0f, 1.0f, (db + dbGain - minDb) / denom);
+    const int lutIdx = juce::jlimit (0, kLutSize - 1,
+                                     (int) std::lround (norm * (float) (kLutSize - 1)));
+    return juce::Colour (colourLut[(size_t) lutIdx]);
+}
+
+juce::Colour SpectrogramComponent::colourFromHistoryDb3D (float db, float brightness,
+                                                          float minDb, float maxDb) const
+{
+    const float dbGain = juce::Decibels::gainToDecibels (juce::jmax (brightness, 1.0e-3f), -100.0f);
+    const float denom = juce::jmax (1.0f, maxDb - minDb);
+    const float norm = juce::jlimit (0.0f, 1.0f, (db + dbGain - minDb) / denom);
+    const int lutIdx = juce::jlimit (0, kLutSize - 1,
+                                     (int) std::lround (norm * (float) (kLutSize - 1)));
+    return juce::Colour (colourLut3D[(size_t) lutIdx]);
 }
 
 void SpectrogramComponent::colouriseColumnIntoImage (int x, const float* dbRows,
@@ -1012,6 +1130,7 @@ void SpectrogramComponent::ensureBinForRowMap()
     if (axisChanged)
     {
         historyDb.assign ((size_t) internalW * (size_t) internalH, -120.0f);
+    historyColumnSerial.store (0, std::memory_order_relaxed);
         if (scrollImage.isValid())
             scrollImage.clear (scrollImage.getBounds(), juce::Colours::black);
         lfFftSizeCachedForBins = 0;
@@ -1102,30 +1221,56 @@ bool SpectrogramComponent::depositEnhanced (float* columnRows, float* prevColumn
     return false;
 }
 
+void SpectrogramComponent::buildClassicDisplayColumn (const float* magnitudesDb, int numBins,
+                                                      std::vector<float>& outRows)
+{
+    if (magnitudesDb == nullptr || internalH <= 0)
+        return;
+
+    ensureBinForRowMap();
+    const int numBinsSafe = juce::jmax (1, numBins > 0 ? numBins : (fftSize / 2 + 1));
+    outRows.resize ((size_t) internalH);
+    for (int y = 0; y < internalH; ++y)
+    {
+        const float binF = binForRow[(size_t) y];
+        const int b0 = juce::jlimit (0, numBinsSafe - 1, (int) binF);
+        const int b1 = juce::jmin (numBinsSafe - 1, b0 + 1);
+        const float frac = juce::jlimit (0.0f, 1.0f, binF - (float) b0);
+        outRows[(size_t) y] = magnitudesDb[(size_t) b0] * (1.0f - frac)
+                            + magnitudesDb[(size_t) b1] * frac;
+    }
+    softenColumnVertical (outRows, internalH);
+}
+
 void SpectrogramComponent::appendColumn (const float* magnitudesDb, int numBins)
 {
-    juce::ignoreUnused (numBins);
     if (! scrollImage.isValid() || magnitudesDb == nullptr)
         return;
 
     ensureHistoryBuffer();
-    ensureBinForRowMap();
-
-    const int numBinsSafe = fftSize / 2 + 1;
-
-    // Interpolate bins → rows, then vertical Gaussian before storing / colourising.
-    columnScratch.resize ((size_t) internalH);
-    for (int y = 0; y < internalH; ++y)
-    {
-        const float binF = binForRow[(size_t) y];
-        const int b0 = (int) binF;
-        const int b1 = juce::jmin (numBinsSafe - 1, b0 + 1);
-        const float frac = binF - (float) b0;
-        columnScratch[(size_t) y] = magnitudesDb[(size_t) b0] * (1.0f - frac)
-                                  + magnitudesDb[(size_t) b1] * frac;
-    }
-    softenColumnVertical (columnScratch, internalH);
+    buildClassicDisplayColumn (magnitudesDb, numBins, columnScratch);
     appendDisplayColumn (columnScratch.data());
+}
+
+void SpectrogramComponent::appendHistory3DColumn (const float* displayDbRows)
+{
+    if (displayDbRows == nullptr || internalH <= 0 || internalW <= 0)
+        return;
+
+    ensureHistoryBuffer();
+    const size_t n = (size_t) internalW * (size_t) internalH;
+    if (historyDb3D.size() != n)
+        historyDb3D.assign (n, -120.0f);
+
+    if (internalW > 1)
+    {
+        std::memmove (historyDb3D.data(),
+                      historyDb3D.data() + (size_t) internalH,
+                      (size_t) (internalW - 1) * (size_t) internalH * sizeof (float));
+    }
+
+    std::copy (displayDbRows, displayDbRows + internalH,
+               historyDb3D.begin() + (size_t) (internalW - 1) * (size_t) internalH);
 }
 
 void SpectrogramComponent::appendDisplayColumn (const float* displayDbRows)
@@ -1161,6 +1306,7 @@ void SpectrogramComponent::appendDisplayColumn (const float* displayDbRows)
     const int x = internalW - 1;
     std::copy (displayDbRows, displayDbRows + internalH,
                historyDb.begin() + (size_t) x * (size_t) internalH);
+    historyColumnSerial.fetch_add (1, std::memory_order_relaxed);
 
     const float brightness = juce::jlimit (10.0f, 200.0f, loadFloatParam ("SPEC_BRIGHTNESS_ID", 100.0f)) / 100.0f;
     const float minDb = loadFloatParam ("SPEC_MIN_DB_ID", -90.0f);
@@ -1211,6 +1357,7 @@ void SpectrogramComponent::timerCallback()
         {
             // Axis change: history rows are wrong — clear; new columns refill.
             historyDb.assign ((size_t) internalW * (size_t) internalH, -120.0f);
+    historyColumnSerial.store (0, std::memory_order_relaxed);
             if (scrollImage.isValid())
                 scrollImage.clear (scrollImage.getBounds(), juce::Colours::black);
             logFreqCached = logNow;
