@@ -1469,8 +1469,6 @@ void EqEditor::layoutHelpTooltipsButton()
     constexpr int trimH = 30;
     const int btnSize = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
     const int margin = px (8.0f);
-    // Scope quad: osc tools sit in the BL pane — nudge ? / Phase / SideCheck / Scope right.
-    const int scopeShift = (mainComponent != nullptr && mainComponent->isScopeMode()) ? 100 : 0;
 
     const int pianoH = (mainComponent != nullptr)
         ? mainComponent->getFrequencyResponseComponent().getPianoStripHeight() : 0;
@@ -1484,7 +1482,7 @@ void EqEditor::layoutHelpTooltipsButton()
         constexpr int gap = 4;
         constexpr int bottomMargin = 18;
         const int graphBottom = (mainComponent != nullptr) ? mainComponent->getBottom() : getHeight();
-        const int x = pLeft + pW + gap + scopeShift;
+        const int x = pLeft + pW + gap;
         const int y = graphBottom - btnSize - bottomMargin - pianoH;
         helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
     }
@@ -1494,14 +1492,14 @@ void EqEditor::layoutHelpTooltipsButton()
         if (modPanelOpen && mainComponent != nullptr)
         {
             constexpr int bottomMargin = 18;
-            const int x = margin + scopeShift;
+            const int x = margin;
             const int y = mainComponent->getBottom() - btnSize - bottomMargin - pianoH;
             helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
         }
         else
         {
             const int trimTop = getHeight() - trimH;
-            const int x = margin + scopeShift;
+            const int x = margin;
             const int y = trimTop + (trimH - btnSize) / 2;
             helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
         }
@@ -1627,22 +1625,27 @@ void EqEditor::layoutScopeModeButton()
 
     const int chromeY = y;
 
-    int scopeX = getWidth() - btnW - px (8.0f);
+    // Keep Scope beside Match (same place as when not in Scope mode). Do not park it
+    // on the far right when OSC/Gon/Spec toggles are hidden.
+    int scopeX = x;
     int scopeY = chromeY;
     if (mainComponent != nullptr)
     {
         auto& frc = mainComponent->getFrequencyResponseComponent();
-        // X only from editor; FRC places Match on the Mod/P piano-aware baseline.
         const auto matchBounds = frc.layoutMatchChromeAt (
             frc.getLocalPoint (this, juce::Point<int> (x, chromeY)), btnSize, matchBtnW);
         const auto matchEditor = getLocalArea (&frc, matchBounds);
+        scopeX = matchEditor.getRight() + gap;
         scopeY = matchEditor.getY() + (matchEditor.getHeight() - btnSize) / 2;
 
-        const auto col = mainComponent->getAnalyserToggleColumnBounds();
-        if (! col.isEmpty())
+        if (! mainComponent->isScopeMode())
         {
-            const auto colInEditor = getLocalArea (mainComponent.get(), col);
-            scopeX = colInEditor.getX() + (colInEditor.getWidth() - btnW) / 2;
+            const auto col = mainComponent->getAnalyserToggleColumnBounds();
+            if (! col.isEmpty())
+            {
+                const auto colInEditor = getLocalArea (mainComponent.get(), col);
+                scopeX = colInEditor.getX() + (colInEditor.getWidth() - btnW) / 2;
+            }
         }
     }
 
@@ -2215,9 +2218,27 @@ void EqEditor::loadUiPrefs()
     bool pianoDisplayOnLoad = false;
     bool spec3DOnLoad = false;
     int spec3DMeshQuality = 1; // medium
-    bool spec3DMsaa = false;
-    bool spec3DTransparentBg = false;
+    int spec3DMsaaLevel = 4; // 4x default
+    bool spec3DTransparentBg = true;
+    bool spec3DReverseFreq = true;
     float spec3DMeshHeight = Spectrogram3DComponent::kDefaultMeshHeight;
+    bool spec3DLighting = false;
+    float spec3DLightingAmt = 0.70f;
+    float spec3DLightAz = -40.0f;
+    float spec3DLightEl = 55.0f;
+    float spec3DSpecular = 0.35f;
+    float spec3DRoughness = 0.45f;
+    float spec3DRim = 0.22f;
+    bool spec3DContactShadow = false;
+    float spec3DContactShadowStr = 0.45f;
+    bool spec3DSelfShadow = false;
+    float spec3DSelfShadowStr = 0.65f;
+    bool spec3DSsao = false;
+    float spec3DSsaoStr = 0.55f;
+    float spec3DSsaoRad = 1.0f;
+    bool spec3DBloom = false;
+    float spec3DBloomStr = 0.45f;
+    float spec3DBloomThr = 0.62f;
     bool oscExpandedOnLoad = false;
     bool gonExpandedOnLoad = false;
     bool specExpandedOnLoad = false;
@@ -2302,10 +2323,37 @@ void EqEditor::loadUiPrefs()
                 pianoDisplayOnLoad = xml->getBoolAttribute ("pianoDisplay", false);
                 spec3DOnLoad = xml->getBoolAttribute ("spec3d", false);
                 spec3DMeshQuality = xml->getIntAttribute ("spec3dMeshQuality", 1);
-                spec3DMsaa = xml->getBoolAttribute ("spec3dMsaa", false);
-                spec3DTransparentBg = xml->getBoolAttribute ("spec3dTransparentBg", false);
+                if (xml->hasAttribute ("spec3dMsaaLevel"))
+                {
+                    const int level = xml->getIntAttribute ("spec3dMsaaLevel", 4);
+                    spec3DMsaaLevel = (level == 0 || level == 4 || level == 8 || level == 16) ? level : 4;
+                }
+                else
+                {
+                    // Migrate legacy bool: on → 4x, off stays off.
+                    spec3DMsaaLevel = xml->getBoolAttribute ("spec3dMsaa", true) ? 4 : 0;
+                }
+                spec3DTransparentBg = xml->getBoolAttribute ("spec3dTransparentBg", true);
+                spec3DReverseFreq = xml->getBoolAttribute ("spec3dReverseFreq", true);
                 spec3DMeshHeight = (float) xml->getDoubleAttribute (
                     "spec3dMeshHeight", Spectrogram3DComponent::kDefaultMeshHeight);
+                spec3DLighting = xml->getBoolAttribute ("spec3dLighting", false);
+                spec3DLightingAmt = (float) xml->getDoubleAttribute ("spec3dLightingAmt", 0.70);
+                spec3DLightAz = (float) xml->getDoubleAttribute ("spec3dLightAz", -40.0);
+                spec3DLightEl = (float) xml->getDoubleAttribute ("spec3dLightEl", 55.0);
+                spec3DSpecular = (float) xml->getDoubleAttribute ("spec3dSpecular", 0.35);
+                spec3DRoughness = (float) xml->getDoubleAttribute ("spec3dRoughness", 0.45);
+                spec3DRim = (float) xml->getDoubleAttribute ("spec3dRim", 0.22);
+                spec3DContactShadow = xml->getBoolAttribute ("spec3dContactShadow", false);
+                spec3DContactShadowStr = (float) xml->getDoubleAttribute ("spec3dContactShadowStr", 0.45);
+                spec3DSelfShadow = xml->getBoolAttribute ("spec3dSelfShadow", false);
+                spec3DSelfShadowStr = (float) xml->getDoubleAttribute ("spec3dSelfShadowStr", 0.65);
+                spec3DSsao = xml->getBoolAttribute ("spec3dSsao", false);
+                spec3DSsaoStr = (float) xml->getDoubleAttribute ("spec3dSsaoStr", 0.55);
+                spec3DSsaoRad = (float) xml->getDoubleAttribute ("spec3dSsaoRad", 1.0);
+                spec3DBloom = xml->getBoolAttribute ("spec3dBloom", false);
+                spec3DBloomStr = (float) xml->getDoubleAttribute ("spec3dBloomStr", 0.45);
+                spec3DBloomThr = (float) xml->getDoubleAttribute ("spec3dBloomThr", 0.62);
                 oscExpandedOnLoad = xml->getBoolAttribute ("oscExpanded", false);
                 gonExpandedOnLoad = xml->getBoolAttribute ("gonExpanded", false);
                 specExpandedOnLoad = xml->getBoolAttribute ("specExpanded", false);
@@ -2340,12 +2388,36 @@ void EqEditor::loadUiPrefs()
         mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (pianoDisplayOnLoad, false);
         mainComponent->setSpec3DMeshQuality (
             spec3DMeshQuality <= 0 ? Spectrogram3DComponent::MeshQuality::low
-                                  : (spec3DMeshQuality >= 2 ? Spectrogram3DComponent::MeshQuality::high
-                                                           : Spectrogram3DComponent::MeshQuality::medium),
+                                  : (spec3DMeshQuality == 1 ? Spectrogram3DComponent::MeshQuality::medium
+                                     : (spec3DMeshQuality == 2 ? Spectrogram3DComponent::MeshQuality::high
+                                                               : Spectrogram3DComponent::MeshQuality::ultra)),
             false);
-        mainComponent->setSpec3DMultisampling (spec3DMsaa, false);
+        mainComponent->setSpec3DMsaaLevel (
+            spec3DMsaaLevel == 0 ? Spectrogram3DComponent::MsaaLevel::off
+                                : (spec3DMsaaLevel == 8 ? Spectrogram3DComponent::MsaaLevel::x8
+                                   : (spec3DMsaaLevel == 16 ? Spectrogram3DComponent::MsaaLevel::x16
+                                                           : Spectrogram3DComponent::MsaaLevel::x4)),
+            false);
         mainComponent->setSpec3DTransparentBackground (spec3DTransparentBg, false);
+        mainComponent->setSpec3DReverseFrequencyAxis (spec3DReverseFreq, false);
         mainComponent->setSpec3DMeshHeight (spec3DMeshHeight, false);
+        mainComponent->setSpec3DLightingEnabled (spec3DLighting, false);
+        mainComponent->setSpec3DLightingAmount (spec3DLightingAmt, false);
+        mainComponent->setSpec3DLightAzimuthDeg (spec3DLightAz, false);
+        mainComponent->setSpec3DLightElevationDeg (spec3DLightEl, false);
+        mainComponent->setSpec3DSpecularAmount (spec3DSpecular, false);
+        mainComponent->setSpec3DRoughnessAmount (spec3DRoughness, false);
+        mainComponent->setSpec3DRimAmount (spec3DRim, false);
+        mainComponent->setSpec3DContactShadowEnabled (spec3DContactShadow, false);
+        mainComponent->setSpec3DContactShadowStrength (spec3DContactShadowStr, false);
+        mainComponent->setSpec3DSelfShadowEnabled (spec3DSelfShadow, false);
+        mainComponent->setSpec3DSelfShadowStrength (spec3DSelfShadowStr, false);
+        mainComponent->setSpec3DSsaoEnabled (spec3DSsao, false);
+        mainComponent->setSpec3DSsaoStrength (spec3DSsaoStr, false);
+        mainComponent->setSpec3DSsaoRadius (spec3DSsaoRad, false);
+        mainComponent->setSpec3DBloomEnabled (spec3DBloom, false);
+        mainComponent->setSpec3DBloomStrength (spec3DBloomStr, false);
+        mainComponent->setSpec3DBloomThreshold (spec3DBloomThr, false);
         if (spec3DCamCustom)
             mainComponent->setSpec3DDefaultCamera (spec3DCam, true);
         // Cube preference only — do not open maximized 3D/overlays on load.
@@ -2410,10 +2482,30 @@ void EqEditor::saveUiPrefs() const
         const auto q = mainComponent->getSpec3DMeshQuality();
         xml->setAttribute ("spec3dMeshQuality",
                            q == Spectrogram3DComponent::MeshQuality::low ? 0
-                               : (q == Spectrogram3DComponent::MeshQuality::high ? 2 : 1));
-        xml->setAttribute ("spec3dMsaa", mainComponent->isSpec3DMultisampling());
+                               : (q == Spectrogram3DComponent::MeshQuality::medium ? 1
+                                  : (q == Spectrogram3DComponent::MeshQuality::high ? 2 : 3)));
+        xml->setAttribute ("spec3dMsaaLevel", (int) mainComponent->getSpec3DMsaaLevel());
+        xml->setAttribute ("spec3dMsaa", mainComponent->isSpec3DMultisampling()); // legacy
         xml->setAttribute ("spec3dTransparentBg", mainComponent->isSpec3DTransparentBackground());
+        xml->setAttribute ("spec3dReverseFreq", mainComponent->isSpec3DReverseFrequencyAxis());
         xml->setAttribute ("spec3dMeshHeight", (double) mainComponent->getSpec3DMeshHeight());
+        xml->setAttribute ("spec3dLighting", mainComponent->isSpec3DLightingEnabled());
+        xml->setAttribute ("spec3dLightingAmt", (double) mainComponent->getSpec3DLightingAmount());
+        xml->setAttribute ("spec3dLightAz", (double) mainComponent->getSpec3DLightAzimuthDeg());
+        xml->setAttribute ("spec3dLightEl", (double) mainComponent->getSpec3DLightElevationDeg());
+        xml->setAttribute ("spec3dSpecular", (double) mainComponent->getSpec3DSpecularAmount());
+        xml->setAttribute ("spec3dRoughness", (double) mainComponent->getSpec3DRoughnessAmount());
+        xml->setAttribute ("spec3dRim", (double) mainComponent->getSpec3DRimAmount());
+        xml->setAttribute ("spec3dContactShadow", mainComponent->isSpec3DContactShadowEnabled());
+        xml->setAttribute ("spec3dContactShadowStr", (double) mainComponent->getSpec3DContactShadowStrength());
+        xml->setAttribute ("spec3dSelfShadow", mainComponent->isSpec3DSelfShadowEnabled());
+        xml->setAttribute ("spec3dSelfShadowStr", (double) mainComponent->getSpec3DSelfShadowStrength());
+        xml->setAttribute ("spec3dSsao", mainComponent->isSpec3DSsaoEnabled());
+        xml->setAttribute ("spec3dSsaoStr", (double) mainComponent->getSpec3DSsaoStrength());
+        xml->setAttribute ("spec3dSsaoRad", (double) mainComponent->getSpec3DSsaoRadius());
+        xml->setAttribute ("spec3dBloom", mainComponent->isSpec3DBloomEnabled());
+        xml->setAttribute ("spec3dBloomStr", (double) mainComponent->getSpec3DBloomStrength());
+        xml->setAttribute ("spec3dBloomThr", (double) mainComponent->getSpec3DBloomThreshold());
         xml->setAttribute ("oscExpanded", mainComponent->isOscExpanded());
         xml->setAttribute ("gonExpanded", mainComponent->isGonExpanded());
         xml->setAttribute ("specExpanded", mainComponent->isSpecExpanded());

@@ -25,6 +25,7 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     /** Audio-thread safe: push latest block when enabled. */
     void pushSamples (const float* left, const float* right, int numSamples) noexcept;
@@ -60,6 +61,7 @@ public:
     void clearColourRamp();
 
     std::function<void()> onShowContextMenu;
+    std::function<void()> onDoubleClick;
 
     static constexpr int kWindowHeightPx = 80; // 60 * 4/3
     static constexpr int kWavePadPx = 2;

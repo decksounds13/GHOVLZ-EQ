@@ -432,6 +432,12 @@ void GoniometerComponent::mouseDown (const juce::MouseEvent& e)
         onShowContextMenu();
 }
 
+void GoniometerComponent::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}
+
 void GoniometerComponent::paint (juce::Graphics& g)
 {
     const auto& theme = colors();

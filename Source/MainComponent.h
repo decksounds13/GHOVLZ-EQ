@@ -16,6 +16,7 @@
 #include "GoniometerComponent.h"
 #include "SpectrogramComponent.h"
 #include "Spectrogram3DComponent.h"
+#include "FramedFloatingScopeWindow.h"
 #include "ScopeModules.h"
 #include "ScopeLayoutPresets.h"
 #include "ScopeLevelMeterModule.h"
@@ -133,12 +134,51 @@ public:
     bool isSpec3DMode() const noexcept { return spec3DEnabled; }
     void setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs = true);
     Spectrogram3DComponent::MeshQuality getSpec3DMeshQuality() const noexcept;
-    void setSpec3DMultisampling (bool shouldEnable, bool notifyPrefs = true);
+    void setSpec3DMsaaLevel (Spectrogram3DComponent::MsaaLevel level, bool notifyPrefs = true);
+    Spectrogram3DComponent::MsaaLevel getSpec3DMsaaLevel() const noexcept;
     bool isSpec3DMultisampling() const noexcept;
     void setSpec3DTransparentBackground (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DTransparentBackground() const noexcept;
+    void setSpec3DReverseFrequencyAxis (bool shouldReverse, bool notifyPrefs = true);
+    bool isSpec3DReverseFrequencyAxis() const noexcept;
     void setSpec3DMeshHeight (float heightWorld, bool notifyPrefs = true);
     float getSpec3DMeshHeight() const noexcept;
+
+    void setSpec3DLightingEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DLightingEnabled() const noexcept;
+    void setSpec3DLightingAmount (float amount01, bool notifyPrefs = true);
+    float getSpec3DLightingAmount() const noexcept;
+    void setSpec3DLightAzimuthDeg (float deg, bool notifyPrefs = true);
+    float getSpec3DLightAzimuthDeg() const noexcept;
+    void setSpec3DLightElevationDeg (float deg, bool notifyPrefs = true);
+    float getSpec3DLightElevationDeg() const noexcept;
+    void setSpec3DSpecularAmount (float amount01, bool notifyPrefs = true);
+    float getSpec3DSpecularAmount() const noexcept;
+    void setSpec3DRoughnessAmount (float amount01, bool notifyPrefs = true);
+    float getSpec3DRoughnessAmount() const noexcept;
+    void setSpec3DRimAmount (float amount01, bool notifyPrefs = true);
+    float getSpec3DRimAmount() const noexcept;
+    void setSpec3DContactShadowEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DContactShadowEnabled() const noexcept;
+    void setSpec3DContactShadowStrength (float amount01, bool notifyPrefs = true);
+    float getSpec3DContactShadowStrength() const noexcept;
+    void setSpec3DSelfShadowEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSelfShadowEnabled() const noexcept;
+    void setSpec3DSelfShadowStrength (float amount01, bool notifyPrefs = true);
+    float getSpec3DSelfShadowStrength() const noexcept;
+    void setSpec3DSsaoEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSsaoEnabled() const noexcept;
+    void setSpec3DSsaoStrength (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsaoStrength() const noexcept;
+    void setSpec3DSsaoRadius (float radius, bool notifyPrefs = true);
+    float getSpec3DSsaoRadius() const noexcept;
+    void setSpec3DBloomEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DBloomEnabled() const noexcept;
+    void setSpec3DBloomStrength (float amount01, bool notifyPrefs = true);
+    float getSpec3DBloomStrength() const noexcept;
+    void setSpec3DBloomThreshold (float amount01, bool notifyPrefs = true);
+    float getSpec3DBloomThreshold() const noexcept;
+
     void resetSpec3DCamera() noexcept { spectrogram3D.resetCamera(); }
     void setSpec3DDefaultCamera (const Spectrogram3DComponent::CameraState& state, bool applyNow = true) noexcept;
     Spectrogram3DComponent::CameraState getSpec3DDefaultCamera() const noexcept;
@@ -149,8 +189,15 @@ public:
     bool isOscExpanded() const noexcept { return oscExpanded; }
     bool isGonExpanded() const noexcept { return gonExpanded; }
     bool isSpecExpanded() const noexcept { return specExpanded; }
+    bool isOscFullGraph() const noexcept { return oscFullGraph; }
+    bool isGonFullGraph() const noexcept { return gonFullGraph; }
+    bool isSpecFullGraph() const noexcept { return specFullGraph; }
+    void toggleOscFullGraph();
+    void toggleGonFullGraph();
+    void toggleSpecFullGraph();
     /** Restore a maximized overlay after editor reopen (enables the module if needed). */
     void restoreExpandedScope (bool osc, bool gon, bool spec);
+    void closeSettingsMenu();
 
     /** Union of OSC / Gon / Spec toggle bounds (MainComponent local) for Scope chrome alignment. */
     juce::Rectangle<int> getAnalyserToggleColumnBounds() const noexcept
@@ -500,14 +547,17 @@ private:
     /** OSC toggle — shows a compact beat-synced waveform between Eco and L/R. */
     juce::TextButton oscButton { "OSC" };
     OscilloscopeComponent oscilloscope;
+    FramedFloatingScopeWindow oscFrame;
 
     /** Gon toggle — sits under OSC; square goniometer + correlation on the right. */
     juce::TextButton gonButton { "Gon" };
     GoniometerComponent goniometer;
+    FramedFloatingScopeWindow gonFrame;
 
     /** Spec toggle — spectrogram strip between UI dice and the EQ preset bar. */
     juce::TextButton specButton { "Spec" };
     SpectrogramComponent spectrogram;
+    FramedFloatingScopeWindow specFrame;
     Spectrogram3DComponent spectrogram3D;
 
     ScopeLevelMeterModule levelMeterIn;
@@ -527,6 +577,24 @@ private:
     };
 
     OscDimmerComponent oscDimmer;
+
+    /** Closes Settings when clicking outside the menu. */
+    class MenuDismissCatcher : public juce::Component
+    {
+    public:
+        explicit MenuDismissCatcher (MainComponent& o) : owner (o)
+        {
+            setOpaque (false);
+            setInterceptsMouseClicks (true, false);
+        }
+
+        void mouseDown (const juce::MouseEvent&) override { owner.closeSettingsMenu(); }
+
+    private:
+        MainComponent& owner;
+    };
+
+    MenuDismissCatcher menuDismissCatcher { *this };
 
     /** Hit-tests only near the crosshair; drag H/V split ratios for Scope mode. */
     class ScopeSplitOverlay : public juce::Component
@@ -644,6 +712,10 @@ private:
     bool oscExpanded = false;
     bool gonExpanded = false;
     bool specExpanded = false;
+    /** When expanded: false = framed floating window, true = edge-to-edge full graph. */
+    bool oscFullGraph = false;
+    bool gonFullGraph = false;
+    bool specFullGraph = false;
     bool spec3DEnabled = false;
     /** User-dragged expanded 3D window size/position (component bounds, includes shadow pad). */
     bool spec3DBoundsCustom = false;
@@ -651,6 +723,33 @@ private:
     int spec3DPreferredH = 0;
     int spec3DPreferredX = 0;
     int spec3DPreferredY = 0;
+    bool oscFrameBoundsCustom = false;
+    int oscFramePreferredW = 0, oscFramePreferredH = 0, oscFramePreferredX = 0, oscFramePreferredY = 0;
+    bool gonFrameBoundsCustom = false;
+    int gonFramePreferredW = 0, gonFramePreferredH = 0, gonFramePreferredX = 0, gonFramePreferredY = 0;
+    bool specFrameBoundsCustom = false;
+    int specFramePreferredW = 0, specFramePreferredH = 0, specFramePreferredX = 0, specFramePreferredY = 0;
+
+    juce::Rectangle<int> getFramedScopeAvailableArea() const;
+    int getFramedToolButtonSize() const noexcept;
+    int getFramedToolColumnWidth() const noexcept;
+    void clampComponentWithToolColumn (juce::Component& frame, int toolColW);
+    void placeToolColumnBesideFrame (juce::Rectangle<int> frameBounds,
+                                     int btnSize, int btnGap,
+                                     const std::initializer_list<OscToolButton*>& buttons);
+    void syncOscFramedTools();
+    void syncGonFramedTools();
+    void syncSpecFramedTools();
+    void syncSpec3DFramedTools();
+    void layoutFramedScopeWindow (FramedFloatingScopeWindow& frame,
+                                  bool& boundsCustom,
+                                  int& prefW, int& prefH, int& prefX, int& prefY,
+                                  int defaultW, int defaultH,
+                                  bool gonSquareShape);
+    void deactivateAnalyserFrames();
+    void rememberFrameBounds (FramedFloatingScopeWindow& frame,
+                              bool& boundsCustom,
+                              int& prefW, int& prefH, int& prefX, int& prefY);
     bool scopesBeforeEcoOsc = true;
     bool scopesBeforeEcoGon = false;
     bool scopesBeforeEcoSpec = true;

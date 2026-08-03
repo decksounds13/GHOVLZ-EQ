@@ -149,25 +149,8 @@ private:
         juce::ToggleButton freezeToggle { "Freeze" };
         std::unique_ptr<ButtonAttachment> freezeAttachment;
 
-        juce::Label view3dSectionLabel;
-        juce::ToggleButton enable3DToggle { "Enable 3D view (expanded / Scope)" };
-        juce::ToggleButton enhancedFreq3DToggle { "Enhanced Frequency (3D)" };
-        std::unique_ptr<ButtonAttachment> enhancedFreq3DAttachment;
-        juce::Label meshQualityLabel;
-        juce::ComboBox meshQualityCombo;
-        juce::Label meshHeightLabel;
-        juce::Slider meshHeightSlider;
-        juce::ToggleButton msaaToggle { "4× Antialiasing" };
-        juce::ToggleButton transparentBgToggle { "Soft background (like Osc/Gon)" };
-        juce::TextButton resetCameraButton { "Reset 3D Camera" };
-
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;
-        juce::Label gradient3DLabel;
-        GradientStripEditor gradient3DEditor;
-
-        void sync3DControlsFromMain();
-        void apply3DControlsToMain();
     };
 
     SharedResources& sharedResources;

@@ -39,8 +39,10 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
 
     std::function<void()> onShowContextMenu;
+    std::function<void()> onDoubleClick;
 
     /** Expanded overlay: log/linear Hz grid matching the scroll image axis. */
     void paintFrequencyGrid (juce::Graphics& g, juce::Rectangle<float> bounds) const;

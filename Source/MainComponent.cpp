@@ -10,6 +10,7 @@
 #include <functional>
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 
 namespace
 {
@@ -743,25 +744,29 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     menu.addComponentListener (this);
     menuToggleButton.onClick = [this] {
-        const bool shouldShowMenu = !menu.isVisible();
-        menu.setVisible(shouldShowMenu);
-
+        const bool shouldShowMenu = ! menu.isVisible();
         if (shouldShowMenu)
         {
+            menu.setVisible (true);
+            menuDismissCatcher.setVisible (true);
+            menuDismissCatcher.setBounds (getLocalBounds());
+            menuDismissCatcher.toFront (false);
+            menu.toFront (false);
+            menuToggleButton.toFront (false);
             layoutSettingsMenu();
-            // Relayout so expanded 3D parks left of Settings (pin left, shrink from right).
             resized();
             syncExpandedOscOverlayStack();
-            menu.setInterceptsMouseClicks(true, true);
-            frequencyResponseComponent.setInterceptsMouseClicks(false, false);
+            menu.setInterceptsMouseClicks (true, true);
+            frequencyResponseComponent.setInterceptsMouseClicks (false, false);
         }
         else
         {
-            resized();
-            syncExpandedOscOverlayStack();
-            frequencyResponseComponent.setInterceptsMouseClicks(true, true);
+            closeSettingsMenu();
         }
     };
+
+    menuDismissCatcher.setVisible (false);
+    addChildComponent (menuDismissCatcher);
 
     // Top chrome: Bypass (left) + A/B/C/D referencing — same look as graph range buttons / Settings area.
     styleChromeButton (bypassButton);
@@ -947,7 +952,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     addAndMakeVisible (gonButton);
 
-    gonExpandButton.setTooltip ("Expand goniometer over the full graph");
+    gonExpandButton.setTooltip ("Open goniometer in a framed floating window");
     gonExpandButton.setAlwaysOnTop (true);
     gonExpandButton.onClick = [this] { setGonExpanded (! gonExpanded); };
     gonExpandButton.setVisible (false);
@@ -966,8 +971,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     specSpeedUpButton.setTooltip ("Speed up spectrogram scroll");
     specSpeedDownButton.setTooltip ("Slow down spectrogram scroll");
-    specExpandButton.setTooltip ("Expand spectrogram over the full graph");
-    spec3DButton.setTooltip ("3D spectrogram - orbit (drag), pan (Shift+drag), zoom (wheel). Double-click resets. Expanded/Scope only.");
+    specExpandButton.setTooltip ("Open spectrogram in a framed floating window");
+    spec3DButton.setTooltip ("3D spectrogram - orbit (drag), ground pan (Shift/MMB), screen pan (RMB), zoom (wheel). Expanded Spec only.");
     specSpeedUpButton.setAlwaysOnTop (true);
     specSpeedDownButton.setAlwaysOnTop (true);
     specExpandButton.setAlwaysOnTop (true);
@@ -989,6 +994,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
         menu.addItem (1, "Mesh: Low", true, q == Spectrogram3DComponent::MeshQuality::low);
         menu.addItem (2, "Mesh: Medium", true, q == Spectrogram3DComponent::MeshQuality::medium);
         menu.addItem (3, "Mesh: High", true, q == Spectrogram3DComponent::MeshQuality::high);
+        menu.addItem (4, "Mesh: Ultra", true, q == Spectrogram3DComponent::MeshQuality::ultra);
         menu.addSeparator();
         menu.addItem (4, "Reset camera");
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&spec3DButton),
@@ -1004,7 +1010,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
                 safe->setSpec3DMeshQuality (
                     result == 1 ? Spectrogram3DComponent::MeshQuality::low
                                 : (result == 3 ? Spectrogram3DComponent::MeshQuality::high
-                                               : Spectrogram3DComponent::MeshQuality::medium),
+                                               : (result == 4 ? Spectrogram3DComponent::MeshQuality::ultra
+                                                              : Spectrogram3DComponent::MeshQuality::medium)),
                     true);
             });
     };
@@ -1047,23 +1054,65 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     oscilloscope.setParameterTree (&processor.treeState);
     addChildComponent (oscilloscope);
     processor.setOscilloscopeTarget (&oscilloscope);
+    oscilloscope.onDoubleClick = [this] { if (oscExpanded) toggleOscFullGraph(); };
 
     goniometer.setAlwaysOnTop (true);
     goniometer.setParameterTree (&processor.treeState);
     addChildComponent (goniometer);
     processor.setGoniometerTarget (&goniometer);
+    goniometer.onDoubleClick = [this] { if (gonExpanded) toggleGonFullGraph(); };
 
     spectrogram.setAlwaysOnTop (true);
     spectrogram.setParameterTree (&processor.treeState);
     addChildComponent (spectrogram);
     processor.setSpectrogramTarget (&spectrogram);
+    spectrogram.onDoubleClick = [this] { if (specExpanded) toggleSpecFullGraph(); };
+
+    auto setupFrame = [this] (FramedFloatingScopeWindow& frame)
+    {
+        frame.setThemeColors (&sharedResources);
+        frame.setSoftFill (true);
+        frame.setChromeMode (FramedFloatingScopeWindow::ChromeMode::floating);
+        frame.setAlwaysOnTop (true);
+        frame.onEscape = [this] { collapseAnyExpandedScope(); };
+        addChildComponent (frame);
+    };
+    setupFrame (oscFrame);
+    setupFrame (gonFrame);
+    setupFrame (specFrame);
+    oscFrame.onDoubleClick = [this] { toggleOscFullGraph(); };
+    gonFrame.onDoubleClick = [this] { toggleGonFullGraph(); };
+    specFrame.onDoubleClick = [this] { toggleSpecFullGraph(); };
+    oscFrame.onUserMoved = oscFrame.onUserResized = [this]
+    {
+        syncOscFramedTools();
+        rememberFrameBounds (oscFrame, oscFrameBoundsCustom,
+                             oscFramePreferredW, oscFramePreferredH,
+                             oscFramePreferredX, oscFramePreferredY);
+    };
+    gonFrame.onUserMoved = gonFrame.onUserResized = [this]
+    {
+        syncGonFramedTools();
+        rememberFrameBounds (gonFrame, gonFrameBoundsCustom,
+                             gonFramePreferredW, gonFramePreferredH,
+                             gonFramePreferredX, gonFramePreferredY);
+    };
+    specFrame.onUserMoved = specFrame.onUserResized = [this]
+    {
+        syncSpecFramedTools();
+        rememberFrameBounds (specFrame, specFrameBoundsCustom,
+                             specFramePreferredW, specFramePreferredH,
+                             specFramePreferredX, specFramePreferredY);
+    };
 
     spectrogram3D.setDataSource (&spectrogram);
     spectrogram3D.setAlwaysOnTop (false);
     spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.saveUiPrefs(); };
+    spectrogram3D.onDoubleClick = [this] { if (specExpanded) toggleSpecFullGraph(); };
     spectrogram3D.onUserResized = [this]
     {
+        syncSpec3DFramedTools();
         spec3DPreferredW = spectrogram3D.getWidth();
         spec3DPreferredH = spectrogram3D.getHeight();
         spec3DPreferredX = spectrogram3D.getX();
@@ -1072,6 +1121,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     spectrogram3D.onUserMoved = [this]
     {
+        syncSpec3DFramedTools();
         spec3DPreferredX = spectrogram3D.getX();
         spec3DPreferredY = spectrogram3D.getY();
         spec3DPreferredW = spectrogram3D.getWidth();
@@ -1279,6 +1329,9 @@ void MainComponent::applyThemeToChildComponents()
     goniometer.setThemeColors (&sharedResources);
     spectrogram.setThemeColors (&sharedResources);
     spectrogram3D.setThemeColors (&sharedResources);
+    oscFrame.setThemeColors (&sharedResources);
+    gonFrame.setThemeColors (&sharedResources);
+    specFrame.setThemeColors (&sharedResources);
     levelMeterIn.setThemeColors (&sharedResources);
     levelMeterOut.setThemeColors (&sharedResources);
     loudnessMeter.setThemeColors (&sharedResources);
@@ -1322,7 +1375,7 @@ void MainComponent::syncOscToolButtons()
                                           : OscToolButton::Glyph::Expand);
     oscExpandButton.setTooltip (oscExpanded
                                     ? "Collapse oscilloscope back to the strip"
-                                    : "Expand oscilloscope over the full graph");
+                                    : "Open oscilloscope in a framed floating window");
     oscExpandButton.setToggleState (oscExpanded, juce::dontSendNotification);
 }
 
@@ -1335,10 +1388,14 @@ void MainComponent::setOscExpanded (bool shouldExpand, bool notifyPrefs)
     {
         setGonExpanded (false, false);
         setSpecExpanded (false, false);
+        oscFullGraph = false;
+    }
+    else
+    {
+        oscFullGraph = false;
     }
 
     oscExpanded = shouldExpand;
-    // In Scope mode panes always use the rich (expanded) drawing style.
     oscilloscope.setExpanded (scopeModeEnabled || oscExpanded);
     syncOscToolButtons();
     resized();
@@ -1358,6 +1415,11 @@ void MainComponent::setGonExpanded (bool shouldExpand, bool notifyPrefs)
     {
         setOscExpanded (false, false);
         setSpecExpanded (false, false);
+        gonFullGraph = false;
+    }
+    else
+    {
+        gonFullGraph = false;
     }
 
     gonExpanded = shouldExpand;
@@ -1381,6 +1443,11 @@ void MainComponent::setSpecExpanded (bool shouldExpand, bool notifyPrefs)
     {
         setOscExpanded (false, false);
         setGonExpanded (false, false);
+        specFullGraph = false;
+    }
+    else
+    {
+        specFullGraph = false;
     }
 
     specExpanded = shouldExpand;
@@ -1393,6 +1460,234 @@ void MainComponent::setSpecExpanded (bool shouldExpand, bool notifyPrefs)
         grabKeyboardFocus();
     if (notifyPrefs)
         editor.saveUiPrefs();
+}
+
+void MainComponent::toggleOscFullGraph()
+{
+    if (! oscExpanded)
+        return;
+    oscFullGraph = ! oscFullGraph;
+    resized();
+    syncExpandedOscOverlayStack();
+}
+
+void MainComponent::toggleGonFullGraph()
+{
+    if (! gonExpanded)
+        return;
+    gonFullGraph = ! gonFullGraph;
+    resized();
+    syncExpandedOscOverlayStack();
+}
+
+void MainComponent::toggleSpecFullGraph()
+{
+    if (! specExpanded)
+        return;
+    specFullGraph = ! specFullGraph;
+    resized();
+    syncExpandedOscOverlayStack();
+}
+
+void MainComponent::closeSettingsMenu()
+{
+    if (! menu.isVisible() && ! menuDismissCatcher.isVisible())
+        return;
+    menu.setVisible (false);
+    menuDismissCatcher.setVisible (false);
+    resized();
+    syncExpandedOscOverlayStack();
+    frequencyResponseComponent.setInterceptsMouseClicks (true, true);
+}
+
+void MainComponent::rememberFrameBounds (FramedFloatingScopeWindow& frame,
+                                         bool& boundsCustom,
+                                         int& prefW, int& prefH, int& prefX, int& prefY)
+{
+    prefW = frame.getWidth();
+    prefH = frame.getHeight();
+    prefX = frame.getX();
+    prefY = frame.getY();
+    boundsCustom = true;
+}
+
+void MainComponent::deactivateAnalyserFrames()
+{
+    oscFrame.setContent (nullptr);
+    gonFrame.setContent (nullptr);
+    specFrame.setContent (nullptr);
+    oscFrame.setFrameActive (false);
+    gonFrame.setFrameActive (false);
+    specFrame.setFrameActive (false);
+}
+
+juce::Rectangle<int> MainComponent::getFramedScopeAvailableArea() const
+{
+    auto area = getExpandedScopeContentBounds();
+    if (area.isEmpty())
+        area = getLocalBounds();
+
+    area.setTop (juce::jmax (area.getY(), getTopChromeClearY()));
+
+    const int bottomChrome = frequencyResponseComponent.getBottomGraphChromeHeight();
+    if (bottomChrome > 0 && area.getHeight() > bottomChrome + 40)
+        area.removeFromBottom (bottomChrome);
+
+    if (verticalGradientMeterR.isVisible())
+        area.setLeft (juce::jmax (area.getX(), verticalGradientMeterR.getRight() + 6));
+    if (verticalGradientMeterPostL.isVisible())
+        area.setRight (juce::jmin (area.getRight(), verticalGradientMeterPostL.getX() - 6));
+
+    if (menu.isVisible())
+        area.setRight (juce::jmin (area.getRight(), menu.getX() - 10));
+
+    return area;
+}
+
+int MainComponent::getFramedToolButtonSize() const noexcept
+{
+    constexpr int btnGap = 2;
+    return juce::jmax (14, (OscilloscopeComponent::kWindowHeightPx - 3 * btnGap) / 4);
+}
+
+int MainComponent::getFramedToolColumnWidth() const noexcept
+{
+    return getFramedToolButtonSize() + 8;
+}
+
+void MainComponent::clampComponentWithToolColumn (juce::Component& frame, int toolColW)
+{
+    auto area = getFramedScopeAvailableArea();
+    if (area.getWidth() < 80 || area.getHeight() < 80)
+        return;
+
+    auto b = frame.getBounds();
+    const int maxW = juce::jmax (180, area.getWidth() - toolColW);
+    const int maxH = juce::jmax (120, area.getHeight());
+    b.setWidth (juce::jlimit (180, maxW, b.getWidth()));
+    b.setHeight (juce::jlimit (120, maxH, b.getHeight()));
+    b.setX (juce::jlimit (area.getX(), area.getRight() - b.getWidth() - toolColW, b.getX()));
+    b.setY (juce::jlimit (area.getY(), area.getBottom() - b.getHeight(), b.getY()));
+    frame.setBounds (b);
+}
+
+void MainComponent::placeToolColumnBesideFrame (juce::Rectangle<int> frameBounds,
+                                                int btnSize, int btnGap,
+                                                const std::initializer_list<OscToolButton*>& buttons)
+{
+    const int pad = 14; // match floating shadow pad for top alignment
+    const int toolX = frameBounds.getRight() + 2;
+    int y = frameBounds.getY() + pad + 4;
+    for (auto* b : buttons)
+    {
+        if (b == nullptr)
+            continue;
+        b->setVisible (true);
+        b->setBounds (toolX, y, btnSize, btnSize);
+        b->toFront (false);
+        y += btnSize + btnGap;
+    }
+}
+
+void MainComponent::syncOscFramedTools()
+{
+    if (! oscExpanded || oscFullGraph || ! oscFrame.isFrameActive())
+        return;
+    const int toolW = getFramedToolColumnWidth();
+    clampComponentWithToolColumn (oscFrame, toolW);
+    placeToolColumnBesideFrame (oscFrame.getBounds(), getFramedToolButtonSize(), 2,
+                                { &oscZoomInButton, &oscZoomOutButton,
+                                  &oscChannelModeButton, &oscExpandButton });
+}
+
+void MainComponent::syncGonFramedTools()
+{
+    if (! gonExpanded || gonFullGraph || ! gonFrame.isFrameActive())
+        return;
+    const int toolW = getFramedToolColumnWidth();
+    clampComponentWithToolColumn (gonFrame, toolW);
+    placeToolColumnBesideFrame (gonFrame.getBounds(), getFramedToolButtonSize(), 2,
+                                { &gonExpandButton });
+}
+
+void MainComponent::syncSpecFramedTools()
+{
+    if (! specExpanded || specFullGraph || ! specFrame.isFrameActive())
+        return;
+    if (spec3DEnabled && specButton.getToggleState())
+        return;
+    const int toolW = getFramedToolColumnWidth();
+    clampComponentWithToolColumn (specFrame, toolW);
+    placeToolColumnBesideFrame (specFrame.getBounds(), getFramedToolButtonSize(), 2,
+                                { &specSpeedUpButton, &specSpeedDownButton,
+                                  &specExpandButton, &spec3DButton });
+}
+
+void MainComponent::syncSpec3DFramedTools()
+{
+    if (scopeModeEnabled || ! specExpanded || ! spectrogram3D.isActive())
+        return;
+    const int toolW = getFramedToolColumnWidth();
+    if (! specFullGraph)
+        clampComponentWithToolColumn (spectrogram3D, toolW);
+    placeToolColumnBesideFrame (spectrogram3D.getBounds(), getFramedToolButtonSize(), 2,
+                                { &specSpeedUpButton, &specSpeedDownButton,
+                                  &specExpandButton, &spec3DButton });
+    raiseSpecToolButtons();
+}
+
+void MainComponent::layoutFramedScopeWindow (FramedFloatingScopeWindow& frame,
+                                             bool& boundsCustom,
+                                             int& prefW, int& prefH, int& prefX, int& prefY,
+                                             int defaultW, int defaultH,
+                                             bool gonSquareShape)
+{
+    auto area = getFramedScopeAvailableArea();
+    const int toolW = getFramedToolColumnWidth();
+    if (area.getWidth() < 80 + toolW || area.getHeight() < 80)
+    {
+        frame.setBounds (area);
+        return;
+    }
+
+    frame.setThemeColors (&sharedResources);
+    frame.setChromeMode (FramedFloatingScopeWindow::ChromeMode::floating);
+    frame.setResizeLimits (juce::jmax (180, area.getWidth() - toolW), area.getHeight());
+    frame.setMovementBounds (area);
+
+    int w = defaultW;
+    int h = defaultH;
+    int frameX = area.getX() + juce::jmax (0, (area.getWidth() - toolW - w) / 2);
+    int frameY = area.getY() + juce::jmax (0, (area.getHeight() - h) / 3);
+
+    if (boundsCustom && prefW > 0 && prefH > 0)
+    {
+        w = prefW;
+        h = prefH;
+        frameX = prefX;
+        frameY = prefY;
+    }
+
+    if (gonSquareShape)
+    {
+        const int pad = frame.getShadowPad() * 2;
+        const int corr = GoniometerComponent::kCorrelationWidthPx + 4 + FramedFloatingScopeWindow::kContentInset * 2;
+        const int side = juce::jlimit (140, juce::jmin (area.getWidth() - toolW - pad, area.getHeight() - pad),
+                                       h - pad);
+        w = side + corr + pad;
+        h = side + pad;
+    }
+
+    const int maxW = juce::jmax (180, area.getWidth() - toolW);
+    w = juce::jlimit (180, maxW, w);
+    h = juce::jlimit (120, area.getHeight(), h);
+    frameX = juce::jlimit (area.getX(), area.getRight() - w - toolW, frameX);
+    frameY = juce::jlimit (area.getY(), area.getBottom() - h, frameY);
+
+    frame.setBounds (frameX, frameY, w, h);
+    clampComponentWithToolColumn (frame, toolW);
+    frame.setFrameActive (true);
+    frame.toFront (false);
 }
 
 void MainComponent::restoreExpandedScope (bool osc, bool gon, bool spec)
@@ -1427,7 +1722,7 @@ void MainComponent::syncGonToolButtons()
                                           : OscToolButton::Glyph::Expand);
     gonExpandButton.setTooltip (gonExpanded
                                     ? "Collapse goniometer back to the strip"
-                                    : "Expand goniometer over the full graph");
+                                    : "Open goniometer in a framed floating window");
     gonExpandButton.setToggleState (gonExpanded, juce::dontSendNotification);
 }
 
@@ -1446,25 +1741,30 @@ void MainComponent::applyGoniometerActive (bool shouldEnable)
 void MainComponent::syncSpecToolButtons()
 {
     const bool on = specButton.getToggleState();
-    // 3D toggle stays visible whenever Spec is on (preference applies on expand / Scope).
-    specSpeedUpButton.setVisible (on);
-    specSpeedDownButton.setVisible (on);
-    specExpandButton.setVisible (on);
-    spec3DButton.setVisible (on);
-    spec3DButton.setToggleState (
-        scopeModeEnabled ? isScopeModuleEnabled (ScopeModuleId::spectrogram3D) : spec3DEnabled,
-        juce::dontSendNotification);
+    // Scope panes place their own speed/expand overlays; never show the 2D/3D cube there.
+    if (! scopeModeEnabled)
+    {
+        specSpeedUpButton.setVisible (on);
+        specSpeedDownButton.setVisible (on);
+        specExpandButton.setVisible (on);
+        spec3DButton.setVisible (on);
+    }
+    else
+    {
+        spec3DButton.setVisible (false);
+    }
+    spec3DButton.setToggleState (spec3DEnabled, juce::dontSendNotification);
     spec3DButton.setThemeResources (&sharedResources);
     spec3DButton.setTooltip (
-        (specExpanded || scopeModeEnabled)
-            ? "3D spectrogram - orbit (drag), pan (Shift+drag), zoom (wheel). Double-click resets. Right-click: mesh quality."
-            : "3D spectrogram (applies when expanded or in Scope). Right-click: mesh quality.");
+        specExpanded
+            ? "3D spectrogram - orbit (drag), ground pan (Shift/MMB), screen pan (RMB), zoom (wheel). Ctrl+RMB: view menu."
+            : "3D spectrogram (applies when expanded). Right-click cube: mesh quality.");
 
     specExpandButton.setGlyph (specExpanded ? OscToolButton::Glyph::Collapse
                                             : OscToolButton::Glyph::Expand);
     specExpandButton.setTooltip (specExpanded
                                      ? "Collapse spectrogram back to the strip"
-                                     : "Expand spectrogram over the full graph");
+                                     : "Open spectrogram in a framed floating window");
     specExpandButton.setToggleState (specExpanded, juce::dontSendNotification);
     syncSpec3DPresentation();
 }
@@ -1533,7 +1833,7 @@ void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
     if (menu.isVisible())
         area.setRight (juce::jmin (area.getRight(), menu.getX() - 10));
 
-    const int toolW = btnSize + 8;
+    const int toolW = getFramedToolColumnWidth();
     if (area.getWidth() <= toolW + 80 || area.getHeight() <= btnSize + 40)
     {
         spectrogram.setBounds (area);
@@ -1541,48 +1841,39 @@ void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
         return;
     }
 
-    auto toolCol = area.removeFromRight (toolW);
+    const int maxFrameW = juce::jmax (220, area.getWidth() - toolW);
 
     // Restore the user's preferred size/position when it fits; otherwise fill.
-    int w = area.getWidth();
+    int w = maxFrameW;
     int h = area.getHeight();
     int frameX = area.getX();
     int frameY = area.getY();
     if (spec3DBoundsCustom && spec3DPreferredW > 0 && spec3DPreferredH > 0)
     {
-        w = juce::jlimit (220, area.getWidth(), spec3DPreferredW);
+        w = juce::jlimit (220, maxFrameW, spec3DPreferredW);
         h = juce::jlimit (160, area.getHeight(), spec3DPreferredH);
-        frameX = juce::jlimit (area.getX(), area.getRight() - w, spec3DPreferredX);
+        frameX = juce::jlimit (area.getX(), area.getRight() - w - toolW, spec3DPreferredX);
         frameY = juce::jlimit (area.getY(), area.getBottom() - h, spec3DPreferredY);
     }
 
     const auto placed = juce::Rectangle<int> (frameX, frameY, w, h);
     const bool show3D = spec3DEnabled && specButton.getToggleState();
-    spectrogram3D.setChromeMode (Spectrogram3DComponent::ChromeMode::floating);
-    spectrogram3D.setResizeLimits (area.getWidth(), area.getHeight());
+    // Scope panes stay docked (hard GL HWND). Soft FBO compositing is floating-only.
+    spectrogram3D.setChromeMode (scopeModeEnabled
+                                     ? Spectrogram3DComponent::ChromeMode::docked
+                                     : Spectrogram3DComponent::ChromeMode::floating);
+    spectrogram3D.setResizeLimits (maxFrameW, area.getHeight());
     spectrogram3D.setMovementBounds (area);
     spectrogram3D.setBounds (placed);
+    if (! scopeModeEnabled)
+        clampComponentWithToolColumn (spectrogram3D, toolW);
 
     // 2D fills the window; when 3D is on it tracks the inner frame under the GL host.
     const int pad = show3D ? spectrogram3D.getShadowPad() : 0;
-    spectrogram.setBounds (pad > 0 ? placed.reduced (pad) : placed);
+    spectrogram.setBounds (pad > 0 ? spectrogram3D.getBounds().reduced (pad) : spectrogram3D.getBounds());
 
-    // Tools sit just to the right of the framed window (not over GL).
-    const int toolX = placed.getRight() + 2;
-    int y = placed.getY() + juce::jmax (4, pad) + 4;
-    const int x = toolX + juce::jmax (0, (toolCol.getRight() - toolX - btnSize) / 2);
-    auto placeTool = [&] (OscToolButton& b)
-    {
-        b.setVisible (true);
-        b.setBounds (x, y, btnSize, btnSize);
-        y += btnSize + btnGap;
-        b.toFront (false);
-    };
-    placeTool (specSpeedUpButton);
-    placeTool (specSpeedDownButton);
-    placeTool (specExpandButton);
-    placeTool (spec3DButton);
-    raiseSpecToolButtons();
+    juce::ignoreUnused (btnGap);
+    syncSpec3DFramedTools();
 }
 
 bool MainComponent::collapseAnyExpandedScope()
@@ -1616,6 +1907,7 @@ void MainComponent::syncSpec3DPresentation()
                                      ? Spectrogram3DComponent::ChromeMode::docked
                                      : Spectrogram3DComponent::ChromeMode::floating);
     spectrogram3D.setActive (show3D);
+    spectrogram3D.setVisible (show3D);
 
     // Mesh history comes from the 2D spectrogram feeder — keep analysing whenever 3D is up.
     if (show3D)
@@ -1653,9 +1945,14 @@ void MainComponent::syncSpec3DPresentation()
 
 void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
 {
-    if (spec3DEnabled == shouldEnable && ! scopeModeEnabled)
+    if (scopeModeEnabled)
     {
-        syncSpec3DPresentation();
+        const bool moduleOn = isScopeModuleEnabled (ScopeModuleId::spectrogram3D);
+        if (shouldEnable == moduleOn && spec3DEnabled == shouldEnable)
+            return;
+    }
+    else if (spec3DEnabled == shouldEnable)
+    {
         return;
     }
 
@@ -1685,11 +1982,16 @@ Spectrogram3DComponent::MeshQuality MainComponent::getSpec3DMeshQuality() const 
     return spectrogram3D.getMeshQuality();
 }
 
-void MainComponent::setSpec3DMultisampling (bool shouldEnable, bool notifyPrefs)
+void MainComponent::setSpec3DMsaaLevel (Spectrogram3DComponent::MsaaLevel level, bool notifyPrefs)
 {
-    spectrogram3D.setMultisamplingEnabled (shouldEnable);
+    spectrogram3D.setMsaaLevel (level);
     if (notifyPrefs)
         editor.saveUiPrefs();
+}
+
+Spectrogram3DComponent::MsaaLevel MainComponent::getSpec3DMsaaLevel() const noexcept
+{
+    return spectrogram3D.getMsaaLevel();
 }
 
 bool MainComponent::isSpec3DMultisampling() const noexcept
@@ -1709,6 +2011,18 @@ bool MainComponent::isSpec3DTransparentBackground() const noexcept
     return spectrogram3D.isTransparentBackground();
 }
 
+void MainComponent::setSpec3DReverseFrequencyAxis (bool shouldReverse, bool notifyPrefs)
+{
+    spectrogram3D.setReverseFrequencyAxis (shouldReverse);
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+bool MainComponent::isSpec3DReverseFrequencyAxis() const noexcept
+{
+    return spectrogram3D.isReverseFrequencyAxis();
+}
+
 void MainComponent::setSpec3DMeshHeight (float heightWorld, bool notifyPrefs)
 {
     spectrogram3D.setMeshHeight (heightWorld);
@@ -1720,6 +2034,125 @@ float MainComponent::getSpec3DMeshHeight() const noexcept
 {
     return spectrogram3D.getMeshHeight();
 }
+
+void MainComponent::setSpec3DLightingEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setLightingEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DLightingEnabled() const noexcept { return spectrogram3D.isLightingEnabled(); }
+
+void MainComponent::setSpec3DLightingAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setLightingAmount (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DLightingAmount() const noexcept { return spectrogram3D.getLightingAmount(); }
+
+void MainComponent::setSpec3DLightAzimuthDeg (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setLightAzimuthDeg (deg);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DLightAzimuthDeg() const noexcept { return spectrogram3D.getLightAzimuthDeg(); }
+
+void MainComponent::setSpec3DLightElevationDeg (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setLightElevationDeg (deg);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DLightElevationDeg() const noexcept { return spectrogram3D.getLightElevationDeg(); }
+
+void MainComponent::setSpec3DSpecularAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSpecularAmount (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSpecularAmount() const noexcept { return spectrogram3D.getSpecularAmount(); }
+
+void MainComponent::setSpec3DRoughnessAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setRoughnessAmount (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DRoughnessAmount() const noexcept { return spectrogram3D.getRoughnessAmount(); }
+
+void MainComponent::setSpec3DRimAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setRimAmount (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DRimAmount() const noexcept { return spectrogram3D.getRimAmount(); }
+
+void MainComponent::setSpec3DContactShadowEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setContactShadowEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DContactShadowEnabled() const noexcept { return spectrogram3D.isContactShadowEnabled(); }
+
+void MainComponent::setSpec3DContactShadowStrength (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setContactShadowStrength (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DContactShadowStrength() const noexcept { return spectrogram3D.getContactShadowStrength(); }
+
+void MainComponent::setSpec3DSelfShadowEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSelfShadowEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DSelfShadowEnabled() const noexcept { return spectrogram3D.isSelfShadowEnabled(); }
+
+void MainComponent::setSpec3DSelfShadowStrength (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSelfShadowStrength (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSelfShadowStrength() const noexcept { return spectrogram3D.getSelfShadowStrength(); }
+
+void MainComponent::setSpec3DSsaoEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSsaoEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DSsaoEnabled() const noexcept { return spectrogram3D.isSsaoEnabled(); }
+
+void MainComponent::setSpec3DSsaoStrength (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsaoStrength (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSsaoStrength() const noexcept { return spectrogram3D.getSsaoStrength(); }
+
+void MainComponent::setSpec3DSsaoRadius (float radius, bool notifyPrefs)
+{
+    spectrogram3D.setSsaoRadius (radius);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSsaoRadius() const noexcept { return spectrogram3D.getSsaoRadius(); }
+
+void MainComponent::setSpec3DBloomEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setBloomEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DBloomEnabled() const noexcept { return spectrogram3D.isBloomEnabled(); }
+
+void MainComponent::setSpec3DBloomStrength (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setBloomStrength (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DBloomStrength() const noexcept { return spectrogram3D.getBloomStrength(); }
+
+void MainComponent::setSpec3DBloomThreshold (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setBloomThreshold (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DBloomThreshold() const noexcept { return spectrogram3D.getBloomThreshold(); }
 
 void MainComponent::placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rectangle<int> overlayTools,
                                             int toolH, int toolSize, int toolGap)
@@ -1735,9 +2168,11 @@ void MainComponent::placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rec
                                         toolH);
     }
 
+    // Docked Scope uses Soft FBO compositing (nested GL HWND is unreliable under Direct2D).
     spectrogram3D.setChromeMode (Spectrogram3DComponent::ChromeMode::docked);
     spectrogram3D.setResizeLimits (placeArea.getWidth(), placeArea.getHeight());
     spectrogram3D.setBounds (placeArea);
+    spectrogram3D.setVisible (true);
 
     // Keep a hidden 2D feeder under the docked frame for mesh history.
     const int pad = spectrogram3D.getShadowPad();
@@ -1757,7 +2192,7 @@ void MainComponent::placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rec
         placeOverlayTool (specSpeedUpButton);
         placeOverlayTool (specSpeedDownButton);
         placeOverlayTool (specExpandButton);
-        placeOverlayTool (spec3DButton);
+        // 2D/3D cube toggle is for expanded Spec only — Scope has separate modules.
     }
 }
 
@@ -1827,9 +2262,15 @@ void MainComponent::syncExpandedOscOverlayStack()
     const bool specExp = specExpanded && specButton.getToggleState();
     const bool expanded = oscExp || gonExp || specExp;
     const bool compactChrome = ! scopeModeEnabled;
+    const bool oscFramed = oscExp && ! oscFullGraph;
+    const bool gonFramed = gonExp && ! gonFullGraph;
+    const bool specFramed = specExp && ! specFullGraph && ! (spec3DEnabled && specButton.getToggleState());
     oscilloscope.setAlwaysOnTop (compactChrome && ! oscExp);
     goniometer.setAlwaysOnTop (compactChrome && ! gonExp);
     spectrogram.setAlwaysOnTop (compactChrome && ! specExp);
+    oscFrame.setAlwaysOnTop (oscFramed);
+    gonFrame.setAlwaysOnTop (gonFramed);
+    specFrame.setAlwaysOnTop (specFramed);
     oscDimmer.setAlwaysOnTop (! expanded);
 
     auto* box = frequencyResponseComponent.getOptionBoxMenu();
@@ -1839,6 +2280,15 @@ void MainComponent::syncExpandedOscOverlayStack()
     hostOptionBoxAboveExpandedOsc (optionOpen);
 
     raiseMenuSystemAboveWordmark();
+
+    if (menu.isVisible())
+    {
+        menuDismissCatcher.setBounds (getLocalBounds());
+        menuDismissCatcher.setVisible (true);
+        menuDismissCatcher.toFront (false);
+        menu.toFront (false);
+        menuToggleButton.toFront (false);
+    }
 }
 
 void MainComponent::stylePresetNameEditor()
@@ -3500,9 +3950,7 @@ void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int>
                 placeOverlayTool (specSpeedUpButton, row);
                 placeOverlayTool (specSpeedDownButton, row);
                 placeOverlayTool (specExpandButton, row);
-                // Cube lives on the 3D module pane when that module is enabled.
-                if (! isScopeModuleEnabled (ScopeModuleId::spectrogram3D))
-                    placeOverlayTool (spec3DButton, row);
+                // No 2D/3D cube toggle in Scope — Spec and Spec 3D are separate modules.
             }
             syncSpec3DPresentation();
             break;
@@ -3647,6 +4095,7 @@ void MainComponent::layoutScopeModePanes (float scale)
     m_visualizer.toFront (false);
     oscilloscope.toFront (false);
     spectrogram.toFront (false);
+    spectrogram3D.toFront (false);
     levelMeterIn.toFront (false);
     levelMeterOut.toFront (false);
     loudnessMeter.toFront (false);
@@ -4087,24 +4536,54 @@ void MainComponent::resized()
 
             if (oscExpanded)
             {
-                oscDimmer.setBounds (getLocalBounds());
-                oscDimmer.setVisible (true);
-                oscilloscope.setBounds (getExpandedScopeContentBounds());
+                if (oscFullGraph)
+                {
+                    oscFrame.setContent (nullptr);
+                    oscFrame.setFrameActive (false);
+                    if (oscilloscope.getParentComponent() != this)
+                        addAndMakeVisible (oscilloscope);
+                    oscDimmer.setBounds (getLocalBounds());
+                    oscDimmer.setVisible (true);
+                    oscilloscope.setBounds (getExpandedScopeContentBounds());
+                    oscZoomInButton.setBounds (btnX, scopeY, btnSize, btnSize);
+                    oscZoomOutButton.setBounds (btnX, scopeY + btnSize + btnGap, btnSize, btnSize);
+                    oscChannelModeButton.setBounds (btnX, scopeY + 2 * (btnSize + btnGap), btnSize, btnSize);
+                    oscExpandButton.setBounds (btnX, scopeY + 3 * (btnSize + btnGap), btnSize, btnSize);
+                }
+                else
+                {
+                    oscFrame.setContent (&oscilloscope);
+                    layoutFramedScopeWindow (oscFrame, oscFrameBoundsCustom,
+                                            oscFramePreferredW, oscFramePreferredH,
+                                            oscFramePreferredX, oscFramePreferredY,
+                                            juce::jmin (520, getFramedScopeAvailableArea().getWidth()
+                                                             - getFramedToolColumnWidth()),
+                                            juce::jmin (220, getFramedScopeAvailableArea().getHeight()),
+                                            false);
+                    // Framed mode needs clicks for double-click toggle (expanded usually click-through).
+                    oscilloscope.setInterceptsMouseClicks (true, true);
+                    syncOscFramedTools();
+                }
             }
             else
             {
+                oscFrame.setContent (nullptr);
+                oscFrame.setFrameActive (false);
+                if (oscilloscope.getParentComponent() != this)
+                    addAndMakeVisible (oscilloscope);
                 oscilloscope.setBounds (scopeLeft, scopeY, scopeW, scopeH);
+                oscZoomInButton.setBounds (btnX, scopeY, btnSize, btnSize);
+                oscZoomOutButton.setBounds (btnX, scopeY + btnSize + btnGap, btnSize, btnSize);
+                oscChannelModeButton.setBounds (btnX, scopeY + 2 * (btnSize + btnGap), btnSize, btnSize);
+                oscExpandButton.setBounds (btnX, scopeY + 3 * (btnSize + btnGap), btnSize, btnSize);
             }
 
             oscilloscope.setVisible (true);
-
-            oscZoomInButton.setBounds (btnX, scopeY, btnSize, btnSize);
-            oscZoomOutButton.setBounds (btnX, scopeY + btnSize + btnGap, btnSize, btnSize);
-            oscChannelModeButton.setBounds (btnX, scopeY + 2 * (btnSize + btnGap), btnSize, btnSize);
-            oscExpandButton.setBounds (btnX, scopeY + 3 * (btnSize + btnGap), btnSize, btnSize);
         }
         else
         {
+            oscFrame.setContent (nullptr);
+            oscFrame.setFrameActive (false);
             oscilloscope.setVisible (false);
         }
 
@@ -4116,26 +4595,50 @@ void MainComponent::resized()
 
             if (gonExpanded)
             {
-                oscDimmer.setBounds (getLocalBounds());
-                oscDimmer.setVisible (true);
-                // Plot area only (above piano); correlation on the dark square's right edge.
-                goniometer.setBounds (getExpandedScopeContentBounds());
+                if (gonFullGraph)
+                {
+                    gonFrame.setContent (nullptr);
+                    gonFrame.setFrameActive (false);
+                    if (goniometer.getParentComponent() != this)
+                        addAndMakeVisible (goniometer);
+                    oscDimmer.setBounds (getLocalBounds());
+                    oscDimmer.setVisible (true);
+                    goniometer.setBounds (getExpandedScopeContentBounds());
+                    gonExpandButton.setBounds (gonExpandX, scopeY, gonExpandSize, gonExpandSize);
+                }
+                else
+                {
+                    gonFrame.setContent (&goniometer);
+                    layoutFramedScopeWindow (gonFrame, gonFrameBoundsCustom,
+                                            gonFramePreferredW, gonFramePreferredH,
+                                            gonFramePreferredX, gonFramePreferredY,
+                                            280, 280, true);
+                    goniometer.setInterceptsMouseClicks (true, true);
+                    syncGonFramedTools();
+                }
             }
             else
             {
+                gonFrame.setContent (nullptr);
+                gonFrame.setFrameActive (false);
+                if (goniometer.getParentComponent() != this)
+                    addAndMakeVisible (goniometer);
                 goniometer.setBounds (gonX, scopeY, gonW, scopeH);
+                gonExpandButton.setBounds (gonExpandX, scopeY, gonExpandSize, gonExpandSize);
             }
 
             goniometer.setVisible (true);
-            gonExpandButton.setBounds (gonExpandX, scopeY, gonExpandSize, gonExpandSize);
         }
         else
         {
+            gonFrame.setContent (nullptr);
+            gonFrame.setFrameActive (false);
             goniometer.setVisible (false);
         }
 
-        // Dimmer only while something is expanded.
-        if (! oscExpanded && ! gonExpanded && ! specExpanded)
+        // Dimmer only for full-graph overlays (framed windows are soft-composited).
+        if (! ((oscExpanded && oscFullGraph) || (gonExpanded && gonFullGraph)
+               || (specExpanded && specFullGraph)))
             oscDimmer.setVisible (false);
 
         // Spectrogram: between UI dice (left) and EQ preset bar (right), osc height, a bit wider.
@@ -4161,15 +4664,53 @@ void MainComponent::resized()
 
                 if (specExpanded)
                 {
-                    oscDimmer.setBounds (getLocalBounds());
-                    oscDimmer.setVisible (true);
-                    layoutExpandedSpectrogramWithTools (btnSize, btnGap);
+                    const bool use3D = spec3DEnabled && specButton.getToggleState();
+                    if (use3D || specFullGraph)
+                    {
+                        specFrame.setContent (nullptr);
+                        specFrame.setFrameActive (false);
+                        if (spectrogram.getParentComponent() != this)
+                            addAndMakeVisible (spectrogram);
+                        if (specFullGraph && ! use3D)
+                        {
+                            oscDimmer.setBounds (getLocalBounds());
+                            oscDimmer.setVisible (true);
+                        }
+                        layoutExpandedSpectrogramWithTools (btnSize, btnGap);
+                        if (use3D && specFullGraph)
+                        {
+                            // Fill available area (ignore custom floating size).
+                            auto area = getFramedScopeAvailableArea();
+                            const int toolW = getFramedToolColumnWidth();
+                            if (area.getWidth() > toolW + 80)
+                                area.removeFromRight (toolW);
+                            spectrogram3D.setBounds (area);
+                            syncSpec3DFramedTools();
+                        }
+                    }
+                    else
+                    {
+                        specFrame.setContent (&spectrogram);
+                        layoutFramedScopeWindow (specFrame, specFrameBoundsCustom,
+                                                specFramePreferredW, specFramePreferredH,
+                                                specFramePreferredX, specFramePreferredY,
+                                                juce::jmin (560, getFramedScopeAvailableArea().getWidth()
+                                                                 - getFramedToolColumnWidth()),
+                                                juce::jmin (260, getFramedScopeAvailableArea().getHeight()),
+                                                false);
+                        spectrogram.setOpaque (false);
+                        spectrogram.setInterceptsMouseClicks (true, true);
+                        syncSpecFramedTools();
+                    }
                 }
                 else
                 {
+                    specFrame.setContent (nullptr);
+                    specFrame.setFrameActive (false);
+                    if (spectrogram.getParentComponent() != this)
+                        addAndMakeVisible (spectrogram);
                     spectrogram.setBounds (blockX, specY, specW, specH);
                     spectrogram3D.setBounds (spectrogram.getBounds());
-                    // Compact strip: tools sit beside the view (never over GL).
                     specSpeedUpButton.setBounds (btnX, specY, btnSize, btnSize);
                     specSpeedDownButton.setBounds (btnX, specY + btnSize + btnGap, btnSize, btnSize);
                     specExpandButton.setBounds (btnX, specY + 2 * (btnSize + btnGap), btnSize, btnSize);
@@ -4187,6 +4728,8 @@ void MainComponent::resized()
         }
         else
         {
+            specFrame.setContent (nullptr);
+            specFrame.setFrameActive (false);
             spectrogram.setVisible (false);
         }
         } // !scopeModeEnabled compact strips

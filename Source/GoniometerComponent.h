@@ -43,7 +43,9 @@ public:
     void clearColourRamp();
 
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
     std::function<void()> onShowContextMenu;
+    std::function<void()> onDoubleClick;
 
     /** Same compact chrome height as OscilloscopeComponent. */
     static constexpr int kWindowHeightPx = 80;

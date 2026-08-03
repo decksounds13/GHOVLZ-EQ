@@ -353,6 +353,12 @@ void OscilloscopeComponent::mouseDown (const juce::MouseEvent& e)
         showContextMenu();
 }
 
+void OscilloscopeComponent::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}
+
 void OscilloscopeComponent::showContextMenu()
 {
     if (onShowContextMenu != nullptr)

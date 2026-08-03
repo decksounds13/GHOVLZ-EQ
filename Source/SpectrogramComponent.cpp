@@ -1388,6 +1388,12 @@ void SpectrogramComponent::mouseDown (const juce::MouseEvent& e)
         onShowContextMenu();
 }
 
+void SpectrogramComponent::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
+}
+
 void SpectrogramComponent::rebuildScreenSoftened()
 {
     if (! scrollImage.isValid())

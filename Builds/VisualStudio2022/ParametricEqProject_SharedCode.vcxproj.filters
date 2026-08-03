@@ -1009,6 +1009,9 @@
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp">
       <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.cpp">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
@@ -1016,6 +1019,9 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\FramedFloatingScopeWindow.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp">
@@ -4755,6 +4761,9 @@
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.h">
       <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.h">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\GoniometerComponent.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
@@ -4762,6 +4771,9 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\GradientRamp.h">

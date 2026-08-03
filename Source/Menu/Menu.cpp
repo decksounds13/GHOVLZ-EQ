@@ -5,6 +5,7 @@
 #include "Gui/OscilloscopeSettingsComponent.h"
 #include "Gui/GoniometerSettingsComponent.h"
 #include "Gui/SpectrogramSettingsComponent.h"
+#include "Gui/Spectrogram3DSettingsComponent.h"
 #include "Gui/LevelMetersComponent.h"
 #include "Gui/LoudnessSettingsComponent.h"
 #include "Gui/StereogramSettingsComponent.h"
@@ -41,6 +42,7 @@ Menu::Menu (SharedResources& resources,
     addOwnedTab ("Oscilloscope", new OscilloscopeSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Goniometer", new GoniometerSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Spectrogram", new SpectrogramSettingsComponent (resources, state, colourRamps));
+    addOwnedTab ("Spectrogram 3D", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state));
     addOwnedTab ("Loudness", new LoudnessSettingsComponent (resources, state));
     addOwnedTab ("Stereogram", new StereogramSettingsComponent (resources, state, colourRamps));
@@ -331,6 +333,8 @@ int Menu::getActiveTabPreferredContentHeight() const
     if (auto* t = dynamic_cast<GoniometerSettingsComponent*> (c))
         return t->getPreferredContentHeight();
     if (auto* t = dynamic_cast<SpectrogramSettingsComponent*> (c))
+        return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<Spectrogram3DSettingsComponent*> (c))
         return t->getPreferredContentHeight();
     if (auto* t = dynamic_cast<LevelMetersComponent*> (c))
         return t->getPreferredContentHeight();

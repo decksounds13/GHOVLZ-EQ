@@ -33,6 +33,10 @@
                 resource="0" file="Source/Menu/Gui/SpectrogramSettingsComponent.cpp"/>
           <FILE id="sP3sHd" name="SpectrogramSettingsComponent.h" compile="0"
                 resource="0" file="Source/Menu/Gui/SpectrogramSettingsComponent.h"/>
+          <FILE id="sP3dSt" name="Spectrogram3DSettingsComponent.cpp" compile="1"
+                resource="0" file="Source/Menu/Gui/Spectrogram3DSettingsComponent.cpp"/>
+          <FILE id="sP3dSh" name="Spectrogram3DSettingsComponent.h" compile="0"
+                resource="0" file="Source/Menu/Gui/Spectrogram3DSettingsComponent.h"/>
         </GROUP>
         <GROUP id="{3A6E8CAB-E493-DB48-C58B-A9E8BF1A1503}" name="ScreenCaptureLite">
           <GROUP id="{AD79FC31-B391-8F0F-9DB1-35DB05D6996B}" name="internal"/>
@@ -60,6 +64,10 @@
             file="Source/Spectrogram3DComponent.cpp"/>
       <FILE id="sP3dHd" name="Spectrogram3DComponent.h" compile="0" resource="0"
             file="Source/Spectrogram3DComponent.h"/>
+      <FILE id="fRmScp" name="FramedFloatingScopeWindow.cpp" compile="1" resource="0"
+            file="Source/FramedFloatingScopeWindow.cpp"/>
+      <FILE id="fRmSch" name="FramedFloatingScopeWindow.h" compile="0" resource="0"
+            file="Source/FramedFloatingScopeWindow.h"/>
       <GROUP name="ColourRamp" id="SCMpqC">
         <FILE id="cRamp01" name="GradientRamp.h" compile="0" resource="0" file="Source/ColourRamp/GradientRamp.h"/>
         <FILE id="cRamp02" name="ColourRampBank.cpp" compile="1" resource="0"
