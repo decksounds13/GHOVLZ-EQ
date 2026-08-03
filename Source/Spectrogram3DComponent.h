@@ -37,8 +37,8 @@ public:
     bool isMultisamplingEnabled() const noexcept { return msaaEnabled; }
 
     /**
-        Soft background: samples what's behind the GL view and draws it under the mesh
-        (true HWND transparency is not reliable on Windows/D2D).
+        Soft background: offscreen GL → Image → paint compositing over the EQ
+        (nested OpenGL HWND transparency is not available on Windows/Direct2D).
     */
     void setTransparentBackground (bool shouldEnable) noexcept;
     bool isTransparentBackground() const noexcept { return transparentBackground; }
@@ -130,6 +130,7 @@ private:
         void triggerRedraw() { if (openGLContext.isAttached()) openGLContext.triggerRepaint(); }
         bool isGlReady() const noexcept { return glReady; }
         bool hasContextFailed() const noexcept { return contextFailed; }
+        void markSoftContentDirty() noexcept { softContentDirty = true; }
 
         void newOpenGLContextCreated() override;
         void renderOpenGL() override;
@@ -150,21 +151,26 @@ private:
         void ensureFloorGeometry();
         void rebuildFloorGeometry();
         void ensureLabelAtlas();
-        void drawBackdropAndTint();
+        void drawSoftTint();
         void drawGroundAndGrid();
         void drawMesh();
         void drawFrequencyLabels();
         void setCornerUniforms (juce::OpenGLShaderProgram& program) const;
         juce::Matrix3D<float> getProjectionMatrix() const;
         juce::Matrix3D<float> getViewMatrix() const;
-        bool projectWorldToNdc (float wx, float wy, float wz, float& ndcX, float& ndcY) const;
-        void uploadBackdropIfNeeded();
+        bool projectWorldToNdc (float wx, float wy, float wz,
+                                float& ndcX, float& ndcY, float& ndcZ) const;
+        juce::Rectangle<int> getViewPixelBounds() const noexcept;
+        void ensureSoftFrameBuffer (int width, int height);
+        void renderSoftComposite();
+        void readbackSoftImage (int width, int height);
 
         Spectrogram3DComponent& owner;
         juce::OpenGLContext openGLContext;
         bool attachPending = false;
         bool contextFailed = false;
         bool glReady = false;
+        bool softContentDirty = true;
 
         std::unique_ptr<juce::OpenGLShaderProgram> colourShader;
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> colourPositionAttrib;
@@ -183,12 +189,10 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelCornerUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelClearUniform;
 
-        std::unique_ptr<juce::OpenGLShaderProgram> blitShader;
-        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> blitPositionAttrib;
-        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> blitTexAttrib;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> blitTexUniform;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> blitTintUniform;
-        unsigned int blitVbo = 0;
+        std::unique_ptr<juce::OpenGLShaderProgram> tintShader;
+        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> tintPositionAttrib;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> tintColourUniform;
+        unsigned int tintVbo = 0;
 
         unsigned int meshVbo = 0, meshIbo = 0;
         unsigned int floorVbo = 0;
@@ -198,14 +202,33 @@ private:
         bool meshNeedsUpload = false;
 
         juce::OpenGLTexture labelAtlas;
-        juce::OpenGLTexture backdropTex;
+        juce::OpenGLFrameBuffer softFbo;
+        unsigned int softDepthRbo = 0;
         bool labelAtlasReady = false;
-        bool backdropTexReady = false;
+        int softFboW = 0;
+        int softFboH = 0;
         double floorGridSr = 0.0;
         bool floorGridLog = true;
         bool floorGridSoftBg = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GlHost)
+    };
+
+    /** Transparent hit target for orbit/pan/zoom when the GL HWND is hidden in soft mode. */
+    class HitLayer : public juce::Component
+    {
+    public:
+        explicit HitLayer (Spectrogram3DComponent& owner);
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp (const juce::MouseEvent& e) override;
+        void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+        void mouseDoubleClick (const juce::MouseEvent& e) override;
+        bool keyPressed (const juce::KeyPress& key) override;
+
+    private:
+        Spectrogram3DComponent& owner;
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HitLayer)
     };
 
     void timerCallback() override;
@@ -216,11 +239,13 @@ private:
     juce::Matrix3D<float> getTurntableViewMatrix() const noexcept;
     juce::Colour getClearColour() const noexcept;
     void applyBackgroundTransparency() noexcept;
+    void layoutPresentation() noexcept;
     juce::Rectangle<int> getInnerFrameLocal() const noexcept;
+    juce::Rectangle<int> getGlViewLocal() const noexcept;
     void showContextMenu (juce::Point<int> screenPos);
-    void refreshBackdropSnapshot();
     bool isInMoveChrome (juce::Point<int> localPos) const noexcept;
     void applyChromeMode() noexcept;
+    void markSoftContentDirty() noexcept;
 
     void meshSizeForQuality (int& outW, int& outH) const noexcept;
     void fillMeshColumn (int meshCol, const float* histCol, int histH);
@@ -242,6 +267,7 @@ private:
     SpectrogramComponent* dataSource = nullptr;
     SharedResources* theme = nullptr;
     std::unique_ptr<GlHost> glHost;
+    std::unique_ptr<HitLayer> hitLayer;
     bool active = false;
     bool msaaEnabled = false;
     bool transparentBackground = false;
@@ -270,10 +296,8 @@ private:
     juce::Image labelAtlasImage;
     bool labelAtlasDirty = true;
 
-    juce::Image backdropImage;
-    juce::CriticalSection backdropLock;
-    bool backdropNeedsUpload = false;
-    int backdropSkipCounter = 0;
+    juce::Image softCompositeImage;
+    juce::CriticalSection softImageLock;
 
     CameraState camera;
     CameraState defaultCamera;

@@ -399,8 +399,8 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
 
     styleToggle (transparentBgToggle);
     transparentBgToggle.setTooltip (
-        "Samples the EQ graph under the 3D view and draws it behind the mesh "
-        "(true OpenGL HWND transparency is not available on Windows/Direct2D).");
+        "Composites the 3D view over the EQ via offscreen OpenGL (FBO to image to paint). "
+        "Nested OpenGL HWND transparency is not available on Windows/Direct2D.");
     transparentBgToggle.onClick = [this] { apply3DControlsToMain(); };
     addAndMakeVisible (transparentBgToggle);
 

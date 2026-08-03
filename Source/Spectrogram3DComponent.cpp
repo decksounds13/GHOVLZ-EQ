@@ -44,13 +44,14 @@ namespace
 
     constexpr const char* kLabelVertexShader = R"(
         #version 150
-        in vec2 position;
+        in vec3 position;
         in vec2 texCoord;
         out vec2 vTex;
         void main()
         {
             vTex = texCoord;
-            gl_Position = vec4 (position, 0.0, 1.0);
+            // NDC xyz — z from the projected world anchor so the mesh can occlude labels.
+            gl_Position = vec4 (position, 1.0);
         }
     )";
 
@@ -80,28 +81,22 @@ namespace
         }
     )";
 
-    constexpr const char* kBlitVertexShader = R"(
+    constexpr const char* kTintVertexShader = R"(
         #version 150
         in vec2 position;
-        in vec2 texCoord;
-        out vec2 vTex;
         void main()
         {
-            vTex = texCoord;
             gl_Position = vec4 (position, 0.0, 1.0);
         }
     )";
 
-    constexpr const char* kBlitFragmentShader = R"(
+    constexpr const char* kTintFragmentShader = R"(
         #version 150
-        in vec2 vTex;
         out vec4 fragColour;
-        uniform sampler2D uTex;
         uniform vec4 uTint;
         void main()
         {
-            vec4 bg = texture (uTex, vTex);
-            fragColour = vec4 (mix (bg.rgb, uTint.rgb, uTint.a), 1.0);
+            fragColour = uTint;
         }
     )";
 
@@ -119,7 +114,7 @@ namespace
 Spectrogram3DComponent::GlHost::GlHost (Spectrogram3DComponent& o)
     : owner (o)
 {
-    // Soft BG composites a backdrop texture in GL — the native HWND stays opaque.
+    // Hard BG: visible nested HWND. Soft BG: tiny peer keeps the context alive for FBO render.
     setOpaque (true);
     setVisible (false);
     setInterceptsMouseClicks (true, true);
@@ -233,20 +228,18 @@ void Spectrogram3DComponent::GlHost::createShaders()
         labelClearUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*labelShader, "uClearColour");
     }
 
-    blitShader = std::make_unique<juce::OpenGLShaderProgram> (openGLContext);
-    if (! blitShader->addVertexShader (kBlitVertexShader)
-        || ! blitShader->addFragmentShader (kBlitFragmentShader)
-        || ! blitShader->link())
+    tintShader = std::make_unique<juce::OpenGLShaderProgram> (openGLContext);
+    if (! tintShader->addVertexShader (kTintVertexShader)
+        || ! tintShader->addFragmentShader (kTintFragmentShader)
+        || ! tintShader->link())
     {
-        DBG ("Spectrogram3D blit shader: " + blitShader->getLastError());
-        blitShader.reset();
+        DBG ("Spectrogram3D tint shader: " + tintShader->getLastError());
+        tintShader.reset();
     }
     else
     {
-        blitPositionAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute> (*blitShader, "position");
-        blitTexAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute> (*blitShader, "texCoord");
-        blitTexUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*blitShader, "uTex");
-        blitTintUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*blitShader, "uTint");
+        tintPositionAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute> (*tintShader, "position");
+        tintColourUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*tintShader, "uTint");
     }
 
     contextFailed = (colourShader == nullptr);
@@ -271,42 +264,45 @@ void Spectrogram3DComponent::GlHost::destroyShaders()
     labelPositionAttrib.reset();
     labelShader.reset();
 
-    blitTintUniform.reset();
-    blitTexUniform.reset();
-    blitTexAttrib.reset();
-    blitPositionAttrib.reset();
-    blitShader.reset();
+    tintColourUniform.reset();
+    tintPositionAttrib.reset();
+    tintShader.reset();
 }
 
 void Spectrogram3DComponent::GlHost::newOpenGLContextCreated()
 {
-    meshVbo = meshIbo = floorVbo = labelVbo = blitVbo = 0;
+    meshVbo = meshIbo = floorVbo = labelVbo = tintVbo = 0;
     floorVertexCount = 0;
     floorGridSr = 0.0;
     labelAtlasReady = false;
-    backdropTexReady = false;
+    softFboW = softFboH = 0;
+    softContentDirty = true;
     createShaders();
     juce::gl::glGenBuffers (1, &meshVbo);
     juce::gl::glGenBuffers (1, &meshIbo);
     juce::gl::glGenBuffers (1, &labelVbo);
-    juce::gl::glGenBuffers (1, &blitVbo);
+    juce::gl::glGenBuffers (1, &tintVbo);
     glReady = (colourShader != nullptr && meshVbo != 0 && meshIbo != 0);
     meshNeedsUpload = true;
     owner.meshNeedsUpload = true;
-    owner.backdropNeedsUpload = true;
 }
 
 void Spectrogram3DComponent::GlHost::openGLContextClosing()
 {
     labelAtlas.release();
     labelAtlasReady = false;
-    backdropTex.release();
-    backdropTexReady = false;
+    if (softDepthRbo != 0)
+    {
+        juce::gl::glDeleteRenderbuffers (1, &softDepthRbo);
+        softDepthRbo = 0;
+    }
+    softFbo.release();
+    softFboW = softFboH = 0;
     if (meshVbo != 0) { juce::gl::glDeleteBuffers (1, &meshVbo); meshVbo = 0; }
     if (meshIbo != 0) { juce::gl::glDeleteBuffers (1, &meshIbo); meshIbo = 0; }
     if (floorVbo != 0) { juce::gl::glDeleteBuffers (1, &floorVbo); floorVbo = 0; }
     if (labelVbo != 0) { juce::gl::glDeleteBuffers (1, &labelVbo); labelVbo = 0; }
-    if (blitVbo != 0) { juce::gl::glDeleteBuffers (1, &blitVbo); blitVbo = 0; }
+    if (tintVbo != 0) { juce::gl::glDeleteBuffers (1, &tintVbo); tintVbo = 0; }
     destroyShaders();
     glReady = false;
     meshIndexCount = 0;
@@ -315,20 +311,23 @@ void Spectrogram3DComponent::GlHost::openGLContextClosing()
 
 void Spectrogram3DComponent::GlHost::setCornerUniforms (juce::OpenGLShaderProgram&) const
 {
-    const float scale = (float) openGLContext.getRenderingScale();
-    const float resX = (float) getWidth() * scale;
-    const float resY = (float) getHeight() * scale;
-    const float corner = juce::jmax (1.0f, (kCornerRadius - (float) kGlInset) * scale);
+    const auto px = getViewPixelBounds();
+    const float resX = (float) juce::jmax (1, px.getWidth());
+    const float resY = (float) juce::jmax (1, px.getHeight());
+    const float scale = resX / (float) juce::jmax (1, owner.getGlViewLocal().getWidth());
+    // Soft BG clips to the frame in paint(); keep GL fill full-bleed so tint isn't wiped.
+    const float corner = owner.transparentBackground
+                             ? 0.0f
+                             : juce::jmax (1.0f, (kCornerRadius - (float) kGlInset) * scale);
     const auto clear = owner.getClearColour();
 
     if (colourResolutionUniform != nullptr)
         colourResolutionUniform->set (resX, resY);
     if (colourCornerUniform != nullptr)
         colourCornerUniform->set (corner);
-    // Soft BG: keep rounded-corner outside transparent so the sampled backdrop shows through.
-    const float cr = owner.transparentBackground ? 0.0f : clear.getFloatRed();
-    const float cg = owner.transparentBackground ? 0.0f : clear.getFloatGreen();
-    const float cb = owner.transparentBackground ? 0.0f : clear.getFloatBlue();
+    const float cr = clear.getFloatRed();
+    const float cg = clear.getFloatGreen();
+    const float cb = clear.getFloatBlue();
     const float ca = owner.transparentBackground ? 0.0f : 1.0f;
 
     if (colourClearUniform != nullptr)
@@ -402,7 +401,7 @@ void Spectrogram3DComponent::GlHost::rebuildFloorGeometry()
         lines.push_back ({ x1, y1, z1, r, g, b });
     };
 
-    // Opaque ground plane (two triangles). Skipped for soft BG so the backdrop shows through.
+    // Opaque ground plane (two triangles). Skipped for soft BG so EQ shows through the tint.
     if (! owner.transparentBackground)
     {
         const float gr = 0.06f, gg = 0.07f, gb = 0.09f;
@@ -527,12 +526,34 @@ void Spectrogram3DComponent::GlHost::ensureLabelAtlas()
     labelAtlasReady = true;
 }
 
+juce::Rectangle<int> Spectrogram3DComponent::GlHost::getViewPixelBounds() const noexcept
+{
+    const auto logical = owner.getGlViewLocal();
+    const float scale = (float) openGLContext.getRenderingScale();
+    int w = juce::jmax (1, juce::roundToInt ((float) logical.getWidth() * scale));
+    int h = juce::jmax (1, juce::roundToInt ((float) logical.getHeight() * scale));
+
+    // Cap soft-mode readback cost; hard mode uses the same size for viewport.
+    constexpr int kMaxDim = 1280;
+    const int maxSide = juce::jmax (w, h);
+    if (owner.transparentBackground && maxSide > kMaxDim)
+    {
+        const float s = (float) kMaxDim / (float) maxSide;
+        w = juce::jmax (1, juce::roundToInt ((float) w * s));
+        h = juce::jmax (1, juce::roundToInt ((float) h * s));
+    }
+
+    return { 0, 0, w, h };
+}
+
 juce::Matrix3D<float> Spectrogram3DComponent::GlHost::getProjectionMatrix() const
 {
     constexpr float nearPlane = 0.05f;
     constexpr float farPlane = 80.0f;
     constexpr float fovHalfWAtNear = 1.0f / 1.5f;
-    const float aspect = (float) getHeight() / (float) juce::jmax (1, getWidth());
+    const auto view = owner.getGlViewLocal();
+    const float aspect = (float) juce::jmax (1, view.getHeight())
+                       / (float) juce::jmax (1, view.getWidth());
     const float w = nearPlane * fovHalfWAtNear;
     const float h = w * aspect;
     return juce::Matrix3D<float>::fromFrustum (-w, w, -h, h, nearPlane, farPlane);
@@ -544,7 +565,7 @@ juce::Matrix3D<float> Spectrogram3DComponent::GlHost::getViewMatrix() const
 }
 
 bool Spectrogram3DComponent::GlHost::projectWorldToNdc (float wx, float wy, float wz,
-                                                       float& ndcX, float& ndcY) const
+                                                       float& ndcX, float& ndcY, float& ndcZ) const
 {
     const auto proj = getProjectionMatrix();
     const auto view = getViewMatrix();
@@ -565,80 +586,182 @@ bool Spectrogram3DComponent::GlHost::projectWorldToNdc (float wx, float wy, floa
         return false;
     ndcX = clip[0] / clip[3];
     ndcY = clip[1] / clip[3];
-    return ndcX > -1.2f && ndcX < 1.2f && ndcY > -1.2f && ndcY < 1.2f;
+    ndcZ = clip[2] / clip[3];
+    return ndcX > -1.2f && ndcX < 1.2f && ndcY > -1.2f && ndcY < 1.2f
+           && ndcZ >= -1.0f && ndcZ <= 1.0f;
 }
 
-void Spectrogram3DComponent::GlHost::uploadBackdropIfNeeded()
-{
-    juce::Image img;
-    {
-        const juce::ScopedLock sl (owner.backdropLock);
-        if (! owner.backdropNeedsUpload || ! owner.backdropImage.isValid())
-            return;
-        img = owner.backdropImage;
-        owner.backdropNeedsUpload = false;
-    }
-
-    backdropTex.loadImage (img);
-    backdropTexReady = true;
-}
-
-void Spectrogram3DComponent::GlHost::drawBackdropAndTint()
+void Spectrogram3DComponent::GlHost::ensureSoftFrameBuffer (int width, int height)
 {
     using namespace juce::gl;
-    uploadBackdropIfNeeded();
-    if (blitShader == nullptr || blitVbo == 0 || ! backdropTexReady)
+
+    width = juce::jmax (1, width);
+    height = juce::jmax (1, height);
+    if (softFbo.isValid() && softFbo.getWidth() == width && softFbo.getHeight() == height
+        && softFboW == width && softFboH == height && softDepthRbo != 0)
         return;
 
-    // Fullscreen NDC quad (triangle strip), Y flipped for OpenGL texture convention.
+    if (softDepthRbo != 0)
+    {
+        glDeleteRenderbuffers (1, &softDepthRbo);
+        softDepthRbo = 0;
+    }
+
+    softFbo.release();
+    if (! softFbo.initialise (openGLContext, width, height))
+    {
+        softFboW = softFboH = 0;
+        return;
+    }
+
+    // JUCE colour FBOs ship without depth — attach one for the heightfield.
+    softFbo.makeCurrentRenderingTarget();
+    glGenRenderbuffers (1, &softDepthRbo);
+    glBindRenderbuffer (GL_RENDERBUFFER, softDepthRbo);
+    glRenderbufferStorage (GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
+    glFramebufferRenderbuffer (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, softDepthRbo);
+    glBindRenderbuffer (GL_RENDERBUFFER, 0);
+    const bool complete = (glCheckFramebufferStatus (GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    softFbo.releaseAsRenderingTarget();
+
+    if (softDepthRbo == 0 || ! complete)
+    {
+        if (softDepthRbo != 0)
+        {
+            glDeleteRenderbuffers (1, &softDepthRbo);
+            softDepthRbo = 0;
+        }
+        softFbo.release();
+        softFboW = softFboH = 0;
+        return;
+    }
+
+    softFboW = width;
+    softFboH = height;
+    softContentDirty = true;
+}
+
+void Spectrogram3DComponent::GlHost::drawSoftTint()
+{
+    using namespace juce::gl;
+    if (tintShader == nullptr || tintVbo == 0)
+        return;
+
     const float verts[] = {
-        -1.0f, -1.0f, 0.0f, 1.0f,
-         1.0f, -1.0f, 1.0f, 1.0f,
-        -1.0f,  1.0f, 0.0f, 0.0f,
-         1.0f,  1.0f, 1.0f, 0.0f
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f
     };
 
-    blitShader->use();
-    if (blitTexUniform != nullptr)
-        blitTexUniform->set (0);
+    tintShader->use();
     const auto tint = owner.getClearColour();
-    if (blitTintUniform != nullptr)
-        blitTintUniform->set (tint.getFloatRed(), tint.getFloatGreen(),
-                              tint.getFloatBlue(), tint.getFloatAlpha());
+    if (tintColourUniform != nullptr)
+        tintColourUniform->set (tint.getFloatRed(), tint.getFloatGreen(),
+                                tint.getFloatBlue(), tint.getFloatAlpha());
 
-    backdropTex.bind();
-    glActiveTexture (GL_TEXTURE0);
     glDisable (GL_DEPTH_TEST);
     glDepthMask (GL_FALSE);
-    glDisable (GL_BLEND);
+    glEnable (GL_BLEND);
+    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable (GL_CULL_FACE);
 
-    glBindBuffer (GL_ARRAY_BUFFER, blitVbo);
+    glBindBuffer (GL_ARRAY_BUFFER, tintVbo);
     glBufferData (GL_ARRAY_BUFFER, sizeof (verts), verts, GL_STREAM_DRAW);
 
-    const GLsizei stride = (GLsizei) (4 * sizeof (float));
-    if (blitPositionAttrib != nullptr && blitPositionAttrib->attributeID >= 0)
+    if (tintPositionAttrib != nullptr && tintPositionAttrib->attributeID >= 0)
     {
-        glEnableVertexAttribArray ((GLuint) blitPositionAttrib->attributeID);
-        glVertexAttribPointer ((GLuint) blitPositionAttrib->attributeID, 2, GL_FLOAT, GL_FALSE, stride, nullptr);
-    }
-    if (blitTexAttrib != nullptr && blitTexAttrib->attributeID >= 0)
-    {
-        glEnableVertexAttribArray ((GLuint) blitTexAttrib->attributeID);
-        glVertexAttribPointer ((GLuint) blitTexAttrib->attributeID, 2, GL_FLOAT, GL_FALSE,
-                               stride, (const void*) (sizeof (float) * 2));
+        glEnableVertexAttribArray ((GLuint) tintPositionAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) tintPositionAttrib->attributeID, 2, GL_FLOAT, GL_FALSE,
+                               (GLsizei) (2 * sizeof (float)), nullptr);
     }
 
     glDrawArrays (GL_TRIANGLE_STRIP, 0, 4);
 
-    if (blitPositionAttrib != nullptr && blitPositionAttrib->attributeID >= 0)
-        glDisableVertexAttribArray ((GLuint) blitPositionAttrib->attributeID);
-    if (blitTexAttrib != nullptr && blitTexAttrib->attributeID >= 0)
-        glDisableVertexAttribArray ((GLuint) blitTexAttrib->attributeID);
+    if (tintPositionAttrib != nullptr && tintPositionAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) tintPositionAttrib->attributeID);
 
     glBindBuffer (GL_ARRAY_BUFFER, 0);
+    glDisable (GL_BLEND);
     glDepthMask (GL_TRUE);
     glEnable (GL_DEPTH_TEST);
+}
+
+void Spectrogram3DComponent::GlHost::readbackSoftImage (int width, int height)
+{
+    if (width < 1 || height < 1 || ! softFbo.isValid())
+        return;
+
+    std::vector<juce::PixelARGB> pixels ((size_t) width * (size_t) height);
+    if (! softFbo.readPixels (pixels.data(),
+                              { 0, 0, width, height },
+                              juce::OpenGLFrameBuffer::RowOrder::fromTopDown))
+        return;
+
+    juce::Image img (juce::Image::ARGB, width, height, true, juce::SoftwareImageType());
+    {
+        juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+        for (int y = 0; y < height; ++y)
+            std::memcpy (bd.getLinePointer (y),
+                         pixels.data() + (size_t) y * (size_t) width,
+                         (size_t) width * sizeof (juce::PixelARGB));
+    }
+
+    {
+        const juce::ScopedLock sl (owner.softImageLock);
+        owner.softCompositeImage = std::move (img);
+    }
+
+    softContentDirty = false;
+
+    juce::Component::SafePointer<Spectrogram3DComponent> safe (&owner);
+    juce::MessageManager::callAsync ([safe]
+    {
+        if (safe != nullptr)
+            safe->repaint();
+    });
+}
+
+void Spectrogram3DComponent::GlHost::renderSoftComposite()
+{
+    using namespace juce::gl;
+
+    const auto px = getViewPixelBounds();
+    const int w = px.getWidth();
+    const int h = px.getHeight();
+    if (w < 2 || h < 2)
+        return;
+
+    const bool needsDraw = softContentDirty || meshNeedsUpload || owner.meshNeedsUpload
+                           || softFboW != w || softFboH != h || ! softFbo.isValid();
+    {
+        const juce::ScopedLock sl (owner.softImageLock);
+        if (! needsDraw && owner.softCompositeImage.isValid())
+            return;
+    }
+
+    ensureSoftFrameBuffer (w, h);
+    if (! softFbo.isValid())
+        return;
+
+    softFbo.makeCurrentAndClear();
+    glViewport (0, 0, w, h);
+    glClear (GL_DEPTH_BUFFER_BIT);
+
+    if (owner.msaaEnabled)
+        glEnable (GL_MULTISAMPLE);
+
+    uploadMeshIfNeeded();
+    ensureFloorGeometry();
+    ensureLabelAtlas();
+
+    drawSoftTint();
+    drawGroundAndGrid();
+    drawMesh();
+    drawFrequencyLabels();
+
+    readbackSoftImage (w, h);
+    softFbo.releaseAsRenderingTarget();
 }
 
 void Spectrogram3DComponent::GlHost::drawGroundAndGrid()
@@ -741,21 +864,20 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
     if (labelShader == nullptr || ! labelAtlasReady || owner.freqLabels.empty() || labelVbo == 0)
         return;
 
-    struct V { float x, y, u, v; };
+    struct V { float x, y, z, u, v; };
     std::vector<V> quads;
     quads.reserve (owner.freqLabels.size() * 6);
 
-    const float scale = (float) openGLContext.getRenderingScale();
-    const float pxW = 52.0f * scale / (float) juce::jmax (1, getWidth());
-    const float pxH = 22.0f * scale / (float) juce::jmax (1, getHeight());
-    // Convert pixel half-size to NDC
+    const auto view = owner.getGlViewLocal();
+    const float pxW = 52.0f / (float) juce::jmax (1, view.getWidth());
+    const float pxH = 22.0f / (float) juce::jmax (1, view.getHeight());
     const float halfW = pxW;
     const float halfH = pxH;
 
     for (const auto& lb : owner.freqLabels)
     {
-        float ndcX = 0.0f, ndcY = 0.0f;
-        if (! projectWorldToNdc (1.08f, 0.09f, lb.worldZ, ndcX, ndcY))
+        float ndcX = 0.0f, ndcY = 0.0f, ndcZ = 0.0f;
+        if (! projectWorldToNdc (1.08f, 0.09f, lb.worldZ, ndcX, ndcY, ndcZ))
             continue;
 
         const float x0 = ndcX + 0.01f;
@@ -763,12 +885,12 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
         const float y0 = ndcY - halfH;
         const float y1 = ndcY + halfH;
 
-        quads.push_back ({ x0, y0, lb.u0, lb.v0 });
-        quads.push_back ({ x1, y0, lb.u1, lb.v0 });
-        quads.push_back ({ x1, y1, lb.u1, lb.v1 });
-        quads.push_back ({ x0, y0, lb.u0, lb.v0 });
-        quads.push_back ({ x1, y1, lb.u1, lb.v1 });
-        quads.push_back ({ x0, y1, lb.u0, lb.v1 });
+        quads.push_back ({ x0, y0, ndcZ, lb.u0, lb.v0 });
+        quads.push_back ({ x1, y0, ndcZ, lb.u1, lb.v0 });
+        quads.push_back ({ x1, y1, ndcZ, lb.u1, lb.v1 });
+        quads.push_back ({ x0, y0, ndcZ, lb.u0, lb.v0 });
+        quads.push_back ({ x1, y1, ndcZ, lb.u1, lb.v1 });
+        quads.push_back ({ x0, y1, ndcZ, lb.u0, lb.v1 });
     }
 
     if (quads.empty())
@@ -786,20 +908,22 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
 
     glEnable (GL_BLEND);
     glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable (GL_DEPTH_TEST);
+    glEnable (GL_DEPTH_TEST);
+    glDepthMask (GL_FALSE);
+    glDepthFunc (GL_LEQUAL);
     glDisable (GL_CULL_FACE);
 
     const GLsizei stride = (GLsizei) sizeof (V);
     if (labelPositionAttrib != nullptr && labelPositionAttrib->attributeID >= 0)
     {
         glEnableVertexAttribArray ((GLuint) labelPositionAttrib->attributeID);
-        glVertexAttribPointer ((GLuint) labelPositionAttrib->attributeID, 2, GL_FLOAT, GL_FALSE, stride, nullptr);
+        glVertexAttribPointer ((GLuint) labelPositionAttrib->attributeID, 3, GL_FLOAT, GL_FALSE, stride, nullptr);
     }
     if (labelTexAttrib != nullptr && labelTexAttrib->attributeID >= 0)
     {
         glEnableVertexAttribArray ((GLuint) labelTexAttrib->attributeID);
         glVertexAttribPointer ((GLuint) labelTexAttrib->attributeID, 2, GL_FLOAT, GL_FALSE,
-                               stride, (const void*) (sizeof (float) * 2));
+                               stride, (const void*) (sizeof (float) * 3));
     }
 
     glDrawArrays (GL_TRIANGLES, 0, (GLsizei) quads.size());
@@ -810,28 +934,32 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
         glDisableVertexAttribArray ((GLuint) labelTexAttrib->attributeID);
 
     glBindBuffer (GL_ARRAY_BUFFER, 0);
+    glDepthMask (GL_TRUE);
+    glDepthFunc (GL_LESS);
     glDisable (GL_BLEND);
-    glEnable (GL_DEPTH_TEST);
 }
 
 void Spectrogram3DComponent::GlHost::renderOpenGL()
 {
     using namespace juce::gl;
 
+    if (! glReady || colourShader == nullptr)
+        return;
+
     if (owner.transparentBackground)
     {
-        uploadBackdropIfNeeded();
+        renderSoftComposite();
+        // Tiny peer framebuffer is unused for display in soft mode.
         glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
         glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    }
-    else
-    {
-        juce::OpenGLHelpers::clear (owner.getClearColour());
-        glClear (GL_DEPTH_BUFFER_BIT);
+        return;
     }
 
-    if (! glReady || colourShader == nullptr || getWidth() < 2 || getHeight() < 2)
+    if (getWidth() < 2 || getHeight() < 2)
         return;
+
+    juce::OpenGLHelpers::clear (owner.getClearColour());
+    glClear (GL_DEPTH_BUFFER_BIT);
 
     if (owner.msaaEnabled)
         glEnable (GL_MULTISAMPLE);
@@ -840,13 +968,8 @@ void Spectrogram3DComponent::GlHost::renderOpenGL()
     ensureFloorGeometry();
     ensureLabelAtlas();
 
-    const float scale = (float) openGLContext.getRenderingScale();
-    glViewport (0, 0,
-                juce::roundToInt ((float) getWidth() * scale),
-                juce::roundToInt ((float) getHeight() * scale));
-
-    if (owner.transparentBackground)
-        drawBackdropAndTint();
+    const auto px = getViewPixelBounds();
+    glViewport (0, 0, px.getWidth(), px.getHeight());
 
     drawGroundAndGrid();
     drawMesh();
@@ -887,6 +1010,48 @@ bool Spectrogram3DComponent::GlHost::keyPressed (const juce::KeyPress& key)
 }
 
 //==============================================================================
+Spectrogram3DComponent::HitLayer::HitLayer (Spectrogram3DComponent& o)
+    : owner (o)
+{
+    setOpaque (false);
+    setInterceptsMouseClicks (true, true);
+    setWantsKeyboardFocus (true);
+}
+
+void Spectrogram3DComponent::HitLayer::mouseDown (const juce::MouseEvent& e)
+{
+    if (! hasKeyboardFocus (true))
+        grabKeyboardFocus();
+    owner.handleMouseDown (e.getEventRelativeTo (&owner));
+}
+
+void Spectrogram3DComponent::HitLayer::mouseDrag (const juce::MouseEvent& e)
+{
+    owner.handleMouseDrag (e.getEventRelativeTo (&owner));
+}
+
+void Spectrogram3DComponent::HitLayer::mouseUp (const juce::MouseEvent& e)
+{
+    owner.handleMouseUp (e);
+}
+
+void Spectrogram3DComponent::HitLayer::mouseWheelMove (const juce::MouseEvent&,
+                                                       const juce::MouseWheelDetails& wheel)
+{
+    owner.handleMouseWheel (wheel);
+}
+
+void Spectrogram3DComponent::HitLayer::mouseDoubleClick (const juce::MouseEvent&)
+{
+    owner.handleDoubleClick();
+}
+
+bool Spectrogram3DComponent::HitLayer::keyPressed (const juce::KeyPress& key)
+{
+    return owner.keyPressed (key);
+}
+
+//==============================================================================
 Spectrogram3DComponent::Spectrogram3DComponent()
 {
     setOpaque (false);
@@ -896,6 +1061,9 @@ Spectrogram3DComponent::Spectrogram3DComponent()
 
     glHost = std::make_unique<GlHost> (*this);
     addChildComponent (*glHost);
+
+    hitLayer = std::make_unique<HitLayer> (*this);
+    addChildComponent (*hitLayer);
 
     constrainer.setMinimumSize (220 + kShadowPadFloating * 2, 160 + kShadowPadFloating * 2);
     constrainer.setMaximumSize (4000, 3000);
@@ -912,6 +1080,7 @@ Spectrogram3DComponent::~Spectrogram3DComponent()
 {
     stopTimer();
     resizer.reset();
+    hitLayer.reset();
     glHost.reset();
 }
 
@@ -994,6 +1163,7 @@ void Spectrogram3DComponent::setMeshHeight (float heightWorld) noexcept
     invalidateMesh();
     if (active)
         updateMeshFromSource();
+    markSoftContentDirty();
     if (glHost != nullptr)
         glHost->triggerRedraw();
     repaint();
@@ -1008,17 +1178,14 @@ void Spectrogram3DComponent::setActive (bool shouldBeActive) noexcept
     setAlwaysOnTop (false);
     setVisible (active);
     applyChromeMode();
-
-    if (glHost != nullptr)
-        glHost->setActive (active);
+    layoutPresentation();
 
     if (active)
     {
         clampCamera();
+        markSoftContentDirty();
         startTimerHz (30);
         updateMeshFromSource();
-        if (transparentBackground)
-            refreshBackdropSnapshot();
     }
     else
     {
@@ -1056,6 +1223,7 @@ void Spectrogram3DComponent::setTransparentBackground (bool shouldEnable) noexce
 
     transparentBackground = shouldEnable;
     applyBackgroundTransparency();
+    markSoftContentDirty();
     if (glHost != nullptr)
         glHost->triggerRedraw();
     repaint();
@@ -1066,13 +1234,61 @@ void Spectrogram3DComponent::applyBackgroundTransparency() noexcept
     setOpaque (! transparentBackground);
     if (glHost != nullptr)
         glHost->applyBackgroundTransparency();
+    layoutPresentation();
 }
 
 void Spectrogram3DComponent::GlHost::applyBackgroundTransparency() noexcept
 {
-    // Backdrop is sampled on the message thread and drawn in renderOpenGL.
+    // Soft mode paints via Image compositing; HWND stays opaque for the tiny peer.
     setOpaque (true);
+    setInterceptsMouseClicks (! owner.transparentBackground, true);
     openGLContext.setComponentPaintingEnabled (false);
+}
+
+void Spectrogram3DComponent::markSoftContentDirty() noexcept
+{
+    if (glHost != nullptr)
+        glHost->markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::layoutPresentation() noexcept
+{
+    const auto glArea = getGlViewLocal();
+
+    if (hitLayer != nullptr)
+    {
+        hitLayer->setBounds (glArea);
+        hitLayer->setVisible (active && transparentBackground);
+        if (hitLayer->isVisible())
+            hitLayer->toFront (false);
+    }
+
+    if (glHost == nullptr)
+        return;
+
+    if (transparentBackground)
+    {
+        // Tiny peer keeps the GL context alive for FBO work. Sit under the resize grip
+        // (floating) or in the frame corner (docked) so the opaque HWND is hidden.
+        const int x = juce::jmax (0, getWidth() - 2);
+        const int y = juce::jmax (0, getHeight() - 2);
+        glHost->setBounds (x, y, 2, 2);
+        glHost->setVisible (active);
+        glHost->setInterceptsMouseClicks (false, false);
+        glHost->toBack();
+    }
+    else
+    {
+        glHost->setBounds (glArea);
+        glHost->setVisible (active);
+        glHost->setInterceptsMouseClicks (true, true);
+    }
+
+    if (active)
+        glHost->requestAttachAsync();
+
+    if (resizer != nullptr && resizer->isVisible())
+        resizer->toFront (false);
 }
 
 void Spectrogram3DComponent::invalidateMesh() noexcept
@@ -1097,6 +1313,7 @@ void Spectrogram3DComponent::recolourMesh() noexcept
 void Spectrogram3DComponent::resetCamera() noexcept
 {
     seedDefaultOrientation();
+    markSoftContentDirty();
     if (glHost != nullptr)
         glHost->triggerRedraw();
     repaint();
@@ -1116,6 +1333,7 @@ void Spectrogram3DComponent::setDefaultCameraState (const CameraState& state) no
     camera = defaultCamera;
     clampCamera();
     defaultCamera = camera;
+    markSoftContentDirty();
     if (glHost != nullptr)
         glHost->triggerRedraw();
     repaint();
@@ -1178,6 +1396,11 @@ juce::Rectangle<int> Spectrogram3DComponent::getInnerFrameLocal() const noexcept
     return getLocalBounds().reduced (getShadowPad());
 }
 
+juce::Rectangle<int> Spectrogram3DComponent::getGlViewLocal() const noexcept
+{
+    return getInnerFrameLocal().reduced (chromeMode == ChromeMode::docked ? 1 : kGlInset);
+}
+
 bool Spectrogram3DComponent::keyPressed (const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::escapeKey)
@@ -1198,20 +1421,16 @@ bool Spectrogram3DComponent::keyPressed (const juce::KeyPress& key)
 
 void Spectrogram3DComponent::resized()
 {
-    const auto inner = getInnerFrameLocal();
     const int pad = getShadowPad();
-    if (glHost != nullptr)
-    {
-        glHost->setBounds (inner.reduced (chromeMode == ChromeMode::docked ? 1 : kGlInset));
-        if (active)
-            glHost->requestAttachAsync();
-    }
+    layoutPresentation();
+    markSoftContentDirty();
 
     if (resizer != nullptr)
     {
         // Keep grip entirely in the shadow chrome so the GL HWND cannot cover it.
         resizer->setBounds (getWidth() - pad, getHeight() - pad, pad, pad);
         resizer->setVisible (chromeMode == ChromeMode::floating && active);
+        resizer->toFront (false);
     }
 
     if (glHost != nullptr)
@@ -1232,16 +1451,26 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
         && (theme == nullptr || ! theme->disableGlowShadowEffects))
         panelShadow.render (g, panel);
 
-    // Soft BG: frame chrome only — GL draws the sampled backdrop + tint.
     if (! transparentBackground)
     {
         g.setColour (getClearColour());
         g.fillPath (panel);
     }
-    else
+    else if (active)
     {
-        g.setColour (getClearColour().withMultipliedAlpha (0.35f));
-        g.strokePath (panel, juce::PathStrokeType (chromeMode == ChromeMode::docked ? 1.0f : 1.2f));
+        juce::Image softImg;
+        {
+            const juce::ScopedLock sl (softImageLock);
+            softImg = softCompositeImage;
+        }
+
+        if (softImg.isValid())
+        {
+            juce::Graphics::ScopedSaveState ss (g);
+            g.reduceClipRegion (panel);
+            g.drawImage (softImg, getGlViewLocal().toFloat(),
+                         juce::RectanglePlacement::stretchToFit, false);
+        }
     }
 
     g.setColour (juce::Colours::white.withAlpha (chromeMode == ChromeMode::docked ? 0.12f : 0.22f));
@@ -1269,13 +1498,6 @@ void Spectrogram3DComponent::timerCallback()
     if (! active)
         return;
 
-    if (transparentBackground)
-    {
-        // Snapshot every other tick — EQ graph updates often enough at ~15 Hz.
-        if ((++backdropSkipCounter & 1) != 0)
-            refreshBackdropSnapshot();
-    }
-
     updateMeshFromSource();
     if (glHost != nullptr)
     {
@@ -1283,42 +1505,18 @@ void Spectrogram3DComponent::timerCallback()
         if (active)
             glHost->requestAttachAsync();
     }
-}
 
-void Spectrogram3DComponent::refreshBackdropSnapshot()
-{
-    auto* parent = getParentComponent();
-    if (parent == nullptr || glHost == nullptr || ! glHost->isShowing())
-        return;
-
-    const auto areaInParent = parent->getLocalArea (glHost.get(), glHost->getLocalBounds());
-    if (areaInParent.getWidth() < 2 || areaInParent.getHeight() < 2)
-        return;
-
-    float snapScale = 1.0f;
-    if (auto* display = juce::Desktop::getInstance().getDisplays()
-                            .getDisplayForRect (parent->localAreaToGlobal (areaInParent)))
-        snapScale = juce::jlimit (1.0f, 2.0f, (float) display->scale);
-
-    // Hide the framed 3D window so the snapshot captures the EQ graph / Scope panes beneath.
-    const bool wasVisible = isVisible();
-    setVisible (false);
-    auto snap = parent->createComponentSnapshot (areaInParent, true, snapScale);
-    setVisible (wasVisible);
-
-    if (! snap.isValid())
-        return;
-
-    const juce::ScopedLock sl (backdropLock);
-    backdropImage = std::move (snap);
-    backdropNeedsUpload = true;
+    if (transparentBackground)
+        repaint();
 }
 
 bool Spectrogram3DComponent::isInMoveChrome (juce::Point<int> localPos) const noexcept
 {
     if (chromeMode != ChromeMode::floating || ! active)
         return false;
-    if (glHost != nullptr && glHost->getBounds().contains (localPos))
+    if (hitLayer != nullptr && hitLayer->isVisible() && hitLayer->getBounds().contains (localPos))
+        return false;
+    if (glHost != nullptr && ! transparentBackground && glHost->getBounds().contains (localPos))
         return false;
     if (resizer != nullptr && resizer->getBounds().contains (localPos))
         return false;
@@ -1458,7 +1656,8 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
             auto& vtx = verts[(size_t) z * (size_t) meshW + (size_t) x];
             vtx.x = u * 2.0f - 1.0f;
             vtx.y = norm * meshHeight;
-            vtx.z = v * 2.0f - 1.0f;
+            // High frequencies toward -Z, lows toward +Z (matches worldZForFreq).
+            vtx.z = (1.0f - v) * 2.0f - 1.0f;
             vtx.r = c.getFloatRed();
             vtx.g = c.getFloatGreen();
             vtx.b = c.getFloatBlue();
@@ -1541,7 +1740,8 @@ float Spectrogram3DComponent::worldZForFreq (float hz, double sampleRate, bool l
         t = std::log (hz / minHz) / std::log (maxHz / minHz);
     else
         t = (hz - minHz) / (maxHz - minHz);
-    return t * 2.0f - 1.0f;
+    // High frequencies toward -Z, lows toward +Z.
+    return (1.0f - t) * 2.0f - 1.0f;
 }
 
 juce::String Spectrogram3DComponent::formatGridHz (float hz)
@@ -1657,8 +1857,11 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
         clampCamera();
     }
 
+    markSoftContentDirty();
     if (glHost != nullptr)
         glHost->triggerRedraw();
+    if (transparentBackground)
+        repaint();
 }
 
 void Spectrogram3DComponent::handleMouseUp (const juce::MouseEvent&)
@@ -1670,8 +1873,11 @@ void Spectrogram3DComponent::handleMouseWheel (const juce::MouseWheelDetails& wh
 {
     camera.distance *= (1.0f - wheel.deltaY * 0.15f);
     clampCamera();
+    markSoftContentDirty();
     if (glHost != nullptr)
         glHost->triggerRedraw();
+    if (transparentBackground)
+        repaint();
 }
 
 void Spectrogram3DComponent::handleDoubleClick()

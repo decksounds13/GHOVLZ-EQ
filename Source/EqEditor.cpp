@@ -2348,10 +2348,9 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DMeshHeight (spec3DMeshHeight, false);
         if (spec3DCamCustom)
             mainComponent->setSpec3DDefaultCamera (spec3DCam, true);
+        // Cube preference only — do not open maximized 3D/overlays on load.
         mainComponent->setSpec3DMode (spec3DOnLoad, false);
-
-        // Restore maximized analyser overlays as left when the editor was closed.
-        mainComponent->restoreExpandedScope (oscExpandedOnLoad, gonExpandedOnLoad, specExpandedOnLoad);
+        juce::ignoreUnused (oscExpandedOnLoad, gonExpandedOnLoad, specExpandedOnLoad);
 
         auto& c = mainComponent->getSharedResources().sharedColors;
         c.randomizeFaceplateMod = randFaceplate;

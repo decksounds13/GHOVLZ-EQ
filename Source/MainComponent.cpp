@@ -1110,16 +1110,16 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     wireScopeMenu (spectrogram, ScopeModuleId::spectrogram);
     wireScopeMenu (m_visualizer, ScopeModuleId::spectrum);
 
-    // Default: scope on at load (summed stereo). Gon off (glow trail is expensive). Spec on.
+    // Default at load: mini oscilloscope only (summed stereo). Gon/Spec off; nothing maximized.
     oscButton.setToggleState (true, juce::dontSendNotification);
     oscilloscope.setEnabled (true);
     oscilloscope.setChannelMode (OscilloscopeComponent::ChannelMode::summedStereo);
     syncOscToolButtons();
     applyGoniometerActive (false);
     syncGonToolButtons();
+    specButton.setToggleState (false, juce::dontSendNotification);
+    spectrogram.setEnabled (false);
     syncSpecToolButtons();
-    specButton.setToggleState (true, juce::dontSendNotification);
-    spectrogram.setEnabled (true);
 
     frequencyResponseComponent.onOptionBoxVisibilityChanged = [this]
     {
