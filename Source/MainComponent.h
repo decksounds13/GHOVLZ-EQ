@@ -138,6 +138,8 @@ public:
     void setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs = true);
     void setSpec3DFreqMeshBias (float amount01, bool notifyPrefs = true);
     float getSpec3DFreqMeshBias() const noexcept;
+    void setSpec3DFreqMeshBiasPivot (float pivot01, bool notifyPrefs = true);
+    float getSpec3DFreqMeshBiasPivot() const noexcept;
     Spectrogram3DComponent::MeshQuality getSpec3DMeshQuality() const noexcept;
     void setSpec3DMsaaLevel (Spectrogram3DComponent::MsaaLevel level, bool notifyPrefs = true);
     Spectrogram3DComponent::MsaaLevel getSpec3DMsaaLevel() const noexcept;
@@ -173,6 +175,10 @@ public:
     float getSpec3DAudioLevelHpHz() const noexcept;
     void setSpec3DAudioLevelLpHz (float hz, bool notifyPrefs = true);
     float getSpec3DAudioLevelLpHz() const noexcept;
+    void setSpec3DAudioLevelThresholdDb (float thresholdDb, bool notifyPrefs = true);
+    float getSpec3DAudioLevelThresholdDb() const noexcept;
+    void setSpec3DAudioLevelSpeed (Spectrogram3DComponent::AudioLevelSpeed speed, bool notifyPrefs = true);
+    Spectrogram3DComponent::AudioLevelSpeed getSpec3DAudioLevelSpeed() const noexcept;
     void setSpec3DAudioLevelAffectPlayhead (bool shouldAffect, bool notifyPrefs = true);
     bool getSpec3DAudioLevelAffectPlayhead() const noexcept;
     void setSpec3DAudioLevelAffectAntiPlayhead (bool shouldAffect, bool notifyPrefs = true);
@@ -411,6 +417,7 @@ private:
     void syncGonToolButtons();
     void syncSpecToolButtons();
     void syncSpec3DPresentation();
+    void syncSpec3DAudioSidechainToProcessor() noexcept;
     void raiseSpecToolButtons();
     /** Expanded Osc/Gon/Spec bounds — excludes piano strip when open. */
     juce::Rectangle<int> getExpandedScopeContentBounds() const;

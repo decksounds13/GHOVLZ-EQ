@@ -2220,6 +2220,7 @@ void EqEditor::loadUiPrefs()
     bool spec3DOnLoad = false;
     int spec3DMeshQuality = 1; // medium
     float spec3DFreqMeshBias = 0.0f;
+    float spec3DFreqMeshBiasPivot = Spectrogram3DComponent::kFreqMeshBiasPivotDefault;
     int spec3DMsaaLevel = 4; // 4x default
     bool spec3DTransparentBg = true;
     bool spec3DReverseFreq = true;
@@ -2281,6 +2282,8 @@ void EqEditor::loadUiPrefs()
     float spec3DAudioMaxPct = Spectrogram3DComponent::kAudioLevelMaxPercentDefault;
     float spec3DAudioHp = Spectrogram3DComponent::kAudioLevelHpDefaultHz;
     float spec3DAudioLp = Spectrogram3DComponent::kAudioLevelLpDefaultHz;
+    float spec3DAudioThresh = Spectrogram3DComponent::kAudioLevelThresholdDefaultDb;
+    int spec3DAudioSpeed = (int) Spectrogram3DComponent::AudioLevelSpeed::fast;
     bool spec3DAudioPlayhead = false;
     bool spec3DAudioAntiPlayhead = false;
     float spec3DNormalCusp = Spectrogram3DComponent::kNormalCuspDefaultDeg;
@@ -2381,6 +2384,9 @@ void EqEditor::loadUiPrefs()
                 spec3DOnLoad = xml->getBoolAttribute ("spec3d", false);
                 spec3DMeshQuality = xml->getIntAttribute ("spec3dMeshQuality", 1);
                 spec3DFreqMeshBias = (float) xml->getDoubleAttribute ("spec3dFreqMeshBias", 0.0);
+                spec3DFreqMeshBiasPivot = (float) xml->getDoubleAttribute (
+                    "spec3dFreqMeshBiasPivot",
+                    (double) Spectrogram3DComponent::kFreqMeshBiasPivotDefault);
                 if (xml->hasAttribute ("spec3dMsaaLevel"))
                 {
                     const int level = xml->getIntAttribute ("spec3dMsaaLevel", 4);
@@ -2475,6 +2481,10 @@ void EqEditor::loadUiPrefs()
                     "spec3dAudioHp", Spectrogram3DComponent::kAudioLevelHpDefaultHz);
                 spec3DAudioLp = (float) xml->getDoubleAttribute (
                     "spec3dAudioLp", Spectrogram3DComponent::kAudioLevelLpDefaultHz);
+                spec3DAudioThresh = (float) xml->getDoubleAttribute (
+                    "spec3dAudioThresh", Spectrogram3DComponent::kAudioLevelThresholdDefaultDb);
+                spec3DAudioSpeed = xml->getIntAttribute (
+                    "spec3dAudioSpeed", (int) Spectrogram3DComponent::AudioLevelSpeed::fast);
                 spec3DAudioPlayhead = xml->getBoolAttribute ("spec3dAudioPlayhead", false);
                 spec3DAudioAntiPlayhead = xml->getBoolAttribute ("spec3dAudioAntiPlayhead", false);
                 spec3DNormalCusp = (float) xml->getDoubleAttribute (
@@ -2531,8 +2541,7 @@ void EqEditor::loadUiPrefs()
             spec3DMeshQuality <= 0 ? Spectrogram3DComponent::MeshQuality::low
                                   : (spec3DMeshQuality == 1 ? Spectrogram3DComponent::MeshQuality::medium
                                      : (spec3DMeshQuality == 2 ? Spectrogram3DComponent::MeshQuality::high
-                                        : (spec3DMeshQuality == 3 ? Spectrogram3DComponent::MeshQuality::ultra
-                                                                  : Spectrogram3DComponent::MeshQuality::overkill))),
+                                                              : Spectrogram3DComponent::MeshQuality::ultra)),
             false);
         mainComponent->setSpec3DMsaaLevel (
             spec3DMsaaLevel == 0 ? Spectrogram3DComponent::MsaaLevel::off
@@ -2544,6 +2553,7 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DReverseFrequencyAxis (spec3DReverseFreq, false);
         mainComponent->setSpec3DMeshHeight (spec3DMeshHeight, false);
         mainComponent->setSpec3DFreqMeshBias (spec3DFreqMeshBias, false);
+        mainComponent->setSpec3DFreqMeshBiasPivot (spec3DFreqMeshBiasPivot, false);
         mainComponent->setSpec3DLightingEnabled (spec3DLighting, false);
         mainComponent->setSpec3DLightingAmount (spec3DLightingAmt, false);
         mainComponent->setSpec3DLightAzimuthDeg (spec3DLightAz, false);
@@ -2630,6 +2640,11 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DAudioLevelMaxPercent (spec3DAudioMaxPct, false);
         mainComponent->setSpec3DAudioLevelHpHz (spec3DAudioHp, false);
         mainComponent->setSpec3DAudioLevelLpHz (spec3DAudioLp, false);
+        mainComponent->setSpec3DAudioLevelThresholdDb (spec3DAudioThresh, false);
+        mainComponent->setSpec3DAudioLevelSpeed (
+            static_cast<Spectrogram3DComponent::AudioLevelSpeed> (
+                juce::jlimit (0, 2, spec3DAudioSpeed)),
+            false);
         mainComponent->setSpec3DAudioLevelAffectPlayhead (spec3DAudioPlayhead, false);
         mainComponent->setSpec3DAudioLevelAffectAntiPlayhead (spec3DAudioAntiPlayhead, false);
         mainComponent->setSpec3DAudioLevelModEnabled (spec3DAudioLevel, false);
@@ -2719,14 +2734,15 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dMeshQuality",
                            q == Spectrogram3DComponent::MeshQuality::low ? 0
                                : (q == Spectrogram3DComponent::MeshQuality::medium ? 1
-                                  : (q == Spectrogram3DComponent::MeshQuality::high ? 2
-                                     : (q == Spectrogram3DComponent::MeshQuality::ultra ? 3 : 4))));
+                                  : (q == Spectrogram3DComponent::MeshQuality::high ? 2 : 3)));
         xml->setAttribute ("spec3dMsaaLevel", (int) mainComponent->getSpec3DMsaaLevel());
         xml->setAttribute ("spec3dMsaa", mainComponent->isSpec3DMultisampling()); // legacy
         xml->setAttribute ("spec3dTransparentBg", mainComponent->isSpec3DTransparentBackground());
         xml->setAttribute ("spec3dReverseFreq", mainComponent->isSpec3DReverseFrequencyAxis());
         xml->setAttribute ("spec3dMeshHeight", (double) mainComponent->getSpec3DMeshHeight());
         xml->setAttribute ("spec3dFreqMeshBias", (double) mainComponent->getSpec3DFreqMeshBias());
+        xml->setAttribute ("spec3dFreqMeshBiasPivot",
+                           (double) mainComponent->getSpec3DFreqMeshBiasPivot());
         xml->setAttribute ("spec3dLighting", mainComponent->isSpec3DLightingEnabled());
         xml->setAttribute ("spec3dLightingAmt", (double) mainComponent->getSpec3DLightingAmount());
         xml->setAttribute ("spec3dLightAz", (double) mainComponent->getSpec3DLightAzimuthDeg());
@@ -2809,6 +2825,9 @@ void EqEditor::saveUiPrefs() const
                            (double) mainComponent->getSpec3DAudioLevelMaxPercent());
         xml->setAttribute ("spec3dAudioHp", (double) mainComponent->getSpec3DAudioLevelHpHz());
         xml->setAttribute ("spec3dAudioLp", (double) mainComponent->getSpec3DAudioLevelLpHz());
+        xml->setAttribute ("spec3dAudioThresh",
+                           (double) mainComponent->getSpec3DAudioLevelThresholdDb());
+        xml->setAttribute ("spec3dAudioSpeed", (int) mainComponent->getSpec3DAudioLevelSpeed());
         xml->setAttribute ("spec3dAudioPlayhead",
                            mainComponent->getSpec3DAudioLevelAffectPlayhead());
         xml->setAttribute ("spec3dAudioAntiPlayhead",

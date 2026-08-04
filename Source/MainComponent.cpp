@@ -1013,16 +1013,16 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
         menu.addItem (1, "Mesh: Low", true, q == Spectrogram3DComponent::MeshQuality::low);
         menu.addItem (2, "Mesh: Medium", true, q == Spectrogram3DComponent::MeshQuality::medium);
         menu.addItem (3, "Mesh: High", true, q == Spectrogram3DComponent::MeshQuality::high);
-        menu.addItem (4, "Mesh: Ultra", true, q == Spectrogram3DComponent::MeshQuality::ultra);
-        menu.addItem (5, "Mesh: Overkill", true, q == Spectrogram3DComponent::MeshQuality::overkill);
+        menu.addItem (4, "Mesh: Ultra", true, q == Spectrogram3DComponent::MeshQuality::ultra
+                                              || q == Spectrogram3DComponent::MeshQuality::overkill);
         menu.addSeparator();
-        menu.addItem (4, "Reset camera");
+        menu.addItem (5, "Reset camera");
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&spec3DButton),
             [safe = juce::Component::SafePointer<MainComponent> (this)] (int result)
             {
                 if (safe == nullptr || result <= 0)
                     return;
-                if (result == 4)
+                if (result == 5)
                 {
                     safe->spectrogram3D.resetCamera();
                     return;
@@ -1031,8 +1031,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
                     result == 1 ? Spectrogram3DComponent::MeshQuality::low
                                 : (result == 3 ? Spectrogram3DComponent::MeshQuality::high
                                                : (result == 4 ? Spectrogram3DComponent::MeshQuality::ultra
-                                                              : (result == 5 ? Spectrogram3DComponent::MeshQuality::overkill
-                                                                             : Spectrogram3DComponent::MeshQuality::medium))),
+                                                              : Spectrogram3DComponent::MeshQuality::medium)),
                     true);
             });
     };
@@ -2110,6 +2109,18 @@ float MainComponent::getSpec3DFreqMeshBias() const noexcept
     return spectrogram3D.getFreqMeshBias();
 }
 
+void MainComponent::setSpec3DFreqMeshBiasPivot (float pivot01, bool notifyPrefs)
+{
+    spectrogram3D.setFreqMeshBiasPivot (pivot01);
+    if (notifyPrefs)
+        editor.saveUiPrefs();
+}
+
+float MainComponent::getSpec3DFreqMeshBiasPivot() const noexcept
+{
+    return spectrogram3D.getFreqMeshBiasPivot();
+}
+
 void MainComponent::setSpec3DMsaaLevel (Spectrogram3DComponent::MsaaLevel level, bool notifyPrefs)
 {
     spectrogram3D.setMsaaLevel (level);
@@ -2218,13 +2229,21 @@ float MainComponent::getSpec3DZoomOscillatePeriodSec() const noexcept
     return spectrogram3D.getZoomOscillatePeriodSec();
 }
 
+void MainComponent::syncSpec3DAudioSidechainToProcessor() noexcept
+{
+    float atk = 8.0f, rel = 80.0f;
+    Spectrogram3DComponent::audioLevelBallisticsMs (spectrogram3D.getAudioLevelSpeed(), atk, rel);
+    processor.configureSpec3DVisualSidechain (spectrogram3D.isAudioLevelModEnabled(),
+                                              spectrogram3D.getAudioLevelHpHz(),
+                                              spectrogram3D.getAudioLevelLpHz(),
+                                              spectrogram3D.getAudioLevelThresholdDb(),
+                                              atk, rel);
+}
+
 void MainComponent::setSpec3DAudioLevelModEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelModEnabled (shouldEnable);
-    processor.configureSpec3DVisualSidechain (shouldEnable,
-                                              spectrogram3D.getAudioLevelHpHz(),
-                                              spectrogram3D.getAudioLevelLpHz(),
-                                              8.0f, 180.0f);
+    syncSpec3DAudioSidechainToProcessor();
     if (notifyPrefs) editor.saveUiPrefs();
 }
 bool MainComponent::isSpec3DAudioLevelModEnabled() const noexcept
@@ -2266,10 +2285,7 @@ float MainComponent::getSpec3DAudioLevelMaxPercent() const noexcept
 void MainComponent::setSpec3DAudioLevelHpHz (float hz, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelHpHz (hz);
-    processor.configureSpec3DVisualSidechain (spectrogram3D.isAudioLevelModEnabled(),
-                                              spectrogram3D.getAudioLevelHpHz(),
-                                              spectrogram3D.getAudioLevelLpHz(),
-                                              8.0f, 180.0f);
+    syncSpec3DAudioSidechainToProcessor();
     if (notifyPrefs) editor.saveUiPrefs();
 }
 float MainComponent::getSpec3DAudioLevelHpHz() const noexcept
@@ -2280,15 +2296,35 @@ float MainComponent::getSpec3DAudioLevelHpHz() const noexcept
 void MainComponent::setSpec3DAudioLevelLpHz (float hz, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelLpHz (hz);
-    processor.configureSpec3DVisualSidechain (spectrogram3D.isAudioLevelModEnabled(),
-                                              spectrogram3D.getAudioLevelHpHz(),
-                                              spectrogram3D.getAudioLevelLpHz(),
-                                              8.0f, 180.0f);
+    syncSpec3DAudioSidechainToProcessor();
     if (notifyPrefs) editor.saveUiPrefs();
 }
 float MainComponent::getSpec3DAudioLevelLpHz() const noexcept
 {
     return spectrogram3D.getAudioLevelLpHz();
+}
+
+void MainComponent::setSpec3DAudioLevelThresholdDb (float thresholdDb, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelThresholdDb (thresholdDb);
+    syncSpec3DAudioSidechainToProcessor();
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DAudioLevelThresholdDb() const noexcept
+{
+    return spectrogram3D.getAudioLevelThresholdDb();
+}
+
+void MainComponent::setSpec3DAudioLevelSpeed (Spectrogram3DComponent::AudioLevelSpeed speed,
+                                             bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelSpeed (speed);
+    syncSpec3DAudioSidechainToProcessor();
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::AudioLevelSpeed MainComponent::getSpec3DAudioLevelSpeed() const noexcept
+{
+    return spectrogram3D.getAudioLevelSpeed();
 }
 
 void MainComponent::setSpec3DAudioLevelAffectPlayhead (bool shouldAffect, bool notifyPrefs)

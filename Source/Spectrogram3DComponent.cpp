@@ -62,7 +62,8 @@ namespace
         uniform float uSelfShadow;
         uniform float uMeshHeight;
         uniform float uReverseFreq;
-        uniform float uFreqBiasB; // w(u)=1+B*u^2 HF density; 0 = uniform
+        uniform float uFreqBiasB; // HF density amount; 0 = uniform
+        uniform float uFreqBiasPivot; // freq-axis u where density boost begins
         uniform float uAoAmount;
         uniform float uAoRadius;
         // CPU-prepared light bearing on the floor (avoids GPU normalize edge cases).
@@ -84,26 +85,36 @@ namespace
         uniform float uClosedFloorY; // closed mesh bottom (just under 0-intensity plane)
         uniform float uSssThickScale;
         uniform float uSssMaxThick;
-        // Audio-level mod matrix (level 0 = silence). Target: 0 bright, 1 lit amt,
-        // 2 spec, 3 rim, 4 dome, 5 all lights, 6 bright+lights.
-        // factor = mix(1+min, 1+max, level); min/max are fractional (±0.20 = ±20%).
+        // Audio-level mod matrix (CPU sets which channels; flags are 0/1).
+        // factor = mix(1+min, 1+max, level); min/max are fractional (±1 = ±100%).
         uniform float uAudioLevel;
         uniform float uAudioMin;
         uniform float uAudioMax;
-        uniform float uAudioTarget;
+        uniform float uAudioModBright; // ramp brightness only — never lighting amount
+        uniform float uAudioModLitAmt;
+        uniform float uAudioModSpec;
+        uniform float uAudioModRim;
+        uniform float uAudioModDome;
         uniform float uAudioAffectPlayhead;
         uniform float uAudioAffectAnti;
         uniform float uPlayheadWallX;
         uniform float uAntiPlayheadWallX;
 
         // Frequency axis u (0=low…1=high) → height-map V (mesh-row CDF).
+        // Boost only above pivot: w=1 for u<=P, else 1+B*((u-P)/(1-P))^2.
         float meshTFromFreqAxis (float uAxis)
         {
             float u = clamp (uAxis, 0.0, 1.0);
             float B = max (uFreqBiasB, 0.0);
             if (B < 1.0e-5)
                 return u;
-            return (u + B * u * u * u / 3.0) / (1.0 + B / 3.0);
+            float P = clamp (uFreqBiasPivot, 0.0, 0.999);
+            float I = 1.0 + B * (1.0 - P) / 3.0;
+            if (u <= P)
+                return u / I;
+            float v = u - P;
+            float omp = max (1.0 - P, 1.0e-5);
+            return (u + B * v * v * v / (3.0 * omp * omp)) / I;
         }
 
         float sampleHeightNorm (vec2 xz)
@@ -379,36 +390,42 @@ namespace
             float shade = shadow * ao * contact;
 
             // Audio-level mod matrix: body always; closed playhead / anti-playhead opt-in.
-            // factor = mix(1+min%, 1+max%, level); both % at 0 → factor 1 (no change).
-            float audioT = 0.0;
+            // rawFactor = mix(1+min%, 1+max%, level); both % at 0 → 1 (no change).
+            // Excluded walls keep factor=1 (base look) — NOT the silence endpoint.
+            float factor = 1.0;
             {
                 float lvl = clamp (uAudioLevel, 0.0, 1.0);
                 float band = 0.05;
                 float nearPh = 1.0 - smoothstep (0.0, band, abs (vWorldPos.x - uPlayheadWallX));
                 float nearAnti = 1.0 - smoothstep (0.0, band, abs (vWorldPos.x - uAntiPlayheadWallX));
-                float onWall = max (nearPh, nearAnti);
-                float m = 1.0 - onWall;
+                float onBody = 1.0 - max (nearPh, nearAnti);
+                float affect = onBody;
                 if (uAudioAffectPlayhead > 0.5)
-                    m = max (m, nearPh);
+                    affect = max (affect, nearPh);
                 if (uAudioAffectAnti > 0.5)
-                    m = max (m, nearAnti);
-                audioT = lvl * m;
+                    affect = max (affect, nearAnti);
+                float rawFactor = mix (1.0 + uAudioMin, 1.0 + uAudioMax, lvl);
+                factor = mix (1.0, rawFactor, clamp (affect, 0.0, 1.0));
             }
-            float factor = mix (1.0 + uAudioMin, 1.0 + uAudioMax, audioT);
-            int tgt = int (uAudioTarget + 0.5);
-            bool wantBright = (tgt == 0 || tgt == 6);
-            bool wantLitAmt = (tgt == 1 || tgt == 5 || tgt == 6);
-            bool wantSpec = (tgt == 2 || tgt == 5 || tgt == 6);
-            bool wantRimT = (tgt == 3 || tgt == 5 || tgt == 6);
-            bool wantDomeT = (tgt == 4 || tgt == 5 || tgt == 6);
-            if (wantBright)
-                albedo *= factor;
 
-            float amt = clamp (uLightingAmount, 0.0, 1.0);
-            if (wantLitAmt)
-                amt = clamp (amt * factor, 0.0, 1.0);
+            // Early-out only when Lighting master is off.
+            float baseAmt = clamp (uLightingAmount, 0.0, 1.0);
 
-            if (amt < 1.0e-4)
+            // Ramp brightness: pulse colours only. Never touch lighting amount.
+            // Soft floor while lit so At Silence −100% doesn't erase the lit form.
+            if (uAudioModBright > 0.5)
+            {
+                float g = max (factor, 0.0);
+                if (baseAmt > 1.0e-4)
+                    g = max (g, 0.12);
+                albedo *= g;
+            }
+
+            float amt = baseAmt;
+            if (uAudioModLitAmt > 0.5)
+                amt = clamp (baseAmt * factor, 0.0, 1.0);
+
+            if (baseAmt < 1.0e-4)
             {
                 fragColour = vec4 (albedo * ao, 1.0); // flat ramp; AO only if enabled
                 return;
@@ -426,7 +443,7 @@ namespace
             float rough = clamp (uRoughness, 0.04, 1.0);
             float metal = clamp (uMetalness, 0.0, 1.0);
             float specAmt = clamp (uSpecular, 0.0, 1.0);
-            if (wantSpec)
+            if (uAudioModSpec > 0.5)
                 specAmt = clamp (specAmt * factor, 0.0, 2.0);
             vec3 lightCol = max (uLightColour, vec3 (0.0));
             vec3 rimCol = max (uRimColour, vec3 (0.0));
@@ -448,7 +465,7 @@ namespace
 
             // Dome / hemisphere fill — sky vs ground, or equirectangular HDRI.
             float domeAmt = clamp (uDomeStrength, 0.0, 1.0);
-            if (wantDomeT)
+            if (uAudioModDome > 0.5)
                 domeAmt = clamp (domeAmt * factor, 0.0, 2.0);
             if (domeAmt > 1.0e-4)
             {
@@ -473,7 +490,7 @@ namespace
             }
 
             float rimAmt = uRim;
-            if (wantRimT)
+            if (uAudioModRim > 0.5)
                 rimAmt = clamp (rimAmt * factor, 0.0, 2.0);
             float rim = pow (1.0 - NdotV, 2.5) * rimAmt * ao;
             vec3 sss = subsurfaceScatter (albedo, n, l, v, shadow);
@@ -1287,6 +1304,7 @@ void Spectrogram3DComponent::GlHost::createShaders()
     colourMeshHeightUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMeshHeight");
     colourReverseFreqUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uReverseFreq");
     colourFreqBiasBUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uFreqBiasB");
+    colourFreqBiasPivotUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uFreqBiasPivot");
     colourAoAmountUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAoAmount");
     colourAoRadiusUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAoRadius");
     colourShadowDirXZUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowDirXZ");
@@ -1309,7 +1327,11 @@ void Spectrogram3DComponent::GlHost::createShaders()
     colourAudioLevelUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioLevel");
     colourAudioMinUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioMin");
     colourAudioMaxUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioMax");
-    colourAudioTargetUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioTarget");
+    colourAudioModBrightUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioModBright");
+    colourAudioModLitAmtUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioModLitAmt");
+    colourAudioModSpecUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioModSpec");
+    colourAudioModRimUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioModRim");
+    colourAudioModDomeUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioModDome");
     colourAudioAffectPlayheadUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioAffectPlayhead");
     colourAudioAffectAntiUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioAffectAnti");
     colourPlayheadWallXUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uPlayheadWallX");
@@ -1415,6 +1437,7 @@ void Spectrogram3DComponent::GlHost::destroyShaders()
     colourShadowDirXZUniform.reset();
     colourAoRadiusUniform.reset();
     colourAoAmountUniform.reset();
+    colourFreqBiasPivotUniform.reset();
     colourFreqBiasBUniform.reset();
     colourReverseFreqUniform.reset();
     colourMeshHeightUniform.reset();
@@ -2430,6 +2453,7 @@ void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProg
     setF1 (colourMeshHeightUniform.get(), "uMeshHeight", owner.meshHeight);
     setF1 (colourReverseFreqUniform.get(), "uReverseFreq", owner.reverseFrequencyAxis ? 1.0f : 0.0f);
     setF1 (colourFreqBiasBUniform.get(), "uFreqBiasB", owner.freqMeshBiasB());
+    setF1 (colourFreqBiasPivotUniform.get(), "uFreqBiasPivot", owner.getFreqMeshBiasPivot());
     setF1 (colourAoAmountUniform.get(), "uAoAmount", aoAmt);
     setF1 (colourAoRadiusUniform.get(), "uAoRadius", owner.ssaoRadius);
     setF2 (colourShadowDirXZUniform.get(), "uShadowDirXZ", shadowDirX, shadowDirZ);
@@ -2467,8 +2491,24 @@ void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProg
            audioOn ? owner.audioLevelMinPercent * 0.01f : 0.0f);
     setF1 (colourAudioMaxUniform.get(), "uAudioMax",
            audioOn ? owner.audioLevelMaxPercent * 0.01f : 0.0f);
-    setF1 (colourAudioTargetUniform.get(), "uAudioTarget",
-           (float) static_cast<int> (owner.audioLevelTarget));
+
+    // Decode target on CPU so brightness can never accidentally gate lighting amount.
+    using ALT = Spectrogram3DComponent::AudioLevelTarget;
+    const auto tgt = owner.audioLevelTarget;
+    const bool modBright = audioOn && (tgt == ALT::brightness || tgt == ALT::brightnessAndLights);
+    const bool modLitAmt = audioOn && (tgt == ALT::lightingAmount || tgt == ALT::allLights
+                                       || tgt == ALT::brightnessAndLights);
+    const bool modSpec = audioOn && (tgt == ALT::specular || tgt == ALT::allLights
+                                     || tgt == ALT::brightnessAndLights);
+    const bool modRim = audioOn && (tgt == ALT::rim || tgt == ALT::allLights
+                                    || tgt == ALT::brightnessAndLights);
+    const bool modDome = audioOn && (tgt == ALT::domeFill || tgt == ALT::allLights
+                                     || tgt == ALT::brightnessAndLights);
+    setF1 (colourAudioModBrightUniform.get(), "uAudioModBright", modBright ? 1.0f : 0.0f);
+    setF1 (colourAudioModLitAmtUniform.get(), "uAudioModLitAmt", modLitAmt ? 1.0f : 0.0f);
+    setF1 (colourAudioModSpecUniform.get(), "uAudioModSpec", modSpec ? 1.0f : 0.0f);
+    setF1 (colourAudioModRimUniform.get(), "uAudioModRim", modRim ? 1.0f : 0.0f);
+    setF1 (colourAudioModDomeUniform.get(), "uAudioModDome", modDome ? 1.0f : 0.0f);
     setF1 (colourAudioAffectPlayheadUniform.get(), "uAudioAffectPlayhead",
            owner.audioLevelAffectPlayhead ? 1.0f : 0.0f);
     setF1 (colourAudioAffectAntiUniform.get(), "uAudioAffectAnti",
@@ -2513,6 +2553,16 @@ void Spectrogram3DComponent::GlHost::drawGroundAndGrid()
         colourAudioMinUniform->set (0.0f);
     if (colourAudioMaxUniform != nullptr)
         colourAudioMaxUniform->set (0.0f);
+    if (colourAudioModBrightUniform != nullptr)
+        colourAudioModBrightUniform->set (0.0f);
+    if (colourAudioModLitAmtUniform != nullptr)
+        colourAudioModLitAmtUniform->set (0.0f);
+    if (colourAudioModSpecUniform != nullptr)
+        colourAudioModSpecUniform->set (0.0f);
+    if (colourAudioModRimUniform != nullptr)
+        colourAudioModRimUniform->set (0.0f);
+    if (colourAudioModDomeUniform != nullptr)
+        colourAudioModDomeUniform->set (0.0f);
     if (colourProjectionUniform != nullptr)
         colourProjectionUniform->setMatrix4 (getProjectionMatrix().mat, 1, false);
     if (colourViewUniform != nullptr)
@@ -3362,6 +3412,8 @@ void Spectrogram3DComponent::setActive (bool shouldBeActive) noexcept
 
 void Spectrogram3DComponent::setMeshQuality (MeshQuality q) noexcept
 {
+    if (q == MeshQuality::overkill)
+        q = MeshQuality::ultra; // removed — was crashy / too heavy
     if (meshQuality == q)
         return;
     meshQuality = q;
@@ -3376,6 +3428,17 @@ void Spectrogram3DComponent::setFreqMeshBias (float amount01) noexcept
     if (std::abs (freqMeshBias - amount01) < 1.0e-4f)
         return;
     freqMeshBias = amount01;
+    invalidateMesh();
+    if (active)
+        updateMeshFromSource();
+}
+
+void Spectrogram3DComponent::setFreqMeshBiasPivot (float pivot01) noexcept
+{
+    pivot01 = juce::jlimit (0.0f, 0.95f, pivot01);
+    if (std::abs (freqMeshBiasPivot - pivot01) < 1.0e-4f)
+        return;
+    freqMeshBiasPivot = pivot01;
     invalidateMesh();
     if (active)
         updateMeshFromSource();
@@ -4181,41 +4244,36 @@ void Spectrogram3DComponent::setAudioLevelModEnabled (bool shouldEnable) noexcep
     audioLevelModEnabled = shouldEnable;
     if (! shouldEnable)
         audioLevelLive01 = 0.0f;
-    markSoftContentDirty();
-    if (glHost != nullptr)
-        glHost->triggerRedraw();
-    if (usesSoftComposite())
-        repaint();
+    markLookDirty(); // force soft-FBO redraw — target/factor changes must not stick
 }
 
 void Spectrogram3DComponent::setAudioLevelTarget (AudioLevelTarget target) noexcept
 {
+    const int idx = juce::jlimit (0, (int) AudioLevelTarget::brightnessAndLights, (int) target);
+    target = static_cast<AudioLevelTarget> (idx);
     if (audioLevelTarget == target)
         return;
     audioLevelTarget = target;
-    markSoftContentDirty();
+    markLookDirty();
 }
 
 void Spectrogram3DComponent::setAudioLevelMinPercent (float pct) noexcept
 {
+    // Independent of max — both may span the full range (allows invert / fine-tune).
     pct = juce::jlimit (kAudioLevelPercentMin, kAudioLevelPercentMax, pct);
-    if (pct > audioLevelMaxPercent)
-        pct = audioLevelMaxPercent;
     if (std::abs (audioLevelMinPercent - pct) < 1.0e-3f)
         return;
     audioLevelMinPercent = pct;
-    markSoftContentDirty();
+    markLookDirty();
 }
 
 void Spectrogram3DComponent::setAudioLevelMaxPercent (float pct) noexcept
 {
     pct = juce::jlimit (kAudioLevelPercentMin, kAudioLevelPercentMax, pct);
-    if (pct < audioLevelMinPercent)
-        pct = audioLevelMinPercent;
     if (std::abs (audioLevelMaxPercent - pct) < 1.0e-3f)
         return;
     audioLevelMaxPercent = pct;
-    markSoftContentDirty();
+    markLookDirty();
 }
 
 void Spectrogram3DComponent::setAudioLevelHpHz (float hz) noexcept
@@ -4228,12 +4286,36 @@ void Spectrogram3DComponent::setAudioLevelLpHz (float hz) noexcept
     audioLevelLpHz = juce::jlimit (40.0f, 20000.0f, hz);
 }
 
+void Spectrogram3DComponent::setAudioLevelThresholdDb (float thresholdDb) noexcept
+{
+    audioLevelThresholdDb = juce::jlimit (kAudioLevelThresholdMinDb, kAudioLevelThresholdMaxDb,
+                                          thresholdDb);
+}
+
+void Spectrogram3DComponent::setAudioLevelSpeed (AudioLevelSpeed speed) noexcept
+{
+    audioLevelSpeed = speed;
+}
+
+void Spectrogram3DComponent::audioLevelBallisticsMs (AudioLevelSpeed speed,
+                                                     float& attackMs, float& releaseMs) noexcept
+{
+    // Match Side Check Fast / Med / Slow (no exposed A/R knobs).
+    switch (speed)
+    {
+        case AudioLevelSpeed::slow: attackMs = 120.0f; releaseMs = 900.0f; break;
+        case AudioLevelSpeed::med:  attackMs = 40.0f;  releaseMs = 300.0f; break;
+        case AudioLevelSpeed::fast:
+        default:                    attackMs = 8.0f;   releaseMs = 80.0f;  break;
+    }
+}
+
 void Spectrogram3DComponent::setAudioLevelAffectPlayhead (bool shouldAffect) noexcept
 {
     if (audioLevelAffectPlayhead == shouldAffect)
         return;
     audioLevelAffectPlayhead = shouldAffect;
-    markSoftContentDirty();
+    markLookDirty();
 }
 
 void Spectrogram3DComponent::setAudioLevelAffectAntiPlayhead (bool shouldAffect) noexcept
@@ -4241,7 +4323,7 @@ void Spectrogram3DComponent::setAudioLevelAffectAntiPlayhead (bool shouldAffect)
     if (audioLevelAffectAntiPlayhead == shouldAffect)
         return;
     audioLevelAffectAntiPlayhead = shouldAffect;
-    markSoftContentDirty();
+    markLookDirty();
 }
 
 void Spectrogram3DComponent::setAudioLevelProvider (std::function<float()> provider) noexcept
@@ -4378,6 +4460,9 @@ void Spectrogram3DComponent::computeTopSurfaceNormals (std::vector<Vertex>& vert
         }
     };
 
+    // Freq reverse mirrors world Z; keep winding matched so normals stay upward.
+    const bool flipWinding = reverseFrequencyAxis;
+
     auto forEachTopTri = [&] (bool accumulate)
     {
         for (int z = 0; z < h - 1; ++z)
@@ -4388,8 +4473,16 @@ void Spectrogram3DComponent::computeTopSurfaceNormals (std::vector<Vertex>& vert
                 const int i1 = i0 + 1;
                 const int i2 = i0 + w;
                 const int i3 = i2 + 1;
-                visitTri (i0, i2, i1, accumulate);
-                visitTri (i1, i2, i3, accumulate);
+                if (! flipWinding)
+                {
+                    visitTri (i0, i2, i1, accumulate);
+                    visitTri (i1, i2, i3, accumulate);
+                }
+                else
+                {
+                    visitTri (i0, i1, i2, accumulate);
+                    visitTri (i1, i3, i2, accumulate);
+                }
             }
         }
     };
@@ -4424,6 +4517,14 @@ void Spectrogram3DComponent::computeTopSurfaceNormals (std::vector<Vertex>& vert
             vtx.nx = normalAccumX[(size_t) i] / len;
             vtx.ny = normalAccumY[(size_t) i] / len;
             vtx.nz = normalAccumZ[(size_t) i] / len;
+        }
+
+        // Safety: top surface must face +Y (Z-mirror must not photonegative the ramp).
+        if (vtx.ny < 0.0f)
+        {
+            vtx.nx = -vtx.nx;
+            vtx.ny = -vtx.ny;
+            vtx.nz = -vtx.nz;
         }
     }
 }
@@ -4635,6 +4736,16 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
                           inner.toNearestInt().reduced (8),
                           juce::Justification::centred, 2);
     }
+
+    if (active && waterfallFrozen)
+    {
+        g.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
+        const juce::Rectangle<int> badge ((int) inner.getX() + 8, (int) inner.getY() + 6, 64, 20);
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRoundedRectangle (badge.toFloat(), 4.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.9f));
+        g.drawFittedText ("FROZEN", badge, juce::Justification::centred, 1);
+    }
 }
 
 void Spectrogram3DComponent::timerCallback()
@@ -4760,8 +4871,8 @@ void Spectrogram3DComponent::meshSizeForQuality (int& outW, int& outH) const noe
     {
         case MeshQuality::low:      outW = 64;  outH = 48;  break;
         case MeshQuality::high:     outW = 192; outH = 160; break;
-        case MeshQuality::ultra:    outW = 288; outH = 240; break;
-        case MeshQuality::overkill: outW = 512; outH = 448; break; // ~230k verts — GPU gym day
+        case MeshQuality::ultra:
+        case MeshQuality::overkill: outW = 288; outH = 240; break; // overkill → ultra
         case MeshQuality::medium:
         default:                    outW = 128; outH = 96;  break;
     }
@@ -4778,35 +4889,49 @@ int Spectrogram3DComponent::effectiveFreqMeshRows (int baseH) const noexcept
     const float B = freqMeshBiasB();
     if (B < 1.0e-5f)
         return baseH;
-    // Keep low-end density ≥ uniform base: N' = base * ∫w = base * (1 + B/3).
-    const int n = (int) std::ceil ((double) baseH * (1.0 + (double) B / 3.0));
+    // Boost only above pivot P: ∫w = 1 + B*(1-P)/3 → fewer rows when P is higher.
+    const float P = juce::jlimit (0.0f, 0.95f, freqMeshBiasPivot);
+    const int n = (int) std::ceil ((double) baseH * (1.0 + (double) B * (1.0 - (double) P) / 3.0));
     return juce::jlimit (baseH, kMaxFreqMeshRows, n);
 }
 
-float Spectrogram3DComponent::meshTFromFreqAxis (float u, float B) noexcept
+float Spectrogram3DComponent::meshTFromFreqAxis (float u, float B, float pivot) noexcept
 {
     u = juce::jlimit (0.0f, 1.0f, u);
     if (B < 1.0e-5f)
         return u;
-    // CDF of w(u)=1+B*u^2
-    return (u + B * u * u * u / 3.0f) / (1.0f + B / 3.0f);
+    const float P = juce::jlimit (0.0f, 0.999f, pivot);
+    const float I = 1.0f + B * (1.0f - P) / 3.0f;
+    if (u <= P)
+        return u / I;
+    const float v = u - P;
+    const float omp = juce::jmax (1.0e-5f, 1.0f - P);
+    return (u + B * v * v * v / (3.0f * omp * omp)) / I;
 }
 
-float Spectrogram3DComponent::freqAxisFromMeshT (float t, float B) noexcept
+float Spectrogram3DComponent::freqAxisFromMeshT (float t, float B, float pivot) noexcept
 {
     t = juce::jlimit (0.0f, 1.0f, t);
     if (B < 1.0e-5f)
         return t;
 
-    // Solve u + (B/3) u^3 = t * (1 + B/3) via Newton.
-    const float target = t * (1.0f + B / 3.0f);
-    float u = t; // uniform seed
+    const float P = juce::jlimit (0.0f, 0.999f, pivot);
+    const float I = 1.0f + B * (1.0f - P) / 3.0f;
+    const float target = t * I;
+    if (target <= P)
+        return juce::jlimit (0.0f, 1.0f, target);
+
+    // Solve u + (B/(3*omp^2))*(u-P)^3 = target via Newton.
+    const float omp = juce::jmax (1.0e-5f, 1.0f - P);
+    const float c = B / (3.0f * omp * omp);
+    float u = juce::jlimit (P, 1.0f, target); // seed in boost region
     for (int i = 0; i < 8; ++i)
     {
-        const float f = u + (B / 3.0f) * u * u * u - target;
-        const float df = 1.0f + B * u * u;
+        const float v = u - P;
+        const float f = u + c * v * v * v - target;
+        const float df = 1.0f + B * v * v / (omp * omp);
         u -= f / juce::jmax (1.0e-6f, df);
-        u = juce::jlimit (0.0f, 1.0f, u);
+        u = juce::jlimit (P, 1.0f, u);
     }
     return u;
 }
@@ -4818,10 +4943,11 @@ void Spectrogram3DComponent::fillMeshColumn (int meshCol, const float* histCol, 
         return;
 
     const float B = freqMeshBiasB();
+    const float P = freqMeshBiasPivot;
     for (int z = 0; z < meshH; ++z)
     {
         const float t = meshH > 1 ? (float) z / (float) (meshH - 1) : 0.0f;
-        const float u = freqAxisFromMeshT (t, B); // 0=low … 1=high
+        const float u = freqAxisFromMeshT (t, B, P); // 0=low … 1=high
         // History: yNorm 0 = high Hz (top), 1 = low Hz (bottom).
         const float yNorm = 1.0f - u;
         const int row = juce::jlimit (0, histH - 1, (int) std::round (yNorm * (float) (histH - 1)));
@@ -4862,13 +4988,15 @@ void Spectrogram3DComponent::appendMeshColumnsFromHistory (const std::vector<flo
 void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
 {
     const bool wantClosed = closedMeshEnabled;
-    if (indicesValid && meshW == w && meshH == h && meshClosed == wantClosed && ! cpuIndices.empty())
+    const bool wantReverse = reverseFrequencyAxis;
+    if (indicesValid && meshW == w && meshH == h && meshClosed == wantClosed
+        && meshIndexReverseFreq == wantReverse && ! cpuIndices.empty())
         return;
 
     std::vector<uint32_t> inds;
     const int topCount = w * h;
 
-    // Top heightfield (CCW when viewed from above).
+    // Top heightfield (CCW from +Y). Freq-reverse mirrors Z, so flip winding to match.
     inds.reserve ((size_t) (w - 1) * (size_t) (h - 1) * 6
                   + (wantClosed ? (size_t) (w - 1) * (size_t) (h - 1) * 6
                                   + (size_t) (w + h) * 12 : 0));
@@ -4880,14 +5008,22 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
             const uint32_t i1 = i0 + 1;
             const uint32_t i2 = i0 + (uint32_t) w;
             const uint32_t i3 = i2 + 1;
-            inds.push_back (i0); inds.push_back (i2); inds.push_back (i1);
-            inds.push_back (i1); inds.push_back (i2); inds.push_back (i3);
+            if (! wantReverse)
+            {
+                inds.push_back (i0); inds.push_back (i2); inds.push_back (i1);
+                inds.push_back (i1); inds.push_back (i2); inds.push_back (i3);
+            }
+            else
+            {
+                inds.push_back (i0); inds.push_back (i1); inds.push_back (i2);
+                inds.push_back (i1); inds.push_back (i3); inds.push_back (i2);
+            }
         }
     }
 
     if (wantClosed)
     {
-        // Bottom cap: verts [topCount .. 2*topCount), winding flipped (normals down).
+        // Bottom cap: opposite winding of the top (normals down).
         for (int z = 0; z < h - 1; ++z)
         {
             for (int x = 0; x < w - 1; ++x)
@@ -4896,8 +5032,16 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
                 const uint32_t i1 = i0 + 1;
                 const uint32_t i2 = i0 + (uint32_t) w;
                 const uint32_t i3 = i2 + 1;
-                inds.push_back (i0); inds.push_back (i1); inds.push_back (i2);
-                inds.push_back (i1); inds.push_back (i3); inds.push_back (i2);
+                if (! wantReverse)
+                {
+                    inds.push_back (i0); inds.push_back (i1); inds.push_back (i2);
+                    inds.push_back (i1); inds.push_back (i3); inds.push_back (i2);
+                }
+                else
+                {
+                    inds.push_back (i0); inds.push_back (i2); inds.push_back (i1);
+                    inds.push_back (i1); inds.push_back (i2); inds.push_back (i3);
+                }
             }
         }
 
@@ -4908,19 +5052,24 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
             inds.push_back (tB); inds.push_back (bA); inds.push_back (bB);
         };
 
-        // z = 0 edge (x increasing)
+        // z = 0 / z = h-1: outward flips when freq-reverse swaps which end is +Z.
         for (int x = 0; x < w - 1; ++x)
         {
             const uint32_t tA = (uint32_t) x;
             const uint32_t tB = (uint32_t) (x + 1);
-            wallQuad (tA, tB, tA + (uint32_t) topCount, tB + (uint32_t) topCount);
+            if (! wantReverse)
+                wallQuad (tA, tB, tA + (uint32_t) topCount, tB + (uint32_t) topCount);
+            else
+                wallQuad (tB, tA, tB + (uint32_t) topCount, tA + (uint32_t) topCount);
         }
-        // z = h-1 edge (x increasing) — flip for outward normal
         for (int x = 0; x < w - 1; ++x)
         {
             const uint32_t tA = (uint32_t) ((h - 1) * w + x);
             const uint32_t tB = tA + 1;
-            wallQuad (tB, tA, tB + (uint32_t) topCount, tA + (uint32_t) topCount);
+            if (! wantReverse)
+                wallQuad (tB, tA, tB + (uint32_t) topCount, tA + (uint32_t) topCount);
+            else
+                wallQuad (tA, tB, tA + (uint32_t) topCount, tB + (uint32_t) topCount);
         }
         // Playhead wall (x = +1) + waterfall-end wall (x = -1): dedicated verts after
         // top+bottom, biased off the shared depth plane with the nearest history columns.
@@ -4952,6 +5101,7 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
     const juce::ScopedLock sl (meshLock);
     cpuIndices.swap (inds);
     meshClosed = wantClosed;
+    meshIndexReverseFreq = wantReverse;
     indicesValid = true;
 }
 
@@ -4974,11 +5124,12 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     const float waterfallEndWallX = -1.0f - kClosedWaterfallEndWallBias;
 
     const float B = freqMeshBiasB();
+    const float P = freqMeshBiasPivot;
 
     auto freqUForRow = [&] (int z) -> float
     {
         const float t = meshH > 1 ? (float) z / (float) (meshH - 1) : 0.0f;
-        return freqAxisFromMeshT (t, B); // 0=low … 1=high
+        return freqAxisFromMeshT (t, B, P); // 0=low … 1=high
     };
 
     auto worldZForU = [&] (float freqU) -> float
@@ -5087,6 +5238,22 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     meshNeedsUpload = true;
 }
 
+void Spectrogram3DComponent::setWaterfallFrozen (bool shouldFreeze) noexcept
+{
+    if (waterfallFrozen == shouldFreeze)
+        return;
+    waterfallFrozen = shouldFreeze;
+    if (! waterfallFrozen && dataSource != nullptr)
+    {
+        // Resume at live head — don't burst-drain columns accumulated while frozen.
+        lastHistorySerial = dataSource->getHistoryColumnSerial();
+    }
+    markSoftContentDirty();
+    if (glHost != nullptr)
+        glHost->triggerRedraw();
+    repaint();
+}
+
 void Spectrogram3DComponent::updateMeshFromSource()
 {
     if (dataSource == nullptr || ! dataSource->isSpectrogramEnabled())
@@ -5121,6 +5288,20 @@ void Spectrogram3DComponent::updateMeshFromSource()
         lastMinDb = minDb;
         lastMaxDb = maxDb;
         rebuildVerticesFromMeshDb (brightness, minDb, maxDb);
+        return;
+    }
+
+    if (waterfallFrozen)
+    {
+        // Hold the mesh; stay serial-synced so unfreeze doesn't catch up a backlog.
+        lastHistorySerial = serial;
+        if (lookChanged)
+        {
+            lastBrightness = brightness;
+            lastMinDb = minDb;
+            lastMaxDb = maxDb;
+            rebuildVerticesFromMeshDb (brightness, minDb, maxDb);
+        }
         return;
     }
 
@@ -5177,7 +5358,10 @@ void Spectrogram3DComponent::setReverseFrequencyAxis (bool shouldReverse) noexce
     if (reverseFrequencyAxis == shouldReverse)
         return;
     reverseFrequencyAxis = shouldReverse;
+    // Z mirror changes triangle winding — rebuild indices with the verts.
+    indicesValid = false;
     // Remap existing history — do not clear meshDb / serial.
+    // Colours stay intensity→ramp; only world Z / winding / normals update.
     if (meshW >= 2 && meshH >= 2 && ! meshDb.empty() && lastBrightness >= 0.0f)
         rebuildVerticesFromMeshDb (lastBrightness, lastMinDb, lastMaxDb);
     markSoftContentDirty();
@@ -5408,17 +5592,19 @@ void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
 {
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
-    menu.addItem (1, "Save as Default View");
-    menu.addItem (2, "Reset Camera (F)");
+    menu.addItem (1, "Freeze", true, waterfallFrozen);
     menu.addSeparator();
-    menu.addItem (3, "Turntable", true, autoRotateEnabled);
+    menu.addItem (2, "Save as Default View");
+    menu.addItem (3, "Reset Camera (F)");
+    menu.addSeparator();
+    menu.addItem (4, "Turntable", true, autoRotateEnabled);
     if (autoRotateEnabled)
-        menu.addCustomItem (4, std::make_unique<AutoRotatePeriodMenuItem> (*this), nullptr, "Turntable speed");
-    menu.addItem (5, "Oscillate Zoom", true, zoomOscillateEnabled);
+        menu.addCustomItem (5, std::make_unique<AutoRotatePeriodMenuItem> (*this), nullptr, "Turntable speed");
+    menu.addItem (6, "Oscillate Zoom", true, zoomOscillateEnabled);
     if (zoomOscillateEnabled)
     {
-        menu.addCustomItem (6, std::make_unique<ZoomOscillateDepthMenuItem> (*this), nullptr, "Zoom depth");
-        menu.addCustomItem (7, std::make_unique<ZoomOscillateRateMenuItem> (*this), nullptr, "Zoom rate");
+        menu.addCustomItem (7, std::make_unique<ZoomOscillateDepthMenuItem> (*this), nullptr, "Zoom depth");
+        menu.addCustomItem (8, std::make_unique<ZoomOscillateRateMenuItem> (*this), nullptr, "Zoom rate");
     }
     menu.showMenuAsync (juce::PopupMenu::Options()
                             .withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 })
@@ -5428,12 +5614,14 @@ void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
             if (safe == nullptr || result <= 0)
                 return;
             if (result == 1)
-                safe->saveAsDefaultView();
+                safe->setWaterfallFrozen (! safe->isWaterfallFrozen());
             else if (result == 2)
-                safe->resetCamera();
+                safe->saveAsDefaultView();
             else if (result == 3)
+                safe->resetCamera();
+            else if (result == 4)
                 safe->setAutoRotateEnabled (! safe->isAutoRotateEnabled());
-            else if (result == 5)
+            else if (result == 6)
                 safe->setZoomOscillateEnabled (! safe->isZoomOscillateEnabled());
         });
 }
@@ -5454,7 +5642,7 @@ float Spectrogram3DComponent::heightAtWorldXZ (float wx, float wz) const noexcep
     float freqU = reverseFrequencyAxis ? ((wz + 1.0f) * 0.5f)
                                        : ((1.0f - wz) * 0.5f);
     freqU = juce::jlimit (0.0f, 1.0f, freqU);
-    const float t = meshTFromFreqAxis (freqU, freqMeshBiasB());
+    const float t = meshTFromFreqAxis (freqU, freqMeshBiasB(), freqMeshBiasPivot);
 
     const float fx = u * (float) (meshW - 1);
     const float fz = t * (float) (meshH - 1);
@@ -5605,7 +5793,8 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     // Turntable controls (no free tumble / roll):
     //  LMB drag           = orbit around look-at (yaw / elevation)
     //  RMB drag           = move look-at (truck / pedestal) — keeps orbit centred
-    //  RMB click          = context menu (Save Default / Reset Camera)
+    //  RMB click          = freeze / unfreeze waterfall (look-dev)
+    //  Shift+RMB click    = context menu (Freeze / Save Default / Turntable / …)
     //  Shift / MMB        = pan look-at on the ground plane
     //  Alt+LMB            = dolly (distance)
     //  Ctrl/Cmd+LMB       = set DOF focus distance under cursor
@@ -5721,9 +5910,14 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
 
 void Spectrogram3DComponent::handleMouseUp (const juce::MouseEvent& e)
 {
-    // RMB click (no meaningful drag) restores the view menu.
+    // RMB click (no meaningful drag): freeze toggle, or Shift+RMB for the view menu.
     if (rightClickCandidate && ! rightClickDragged)
-        showContextMenu (e.getScreenPosition());
+    {
+        if (e.mods.isShiftDown())
+            showContextMenu (e.getScreenPosition());
+        else
+            setWaterfallFrozen (! waterfallFrozen);
+    }
 
     rightClickCandidate = false;
     rightClickDragged = false;

@@ -2,6 +2,7 @@
 
 #include "../../MainComponent.h"
 #include "../../ScopeModules.h"
+#include "../../SpectrogramComponent.h"
 #include "../Menu.h"
 
 namespace
@@ -47,14 +48,27 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     enhancedFreq3DAttachment = std::make_unique<ButtonAttachment> (
         treeState, "SPEC_ENHANCED_FREQ_3D_ID", enhancedFreq3DToggle);
 
+    fftSizeLabel.setText ("FFT Size", juce::dontSendNotification);
+    styleCombo (fftSizeCombo);
+    {
+        const auto names = SpectrogramComponent::getFftSizeNames();
+        for (int i = 0; i < names.size(); ++i)
+            fftSizeCombo.addItem (names[i], i + 1);
+    }
+    fftSizeCombo.setTooltip (
+        "Analysis FFT block size for the spectrogram (shared with 2D Spec). "
+        "Larger = finer frequency resolution, more CPU / latency.");
+    addAndMakeVisible (fftSizeLabel);
+    addAndMakeVisible (fftSizeCombo);
+    fftSizeAttachment = std::make_unique<ComboBoxAttachment> (treeState, "SPEC_FFT_SIZE_ID", fftSizeCombo);
+
     meshQualityLabel.setText ("Mesh Quality", juce::dontSendNotification);
     styleCombo (meshQualityCombo);
     meshQualityCombo.addItem ("Low", 1);
     meshQualityCombo.addItem ("Medium", 2);
     meshQualityCombo.addItem ("High", 3);
     meshQualityCombo.addItem ("Ultra", 4);
-    meshQualityCombo.addItem ("Overkill", 5);
-    meshQualityCombo.setTooltip ("Mesh density along time × frequency. Overkill is 512×448 (~230k verts).");
+    meshQualityCombo.setTooltip ("Mesh density along time × frequency. Ultra is 288×240 base rows.");
     meshQualityCombo.onChange = [this] { applyStructureControlsToMain(); };
     addAndMakeVisible (meshQualityLabel);
     addAndMakeVisible (meshQualityCombo);
@@ -76,10 +90,22 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     freqMeshBiasSlider.setValue (0.0, juce::dontSendNotification);
     freqMeshBiasSlider.onValueChange = [this] { applyStructureControlsToMain(); };
     freqMeshBiasSlider.setTooltip (
-        "Packs extra frequency quads toward the highs without thinning the lows. "
-        "0 = uniform grid; 1 ≈ 2.7× frequency rows (biased to HF).");
+        "How strongly to pack extra frequency quads above the density start. "
+        "0 = uniform; higher = denser highs. Row count also depends on HF Density Start.");
     addAndMakeVisible (freqMeshBiasLabel);
     addAndMakeVisible (freqMeshBiasSlider);
+
+    freqMeshBiasPivotLabel.setText ("HF Density Start", juce::dontSendNotification);
+    styleSlider (freqMeshBiasPivotSlider);
+    freqMeshBiasPivotSlider.setRange (0.0, 0.95, 0.01);
+    freqMeshBiasPivotSlider.setValue (Spectrogram3DComponent::kFreqMeshBiasPivotDefault,
+                                      juce::dontSendNotification);
+    freqMeshBiasPivotSlider.onValueChange = [this] { applyStructureControlsToMain(); };
+    freqMeshBiasPivotSlider.setTooltip (
+        "Inflection on the frequency axis where HF packing begins. "
+        "0 = boost from the lows (old behaviour); higher = keep mids uniform and only densify the top.");
+    addAndMakeVisible (freqMeshBiasPivotLabel);
+    addAndMakeVisible (freqMeshBiasPivotSlider);
 
     msaaLabel.setText ("Antialiasing (MSAA)", juce::dontSendNotification);
     styleCombo (msaaCombo);
@@ -171,7 +197,9 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     audioLevelTargetCombo.addItem ("All lights", 6);
     audioLevelTargetCombo.addItem ("Brightness + lights", 7);
     audioLevelTargetCombo.setSelectedId (1, juce::dontSendNotification);
-    audioLevelTargetCombo.setTooltip ("Which Look parameter the filtered audio level modulates.");
+    audioLevelTargetCombo.setTooltip (
+        "Which Look parameter the filtered audio level modulates. "
+        "Ramp brightness pulses colours only — Lighting amount / All lights are required to pulse lighting.");
     audioLevelTargetCombo.onChange = [this] { applyLookControlsToMain(); };
     addAndMakeVisible (audioLevelTargetLabel);
     addAndMakeVisible (audioLevelTargetCombo);
@@ -200,41 +228,24 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
         addAndMakeVisible (s);
     };
 
-    styleLabel (audioLevelRangeLabel);
-    audioLevelRangeLabel.setText ("Pulse Range (%)", juce::dontSendNotification);
-    audioLevelRangeSlider.setSliderStyle (juce::Slider::TwoValueHorizontal);
-    audioLevelRangeSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-    audioLevelRangeSlider.setRange (Spectrogram3DComponent::kAudioLevelPercentMin,
-                                    Spectrogram3DComponent::kAudioLevelPercentMax,
-                                    1.0);
-    audioLevelRangeSlider.setMinValue (Spectrogram3DComponent::kAudioLevelMinPercentDefault,
-                                       juce::dontSendNotification);
-    audioLevelRangeSlider.setMaxValue (Spectrogram3DComponent::kAudioLevelMaxPercentDefault,
-                                       juce::dontSendNotification);
-    audioLevelRangeSlider.setTooltip (
-        "Bipolar % of the current target. Silence uses the low thumb, peaks the high. "
-        "Both at 0 = no change. Example: −20…+20 lowers/raises the value by 20%.");
-    audioLevelRangeSlider.setColour (juce::Slider::trackColourId, juce::Colours::darkgoldenrod.withAlpha (0.55f));
-    audioLevelRangeSlider.setColour (juce::Slider::thumbColourId, juce::Colours::goldenrod);
-    audioLevelRangeSlider.setColour (juce::Slider::backgroundColourId, juce::Colours::black.withAlpha (0.35f));
-    auto syncAudioRangeLabel = [this]
-    {
-        const int lo = juce::roundToInt (audioLevelRangeSlider.getMinValue());
-        const int hi = juce::roundToInt (audioLevelRangeSlider.getMaxValue());
-        audioLevelRangeValueLabel.setText (juce::String (lo) + "%  …  " + juce::String (hi) + "%",
-                                           juce::dontSendNotification);
-    };
-    audioLevelRangeSlider.onValueChange = [this, syncAudioRangeLabel]
-    {
-        syncAudioRangeLabel();
-        applyLookControlsToMain();
-    };
-    styleLabel (audioLevelRangeValueLabel);
-    audioLevelRangeValueLabel.setJustificationType (juce::Justification::centredRight);
-    syncAudioRangeLabel();
-    addAndMakeVisible (audioLevelRangeLabel);
-    addAndMakeVisible (audioLevelRangeSlider);
-    addAndMakeVisible (audioLevelRangeValueLabel);
+    audioLevelMinPctLabel.setText ("At Silence (%)", juce::dontSendNotification);
+    setupLookSlider (audioLevelMinPctLabel, audioLevelMinPctSlider,
+                     Spectrogram3DComponent::kAudioLevelPercentMin,
+                     Spectrogram3DComponent::kAudioLevelPercentMax,
+                     1.0,
+                     "Modulation % when the sidechain is below/at threshold (level 0). "
+                     "Full ±100 range — swap with At Peak to invert.");
+    audioLevelMinPctSlider.setValue (Spectrogram3DComponent::kAudioLevelMinPercentDefault,
+                                     juce::dontSendNotification);
+    audioLevelMaxPctLabel.setText ("At Peak (%)", juce::dontSendNotification);
+    setupLookSlider (audioLevelMaxPctLabel, audioLevelMaxPctSlider,
+                     Spectrogram3DComponent::kAudioLevelPercentMin,
+                     Spectrogram3DComponent::kAudioLevelPercentMax,
+                     1.0,
+                     "Modulation % at full sidechain level (1). Independent of At Silence — "
+                     "set e.g. +20 / −20 to invert the pulse.");
+    audioLevelMaxPctSlider.setValue (Spectrogram3DComponent::kAudioLevelMaxPercentDefault,
+                                     juce::dontSendNotification);
 
     audioLevelHpLabel.setText ("Sidechain HP (Hz)", juce::dontSendNotification);
     setupLookSlider (audioLevelHpLabel, audioLevelHpSlider, 20.0, 2000.0, 1.0,
@@ -246,6 +257,26 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                      "Low-pass the visual sidechain (lower to isolate kick).");
     audioLevelLpSlider.setValue (Spectrogram3DComponent::kAudioLevelLpDefaultHz,
                                  juce::dontSendNotification);
+    audioLevelThresholdLabel.setText ("Threshold (dB)", juce::dontSendNotification);
+    setupLookSlider (audioLevelThresholdLabel, audioLevelThresholdSlider,
+                     Spectrogram3DComponent::kAudioLevelThresholdMinDb,
+                     Spectrogram3DComponent::kAudioLevelThresholdMaxDb,
+                     0.5,
+                     "Sidechain level must exceed this before the pulse rises (0…1 over the next 24 dB).");
+    audioLevelThresholdSlider.setValue (Spectrogram3DComponent::kAudioLevelThresholdDefaultDb,
+                                        juce::dontSendNotification);
+    styleLabel (audioLevelSpeedLabel);
+    audioLevelSpeedLabel.setText ("Envelope Speed", juce::dontSendNotification);
+    styleCombo (audioLevelSpeedCombo);
+    audioLevelSpeedCombo.addItem ("Fast", 1);
+    audioLevelSpeedCombo.addItem ("Med", 2);
+    audioLevelSpeedCombo.addItem ("Slow", 3);
+    audioLevelSpeedCombo.setSelectedId (1, juce::dontSendNotification);
+    audioLevelSpeedCombo.setTooltip (
+        "Hard-wired attack/release: Fast 8/80 ms, Med 40/300 ms, Slow 120/900 ms.");
+    audioLevelSpeedCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (audioLevelSpeedLabel);
+    addAndMakeVisible (audioLevelSpeedCombo);
     setupLookToggle (audioAffectPlayheadToggle,
                      "Also pulse the closed-mesh playhead (+X) wall. Only when Audio level affects is on.");
     setupLookToggle (audioAffectAntiPlayheadToggle,
@@ -530,9 +561,11 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     });
 
     styleLabel (titleLabel);
+    styleLabel (fftSizeLabel);
     styleLabel (meshQualityLabel);
     styleLabel (meshHeightLabel);
     styleLabel (freqMeshBiasLabel);
+    styleLabel (freqMeshBiasPivotLabel);
     styleLabel (msaaLabel);
     styleLabel (selfShadowQualityLabel);
     styleLabel (sssQualityLabel);
@@ -546,9 +579,11 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
 
 Spectrogram3DSettingsComponent::Content::~Content()
 {
+    fftSizeCombo.setLookAndFeel (nullptr);
     meshQualityCombo.setLookAndFeel (nullptr);
     msaaCombo.setLookAndFeel (nullptr);
     audioLevelTargetCombo.setLookAndFeel (nullptr);
+    audioLevelSpeedCombo.setLookAndFeel (nullptr);
     selfShadowQualityCombo.setLookAndFeel (nullptr);
     sssQualityCombo.setLookAndFeel (nullptr);
     dofQualityCombo.setLookAndFeel (nullptr);
@@ -566,13 +601,18 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     const bool audioOn = audioLevelToggle.getToggleState();
     setLookChildVisible (audioLevelTargetLabel, audioOn);
     setLookChildVisible (audioLevelTargetCombo, audioOn);
-    setLookChildVisible (audioLevelRangeLabel, audioOn);
-    setLookChildVisible (audioLevelRangeSlider, audioOn);
-    setLookChildVisible (audioLevelRangeValueLabel, audioOn);
+    setLookChildVisible (audioLevelMinPctLabel, audioOn);
+    setLookChildVisible (audioLevelMinPctSlider, audioOn);
+    setLookChildVisible (audioLevelMaxPctLabel, audioOn);
+    setLookChildVisible (audioLevelMaxPctSlider, audioOn);
     setLookChildVisible (audioLevelHpLabel, audioOn);
     setLookChildVisible (audioLevelHpSlider, audioOn);
     setLookChildVisible (audioLevelLpLabel, audioOn);
     setLookChildVisible (audioLevelLpSlider, audioOn);
+    setLookChildVisible (audioLevelThresholdLabel, audioOn);
+    setLookChildVisible (audioLevelThresholdSlider, audioOn);
+    setLookChildVisible (audioLevelSpeedLabel, audioOn);
+    setLookChildVisible (audioLevelSpeedCombo, audioOn);
     setLookChildVisible (audioAffectPlayheadToggle, audioOn);
     setLookChildVisible (audioAffectAntiPlayheadToggle, audioOn);
 
@@ -851,8 +891,8 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     meshQualityCombo.setSelectedId (
         q == Spectrogram3DComponent::MeshQuality::low ? 1
             : (q == Spectrogram3DComponent::MeshQuality::high ? 3
-               : (q == Spectrogram3DComponent::MeshQuality::ultra ? 4
-                  : (q == Spectrogram3DComponent::MeshQuality::overkill ? 5 : 2))),
+               : (q == Spectrogram3DComponent::MeshQuality::ultra
+                  || q == Spectrogram3DComponent::MeshQuality::overkill ? 4 : 2)),
         juce::dontSendNotification);
     {
         const auto msaa = main->getSpec3DMsaaLevel();
@@ -866,21 +906,25 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     closedMeshToggle.setToggleState (main->isSpec3DClosedMeshEnabled(), juce::dontSendNotification);
     meshHeightSlider.setValue (main->getSpec3DMeshHeight(), juce::dontSendNotification);
     freqMeshBiasSlider.setValue (main->getSpec3DFreqMeshBias(), juce::dontSendNotification);
+    freqMeshBiasPivotSlider.setValue (main->getSpec3DFreqMeshBiasPivot(), juce::dontSendNotification);
     softAngleSlider.setValue (main->getSpec3DNormalCuspAngleDeg(), juce::dontSendNotification);
 
     audioLevelToggle.setToggleState (main->isSpec3DAudioLevelModEnabled(), juce::dontSendNotification);
     audioLevelTargetCombo.setSelectedId (
         (int) main->getSpec3DAudioLevelTarget() + 1, juce::dontSendNotification);
-    audioLevelRangeSlider.setMinValue (main->getSpec3DAudioLevelMinPercent(), juce::dontSendNotification);
-    audioLevelRangeSlider.setMaxValue (main->getSpec3DAudioLevelMaxPercent(), juce::dontSendNotification);
-    {
-        const int lo = juce::roundToInt (audioLevelRangeSlider.getMinValue());
-        const int hi = juce::roundToInt (audioLevelRangeSlider.getMaxValue());
-        audioLevelRangeValueLabel.setText (juce::String (lo) + "%  …  " + juce::String (hi) + "%",
-                                           juce::dontSendNotification);
-    }
+    audioLevelMinPctSlider.setValue (main->getSpec3DAudioLevelMinPercent(), juce::dontSendNotification);
+    audioLevelMaxPctSlider.setValue (main->getSpec3DAudioLevelMaxPercent(), juce::dontSendNotification);
     audioLevelHpSlider.setValue (main->getSpec3DAudioLevelHpHz(), juce::dontSendNotification);
     audioLevelLpSlider.setValue (main->getSpec3DAudioLevelLpHz(), juce::dontSendNotification);
+    audioLevelThresholdSlider.setValue (main->getSpec3DAudioLevelThresholdDb(),
+                                        juce::dontSendNotification);
+    {
+        const auto spd = main->getSpec3DAudioLevelSpeed();
+        audioLevelSpeedCombo.setSelectedId (
+            spd == Spectrogram3DComponent::AudioLevelSpeed::slow ? 3
+                : (spd == Spectrogram3DComponent::AudioLevelSpeed::med ? 2 : 1),
+            juce::dontSendNotification);
+    }
     audioAffectPlayheadToggle.setToggleState (main->getSpec3DAudioLevelAffectPlayhead(),
                                               juce::dontSendNotification);
     audioAffectAntiPlayheadToggle.setToggleState (main->getSpec3DAudioLevelAffectAntiPlayhead(),
@@ -991,8 +1035,7 @@ void Spectrogram3DSettingsComponent::Content::applyStructureControlsToMain()
         id == 1 ? Spectrogram3DComponent::MeshQuality::low
                 : (id == 3 ? Spectrogram3DComponent::MeshQuality::high
                            : (id == 4 ? Spectrogram3DComponent::MeshQuality::ultra
-                                      : (id == 5 ? Spectrogram3DComponent::MeshQuality::overkill
-                                                 : Spectrogram3DComponent::MeshQuality::medium))),
+                                      : Spectrogram3DComponent::MeshQuality::medium)),
         true);
     {
         const int msaaId = msaaCombo.getSelectedId();
@@ -1007,6 +1050,7 @@ void Spectrogram3DSettingsComponent::Content::applyStructureControlsToMain()
     main->setSpec3DClosedMeshEnabled (closedMeshToggle.getToggleState(), true);
     main->setSpec3DMeshHeight ((float) meshHeightSlider.getValue(), true);
     main->setSpec3DFreqMeshBias ((float) freqMeshBiasSlider.getValue(), true);
+    main->setSpec3DFreqMeshBiasPivot ((float) freqMeshBiasPivotSlider.getValue(), true);
     // Soften path: Soft Angle + Angle+Area (Labs Soften ≈ cusp 180; organic default).
     main->setSpec3DNormalWeighting (Spectrogram3DComponent::NormalWeighting::angleAndArea, true);
     main->setSpec3DNormalCuspAngleDeg ((float) softAngleSlider.getValue(), true);
@@ -1025,10 +1069,19 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
         main->setSpec3DAudioLevelTarget (
             static_cast<Spectrogram3DComponent::AudioLevelTarget> (id - 1), true);
     }
-    main->setSpec3DAudioLevelMinPercent ((float) audioLevelRangeSlider.getMinValue(), true);
-    main->setSpec3DAudioLevelMaxPercent ((float) audioLevelRangeSlider.getMaxValue(), true);
+    main->setSpec3DAudioLevelMinPercent ((float) audioLevelMinPctSlider.getValue(), true);
+    main->setSpec3DAudioLevelMaxPercent ((float) audioLevelMaxPctSlider.getValue(), true);
     main->setSpec3DAudioLevelHpHz ((float) audioLevelHpSlider.getValue(), true);
     main->setSpec3DAudioLevelLpHz ((float) audioLevelLpSlider.getValue(), true);
+    main->setSpec3DAudioLevelThresholdDb ((float) audioLevelThresholdSlider.getValue(), true);
+    {
+        const int id = audioLevelSpeedCombo.getSelectedId();
+        main->setSpec3DAudioLevelSpeed (
+            id == 3 ? Spectrogram3DComponent::AudioLevelSpeed::slow
+                    : (id == 2 ? Spectrogram3DComponent::AudioLevelSpeed::med
+                               : Spectrogram3DComponent::AudioLevelSpeed::fast),
+            true);
+    }
     main->setSpec3DAudioLevelAffectPlayhead (audioAffectPlayheadToggle.getToggleState(), true);
     main->setSpec3DAudioLevelAffectAntiPlayhead (audioAffectAntiPlayheadToggle.getToggleState(), true);
 
@@ -1141,8 +1194,8 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
 {
     const int rowH = kLabelH + kLabelGap + kSliderH + kRowGap;
     const int toggleH = 22 + 6;
-    const int comboRows = 2; // mesh quality + MSAA
-    const int baseSliderRows = 3; // mesh height + HF density + soft angle
+    const int comboRows = 3; // FFT size + mesh quality + MSAA
+    const int baseSliderRows = 4; // mesh height + HF density + density start + soft angle
     // base (+ closed) + look masters (+ SSS + DOF + dome + SSGI + tonemap
     // + energy when lit + audio level)
     int toggles = 5 + 11; // includes tonemap + audio; energy counted when lighting on
@@ -1155,7 +1208,7 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     int lookRows = 0;
     int colourEditorH = 0;
     if (audioLevelToggle.getToggleState())
-        lookRows += 4; // target, depth, HP, LP
+        lookRows += 7; // target, silence%, peak%, HP, LP, threshold, speed
     if (lightingToggle.getToggleState())
     {
         lookRows += 7; // amount, az/el, specular, roughness, metalness, rim
@@ -1214,9 +1267,11 @@ void Spectrogram3DSettingsComponent::Content::resized()
 
     layoutToggle (area, enable3DToggle);
     layoutToggle (area, enhancedFreq3DToggle);
+    layoutComboRow (area, fftSizeLabel, fftSizeCombo);
     layoutComboRow (area, meshQualityLabel, meshQualityCombo);
     layoutSliderRow (area, meshHeightLabel, meshHeightSlider);
     layoutSliderRow (area, freqMeshBiasLabel, freqMeshBiasSlider);
+    layoutSliderRow (area, freqMeshBiasPivotLabel, freqMeshBiasPivotSlider);
     layoutComboRow (area, msaaLabel, msaaCombo);
     layoutToggle (area, transparentBgToggle);
     layoutToggle (area, reverseFreqAxisToggle);
@@ -1231,16 +1286,12 @@ void Spectrogram3DSettingsComponent::Content::resized()
     if (audioLevelToggle.getToggleState())
     {
         layoutComboRow (area, audioLevelTargetLabel, audioLevelTargetCombo);
-        {
-            audioLevelRangeLabel.setBounds (area.removeFromTop (kLabelH));
-            area.removeFromTop (kLabelGap);
-            auto row = area.removeFromTop (kSliderH);
-            audioLevelRangeValueLabel.setBounds (row.removeFromRight (88));
-            audioLevelRangeSlider.setBounds (row);
-            area.removeFromTop (kRowGap);
-        }
+        layoutSliderRow (area, audioLevelMinPctLabel, audioLevelMinPctSlider);
+        layoutSliderRow (area, audioLevelMaxPctLabel, audioLevelMaxPctSlider);
         layoutSliderRow (area, audioLevelHpLabel, audioLevelHpSlider);
         layoutSliderRow (area, audioLevelLpLabel, audioLevelLpSlider);
+        layoutSliderRow (area, audioLevelThresholdLabel, audioLevelThresholdSlider);
+        layoutComboRow (area, audioLevelSpeedLabel, audioLevelSpeedCombo);
         layoutToggle (area, audioAffectPlayheadToggle);
         layoutToggle (area, audioAffectAntiPlayheadToggle);
     }

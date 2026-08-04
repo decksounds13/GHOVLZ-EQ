@@ -2408,7 +2408,7 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         spec3dVisScLpFilter.prepare (scSpec);
         spec3dVisScHpFilter.reset();
         spec3dVisScLpFilter.reset();
-        spec3dVisScEnv = 0.0f;
+        spec3dVisScEnvDb = -140.0f;
         spec3dVisScAppliedHpHz = -1.0f;
         spec3dVisScAppliedLpHz = -1.0f;
         spec3dVisScLevel01.store (0.0f);
@@ -5108,16 +5108,18 @@ void EqProcessor::setFrequencyResponseComponent (FrequencyResponseComponent* com
 }
 
 void EqProcessor::configureSpec3DVisualSidechain (bool enabled, float hpHz, float lpHz,
+                                                  float thresholdDb,
                                                   float attackMs, float releaseMs) noexcept
 {
     spec3dVisScEnabled.store (enabled, std::memory_order_relaxed);
     spec3dVisScHpHz.store (juce::jlimit (20.0f, 18000.0f, hpHz), std::memory_order_relaxed);
     spec3dVisScLpHz.store (juce::jlimit (40.0f, 20000.0f, lpHz), std::memory_order_relaxed);
-    spec3dVisScAttackMs.store (juce::jlimit (1.0f, 200.0f, attackMs), std::memory_order_relaxed);
+    spec3dVisScThresholdDb.store (juce::jlimit (-80.0f, 0.0f, thresholdDb), std::memory_order_relaxed);
+    spec3dVisScAttackMs.store (juce::jlimit (1.0f, 500.0f, attackMs), std::memory_order_relaxed);
     spec3dVisScReleaseMs.store (juce::jlimit (10.0f, 2000.0f, releaseMs), std::memory_order_relaxed);
     if (! enabled)
     {
-        spec3dVisScEnv = 0.0f;
+        spec3dVisScEnvDb = -140.0f;
         spec3dVisScLevel01.store (0.0f, std::memory_order_relaxed);
     }
 }
@@ -5171,19 +5173,18 @@ void EqProcessor::processSpec3DVisualSidechain (const juce::AudioBuffer<float>& 
         peak = juce::jmax (peak, std::abs (s));
     }
 
+    const float peakDb = juce::Decibels::gainToDecibels (juce::jmax (peak, 1.0e-8f), -140.0f);
     const float atkMs = spec3dVisScAttackMs.load (std::memory_order_relaxed);
     const float relMs = spec3dVisScReleaseMs.load (std::memory_order_relaxed);
     const float n = (float) juce::jmax (1, numSamples);
     const float atk = std::exp (-n / (juce::jmax (0.001f, atkMs * 0.001f) * (float) sr));
     const float rel = std::exp (-n / (juce::jmax (0.001f, relMs * 0.001f) * (float) sr));
-    const float coeff = peak > spec3dVisScEnv ? atk : rel;
-    spec3dVisScEnv = coeff * spec3dVisScEnv + (1.0f - coeff) * peak;
+    const float coeff = peakDb > spec3dVisScEnvDb ? atk : rel;
+    spec3dVisScEnvDb = coeff * spec3dVisScEnvDb + (1.0f - coeff) * peakDb;
 
-    // Map filtered envelope to 0..1 (kick-friendly: silence floor → strong hits).
-    const float levelDb = juce::Decibels::gainToDecibels (juce::jmax (spec3dVisScEnv, 1.0e-8f), -140.0f);
-    constexpr float kFloorDb = -48.0f;
-    constexpr float kCeilDb = -12.0f;
-    const float level01 = juce::jlimit (0.0f, 1.0f, (levelDb - kFloorDb) / (kCeilDb - kFloorDb));
+    // Amount 0..1 above threshold over a 24 dB window (same shape as mod-matrix env).
+    const float thresholdDb = spec3dVisScThresholdDb.load (std::memory_order_relaxed);
+    const float level01 = juce::jlimit (0.0f, 1.0f, (spec3dVisScEnvDb - thresholdDb) / 24.0f);
     spec3dVisScLevel01.store (level01, std::memory_order_relaxed);
 }
 

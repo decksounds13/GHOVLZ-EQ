@@ -20,6 +20,7 @@ class Spectrogram3DComponent : public juce::Component,
                                private juce::Timer
 {
 public:
+    /** overkill kept for prefs migration only — clamped to ultra. */
     enum class MeshQuality { low = 0, medium, high, ultra, overkill };
     enum class ChromeMode { floating, docked };
     /** Window / soft-FBO multisample count. Off = 0. */
@@ -44,6 +45,13 @@ public:
     */
     void setFreqMeshBias (float amount01) noexcept;
     float getFreqMeshBias() const noexcept { return freqMeshBias; }
+    /**
+        Inflection on the frequency axis (0=low…1=high) where HF density boost begins.
+        Below this, rows stay uniform; above, w(u) ramps with the density slider.
+    */
+    void setFreqMeshBiasPivot (float pivot01) noexcept;
+    float getFreqMeshBiasPivot() const noexcept { return freqMeshBiasPivot; }
+    static constexpr float kFreqMeshBiasPivotDefault = 0.55f;
 
     void setMsaaLevel (MsaaLevel level) noexcept;
     MsaaLevel getMsaaLevel() const noexcept { return msaaLevel; }
@@ -288,6 +296,13 @@ public:
     void resetCamera() noexcept;
     void saveAsDefaultView() noexcept;
 
+    /**
+        Freeze the waterfall (no new columns). Camera / look-dev still update.
+        Toggle with right-click (no drag); Shift+right-click opens the view menu.
+    */
+    void setWaterfallFrozen (bool shouldFreeze) noexcept;
+    bool isWaterfallFrozen() const noexcept { return waterfallFrozen; }
+
     /** Auto yaw orbit (turntable). Off by default; period = seconds per full revolution. */
     void setAutoRotateEnabled (bool shouldEnable, bool notifyPrefsCallback = true) noexcept;
     bool isAutoRotateEnabled() const noexcept { return autoRotateEnabled; }
@@ -328,7 +343,10 @@ public:
     bool isAudioLevelModEnabled() const noexcept { return audioLevelModEnabled; }
     void setAudioLevelTarget (AudioLevelTarget target) noexcept;
     AudioLevelTarget getAudioLevelTarget() const noexcept { return audioLevelTarget; }
-    /** Pulse range as % of the current target value (e.g. -20…+20). Both 0 = no change. */
+    /**
+        Pulse endpoints as % of the current target (independent; either may be anywhere
+        in ±100). Silence→min, peak→max via mix — swap them to invert. Both 0 = no change.
+    */
     void setAudioLevelMinPercent (float pct) noexcept;
     float getAudioLevelMinPercent() const noexcept { return audioLevelMinPercent; }
     void setAudioLevelMaxPercent (float pct) noexcept;
@@ -337,6 +355,14 @@ public:
     float getAudioLevelHpHz() const noexcept { return audioLevelHpHz; }
     void setAudioLevelLpHz (float hz) noexcept;
     float getAudioLevelLpHz() const noexcept { return audioLevelLpHz; }
+    void setAudioLevelThresholdDb (float thresholdDb) noexcept;
+    float getAudioLevelThresholdDb() const noexcept { return audioLevelThresholdDb; }
+    /** Hard-wired A/R ballistics (Side Check–style Fast / Med / Slow). */
+    enum class AudioLevelSpeed : int { fast = 0, med = 1, slow = 2 };
+    void setAudioLevelSpeed (AudioLevelSpeed speed) noexcept;
+    AudioLevelSpeed getAudioLevelSpeed() const noexcept { return audioLevelSpeed; }
+    static void audioLevelBallisticsMs (AudioLevelSpeed speed,
+                                        float& attackMs, float& releaseMs) noexcept;
     void setAudioLevelAffectPlayhead (bool shouldAffect) noexcept;
     bool getAudioLevelAffectPlayhead() const noexcept { return audioLevelAffectPlayhead; }
     void setAudioLevelAffectAntiPlayhead (bool shouldAffect) noexcept;
@@ -349,6 +375,9 @@ public:
     static constexpr float kAudioLevelMaxPercentDefault = 0.0f;
     static constexpr float kAudioLevelHpDefaultHz = 40.0f;
     static constexpr float kAudioLevelLpDefaultHz = 150.0f;
+    static constexpr float kAudioLevelThresholdDefaultDb = -24.0f;
+    static constexpr float kAudioLevelThresholdMinDb = -60.0f;
+    static constexpr float kAudioLevelThresholdMaxDb = 0.0f;
 
     /**
         Top-surface normals (organic soften, Labs Soften Normals–style).
@@ -547,6 +576,7 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMeshHeightUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourReverseFreqUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourFreqBiasBUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourFreqBiasPivotUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAoAmountUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAoRadiusUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowDirXZUniform;
@@ -569,7 +599,11 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioLevelUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioMinUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioMaxUniform;
-        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioTargetUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioModBrightUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioModLitAmtUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioModSpecUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioModRimUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioModDomeUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioAffectPlayheadUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioAffectAntiUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourPlayheadWallXUniform;
@@ -718,12 +752,12 @@ private:
     void meshSizeForQuality (int& outW, int& outH) const noexcept;
     /** Frequency rows after HF bias expansion (base H from quality). */
     int effectiveFreqMeshRows (int baseH) const noexcept;
-    /** Bias weight B for w(u)=1+B*u^2 (0 when slider is 0). */
+    /** Bias weight B for the HF density ramp (0 when slider is 0). */
     float freqMeshBiasB() const noexcept;
     /** Mesh-row param t∈[0,1] → frequency axis u∈[0,1] (0=low, 1=high). */
-    static float freqAxisFromMeshT (float t, float B) noexcept;
+    static float freqAxisFromMeshT (float t, float B, float pivot) noexcept;
     /** Inverse: frequency u → mesh-row param t (CDF). */
-    static float meshTFromFreqAxis (float u, float B) noexcept;
+    static float meshTFromFreqAxis (float u, float B, float pivot) noexcept;
     void fillMeshColumn (int meshCol, const float* histCol, int histH);
     void seedMeshFromHistory (const std::vector<float>& history, int histW, int histH);
     void appendMeshColumnsFromHistory (const std::vector<float>& history, int histW, int histH, int numNew);
@@ -758,10 +792,11 @@ private:
     bool reverseFrequencyAxis = true;
     ChromeMode chromeMode = ChromeMode::floating;
     MeshQuality meshQuality = MeshQuality::medium;
-    float freqMeshBias = 0.0f; // 0..1 — HF density boost
+    float freqMeshBias = 0.0f; // 0..1 — HF density boost amount
+    float freqMeshBiasPivot = kFreqMeshBiasPivotDefault; // where boost begins (freq axis)
     float meshHeight = kDefaultMeshHeight;
-    static constexpr int kMaxFreqMeshRows = 2048;
-    static constexpr float kFreqMeshBiasMaxB = 5.0f; // B at slider=1 → ~2.67× rows
+    static constexpr int kMaxFreqMeshRows = 768; // hard cap — bias must not explode GPU cost
+    static constexpr float kFreqMeshBiasMaxB = 4.0f; // B at slider=1 (with pivot=0 → ~2.33× rows)
 
     bool lightingEnabled = false;
     float lightingAmount = 0.70f;
@@ -832,6 +867,7 @@ private:
     float sssThicknessScale = 0.50f;
     float sssMaxThickness = 0.70f;
     bool meshClosed = false; // last built topology (open vs extrude+cap)
+    bool meshIndexReverseFreq = false; // winding baked for reverse-freq Z mirror
 
     melatonin::DropShadow panelShadow {
         { juce::Colours::black.withAlpha (0.55f), 16, { 0, 6 }, 0 }
@@ -859,6 +895,7 @@ private:
 
     CameraState camera;
     CameraState defaultCamera;
+    bool waterfallFrozen = false;
     bool autoRotateEnabled = false;
     float autoRotatePeriodSec = kAutoRotatePeriodDefaultSec;
     double autoRotateLastTimeSec = 0.0;
@@ -875,6 +912,8 @@ private:
     float audioLevelMaxPercent = kAudioLevelMaxPercentDefault;
     float audioLevelHpHz = kAudioLevelHpDefaultHz;
     float audioLevelLpHz = kAudioLevelLpDefaultHz;
+    float audioLevelThresholdDb = kAudioLevelThresholdDefaultDb;
+    AudioLevelSpeed audioLevelSpeed = AudioLevelSpeed::fast;
     bool audioLevelAffectPlayhead = false;
     bool audioLevelAffectAntiPlayhead = false;
     float audioLevelLive01 = 0.0f;

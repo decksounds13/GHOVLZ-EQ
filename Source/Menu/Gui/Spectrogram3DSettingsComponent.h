@@ -28,6 +28,7 @@ public:
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
 
@@ -75,12 +76,17 @@ private:
         juce::ToggleButton enable3DToggle { "Enable 3D view (expanded / Scope)" };
         juce::ToggleButton enhancedFreq3DToggle { "Enhanced Frequency (3D)" };
         std::unique_ptr<ButtonAttachment> enhancedFreq3DAttachment;
+        juce::Label fftSizeLabel;
+        juce::ComboBox fftSizeCombo;
+        std::unique_ptr<ComboBoxAttachment> fftSizeAttachment;
         juce::Label meshQualityLabel;
         juce::ComboBox meshQualityCombo;
         juce::Label meshHeightLabel;
         juce::Slider meshHeightSlider;
         juce::Label freqMeshBiasLabel;
         juce::Slider freqMeshBiasSlider;
+        juce::Label freqMeshBiasPivotLabel;
+        juce::Slider freqMeshBiasPivotSlider;
         juce::Label msaaLabel;
         juce::ComboBox msaaCombo;
         juce::ToggleButton transparentBgToggle { "Soft background (like Osc/Gon)" };
@@ -94,13 +100,18 @@ private:
         juce::ToggleButton audioLevelToggle { "Audio level affects" };
         juce::Label audioLevelTargetLabel;
         juce::ComboBox audioLevelTargetCombo;
-        juce::Label audioLevelRangeLabel;
-        juce::Slider audioLevelRangeSlider;
-        juce::Label audioLevelRangeValueLabel;
+        juce::Label audioLevelMinPctLabel;
+        juce::Slider audioLevelMinPctSlider;
+        juce::Label audioLevelMaxPctLabel;
+        juce::Slider audioLevelMaxPctSlider;
         juce::Label audioLevelHpLabel;
         juce::Slider audioLevelHpSlider;
         juce::Label audioLevelLpLabel;
         juce::Slider audioLevelLpSlider;
+        juce::Label audioLevelThresholdLabel;
+        juce::Slider audioLevelThresholdSlider;
+        juce::Label audioLevelSpeedLabel;
+        juce::ComboBox audioLevelSpeedCombo;
         juce::ToggleButton audioAffectPlayheadToggle { "Affect playhead" };
         juce::ToggleButton audioAffectAntiPlayheadToggle { "Affect anti-playhead" };
         juce::ToggleButton lightingToggle { "Lighting" };

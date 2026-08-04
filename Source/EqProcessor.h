@@ -210,6 +210,7 @@ public:
         Call configure from the UI thread; process runs in processBlock when enabled.
     */
     void configureSpec3DVisualSidechain (bool enabled, float hpHz, float lpHz,
+                                         float thresholdDb,
                                          float attackMs, float releaseMs) noexcept;
     float getSpec3DVisualLevel01() const noexcept
     {
@@ -640,12 +641,13 @@ private:
     std::atomic<bool> spec3dVisScEnabled { false };
     std::atomic<float> spec3dVisScHpHz { 40.0f };
     std::atomic<float> spec3dVisScLpHz { 150.0f };
+    std::atomic<float> spec3dVisScThresholdDb { -24.0f };
     std::atomic<float> spec3dVisScAttackMs { 8.0f };
-    std::atomic<float> spec3dVisScReleaseMs { 180.0f };
+    std::atomic<float> spec3dVisScReleaseMs { 80.0f };
     std::atomic<float> spec3dVisScLevel01 { 0.0f };
     juce::dsp::IIR::Filter<float> spec3dVisScHpFilter;
     juce::dsp::IIR::Filter<float> spec3dVisScLpFilter;
-    float spec3dVisScEnv = 0.0f;
+    float spec3dVisScEnvDb = -140.0f;
     float spec3dVisScAppliedHpHz = -1.0f;
     float spec3dVisScAppliedLpHz = -1.0f;
     void processSpec3DVisualSidechain (const juce::AudioBuffer<float>& buffer, int numSamples) noexcept;
