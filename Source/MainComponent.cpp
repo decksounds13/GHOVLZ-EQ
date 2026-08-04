@@ -1146,6 +1146,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     spectrogram3D.setDataSource (&spectrogram);
     spectrogram3D.setAlwaysOnTop (false);
+    spectrogram3D.setAudioLevelProvider ([this] { return processor.getSpec3DVisualLevel01(); });
     spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.saveUiPrefs(); };
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.saveUiPrefs(); };
@@ -2190,6 +2191,147 @@ float MainComponent::getSpec3DAutoRotatePeriodSec() const noexcept
     return spectrogram3D.getAutoRotatePeriodSec();
 }
 
+void MainComponent::setSpec3DZoomOscillateEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setZoomOscillateEnabled (shouldEnable, notifyPrefs);
+}
+bool MainComponent::isSpec3DZoomOscillateEnabled() const noexcept
+{
+    return spectrogram3D.isZoomOscillateEnabled();
+}
+
+void MainComponent::setSpec3DZoomOscillateDepth (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setZoomOscillateDepth (amount01, notifyPrefs);
+}
+float MainComponent::getSpec3DZoomOscillateDepth() const noexcept
+{
+    return spectrogram3D.getZoomOscillateDepth();
+}
+
+void MainComponent::setSpec3DZoomOscillatePeriodSec (float secondsPerCycle, bool notifyPrefs)
+{
+    spectrogram3D.setZoomOscillatePeriodSec (secondsPerCycle, notifyPrefs);
+}
+float MainComponent::getSpec3DZoomOscillatePeriodSec() const noexcept
+{
+    return spectrogram3D.getZoomOscillatePeriodSec();
+}
+
+void MainComponent::setSpec3DAudioLevelModEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelModEnabled (shouldEnable);
+    processor.configureSpec3DVisualSidechain (shouldEnable,
+                                              spectrogram3D.getAudioLevelHpHz(),
+                                              spectrogram3D.getAudioLevelLpHz(),
+                                              8.0f, 180.0f);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DAudioLevelModEnabled() const noexcept
+{
+    return spectrogram3D.isAudioLevelModEnabled();
+}
+
+void MainComponent::setSpec3DAudioLevelTarget (Spectrogram3DComponent::AudioLevelTarget target,
+                                              bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelTarget (target);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::AudioLevelTarget MainComponent::getSpec3DAudioLevelTarget() const noexcept
+{
+    return spectrogram3D.getAudioLevelTarget();
+}
+
+void MainComponent::setSpec3DAudioLevelMinPercent (float pct, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelMinPercent (pct);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DAudioLevelMinPercent() const noexcept
+{
+    return spectrogram3D.getAudioLevelMinPercent();
+}
+
+void MainComponent::setSpec3DAudioLevelMaxPercent (float pct, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelMaxPercent (pct);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DAudioLevelMaxPercent() const noexcept
+{
+    return spectrogram3D.getAudioLevelMaxPercent();
+}
+
+void MainComponent::setSpec3DAudioLevelHpHz (float hz, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelHpHz (hz);
+    processor.configureSpec3DVisualSidechain (spectrogram3D.isAudioLevelModEnabled(),
+                                              spectrogram3D.getAudioLevelHpHz(),
+                                              spectrogram3D.getAudioLevelLpHz(),
+                                              8.0f, 180.0f);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DAudioLevelHpHz() const noexcept
+{
+    return spectrogram3D.getAudioLevelHpHz();
+}
+
+void MainComponent::setSpec3DAudioLevelLpHz (float hz, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelLpHz (hz);
+    processor.configureSpec3DVisualSidechain (spectrogram3D.isAudioLevelModEnabled(),
+                                              spectrogram3D.getAudioLevelHpHz(),
+                                              spectrogram3D.getAudioLevelLpHz(),
+                                              8.0f, 180.0f);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DAudioLevelLpHz() const noexcept
+{
+    return spectrogram3D.getAudioLevelLpHz();
+}
+
+void MainComponent::setSpec3DAudioLevelAffectPlayhead (bool shouldAffect, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelAffectPlayhead (shouldAffect);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::getSpec3DAudioLevelAffectPlayhead() const noexcept
+{
+    return spectrogram3D.getAudioLevelAffectPlayhead();
+}
+
+void MainComponent::setSpec3DAudioLevelAffectAntiPlayhead (bool shouldAffect, bool notifyPrefs)
+{
+    spectrogram3D.setAudioLevelAffectAntiPlayhead (shouldAffect);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::getSpec3DAudioLevelAffectAntiPlayhead() const noexcept
+{
+    return spectrogram3D.getAudioLevelAffectAntiPlayhead();
+}
+
+void MainComponent::setSpec3DNormalCuspAngleDeg (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setNormalCuspAngleDeg (deg);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DNormalCuspAngleDeg() const noexcept
+{
+    return spectrogram3D.getNormalCuspAngleDeg();
+}
+
+void MainComponent::setSpec3DNormalWeighting (Spectrogram3DComponent::NormalWeighting method,
+                                             bool notifyPrefs)
+{
+    spectrogram3D.setNormalWeighting (method);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::NormalWeighting MainComponent::getSpec3DNormalWeighting() const noexcept
+{
+    return spectrogram3D.getNormalWeighting();
+}
+
 void MainComponent::setSpec3DLightingEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setLightingEnabled (shouldEnable);
@@ -2288,6 +2430,34 @@ void MainComponent::setSpec3DDomeGroundColour (juce::Colour c, bool notifyPrefs)
 }
 juce::Colour MainComponent::getSpec3DDomeGroundColour() const noexcept { return spectrogram3D.getDomeGroundColour(); }
 
+void MainComponent::setSpec3DDomeTextureEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setDomeTextureEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DDomeTextureEnabled() const noexcept { return spectrogram3D.isDomeTextureEnabled(); }
+
+void MainComponent::setSpec3DDomeTextureSource (Spectrogram3DComponent::DomeTextureSource source,
+                                                bool notifyPrefs)
+{
+    spectrogram3D.setDomeTextureSource (source);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::DomeTextureSource MainComponent::getSpec3DDomeTextureSource() const noexcept
+{
+    return spectrogram3D.getDomeTextureSource();
+}
+
+void MainComponent::setSpec3DDomeTextureCustomPath (const juce::String& absolutePath, bool notifyPrefs)
+{
+    spectrogram3D.setDomeTextureCustomPath (absolutePath);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+juce::String MainComponent::getSpec3DDomeTextureCustomPath() const noexcept
+{
+    return spectrogram3D.getDomeTextureCustomPath();
+}
+
 void MainComponent::setSpec3DSsgiEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSsgiEnabled (shouldEnable);
@@ -2317,6 +2487,99 @@ void MainComponent::setSpec3DSsgiQuality (Spectrogram3DComponent::ShadowQuality 
 Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsgiQuality() const noexcept
 {
     return spectrogram3D.getSsgiQuality();
+}
+
+void MainComponent::setSpec3DSsgiTemporalEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiTemporalEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DSsgiTemporalEnabled() const noexcept { return spectrogram3D.isSsgiTemporalEnabled(); }
+
+void MainComponent::setSpec3DSsgiTemporalAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiTemporalAmount (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSsgiTemporalAmount() const noexcept { return spectrogram3D.getSsgiTemporalAmount(); }
+
+void MainComponent::setSpec3DSsgiDenoiseEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiDenoiseEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DSsgiDenoiseEnabled() const noexcept { return spectrogram3D.isSsgiDenoiseEnabled(); }
+
+void MainComponent::setSpec3DSsgiDenoiseAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiDenoiseAmount (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSsgiDenoiseAmount() const noexcept { return spectrogram3D.getSsgiDenoiseAmount(); }
+
+void MainComponent::setSpec3DSsgiDenoiseMode (Spectrogram3DComponent::SsgiDenoiseMode mode, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiDenoiseMode (mode);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::SsgiDenoiseMode MainComponent::getSpec3DSsgiDenoiseMode() const noexcept
+{
+    return spectrogram3D.getSsgiDenoiseMode();
+}
+
+void MainComponent::setSpec3DSsgiAtrousQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiAtrousQuality (q);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsgiAtrousQuality() const noexcept
+{
+    return spectrogram3D.getSsgiAtrousQuality();
+}
+
+void MainComponent::setSpec3DSsgiHalfResEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiHalfResEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DSsgiHalfResEnabled() const noexcept { return spectrogram3D.isSsgiHalfResEnabled(); }
+
+void MainComponent::setSpec3DSsgiMeshNormalsEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiMeshNormalsEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DSsgiMeshNormalsEnabled() const noexcept { return spectrogram3D.isSsgiMeshNormalsEnabled(); }
+
+void MainComponent::setSpec3DEnergyConservingEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setEnergyConservingEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DEnergyConservingEnabled() const noexcept { return spectrogram3D.isEnergyConservingEnabled(); }
+
+void MainComponent::setSpec3DTonemapEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setTonemapEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DTonemapEnabled() const noexcept { return spectrogram3D.isTonemapEnabled(); }
+
+void MainComponent::setSpec3DTonemapExposureStops (float stops, bool notifyPrefs)
+{
+    spectrogram3D.setTonemapExposureStops (stops);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DTonemapExposureStops() const noexcept { return spectrogram3D.getTonemapExposureStops(); }
+
+void MainComponent::setSpec3DColorGrade (Spectrogram3DComponent::ColorGrade grade, bool notifyPrefs)
+{
+    spectrogram3D.setColorGrade (grade);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::ColorGrade MainComponent::getSpec3DColorGrade() const noexcept
+{
+    return spectrogram3D.getColorGrade();
 }
 
 void MainComponent::setSpec3DContactShadowEnabled (bool shouldEnable, bool notifyPrefs)
@@ -2449,6 +2712,27 @@ Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DDofQuality() const
 {
     return spectrogram3D.getDofQuality();
 }
+
+void MainComponent::setSpec3DDofBlurScale (float scale, bool notifyPrefs)
+{
+    spectrogram3D.setDofBlurScale (scale);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DDofBlurScale() const noexcept { return spectrogram3D.getDofBlurScale(); }
+
+void MainComponent::setSpec3DDofCocDilate (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setDofCocDilate (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DDofCocDilate() const noexcept { return spectrogram3D.getDofCocDilate(); }
+
+void MainComponent::setSpec3DDofEdgeSpill (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setDofEdgeSpill (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DDofEdgeSpill() const noexcept { return spectrogram3D.getDofEdgeSpill(); }
 
 void MainComponent::setSpec3DSssEnabled (bool shouldEnable, bool notifyPrefs)
 {

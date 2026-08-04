@@ -2399,6 +2399,21 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     spec.sampleRate = sampleRate;
     spec.numChannels = getTotalNumOutputChannels();
 
+    {
+        juce::dsp::ProcessSpec scSpec;
+        scSpec.sampleRate = sampleRate;
+        scSpec.maximumBlockSize = (juce::uint32) samplesPerBlock;
+        scSpec.numChannels = 1;
+        spec3dVisScHpFilter.prepare (scSpec);
+        spec3dVisScLpFilter.prepare (scSpec);
+        spec3dVisScHpFilter.reset();
+        spec3dVisScLpFilter.reset();
+        spec3dVisScEnv = 0.0f;
+        spec3dVisScAppliedHpHz = -1.0f;
+        spec3dVisScAppliedLpHz = -1.0f;
+        spec3dVisScLevel01.store (0.0f);
+    }
+
     // Prepare DSP modules
     for (auto& stage : highpassStages)
         stage.prepare(spec);
@@ -2860,6 +2875,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             }
         }
 
+        processSpec3DVisualSidechain (mainBuffer, numSamples);
         return;
     }
 
@@ -3072,6 +3088,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 
     const float preLeftDb = inputRmsDbLeft.load();
     const float preRightDb = inputRmsDbRight.load();
+
+    processSpec3DVisualSidechain (mainBuffer, numSamples);
 
     // Pre-EQ spectrum capture (before any band processing).
     // Scope+Post: leave SPECTRUM_PRE_* prefs alone so users can still compare.
@@ -5087,6 +5105,86 @@ void EqProcessor::captureMatchSpectrumFromAnalyser()
 void EqProcessor::setFrequencyResponseComponent (FrequencyResponseComponent* component)
 {
     frequencyResponseComponent = component;
+}
+
+void EqProcessor::configureSpec3DVisualSidechain (bool enabled, float hpHz, float lpHz,
+                                                  float attackMs, float releaseMs) noexcept
+{
+    spec3dVisScEnabled.store (enabled, std::memory_order_relaxed);
+    spec3dVisScHpHz.store (juce::jlimit (20.0f, 18000.0f, hpHz), std::memory_order_relaxed);
+    spec3dVisScLpHz.store (juce::jlimit (40.0f, 20000.0f, lpHz), std::memory_order_relaxed);
+    spec3dVisScAttackMs.store (juce::jlimit (1.0f, 200.0f, attackMs), std::memory_order_relaxed);
+    spec3dVisScReleaseMs.store (juce::jlimit (10.0f, 2000.0f, releaseMs), std::memory_order_relaxed);
+    if (! enabled)
+    {
+        spec3dVisScEnv = 0.0f;
+        spec3dVisScLevel01.store (0.0f, std::memory_order_relaxed);
+    }
+}
+
+void EqProcessor::processSpec3DVisualSidechain (const juce::AudioBuffer<float>& buffer,
+                                                int numSamples) noexcept
+{
+    if (! spec3dVisScEnabled.load (std::memory_order_relaxed)
+        || numSamples <= 0
+        || buffer.getNumChannels() <= 0)
+    {
+        spec3dVisScLevel01.store (0.0f, std::memory_order_relaxed);
+        return;
+    }
+
+    const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+    if (sr <= 0.0)
+    {
+        spec3dVisScLevel01.store (0.0f, std::memory_order_relaxed);
+        return;
+    }
+
+    float hpHz = spec3dVisScHpHz.load (std::memory_order_relaxed);
+    float lpHz = spec3dVisScLpHz.load (std::memory_order_relaxed);
+    const float nyquist = (float) sr * 0.49f;
+    hpHz = juce::jlimit (20.0f, nyquist - 10.0f, hpHz);
+    lpHz = juce::jlimit (hpHz + 10.0f, nyquist, lpHz);
+
+    if (std::abs (hpHz - spec3dVisScAppliedHpHz) > 0.25f
+        || std::abs (lpHz - spec3dVisScAppliedLpHz) > 0.25f)
+    {
+        *spec3dVisScHpFilter.coefficients =
+            *juce::dsp::IIR::Coefficients<float>::makeHighPass (sr, hpHz);
+        *spec3dVisScLpFilter.coefficients =
+            *juce::dsp::IIR::Coefficients<float>::makeLowPass (sr, lpHz);
+        spec3dVisScAppliedHpHz = hpHz;
+        spec3dVisScAppliedLpHz = lpHz;
+    }
+
+    const float* left = buffer.getReadPointer (0);
+    const float* right = buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr;
+
+    float peak = 0.0f;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        float s = left[i];
+        if (right != nullptr)
+            s = 0.5f * (s + right[i]);
+        s = spec3dVisScHpFilter.processSample (s);
+        s = spec3dVisScLpFilter.processSample (s);
+        peak = juce::jmax (peak, std::abs (s));
+    }
+
+    const float atkMs = spec3dVisScAttackMs.load (std::memory_order_relaxed);
+    const float relMs = spec3dVisScReleaseMs.load (std::memory_order_relaxed);
+    const float n = (float) juce::jmax (1, numSamples);
+    const float atk = std::exp (-n / (juce::jmax (0.001f, atkMs * 0.001f) * (float) sr));
+    const float rel = std::exp (-n / (juce::jmax (0.001f, relMs * 0.001f) * (float) sr));
+    const float coeff = peak > spec3dVisScEnv ? atk : rel;
+    spec3dVisScEnv = coeff * spec3dVisScEnv + (1.0f - coeff) * peak;
+
+    // Map filtered envelope to 0..1 (kick-friendly: silence floor → strong hits).
+    const float levelDb = juce::Decibels::gainToDecibels (juce::jmax (spec3dVisScEnv, 1.0e-8f), -140.0f);
+    constexpr float kFloorDb = -48.0f;
+    constexpr float kCeilDb = -12.0f;
+    const float level01 = juce::jlimit (0.0f, 1.0f, (levelDb - kFloorDb) / (kCeilDb - kFloorDb));
+    spec3dVisScLevel01.store (level01, std::memory_order_relaxed);
 }
 
 float EqProcessor::getInputRmsValue(const int channel)

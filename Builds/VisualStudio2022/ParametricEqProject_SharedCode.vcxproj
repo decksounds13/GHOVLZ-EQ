@@ -150,6 +150,8 @@
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp"/>
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp"/>
+    <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp"/>
+    <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp"/>
     <ClCompile Include="..\..\Source\FramedFloatingScopeWindow.cpp"/>
     <ClCompile Include="..\..\Source\ScopeLevelMeterModule.cpp"/>
     <ClCompile Include="..\..\Source\LoudnessComponent.cpp"/>
@@ -3489,6 +3491,8 @@
     <ClInclude Include="..\..\Source\ColourRamp\ColourRampBank.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\PathSampleOverlay.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\RampColorPickerPanel.h"/>
+    <ClInclude Include="..\..\Source\ColourRamp\ColourSwatchEditor.h"/>
+    <ClInclude Include="..\..\Source\Assets\VeniceSunsetHdri.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\GradientStripEditor.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\RampPresetStore.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.h"/>

@@ -154,6 +154,34 @@ public:
     bool isSpec3DAutoRotateEnabled() const noexcept;
     void setSpec3DAutoRotatePeriodSec (float secondsPerRevolution, bool notifyPrefs = true);
     float getSpec3DAutoRotatePeriodSec() const noexcept;
+    void setSpec3DZoomOscillateEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DZoomOscillateEnabled() const noexcept;
+    void setSpec3DZoomOscillateDepth (float amount01, bool notifyPrefs = true);
+    float getSpec3DZoomOscillateDepth() const noexcept;
+    void setSpec3DZoomOscillatePeriodSec (float secondsPerCycle, bool notifyPrefs = true);
+    float getSpec3DZoomOscillatePeriodSec() const noexcept;
+
+    void setSpec3DAudioLevelModEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DAudioLevelModEnabled() const noexcept;
+    void setSpec3DAudioLevelTarget (Spectrogram3DComponent::AudioLevelTarget target, bool notifyPrefs = true);
+    Spectrogram3DComponent::AudioLevelTarget getSpec3DAudioLevelTarget() const noexcept;
+    void setSpec3DAudioLevelMinPercent (float pct, bool notifyPrefs = true);
+    float getSpec3DAudioLevelMinPercent() const noexcept;
+    void setSpec3DAudioLevelMaxPercent (float pct, bool notifyPrefs = true);
+    float getSpec3DAudioLevelMaxPercent() const noexcept;
+    void setSpec3DAudioLevelHpHz (float hz, bool notifyPrefs = true);
+    float getSpec3DAudioLevelHpHz() const noexcept;
+    void setSpec3DAudioLevelLpHz (float hz, bool notifyPrefs = true);
+    float getSpec3DAudioLevelLpHz() const noexcept;
+    void setSpec3DAudioLevelAffectPlayhead (bool shouldAffect, bool notifyPrefs = true);
+    bool getSpec3DAudioLevelAffectPlayhead() const noexcept;
+    void setSpec3DAudioLevelAffectAntiPlayhead (bool shouldAffect, bool notifyPrefs = true);
+    bool getSpec3DAudioLevelAffectAntiPlayhead() const noexcept;
+
+    void setSpec3DNormalCuspAngleDeg (float deg, bool notifyPrefs = true);
+    float getSpec3DNormalCuspAngleDeg() const noexcept;
+    void setSpec3DNormalWeighting (Spectrogram3DComponent::NormalWeighting method, bool notifyPrefs = true);
+    Spectrogram3DComponent::NormalWeighting getSpec3DNormalWeighting() const noexcept;
 
     void setSpec3DLightingEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DLightingEnabled() const noexcept;
@@ -183,6 +211,13 @@ public:
     juce::Colour getSpec3DDomeSkyColour() const noexcept;
     void setSpec3DDomeGroundColour (juce::Colour c, bool notifyPrefs = true);
     juce::Colour getSpec3DDomeGroundColour() const noexcept;
+    void setSpec3DDomeTextureEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DDomeTextureEnabled() const noexcept;
+    void setSpec3DDomeTextureSource (Spectrogram3DComponent::DomeTextureSource source,
+                                     bool notifyPrefs = true);
+    Spectrogram3DComponent::DomeTextureSource getSpec3DDomeTextureSource() const noexcept;
+    void setSpec3DDomeTextureCustomPath (const juce::String& absolutePath, bool notifyPrefs = true);
+    juce::String getSpec3DDomeTextureCustomPath() const noexcept;
     void setSpec3DSsgiEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DSsgiEnabled() const noexcept;
     void setSpec3DSsgiStrength (float amount01, bool notifyPrefs = true);
@@ -191,6 +226,30 @@ public:
     float getSpec3DSsgiRadius() const noexcept;
     void setSpec3DSsgiQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
     Spectrogram3DComponent::ShadowQuality getSpec3DSsgiQuality() const noexcept;
+    void setSpec3DSsgiTemporalEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSsgiTemporalEnabled() const noexcept;
+    void setSpec3DSsgiTemporalAmount (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsgiTemporalAmount() const noexcept;
+    void setSpec3DSsgiDenoiseEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSsgiDenoiseEnabled() const noexcept;
+    void setSpec3DSsgiDenoiseAmount (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsgiDenoiseAmount() const noexcept;
+    void setSpec3DSsgiDenoiseMode (Spectrogram3DComponent::SsgiDenoiseMode mode, bool notifyPrefs = true);
+    Spectrogram3DComponent::SsgiDenoiseMode getSpec3DSsgiDenoiseMode() const noexcept;
+    void setSpec3DSsgiAtrousQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
+    Spectrogram3DComponent::ShadowQuality getSpec3DSsgiAtrousQuality() const noexcept;
+    void setSpec3DSsgiHalfResEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSsgiHalfResEnabled() const noexcept;
+    void setSpec3DSsgiMeshNormalsEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSsgiMeshNormalsEnabled() const noexcept;
+    void setSpec3DEnergyConservingEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DEnergyConservingEnabled() const noexcept;
+    void setSpec3DTonemapEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DTonemapEnabled() const noexcept;
+    void setSpec3DTonemapExposureStops (float stops, bool notifyPrefs = true);
+    float getSpec3DTonemapExposureStops() const noexcept;
+    void setSpec3DColorGrade (Spectrogram3DComponent::ColorGrade grade, bool notifyPrefs = true);
+    Spectrogram3DComponent::ColorGrade getSpec3DColorGrade() const noexcept;
     void setSpec3DContactShadowEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DContactShadowEnabled() const noexcept;
     void setSpec3DContactShadowStrength (float amount01, bool notifyPrefs = true);
@@ -227,6 +286,12 @@ public:
     float getSpec3DDofAmount() const noexcept;
     void setSpec3DDofQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
     Spectrogram3DComponent::ShadowQuality getSpec3DDofQuality() const noexcept;
+    void setSpec3DDofBlurScale (float scale, bool notifyPrefs = true);
+    float getSpec3DDofBlurScale() const noexcept;
+    void setSpec3DDofCocDilate (float amount01, bool notifyPrefs = true);
+    float getSpec3DDofCocDilate() const noexcept;
+    void setSpec3DDofEdgeSpill (float amount01, bool notifyPrefs = true);
+    float getSpec3DDofEdgeSpill() const noexcept;
 
     void setSpec3DSssEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DSssEnabled() const noexcept;

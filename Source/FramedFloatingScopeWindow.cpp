@@ -1,6 +1,38 @@
 #include "FramedFloatingScopeWindow.h"
 #include "Menu/SharedResources.h"
 
+namespace
+{
+    class SoftResizeCorner final : public juce::ResizableCornerComponent
+    {
+    public:
+        SoftResizeCorner (juce::Component* componentToResize,
+                          juce::ComponentBoundsConstrainer* constrainerToUse)
+            : juce::ResizableCornerComponent (componentToResize, constrainerToUse)
+        {
+            setOpaque (false);
+            setMouseCursor (juce::MouseCursor::BottomRightCornerResizeCursor);
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto b = getLocalBounds().toFloat().reduced (2.5f);
+            const bool hot = isMouseOverOrDragging();
+            const float alpha = hot ? 0.85f : 0.50f;
+            g.setColour (juce::Colours::whitesmoke.withAlpha (alpha));
+            for (int i = 0; i < 3; ++i)
+            {
+                const float o = 3.0f + (float) i * 3.6f;
+                g.drawLine (b.getRight() - o, b.getBottom(),
+                            b.getRight(), b.getBottom() - o, hot ? 1.6f : 1.35f);
+            }
+            g.setColour (juce::Colours::goldenrod.withAlpha (hot ? 0.55f : 0.28f));
+            g.drawLine (b.getRight() - 5.0f, b.getBottom(),
+                        b.getRight(), b.getBottom() - 5.0f, 1.1f);
+        }
+    };
+}
+
 FramedFloatingScopeWindow::FramedFloatingScopeWindow()
 {
     setOpaque (false);
@@ -10,7 +42,7 @@ FramedFloatingScopeWindow::FramedFloatingScopeWindow()
 
     constrainer.setMinimumSize (180 + kShadowPadFloating * 2, 120 + kShadowPadFloating * 2);
     constrainer.setMaximumSize (4000, 3000);
-    resizer = std::make_unique<juce::ResizableCornerComponent> (this, &constrainer);
+    resizer = std::make_unique<SoftResizeCorner> (this, &constrainer);
     addAndMakeVisible (*resizer);
     resizer->setAlwaysOnTop (true);
     applyChromeMode();

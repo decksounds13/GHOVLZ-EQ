@@ -141,7 +141,8 @@ private:
     void rebuildTabsForCurrentPage();
     void setTabPage (int page);
     int getNumTabPages() const noexcept;
-    void refreshContentPanelSize();
+    /** @param preserveScrollPosition keep viewport offset (toggles / resize). Tab changes pass false. */
+    void refreshContentPanelSize (bool preserveScrollPosition = false);
     int getActiveTabPreferredContentHeight() const;
     /** Sliders would eat the wheel for value tweaks — prefer scrolling the Settings page. */
     static void disableSliderScrollWheelRecursive (juce::Component& root);
@@ -159,14 +160,15 @@ private:
         void currentTabChanged (int newCurrentTabIndex, const juce::String& newTabName) override
         {
             juce::ignoreUnused (newCurrentTabIndex, newTabName);
-            owner.refreshContentPanelSize();
+            // New tab: jump to top (don't preserve prior tab's scroll).
+            owner.refreshContentPanelSize (false);
             // Tabs that sync Look toggles from prefs during layout can grow after the
             // first measure — re-measure once the message queue settles so the scrollbar
             // covers the full page without requiring a manual resize.
             juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Menu> (&owner)]
             {
                 if (safe != nullptr)
-                    safe->refreshContentPanelSize();
+                    safe->refreshContentPanelSize (false);
             });
         }
 

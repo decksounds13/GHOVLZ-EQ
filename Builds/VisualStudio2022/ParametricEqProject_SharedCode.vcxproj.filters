@@ -8,8 +8,14 @@
     <Filter Include="ParametricEqProject\Source\Menu">
       <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ParametricEqProject\Source\Assets">
+      <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ParametricEqProject\Source\ColourRamp">
       <UniqueIdentifier>{EC9A775C-1238-8D75-54B2-8DB895BEBFE1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ParametricEqProject\Source\Assets">
+      <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
     </Filter>
     <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations">
       <UniqueIdentifier>{A44CA844-07B8-B554-5FA6-7C9504B03FBF}</UniqueIdentifier>
@@ -1021,10 +1027,16 @@
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp">
+      <Filter>ParametricEqProject\Source\Assets</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\FramedFloatingScopeWindow.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp">
+      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp">
       <Filter>ParametricEqProject\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\PathSampleOverlay.cpp">
@@ -4787,6 +4799,12 @@
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\RampColorPickerPanel.h">
       <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ColourRamp\ColourSwatchEditor.h">
+      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Assets\VeniceSunsetHdri.h">
+      <Filter>ParametricEqProject\Source\Assets</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\GradientStripEditor.h">
       <Filter>ParametricEqProject\Source\ColourRamp</Filter>

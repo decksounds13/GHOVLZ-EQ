@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "MelatoninBlur/melatonin/shadows.h"
+#include <atomic>
 #include <vector>
 #include <cstdint>
 #include <functional>
@@ -23,8 +24,8 @@ public:
     enum class ChromeMode { floating, docked };
     /** Window / soft-FBO multisample count. Off = 0. */
     enum class MsaaLevel { off = 0, x4 = 4, x8 = 8, x16 = 16 };
-    /** Self-shadow ray / horizon sample density. */
-    enum class ShadowQuality { low = 0, medium, high };
+    /** Sample density for shadows / SSGI / DOF / SSS. Ultra is used by SSGI gather. */
+    enum class ShadowQuality { low = 0, medium, high, ultra };
 
     Spectrogram3DComponent();
     ~Spectrogram3DComponent() override;
@@ -100,6 +101,9 @@ public:
     /** PBR metalness 0–1 (dielectric → metal). Off/default = 0. */
     void setMetalnessAmount (float amount01) noexcept;
     float getMetalnessAmount() const noexcept { return metalnessAmount; }
+    /** Multiply diffuse/dome by (1−F). Off by default (preserves current look). */
+    void setEnergyConservingEnabled (bool shouldEnable) noexcept;
+    bool isEnergyConservingEnabled() const noexcept { return energyConservingEnabled; }
     void setRimAmount (float amount01) noexcept;
     float getRimAmount() const noexcept { return rimAmount; }
     void setLightColour (juce::Colour c) noexcept;
@@ -117,6 +121,17 @@ public:
     void setDomeGroundColour (juce::Colour c) noexcept;
     juce::Colour getDomeGroundColour() const noexcept { return domeGroundColour; }
 
+    /** Equirectangular dome irradiance map (off by default — uses sky/ground colours). */
+    enum class DomeTextureSource { veniceSunset = 0, custom = 1 };
+    void setDomeTextureEnabled (bool shouldEnable) noexcept;
+    bool isDomeTextureEnabled() const noexcept { return domeTextureEnabled; }
+    void setDomeTextureSource (DomeTextureSource source) noexcept;
+    DomeTextureSource getDomeTextureSource() const noexcept { return domeTextureSource; }
+    void setDomeTextureCustomPath (const juce::String& absolutePath) noexcept;
+    juce::String getDomeTextureCustomPath() const noexcept { return domeTextureCustomPath; }
+    /** Reload image from current source (built-in Venice Sunset or custom path). */
+    void refreshDomeTextureImage();
+
     /**
         Screen-space GI (soft post path): short ray-march gather for color bleed
         into shadows. Off by default.
@@ -129,6 +144,29 @@ public:
     float getSsgiRadius() const noexcept { return ssgiRadius; }
     void setSsgiQuality (ShadowQuality q) noexcept;
     ShadowQuality getSsgiQuality() const noexcept { return ssgiQuality; }
+    /** Temporal GI history. Off by default. */
+    void setSsgiTemporalEnabled (bool shouldEnable) noexcept;
+    bool isSsgiTemporalEnabled() const noexcept { return ssgiTemporalEnabled; }
+    void setSsgiTemporalAmount (float amount01) noexcept;
+    float getSsgiTemporalAmount() const noexcept { return ssgiTemporalAmount; }
+    /** GI denoise. Off by default. */
+    void setSsgiDenoiseEnabled (bool shouldEnable) noexcept;
+    bool isSsgiDenoiseEnabled() const noexcept { return ssgiDenoiseEnabled; }
+    void setSsgiDenoiseAmount (float amount01) noexcept;
+    float getSsgiDenoiseAmount() const noexcept { return ssgiDenoiseAmount; }
+    /** Simple = bilateral (default); Modern = SVGF-style temporal moments + à-trous. */
+    enum class SsgiDenoiseMode { simple = 0, modern = 1 };
+    void setSsgiDenoiseMode (SsgiDenoiseMode mode) noexcept;
+    SsgiDenoiseMode getSsgiDenoiseMode() const noexcept { return ssgiDenoiseMode; }
+    /** À-trous pass count for Modern denoise (low=3, medium=4, high=5). */
+    void setSsgiAtrousQuality (ShadowQuality q) noexcept;
+    ShadowQuality getSsgiAtrousQuality() const noexcept { return ssgiAtrousQuality; }
+    /** Half-resolution SSGI gather + upsample. Off by default. */
+    void setSsgiHalfResEnabled (bool shouldEnable) noexcept;
+    bool isSsgiHalfResEnabled() const noexcept { return ssgiHalfResEnabled; }
+    /** Use mesh view-normals for SSGI instead of depth derivatives. Off by default. */
+    void setSsgiMeshNormalsEnabled (bool shouldEnable) noexcept;
+    bool isSsgiMeshNormalsEnabled() const noexcept { return ssgiMeshNormalsEnabled; }
 
     void setContactShadowEnabled (bool shouldEnable) noexcept;
     bool isContactShadowEnabled() const noexcept { return contactShadowEnabled; }
@@ -178,12 +216,44 @@ public:
     float getDofAmount() const noexcept { return getDofAperture(); }
     void setDofQuality (ShadowQuality q) noexcept;
     ShadowQuality getDofQuality() const noexcept { return dofQuality; }
+    /** Scales max CoC blur radius (1 = quality default). Useful for far-camera tuning. */
+    void setDofBlurScale (float scale) noexcept;
+    float getDofBlurScale() const noexcept { return dofBlurScale; }
+    /** Neighbour CoC dilation for silhouette gather (0 = off, 1 = full). */
+    void setDofCocDilate (float amount01) noexcept;
+    float getDofCocDilate() const noexcept { return dofCocDilate; }
+    /** How strongly out-of-focus mesh spills onto background / Soft BG edges. */
+    void setDofEdgeSpill (float amount01) noexcept;
+    float getDofEdgeSpill() const noexcept { return dofEdgeSpill; }
+
+    /** Soft-path display transform. Off by default (current LDR look). */
+    enum class ColorGrade
+    {
+        aces = 0,
+        filmic,
+        warmCinema,
+        coolCinema,
+        tealOrange,
+        bleachBypass
+    };
+    void setTonemapEnabled (bool shouldEnable) noexcept;
+    bool isTonemapEnabled() const noexcept { return tonemapEnabled; }
+    /** Exposure in stops (0 = unchanged). Applied only when tonemap is on. */
+    void setTonemapExposureStops (float stops) noexcept;
+    float getTonemapExposureStops() const noexcept { return tonemapExposureStops; }
+    void setColorGrade (ColorGrade grade) noexcept;
+    ColorGrade getColorGrade() const noexcept { return colorGrade; }
+
     static constexpr float kDofFocusMin = 0.5f;
-    static constexpr float kDofFocusMax = 8.0f;
+    /** Match camera dolly max so far framing can still place focus on the mesh. */
+    static constexpr float kDofFocusMax = 14.0f;
     /** Tuned for the default camera (~distance 3) — sharp mid mesh, soft waterfall end. */
     static constexpr float kDofFocusDefault = 2.75f;
     static constexpr float kDofApertureDefault = 0.35f;
     static constexpr float kDofAmountDefault = kDofApertureDefault;
+    static constexpr float kDofBlurScaleDefault = 1.0f;
+    static constexpr float kDofCocDilateDefault = 0.85f;
+    static constexpr float kDofEdgeSpillDefault = 0.55f;
 
     /**
         SSS Look toggle. Thickness path follows Closed Mesh:
@@ -227,6 +297,81 @@ public:
     static constexpr float kAutoRotatePeriodMaxSec = 60.0f;
     static constexpr float kAutoRotatePeriodDefaultSec = 10.0f;
 
+    /** LFO on camera distance (zoom). Off by default. */
+    void setZoomOscillateEnabled (bool shouldEnable, bool notifyPrefsCallback = true) noexcept;
+    bool isZoomOscillateEnabled() const noexcept { return zoomOscillateEnabled; }
+    void setZoomOscillateDepth (float amount01, bool notifyPrefsCallback = true) noexcept;
+    float getZoomOscillateDepth() const noexcept { return zoomOscillateDepth; }
+    void setZoomOscillatePeriodSec (float secondsPerCycle, bool notifyPrefsCallback = true) noexcept;
+    float getZoomOscillatePeriodSec() const noexcept { return zoomOscillatePeriodSec; }
+    static constexpr float kZoomOscillateDepthDefault = 0.35f;
+    static constexpr float kZoomOscillatePeriodMinSec = 1.0f;
+    static constexpr float kZoomOscillatePeriodMaxSec = 60.0f;
+    static constexpr float kZoomOscillatePeriodDefaultSec = 8.0f;
+
+    /**
+        Audio-level visual mod matrix (off by default): sidechain envelope →
+        ramp brightness and/or light intensities. Optional closed playhead /
+        anti-playhead wall masks.
+    */
+    enum class AudioLevelTarget : int
+    {
+        brightness = 0,
+        lightingAmount = 1,
+        specular = 2,
+        rim = 3,
+        domeFill = 4,
+        allLights = 5,
+        brightnessAndLights = 6
+    };
+    void setAudioLevelModEnabled (bool shouldEnable) noexcept;
+    bool isAudioLevelModEnabled() const noexcept { return audioLevelModEnabled; }
+    void setAudioLevelTarget (AudioLevelTarget target) noexcept;
+    AudioLevelTarget getAudioLevelTarget() const noexcept { return audioLevelTarget; }
+    /** Pulse range as % of the current target value (e.g. -20…+20). Both 0 = no change. */
+    void setAudioLevelMinPercent (float pct) noexcept;
+    float getAudioLevelMinPercent() const noexcept { return audioLevelMinPercent; }
+    void setAudioLevelMaxPercent (float pct) noexcept;
+    float getAudioLevelMaxPercent() const noexcept { return audioLevelMaxPercent; }
+    void setAudioLevelHpHz (float hz) noexcept;
+    float getAudioLevelHpHz() const noexcept { return audioLevelHpHz; }
+    void setAudioLevelLpHz (float hz) noexcept;
+    float getAudioLevelLpHz() const noexcept { return audioLevelLpHz; }
+    void setAudioLevelAffectPlayhead (bool shouldAffect) noexcept;
+    bool getAudioLevelAffectPlayhead() const noexcept { return audioLevelAffectPlayhead; }
+    void setAudioLevelAffectAntiPlayhead (bool shouldAffect) noexcept;
+    bool getAudioLevelAffectAntiPlayhead() const noexcept { return audioLevelAffectAntiPlayhead; }
+    /** Provider returns filtered sidechain level 0..1 (typically from EqProcessor). */
+    void setAudioLevelProvider (std::function<float()> provider) noexcept;
+    static constexpr float kAudioLevelPercentMin = -100.0f;
+    static constexpr float kAudioLevelPercentMax = 100.0f;
+    static constexpr float kAudioLevelMinPercentDefault = 0.0f;
+    static constexpr float kAudioLevelMaxPercentDefault = 0.0f;
+    static constexpr float kAudioLevelHpDefaultHz = 40.0f;
+    static constexpr float kAudioLevelLpDefaultHz = 150.0f;
+
+    /**
+        Top-surface normals (organic soften, Labs Soften Normals–style).
+        Soft Angle = cusp; 180 (default) fully averages incident faces.
+        Weighting methods stay available in code; default is Angle+Area
+        (vertex angle × face area) for organic heightfields.
+    */
+    enum class NormalWeighting : int
+    {
+        equal = 0,
+        vertexAngle = 1,
+        faceArea = 2,
+        angleAndArea = 3
+    };
+    void setNormalCuspAngleDeg (float deg) noexcept;
+    float getNormalCuspAngleDeg() const noexcept { return normalCuspAngleDeg; }
+    void setNormalWeighting (NormalWeighting method) noexcept;
+    NormalWeighting getNormalWeighting() const noexcept { return normalWeighting; }
+    /** Labs Soften Normals “Soft Angle” default — fully soft. */
+    static constexpr float kNormalCuspDefaultDeg = 180.0f;
+    static constexpr float kNormalCuspMinDeg = 0.0f;
+    static constexpr float kNormalCuspMaxDeg = 180.0f;
+
     void invalidateMesh() noexcept;
     /** Rebuild vertex colours from the current mesh + 3D colour LUT (ramp edits). */
     void recolourMesh() noexcept;
@@ -257,7 +402,7 @@ public:
     std::function<void()> onUserResized;
     std::function<void()> onUserMoved;
     std::function<void()> onDefaultViewChanged;
-    /** Fired when turntable enable/period changes (persist prefs). */
+    /** Fired when turntable / zoom-oscillate settings change (persist prefs). */
     std::function<void()> onAutoRotateSettingsChanged;
     /** Fired when DOF focus is picked (Ctrl/Cmd+LMB) or otherwise changed with notify. */
     std::function<void()> onDofFocusChanged;
@@ -310,6 +455,11 @@ private:
         bool isGlReady() const noexcept { return glReady; }
         bool hasContextFailed() const noexcept { return contextFailed; }
         void markSoftContentDirty() noexcept { softContentDirty = true; }
+        void invalidateSsgiHistory() noexcept
+        {
+            ssgiHistoryValid = false;
+            ssgiMomentsValid = false;
+        }
 
         void newOpenGLContextCreated() override;
         void renderOpenGL() override;
@@ -348,12 +498,18 @@ private:
         void releaseSoftMsaaBuffers();
         int effectiveMsaaSamples() const noexcept;
         void ensurePostFrameBuffers (int width, int height);
+        void ensureSsgiSupportBuffers (int width, int height, bool halfRes, bool needHistory,
+                                       bool needNormals, bool needMoments);
         void releasePostFrameBuffers();
         void renderSoftComposite();
         void applySsaoAndBloom (int width, int height);
+        void drawMeshNormalsPass (int width, int height);
         void readbackSoftImage (int width, int height);
         void uploadHeightMap (const std::vector<Vertex>& verts, int w, int h);
         void bindHeightMapForMesh() const;
+        void uploadDomeTextureIfNeeded();
+        void bindDomeTextureForMesh() const;
+        void unbindDomeTexture() const;
 
         Spectrogram3DComponent& owner;
         juce::OpenGLContext openGLContext;
@@ -376,12 +532,15 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSpecularUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourRoughnessUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMetalnessUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourEnergyConserveUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourRimUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourLightColourUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourRimColourUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeStrengthUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeSkyUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeGroundUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeUseTexUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeMapUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourHeightMapUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourLightDirWorldUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSelfShadowUniform;
@@ -407,6 +566,14 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssBaseDepthUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssThickScaleUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSssMaxThickUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioLevelUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioMinUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioMaxUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioTargetUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioAffectPlayheadUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAudioAffectAntiUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourPlayheadWallXUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourAntiPlayheadWallXUniform;
 
         std::unique_ptr<juce::OpenGLShaderProgram> labelShader;
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> labelPositionAttrib;
@@ -432,12 +599,20 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> postPositionAttrib;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postTexUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postDepthUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postAuxUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postModeUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postStrengthUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postRadiusUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postThresholdUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postParamUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postResolutionUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postInvProjUniform;
+
+        std::unique_ptr<juce::OpenGLShaderProgram> normalsShader;
+        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> normalsPositionAttrib;
+        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> normalsNormalAttrib;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> normalsProjectionUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> normalsViewUniform;
 
         unsigned int meshVbo = 0, meshIbo = 0;
         unsigned int floorVbo = 0;
@@ -450,6 +625,10 @@ private:
         juce::OpenGLFrameBuffer softFbo;
         juce::OpenGLFrameBuffer postFboA;
         juce::OpenGLFrameBuffer postFboB;
+        juce::OpenGLFrameBuffer ssgiHalfFbo;
+        juce::OpenGLFrameBuffer ssgiHistoryFbo;
+        juce::OpenGLFrameBuffer ssgiMomentsFbo;
+        juce::OpenGLFrameBuffer ssgiNormalsFbo;
         unsigned int softDepthTex = 0;
         unsigned int softMsaaFbo = 0;
         unsigned int softMsaaColorRb = 0;
@@ -460,11 +639,24 @@ private:
         unsigned int heightMapTex = 0;
         int heightMapW = 0;
         int heightMapH = 0;
+        juce::OpenGLTexture domeMapTex;
+        bool domeMapReady = false;
         bool labelAtlasReady = false;
         int softFboW = 0;
         int softFboH = 0;
         int postFboW = 0;
         int postFboH = 0;
+        int ssgiHalfW = 0;
+        int ssgiHalfH = 0;
+        int ssgiHistoryW = 0;
+        int ssgiHistoryH = 0;
+        int ssgiMomentsW = 0;
+        int ssgiMomentsH = 0;
+        int ssgiNormalsW = 0;
+        int ssgiNormalsH = 0;
+        bool ssgiHistoryValid = false;
+        bool ssgiMomentsValid = false;
+        unsigned int postFrameIndex = 0;
         double floorGridSr = 0.0;
         bool floorGridLog = true;
         bool floorGridSoftBg = false;
@@ -506,7 +698,15 @@ private:
     void layoutPresentation() noexcept;
     /** Soft FBO→Image path — Soft BG, docked Scope, or when bloom/DOF needs a colour+depth target. */
     bool usesSoftComposite() const noexcept;
-    bool needsPostEffects() const noexcept { return bloomEnabled || dofEnabled || ssgiEnabled; }
+    bool needsPostEffects() const noexcept
+    {
+        return bloomEnabled || dofEnabled || ssgiEnabled || tonemapEnabled;
+    }
+    bool needsAdvancedSsgi() const noexcept
+    {
+        return ssgiTemporalEnabled || ssgiDenoiseEnabled
+            || ssgiHalfResEnabled || ssgiMeshNormalsEnabled;
+    }
     void markLookDirty() noexcept;
     juce::Rectangle<int> getInnerFrameLocal() const noexcept;
     juce::Rectangle<int> getGlViewLocal() const noexcept;
@@ -570,6 +770,7 @@ private:
     float specularAmount = 0.35f;
     float roughnessAmount = 0.45f;
     float metalnessAmount = 0.0f;
+    bool energyConservingEnabled = false;
     float rimAmount = 0.22f;
     juce::Colour lightColour { juce::Colours::white };
     juce::Colour rimColour { juce::Colours::white };
@@ -577,10 +778,24 @@ private:
     float domeFillStrength = 0.35f;
     juce::Colour domeSkyColour { 0xff7390bf };    // soft sky blue-grey
     juce::Colour domeGroundColour { 0xff403328 }; // warm ground
+    bool domeTextureEnabled = false;
+    DomeTextureSource domeTextureSource = DomeTextureSource::veniceSunset;
+    juce::String domeTextureCustomPath;
+    juce::CriticalSection domeTextureLock;
+    juce::Image domeTextureImage;
+    std::atomic<bool> domeTextureDirty { false };
     bool ssgiEnabled = false;
     float ssgiStrength = 0.40f;
     float ssgiRadius = 0.45f;
     ShadowQuality ssgiQuality = ShadowQuality::medium;
+    bool ssgiTemporalEnabled = false;
+    float ssgiTemporalAmount = 0.85f;
+    bool ssgiDenoiseEnabled = false;
+    float ssgiDenoiseAmount = 0.50f;
+    SsgiDenoiseMode ssgiDenoiseMode = SsgiDenoiseMode::simple;
+    ShadowQuality ssgiAtrousQuality = ShadowQuality::medium;
+    bool ssgiHalfResEnabled = false;
+    bool ssgiMeshNormalsEnabled = false;
     bool contactShadowEnabled = false;
     float contactShadowStrength = 0.45f;
     bool selfShadowEnabled = false;
@@ -598,6 +813,12 @@ private:
     float dofFocusDistance = kDofFocusDefault;
     float dofAperture = kDofApertureDefault;
     ShadowQuality dofQuality = ShadowQuality::medium;
+    float dofBlurScale = kDofBlurScaleDefault;
+    float dofCocDilate = kDofCocDilateDefault;
+    float dofEdgeSpill = kDofEdgeSpillDefault;
+    bool tonemapEnabled = false;
+    float tonemapExposureStops = -0.3f;
+    ColorGrade colorGrade = ColorGrade::warmCinema;
 
     bool closedMeshEnabled = false;
     bool sssEnabled = false;
@@ -641,6 +862,33 @@ private:
     bool autoRotateEnabled = false;
     float autoRotatePeriodSec = kAutoRotatePeriodDefaultSec;
     double autoRotateLastTimeSec = 0.0;
+    bool zoomOscillateEnabled = false;
+    float zoomOscillateDepth = kZoomOscillateDepthDefault;
+    float zoomOscillatePeriodSec = kZoomOscillatePeriodDefaultSec;
+    float zoomOscillateBaseDistance = 3.0f;
+    float zoomOscillatePhaseRad = 0.0f;
+    double zoomOscillateLastTimeSec = 0.0;
+
+    bool audioLevelModEnabled = false;
+    AudioLevelTarget audioLevelTarget = AudioLevelTarget::brightness;
+    float audioLevelMinPercent = kAudioLevelMinPercentDefault;
+    float audioLevelMaxPercent = kAudioLevelMaxPercentDefault;
+    float audioLevelHpHz = kAudioLevelHpDefaultHz;
+    float audioLevelLpHz = kAudioLevelLpDefaultHz;
+    bool audioLevelAffectPlayhead = false;
+    bool audioLevelAffectAntiPlayhead = false;
+    float audioLevelLive01 = 0.0f;
+    std::function<float()> audioLevelProvider;
+
+    float normalCuspAngleDeg = kNormalCuspDefaultDeg;
+    NormalWeighting normalWeighting = NormalWeighting::angleAndArea;
+    void computeTopSurfaceNormals (std::vector<Vertex>& verts, int w, int h);
+    // Reused across rebuilds — avoids heap churn in the hot mesh path.
+    std::vector<float> normalAccumX, normalAccumY, normalAccumZ;
+    std::vector<float> normalBestW, normalBestNx, normalBestNy, normalBestNz;
+
+    void applyZoomOscillateDistance() noexcept;
+    void captureZoomOscillateBaseFromCamera() noexcept;
     juce::Point<float> lastDrag {};
     juce::Point<float> rightClickStart {};
     bool rightClickCandidate = false;

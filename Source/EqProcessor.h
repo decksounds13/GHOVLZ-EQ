@@ -205,6 +205,17 @@ public:
         return publishedEnvDb.load (std::memory_order_relaxed);
     }
 
+    /**
+        Spec3D visual sidechain: filtered input envelope → 0..1 for Look modulation.
+        Call configure from the UI thread; process runs in processBlock when enabled.
+    */
+    void configureSpec3DVisualSidechain (bool enabled, float hpHz, float lpHz,
+                                         float attackMs, float releaseMs) noexcept;
+    float getSpec3DVisualLevel01() const noexcept
+    {
+        return spec3dVisScLevel01.load (std::memory_order_relaxed);
+    }
+
     bool getIsHighpassOn() const { return isHighpassOn; }
     bool getIsLowpassOn() const { return isLowpassOn; }
     bool getIsHighShelfOn() const { return isHighShelfOn; }
@@ -625,6 +636,19 @@ private:
     std::atomic<float> publishedEnvDb { -140.0f };
     std::atomic<float> publishedShapeBipolar { 0.0f };
     std::atomic<float> publishedShapePhase { 0.0f };
+
+    std::atomic<bool> spec3dVisScEnabled { false };
+    std::atomic<float> spec3dVisScHpHz { 40.0f };
+    std::atomic<float> spec3dVisScLpHz { 150.0f };
+    std::atomic<float> spec3dVisScAttackMs { 8.0f };
+    std::atomic<float> spec3dVisScReleaseMs { 180.0f };
+    std::atomic<float> spec3dVisScLevel01 { 0.0f };
+    juce::dsp::IIR::Filter<float> spec3dVisScHpFilter;
+    juce::dsp::IIR::Filter<float> spec3dVisScLpFilter;
+    float spec3dVisScEnv = 0.0f;
+    float spec3dVisScAppliedHpHz = -1.0f;
+    float spec3dVisScAppliedLpHz = -1.0f;
+    void processSpec3DVisualSidechain (const juce::AudioBuffer<float>& buffer, int numSamples) noexcept;
 
     /** One shared coarse bandpass bank for all S bands (GR on post-EQ; detect pre-EQ). Zero cost when no S is on. */
     SpectralDynamicsProcessor spectralEngine;

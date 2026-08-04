@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 
 #include "../../ColourRamp/ColourRampBank.h"
+#include "../../ColourRamp/ColourSwatchEditor.h"
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../../Spectrogram3DComponent.h"
@@ -51,6 +52,7 @@ private:
         void layoutSliderRow (juce::Rectangle<int>& area, juce::Label& label, juce::Slider& slider);
         void layoutComboRow (juce::Rectangle<int>& area, juce::Label& label, juce::ComboBox& combo);
         void layoutToggle (juce::Rectangle<int>& area, juce::ToggleButton& toggle);
+        void layoutColourEditor (juce::Rectangle<int>& area, ColourSwatchEditor& editor);
         void setLookChildVisible (juce::Component& c, bool vis);
         void updateLookDevVisibility();
         void requestParentRelayout();
@@ -58,6 +60,8 @@ private:
         void applyControlsToMain();
         void applyLookControlsToMain();
         void applyStructureControlsToMain();
+        void browseDomeTextureFile();
+        void wireColourEditor (ColourSwatchEditor& editor);
 
         friend class Spectrogram3DSettingsComponent;
 
@@ -82,9 +86,23 @@ private:
         juce::ToggleButton transparentBgToggle { "Soft background (like Osc/Gon)" };
         juce::ToggleButton reverseFreqAxisToggle { "Reverse frequency axis" };
         juce::ToggleButton closedMeshToggle { "Closed mesh (solid)" };
+        juce::Label softAngleLabel;
+        juce::Slider softAngleSlider;
         juce::TextButton resetCameraButton { "Reset 3D Camera" };
 
         juce::Label lookLabel;
+        juce::ToggleButton audioLevelToggle { "Audio level affects" };
+        juce::Label audioLevelTargetLabel;
+        juce::ComboBox audioLevelTargetCombo;
+        juce::Label audioLevelRangeLabel;
+        juce::Slider audioLevelRangeSlider;
+        juce::Label audioLevelRangeValueLabel;
+        juce::Label audioLevelHpLabel;
+        juce::Slider audioLevelHpSlider;
+        juce::Label audioLevelLpLabel;
+        juce::Slider audioLevelLpSlider;
+        juce::ToggleButton audioAffectPlayheadToggle { "Affect playhead" };
+        juce::ToggleButton audioAffectAntiPlayheadToggle { "Affect anti-playhead" };
         juce::ToggleButton lightingToggle { "Lighting" };
         juce::Label lightingAmountLabel;
         juce::Slider lightingAmountSlider;
@@ -98,36 +116,21 @@ private:
         juce::Slider roughnessSlider;
         juce::Label metalnessLabel;
         juce::Slider metalnessSlider;
+        juce::ToggleButton energyConserveToggle { "Energy conserving (1-F)" };
         juce::Label rimLabel;
         juce::Slider rimSlider;
-        juce::Label lightColRLabel;
-        juce::Slider lightColRSlider;
-        juce::Label lightColGLabel;
-        juce::Slider lightColGSlider;
-        juce::Label lightColBLabel;
-        juce::Slider lightColBSlider;
-        juce::Label rimColRLabel;
-        juce::Slider rimColRSlider;
-        juce::Label rimColGLabel;
-        juce::Slider rimColGSlider;
-        juce::Label rimColBLabel;
-        juce::Slider rimColBSlider;
+        ColourSwatchEditor lightColourEditor { "Light Color" };
+        ColourSwatchEditor rimColourEditor { "Rim Color" };
 
         juce::ToggleButton domeFillToggle { "Dome fill" };
         juce::Label domeFillStrengthLabel;
         juce::Slider domeFillStrengthSlider;
-        juce::Label domeSkyRLabel;
-        juce::Slider domeSkyRSlider;
-        juce::Label domeSkyGLabel;
-        juce::Slider domeSkyGSlider;
-        juce::Label domeSkyBLabel;
-        juce::Slider domeSkyBSlider;
-        juce::Label domeGroundRLabel;
-        juce::Slider domeGroundRSlider;
-        juce::Label domeGroundGLabel;
-        juce::Slider domeGroundGSlider;
-        juce::Label domeGroundBLabel;
-        juce::Slider domeGroundBSlider;
+        juce::ToggleButton domeTextureToggle { "Dome texture" };
+        juce::Label domeTextureLabel;
+        juce::ComboBox domeTextureCombo;
+        ColourSwatchEditor domeSkyEditor { "Dome Sky" };
+        ColourSwatchEditor domeGroundEditor { "Dome Ground" };
+        std::unique_ptr<juce::FileChooser> domeTextureChooser;
 
         juce::ToggleButton ssgiToggle { "SSGI (screen-space GI)" };
         juce::Label ssgiStrengthLabel;
@@ -170,6 +173,18 @@ private:
         juce::Slider dofApertureSlider;
         juce::Label dofQualityLabel;
         juce::ComboBox dofQualityCombo;
+        juce::Label dofBlurScaleLabel;
+        juce::Slider dofBlurScaleSlider;
+        juce::Label dofCocDilateLabel;
+        juce::Slider dofCocDilateSlider;
+        juce::Label dofEdgeSpillLabel;
+        juce::Slider dofEdgeSpillSlider;
+
+        juce::ToggleButton tonemapToggle { "Tonemap / grade" };
+        juce::Label exposureLabel;
+        juce::Slider exposureSlider;
+        juce::Label gradeLabel;
+        juce::ComboBox gradeCombo;
 
         juce::ToggleButton sssToggle { "Subsurface (SSS)" };
         juce::Label sssStrengthLabel;

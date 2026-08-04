@@ -64,6 +64,12 @@
             file="Source/Spectrogram3DComponent.cpp"/>
       <FILE id="sP3dHd" name="Spectrogram3DComponent.h" compile="0" resource="0"
             file="Source/Spectrogram3DComponent.h"/>
+      <GROUP name="Assets" id="AsSt3D">
+        <FILE id="vSunCp" name="VeniceSunsetHdri.cpp" compile="1" resource="0"
+              file="Source/Assets/VeniceSunsetHdri.cpp"/>
+        <FILE id="vSunHd" name="VeniceSunsetHdri.h" compile="0" resource="0"
+              file="Source/Assets/VeniceSunsetHdri.h"/>
+      </GROUP>
       <FILE id="fRmScp" name="FramedFloatingScopeWindow.cpp" compile="1" resource="0"
             file="Source/FramedFloatingScopeWindow.cpp"/>
       <FILE id="fRmSch" name="FramedFloatingScopeWindow.h" compile="0" resource="0"
@@ -82,6 +88,10 @@
               file="Source/ColourRamp/RampColorPickerPanel.cpp"/>
         <FILE id="cRamp07" name="RampColorPickerPanel.h" compile="0" resource="0"
               file="Source/ColourRamp/RampColorPickerPanel.h"/>
+        <FILE id="cSwCp" name="ColourSwatchEditor.cpp" compile="1" resource="0"
+              file="Source/ColourRamp/ColourSwatchEditor.cpp"/>
+        <FILE id="cSwHd" name="ColourSwatchEditor.h" compile="0" resource="0"
+              file="Source/ColourRamp/ColourSwatchEditor.h"/>
         <FILE id="cRamp08" name="GradientStripEditor.cpp" compile="1" resource="0"
               file="Source/ColourRamp/GradientStripEditor.cpp"/>
         <FILE id="cRamp09" name="GradientStripEditor.h" compile="0" resource="0"
@@ -286,6 +296,8 @@
         <FILE id="n9KeeU" name="DarkKnob4_Stitched.png" compile="0" resource="1"
               file="Resources/DarkKnob4_Stitched.png"/>
         <FILE id="lUVN2S" name="pirulen.ttf" compile="0" resource="1" file="Resources/pirulen.ttf"/>
+        <FILE id="vSunJp" name="venice_sunset_1k.jpg" compile="0" resource="0"
+              file="Resources/venice_sunset_1k.jpg"/>
       </GROUP>
       <GROUP id="{C6EBE54F-59E4-D84B-6307-19E5994EDCAC}" name="Visualizer">
         <GROUP id="{84656482-7330-8DA8-1650-4C41B9100DAE}" name="Layers">

@@ -2238,10 +2238,17 @@ void EqEditor::loadUiPrefs()
     float spec3DDomeStr = 0.35f;
     juce::uint32 spec3DDomeSky = 0xff7390bf;
     juce::uint32 spec3DDomeGround = 0xff403328;
+    bool spec3DDomeTex = false;
+    int spec3DDomeTexSrc = 0; // Venice Sunset
+    juce::String spec3DDomeTexPath;
     bool spec3DSsgi = false;
     float spec3DSsgiStr = 0.40f;
     float spec3DSsgiRad = 0.45f;
     int spec3DSsgiQuality = 1; // medium
+    bool spec3DEnergyConserve = false;
+    bool spec3DTonemap = false;
+    float spec3DExposure = -0.3f;
+    int spec3DGrade = 2; // Warm Cinema
     bool spec3DContactShadow = false;
     float spec3DContactShadowStr = 0.45f;
     bool spec3DSelfShadow = false;
@@ -2259,9 +2266,25 @@ void EqEditor::loadUiPrefs()
     float spec3DDofFocus = Spectrogram3DComponent::kDofFocusDefault;
     float spec3DDofAperture = Spectrogram3DComponent::kDofApertureDefault;
     int spec3DDofQuality = 1; // medium
+    float spec3DDofBlurScale = Spectrogram3DComponent::kDofBlurScaleDefault;
+    float spec3DDofCocDilate = Spectrogram3DComponent::kDofCocDilateDefault;
+    float spec3DDofEdgeSpill = Spectrogram3DComponent::kDofEdgeSpillDefault;
     bool spec3DClosedMesh = false;
     bool spec3DAutoRotate = false;
     float spec3DAutoRotatePeriod = Spectrogram3DComponent::kAutoRotatePeriodDefaultSec;
+    bool spec3DZoomOsc = false;
+    float spec3DZoomOscDepth = Spectrogram3DComponent::kZoomOscillateDepthDefault;
+    float spec3DZoomOscPeriod = Spectrogram3DComponent::kZoomOscillatePeriodDefaultSec;
+    bool spec3DAudioLevel = false;
+    int spec3DAudioTarget = 0;
+    float spec3DAudioMinPct = Spectrogram3DComponent::kAudioLevelMinPercentDefault;
+    float spec3DAudioMaxPct = Spectrogram3DComponent::kAudioLevelMaxPercentDefault;
+    float spec3DAudioHp = Spectrogram3DComponent::kAudioLevelHpDefaultHz;
+    float spec3DAudioLp = Spectrogram3DComponent::kAudioLevelLpDefaultHz;
+    bool spec3DAudioPlayhead = false;
+    bool spec3DAudioAntiPlayhead = false;
+    float spec3DNormalCusp = Spectrogram3DComponent::kNormalCuspDefaultDeg;
+    int spec3DNormalWeight = (int) Spectrogram3DComponent::NormalWeighting::angleAndArea;
     bool spec3DSss = false;
     float spec3DSssStr = 0.45f;
     float spec3DSssWrap = 0.55f;
@@ -2386,10 +2409,17 @@ void EqEditor::loadUiPrefs()
                 spec3DDomeStr = (float) xml->getDoubleAttribute ("spec3dDomeStr", 0.35);
                 spec3DDomeSky = (juce::uint32) xml->getIntAttribute ("spec3dDomeSky", (int) 0xff7390bf);
                 spec3DDomeGround = (juce::uint32) xml->getIntAttribute ("spec3dDomeGround", (int) 0xff403328);
+                spec3DDomeTex = xml->getBoolAttribute ("spec3dDomeTex", false);
+                spec3DDomeTexSrc = xml->getIntAttribute ("spec3dDomeTexSrc", 0);
+                spec3DDomeTexPath = xml->getStringAttribute ("spec3dDomeTexPath");
                 spec3DSsgi = xml->getBoolAttribute ("spec3dSsgi", false);
                 spec3DSsgiStr = (float) xml->getDoubleAttribute ("spec3dSsgiStr", 0.40);
                 spec3DSsgiRad = (float) xml->getDoubleAttribute ("spec3dSsgiRad", 0.45);
                 spec3DSsgiQuality = xml->getIntAttribute ("spec3dSsgiQuality", 1);
+                spec3DEnergyConserve = xml->getBoolAttribute ("spec3dEnergyConserve", false);
+                spec3DTonemap = xml->getBoolAttribute ("spec3dTonemap", false);
+                spec3DExposure = (float) xml->getDoubleAttribute ("spec3dExposure", -0.3);
+                spec3DGrade = xml->getIntAttribute ("spec3dGrade", 2); // Warm Cinema
                 spec3DContactShadow = xml->getBoolAttribute ("spec3dContactShadow", false);
                 spec3DContactShadowStr = (float) xml->getDoubleAttribute ("spec3dContactShadowStr", 0.45);
                 spec3DSelfShadow = xml->getBoolAttribute ("spec3dSelfShadow", false);
@@ -2414,6 +2444,12 @@ void EqEditor::loadUiPrefs()
                     spec3DDofAperture = (float) xml->getDoubleAttribute (
                         "spec3dDofAmount", Spectrogram3DComponent::kDofApertureDefault);
                 spec3DDofQuality = xml->getIntAttribute ("spec3dDofQuality", 1);
+                spec3DDofBlurScale = (float) xml->getDoubleAttribute (
+                    "spec3dDofBlurScale", Spectrogram3DComponent::kDofBlurScaleDefault);
+                spec3DDofCocDilate = (float) xml->getDoubleAttribute (
+                    "spec3dDofCocDilate", Spectrogram3DComponent::kDofCocDilateDefault);
+                spec3DDofEdgeSpill = (float) xml->getDoubleAttribute (
+                    "spec3dDofEdgeSpill", Spectrogram3DComponent::kDofEdgeSpillDefault);
                 // Migrate legacy SSS mode combo (0=off, 1=heightfield, 2=closed).
                 const int legacySssMode = xml->getIntAttribute ("spec3dSssMode", -1);
                 if (xml->hasAttribute ("spec3dClosedMesh"))
@@ -2424,6 +2460,28 @@ void EqEditor::loadUiPrefs()
                 spec3DAutoRotatePeriod = (float) xml->getDoubleAttribute (
                     "spec3dAutoRotatePeriod",
                     Spectrogram3DComponent::kAutoRotatePeriodDefaultSec);
+                spec3DZoomOsc = xml->getBoolAttribute ("spec3dZoomOsc", false);
+                spec3DZoomOscDepth = (float) xml->getDoubleAttribute (
+                    "spec3dZoomOscDepth", Spectrogram3DComponent::kZoomOscillateDepthDefault);
+                spec3DZoomOscPeriod = (float) xml->getDoubleAttribute (
+                    "spec3dZoomOscPeriod", Spectrogram3DComponent::kZoomOscillatePeriodDefaultSec);
+                spec3DAudioLevel = xml->getBoolAttribute ("spec3dAudioLevel", false);
+                spec3DAudioTarget = xml->getIntAttribute ("spec3dAudioTarget", 0);
+                spec3DAudioMinPct = (float) xml->getDoubleAttribute (
+                    "spec3dAudioMinPct", Spectrogram3DComponent::kAudioLevelMinPercentDefault);
+                spec3DAudioMaxPct = (float) xml->getDoubleAttribute (
+                    "spec3dAudioMaxPct", Spectrogram3DComponent::kAudioLevelMaxPercentDefault);
+                spec3DAudioHp = (float) xml->getDoubleAttribute (
+                    "spec3dAudioHp", Spectrogram3DComponent::kAudioLevelHpDefaultHz);
+                spec3DAudioLp = (float) xml->getDoubleAttribute (
+                    "spec3dAudioLp", Spectrogram3DComponent::kAudioLevelLpDefaultHz);
+                spec3DAudioPlayhead = xml->getBoolAttribute ("spec3dAudioPlayhead", false);
+                spec3DAudioAntiPlayhead = xml->getBoolAttribute ("spec3dAudioAntiPlayhead", false);
+                spec3DNormalCusp = (float) xml->getDoubleAttribute (
+                    "spec3dNormalCusp", Spectrogram3DComponent::kNormalCuspDefaultDeg);
+                spec3DNormalWeight = xml->getIntAttribute (
+                    "spec3dNormalWeight",
+                    (int) Spectrogram3DComponent::NormalWeighting::angleAndArea);
                 if (xml->hasAttribute ("spec3dSss"))
                     spec3DSss = xml->getBoolAttribute ("spec3dSss", false);
                 else
@@ -2500,14 +2558,35 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DDomeFillStrength (spec3DDomeStr, false);
         mainComponent->setSpec3DDomeSkyColour (juce::Colour (spec3DDomeSky), false);
         mainComponent->setSpec3DDomeGroundColour (juce::Colour (spec3DDomeGround), false);
+        mainComponent->setSpec3DDomeTextureCustomPath (spec3DDomeTexPath, false);
+        mainComponent->setSpec3DDomeTextureSource (
+            spec3DDomeTexSrc == 1 ? Spectrogram3DComponent::DomeTextureSource::custom
+                                 : Spectrogram3DComponent::DomeTextureSource::veniceSunset,
+            false);
+        mainComponent->setSpec3DDomeTextureEnabled (spec3DDomeTex, false);
         mainComponent->setSpec3DSsgiEnabled (spec3DSsgi, false);
         mainComponent->setSpec3DSsgiStrength (spec3DSsgiStr, false);
         mainComponent->setSpec3DSsgiRadius (spec3DSsgiRad, false);
         mainComponent->setSpec3DSsgiQuality (
             spec3DSsgiQuality <= 0 ? Spectrogram3DComponent::ShadowQuality::low
-                                  : (spec3DSsgiQuality >= 2 ? Spectrogram3DComponent::ShadowQuality::high
-                                                           : Spectrogram3DComponent::ShadowQuality::medium),
+                                  : (spec3DSsgiQuality == 1 ? Spectrogram3DComponent::ShadowQuality::medium
+                                  : (spec3DSsgiQuality == 2 ? Spectrogram3DComponent::ShadowQuality::high
+                                                           : Spectrogram3DComponent::ShadowQuality::ultra)),
             false);
+        // SSGI temporal/denoise/half-res/mesh-normals kept in Spectrogram3DComponent for later
+        // use, but not loaded from prefs (Look UI removed — use Quality Ultra instead).
+        mainComponent->setSpec3DSsgiTemporalEnabled (false, false);
+        mainComponent->setSpec3DSsgiDenoiseEnabled (false, false);
+        mainComponent->setSpec3DSsgiHalfResEnabled (false, false);
+        mainComponent->setSpec3DSsgiMeshNormalsEnabled (false, false);
+        mainComponent->setSpec3DEnergyConservingEnabled (spec3DEnergyConserve, false);
+        mainComponent->setSpec3DTonemapEnabled (spec3DTonemap, false);
+        mainComponent->setSpec3DTonemapExposureStops (spec3DExposure, false);
+        {
+            const int g = juce::jlimit (0, 5, spec3DGrade);
+            mainComponent->setSpec3DColorGrade (
+                static_cast<Spectrogram3DComponent::ColorGrade> (g), false);
+        }
         mainComponent->setSpec3DContactShadowEnabled (spec3DContactShadow, false);
         mainComponent->setSpec3DContactShadowStrength (spec3DContactShadowStr, false);
         mainComponent->setSpec3DSelfShadowEnabled (spec3DSelfShadow, false);
@@ -2534,9 +2613,31 @@ void EqEditor::loadUiPrefs()
                                  : (spec3DDofQuality >= 2 ? Spectrogram3DComponent::ShadowQuality::high
                                                          : Spectrogram3DComponent::ShadowQuality::medium),
             false);
+        mainComponent->setSpec3DDofBlurScale (spec3DDofBlurScale, false);
+        mainComponent->setSpec3DDofCocDilate (spec3DDofCocDilate, false);
+        mainComponent->setSpec3DDofEdgeSpill (spec3DDofEdgeSpill, false);
         mainComponent->setSpec3DClosedMeshEnabled (spec3DClosedMesh, false);
         mainComponent->setSpec3DAutoRotateEnabled (spec3DAutoRotate, false);
         mainComponent->setSpec3DAutoRotatePeriodSec (spec3DAutoRotatePeriod, false);
+        mainComponent->setSpec3DZoomOscillateDepth (spec3DZoomOscDepth, false);
+        mainComponent->setSpec3DZoomOscillatePeriodSec (spec3DZoomOscPeriod, false);
+        mainComponent->setSpec3DZoomOscillateEnabled (spec3DZoomOsc, false);
+        mainComponent->setSpec3DAudioLevelTarget (
+            static_cast<Spectrogram3DComponent::AudioLevelTarget> (
+                juce::jlimit (0, 6, spec3DAudioTarget)),
+            false);
+        mainComponent->setSpec3DAudioLevelMinPercent (spec3DAudioMinPct, false);
+        mainComponent->setSpec3DAudioLevelMaxPercent (spec3DAudioMaxPct, false);
+        mainComponent->setSpec3DAudioLevelHpHz (spec3DAudioHp, false);
+        mainComponent->setSpec3DAudioLevelLpHz (spec3DAudioLp, false);
+        mainComponent->setSpec3DAudioLevelAffectPlayhead (spec3DAudioPlayhead, false);
+        mainComponent->setSpec3DAudioLevelAffectAntiPlayhead (spec3DAudioAntiPlayhead, false);
+        mainComponent->setSpec3DAudioLevelModEnabled (spec3DAudioLevel, false);
+        mainComponent->setSpec3DNormalCuspAngleDeg (spec3DNormalCusp, false);
+        mainComponent->setSpec3DNormalWeighting (
+            static_cast<Spectrogram3DComponent::NormalWeighting> (
+                juce::jlimit (0, 3, spec3DNormalWeight)),
+            false);
         mainComponent->setSpec3DSssEnabled (spec3DSss, false);
         mainComponent->setSpec3DSssStrength (spec3DSssStr, false);
         mainComponent->setSpec3DSssWrap (spec3DSssWrap, false);
@@ -2640,6 +2741,11 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dDomeStr", (double) mainComponent->getSpec3DDomeFillStrength());
         xml->setAttribute ("spec3dDomeSky", (int) mainComponent->getSpec3DDomeSkyColour().getARGB());
         xml->setAttribute ("spec3dDomeGround", (int) mainComponent->getSpec3DDomeGroundColour().getARGB());
+        xml->setAttribute ("spec3dDomeTex", mainComponent->isSpec3DDomeTextureEnabled());
+        xml->setAttribute ("spec3dDomeTexSrc",
+                           mainComponent->getSpec3DDomeTextureSource()
+                               == Spectrogram3DComponent::DomeTextureSource::custom ? 1 : 0);
+        xml->setAttribute ("spec3dDomeTexPath", mainComponent->getSpec3DDomeTextureCustomPath());
         xml->setAttribute ("spec3dSsgi", mainComponent->isSpec3DSsgiEnabled());
         xml->setAttribute ("spec3dSsgiStr", (double) mainComponent->getSpec3DSsgiStrength());
         xml->setAttribute ("spec3dSsgiRad", (double) mainComponent->getSpec3DSsgiRadius());
@@ -2647,8 +2753,13 @@ void EqEditor::saveUiPrefs() const
             const auto q = mainComponent->getSpec3DSsgiQuality();
             xml->setAttribute ("spec3dSsgiQuality",
                                q == Spectrogram3DComponent::ShadowQuality::low ? 0
-                                   : (q == Spectrogram3DComponent::ShadowQuality::high ? 2 : 1));
+                                   : (q == Spectrogram3DComponent::ShadowQuality::medium ? 1
+                                   : (q == Spectrogram3DComponent::ShadowQuality::high ? 2 : 3)));
         }
+        xml->setAttribute ("spec3dEnergyConserve", mainComponent->isSpec3DEnergyConservingEnabled());
+        xml->setAttribute ("spec3dTonemap", mainComponent->isSpec3DTonemapEnabled());
+        xml->setAttribute ("spec3dExposure", (double) mainComponent->getSpec3DTonemapExposureStops());
+        xml->setAttribute ("spec3dGrade", (int) mainComponent->getSpec3DColorGrade());
         xml->setAttribute ("spec3dContactShadow", mainComponent->isSpec3DContactShadowEnabled());
         xml->setAttribute ("spec3dContactShadowStr", (double) mainComponent->getSpec3DContactShadowStrength());
         xml->setAttribute ("spec3dSelfShadow", mainComponent->isSpec3DSelfShadowEnabled());
@@ -2678,10 +2789,34 @@ void EqEditor::saveUiPrefs() const
                                q == Spectrogram3DComponent::ShadowQuality::low ? 0
                                    : (q == Spectrogram3DComponent::ShadowQuality::high ? 2 : 1));
         }
+        xml->setAttribute ("spec3dDofBlurScale", (double) mainComponent->getSpec3DDofBlurScale());
+        xml->setAttribute ("spec3dDofCocDilate", (double) mainComponent->getSpec3DDofCocDilate());
+        xml->setAttribute ("spec3dDofEdgeSpill", (double) mainComponent->getSpec3DDofEdgeSpill());
         xml->setAttribute ("spec3dClosedMesh", mainComponent->isSpec3DClosedMeshEnabled());
         xml->setAttribute ("spec3dAutoRotate", mainComponent->isSpec3DAutoRotateEnabled());
         xml->setAttribute ("spec3dAutoRotatePeriod",
                            (double) mainComponent->getSpec3DAutoRotatePeriodSec());
+        xml->setAttribute ("spec3dZoomOsc", mainComponent->isSpec3DZoomOscillateEnabled());
+        xml->setAttribute ("spec3dZoomOscDepth",
+                           (double) mainComponent->getSpec3DZoomOscillateDepth());
+        xml->setAttribute ("spec3dZoomOscPeriod",
+                           (double) mainComponent->getSpec3DZoomOscillatePeriodSec());
+        xml->setAttribute ("spec3dAudioLevel", mainComponent->isSpec3DAudioLevelModEnabled());
+        xml->setAttribute ("spec3dAudioTarget", (int) mainComponent->getSpec3DAudioLevelTarget());
+        xml->setAttribute ("spec3dAudioMinPct",
+                           (double) mainComponent->getSpec3DAudioLevelMinPercent());
+        xml->setAttribute ("spec3dAudioMaxPct",
+                           (double) mainComponent->getSpec3DAudioLevelMaxPercent());
+        xml->setAttribute ("spec3dAudioHp", (double) mainComponent->getSpec3DAudioLevelHpHz());
+        xml->setAttribute ("spec3dAudioLp", (double) mainComponent->getSpec3DAudioLevelLpHz());
+        xml->setAttribute ("spec3dAudioPlayhead",
+                           mainComponent->getSpec3DAudioLevelAffectPlayhead());
+        xml->setAttribute ("spec3dAudioAntiPlayhead",
+                           mainComponent->getSpec3DAudioLevelAffectAntiPlayhead());
+        xml->setAttribute ("spec3dNormalCusp",
+                           (double) mainComponent->getSpec3DNormalCuspAngleDeg());
+        xml->setAttribute ("spec3dNormalWeight",
+                           (int) mainComponent->getSpec3DNormalWeighting());
         xml->setAttribute ("spec3dSss", mainComponent->isSpec3DSssEnabled());
         xml->setAttribute ("spec3dSssStr", (double) mainComponent->getSpec3DSssStrength());
         xml->setAttribute ("spec3dSssWrap", (double) mainComponent->getSpec3DSssWrap());

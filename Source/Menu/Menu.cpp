@@ -372,9 +372,13 @@ void Menu::disableSliderScrollWheelRecursive (juce::Component& root)
             disableSliderScrollWheelRecursive (*child);
 }
 
-void Menu::refreshContentPanelSize()
+void Menu::refreshContentPanelSize (bool preserveScrollPosition)
 {
     constexpr int tabBarDepth = 35;
+
+    // Shrinking contentPanel for the provisional measure clamps the viewport to (0,0).
+    // Capture first so toggles that grow/shrink Look rows don't kick the user to the top.
+    const auto savedScroll = viewport.getViewPosition();
 
     // Resolve viewport bounds first so content can fill the panel when the user
     // widens Settings (avoids a floating content island / grey inset frame).
@@ -413,6 +417,10 @@ void Menu::refreshContentPanelSize()
     disableSliderScrollWheelRecursive (contentPanel);
 
     layoutScrollBars();
+
+    if (preserveScrollPosition)
+        viewport.setViewPosition (savedScroll); // Viewport clamps to the new content size.
+
     if (verticalScrollBar != nullptr)
         verticalScrollBar->updateThumbPosition();
     if (horizontalScrollBar != nullptr)
@@ -421,12 +429,12 @@ void Menu::refreshContentPanelSize()
 
 void Menu::notifyContentHeightChanged()
 {
-    refreshContentPanelSize();
+    refreshContentPanelSize (true);
 }
 
 void Menu::resized()
 {
-    refreshContentPanelSize();
+    refreshContentPanelSize (true);
 
     tabBar.setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
 

@@ -119,6 +119,21 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     };
     addAndMakeVisible (closedMeshToggle);
 
+    styleLabel (softAngleLabel);
+    softAngleLabel.setText ("Soft Angle (deg)", juce::dontSendNotification);
+    styleSlider (softAngleSlider);
+    softAngleSlider.setRange (Spectrogram3DComponent::kNormalCuspMinDeg,
+                              Spectrogram3DComponent::kNormalCuspMaxDeg,
+                              1.0);
+    softAngleSlider.setValue (Spectrogram3DComponent::kNormalCuspDefaultDeg,
+                              juce::dontSendNotification);
+    softAngleSlider.setTooltip (
+        "Labs Soften Normals–style soft angle (cusp). 180 = fully soft organic shading; "
+        "lower values keep harder ridges. Weighting stays Angle+Area under the hood.");
+    softAngleSlider.onValueChange = [this] { applyStructureControlsToMain(); };
+    addAndMakeVisible (softAngleLabel);
+    addAndMakeVisible (softAngleSlider);
+
     styleSaveDefaultButton (resetCameraButton);
     resetCameraButton.setButtonText ("Reset 3D Camera");
     resetCameraButton.onClick = [this]
@@ -132,6 +147,34 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (lookLabel);
     lookLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
     addAndMakeVisible (lookLabel);
+
+    styleToggle (audioLevelToggle);
+    audioLevelToggle.setTooltip (
+        "Sidechain the pre-EQ input level (HP/LP filtered) into Look targets so the mesh "
+        "pulses with the beat. Off by default.");
+    audioLevelToggle.onClick = [this]
+    {
+        updateLookDevVisibility();
+        applyLookControlsToMain();
+        requestParentRelayout();
+    };
+    addAndMakeVisible (audioLevelToggle);
+
+    styleLabel (audioLevelTargetLabel);
+    audioLevelTargetLabel.setText ("Affects", juce::dontSendNotification);
+    styleCombo (audioLevelTargetCombo);
+    audioLevelTargetCombo.addItem ("Ramp brightness", 1);
+    audioLevelTargetCombo.addItem ("Lighting amount", 2);
+    audioLevelTargetCombo.addItem ("Specular", 3);
+    audioLevelTargetCombo.addItem ("Rim light", 4);
+    audioLevelTargetCombo.addItem ("Dome fill", 5);
+    audioLevelTargetCombo.addItem ("All lights", 6);
+    audioLevelTargetCombo.addItem ("Brightness + lights", 7);
+    audioLevelTargetCombo.setSelectedId (1, juce::dontSendNotification);
+    audioLevelTargetCombo.setTooltip ("Which Look parameter the filtered audio level modulates.");
+    audioLevelTargetCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (audioLevelTargetLabel);
+    addAndMakeVisible (audioLevelTargetCombo);
 
     auto setupLookToggle = [this] (juce::ToggleButton& t, const juce::String& tip)
     {
@@ -157,6 +200,57 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
         addAndMakeVisible (s);
     };
 
+    styleLabel (audioLevelRangeLabel);
+    audioLevelRangeLabel.setText ("Pulse Range (%)", juce::dontSendNotification);
+    audioLevelRangeSlider.setSliderStyle (juce::Slider::TwoValueHorizontal);
+    audioLevelRangeSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    audioLevelRangeSlider.setRange (Spectrogram3DComponent::kAudioLevelPercentMin,
+                                    Spectrogram3DComponent::kAudioLevelPercentMax,
+                                    1.0);
+    audioLevelRangeSlider.setMinValue (Spectrogram3DComponent::kAudioLevelMinPercentDefault,
+                                       juce::dontSendNotification);
+    audioLevelRangeSlider.setMaxValue (Spectrogram3DComponent::kAudioLevelMaxPercentDefault,
+                                       juce::dontSendNotification);
+    audioLevelRangeSlider.setTooltip (
+        "Bipolar % of the current target. Silence uses the low thumb, peaks the high. "
+        "Both at 0 = no change. Example: −20…+20 lowers/raises the value by 20%.");
+    audioLevelRangeSlider.setColour (juce::Slider::trackColourId, juce::Colours::darkgoldenrod.withAlpha (0.55f));
+    audioLevelRangeSlider.setColour (juce::Slider::thumbColourId, juce::Colours::goldenrod);
+    audioLevelRangeSlider.setColour (juce::Slider::backgroundColourId, juce::Colours::black.withAlpha (0.35f));
+    auto syncAudioRangeLabel = [this]
+    {
+        const int lo = juce::roundToInt (audioLevelRangeSlider.getMinValue());
+        const int hi = juce::roundToInt (audioLevelRangeSlider.getMaxValue());
+        audioLevelRangeValueLabel.setText (juce::String (lo) + "%  …  " + juce::String (hi) + "%",
+                                           juce::dontSendNotification);
+    };
+    audioLevelRangeSlider.onValueChange = [this, syncAudioRangeLabel]
+    {
+        syncAudioRangeLabel();
+        applyLookControlsToMain();
+    };
+    styleLabel (audioLevelRangeValueLabel);
+    audioLevelRangeValueLabel.setJustificationType (juce::Justification::centredRight);
+    syncAudioRangeLabel();
+    addAndMakeVisible (audioLevelRangeLabel);
+    addAndMakeVisible (audioLevelRangeSlider);
+    addAndMakeVisible (audioLevelRangeValueLabel);
+
+    audioLevelHpLabel.setText ("Sidechain HP (Hz)", juce::dontSendNotification);
+    setupLookSlider (audioLevelHpLabel, audioLevelHpSlider, 20.0, 2000.0, 1.0,
+                     "High-pass the visual sidechain (raise to ignore rumble).");
+    audioLevelHpSlider.setValue (Spectrogram3DComponent::kAudioLevelHpDefaultHz,
+                                 juce::dontSendNotification);
+    audioLevelLpLabel.setText ("Sidechain LP (Hz)", juce::dontSendNotification);
+    setupLookSlider (audioLevelLpLabel, audioLevelLpSlider, 40.0, 8000.0, 1.0,
+                     "Low-pass the visual sidechain (lower to isolate kick).");
+    audioLevelLpSlider.setValue (Spectrogram3DComponent::kAudioLevelLpDefaultHz,
+                                 juce::dontSendNotification);
+    setupLookToggle (audioAffectPlayheadToggle,
+                     "Also pulse the closed-mesh playhead (+X) wall. Only when Audio level affects is on.");
+    setupLookToggle (audioAffectAntiPlayheadToggle,
+                     "Also pulse the closed-mesh anti-playhead (−X) wall. Only when Audio level affects is on.");
+
     setupLookToggle (lightingToggle, "Directional lighting with normals / specular / rim. Off = flat colours.");
     lightingAmountLabel.setText ("Lighting Amount", juce::dontSendNotification);
     setupLookSlider (lightingAmountLabel, lightingAmountSlider, 0.0, 1.0, 0.01, "How strongly lighting reshapes the ramp colours.");
@@ -179,27 +273,15 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     setupLookSlider (metalnessLabel, metalnessSlider, 0.0, 1.0, 0.01,
                      "PBR metalness — 0 = dielectric, 1 = metal (tinted specular, no diffuse).");
     metalnessSlider.setValue (0.0, juce::dontSendNotification);
+    setupLookToggle (energyConserveToggle,
+                     "Multiply diffuse/dome by (1−Fresnel). Off by default (legacy Look).");
     rimLabel.setText ("Rim Light", juce::dontSendNotification);
     setupLookSlider (rimLabel, rimSlider, 0.0, 1.0, 0.01, "View-dependent edge lift.");
     rimSlider.setValue (0.22, juce::dontSendNotification);
-    lightColRLabel.setText ("Light Color R", juce::dontSendNotification);
-    setupLookSlider (lightColRLabel, lightColRSlider, 0.0, 1.0, 0.01, "Key light tint red.");
-    lightColRSlider.setValue (1.0, juce::dontSendNotification);
-    lightColGLabel.setText ("Light Color G", juce::dontSendNotification);
-    setupLookSlider (lightColGLabel, lightColGSlider, 0.0, 1.0, 0.01, "Key light tint green.");
-    lightColGSlider.setValue (1.0, juce::dontSendNotification);
-    lightColBLabel.setText ("Light Color B", juce::dontSendNotification);
-    setupLookSlider (lightColBLabel, lightColBSlider, 0.0, 1.0, 0.01, "Key light tint blue.");
-    lightColBSlider.setValue (1.0, juce::dontSendNotification);
-    rimColRLabel.setText ("Rim Color R", juce::dontSendNotification);
-    setupLookSlider (rimColRLabel, rimColRSlider, 0.0, 1.0, 0.01, "Rim light tint red.");
-    rimColRSlider.setValue (1.0, juce::dontSendNotification);
-    rimColGLabel.setText ("Rim Color G", juce::dontSendNotification);
-    setupLookSlider (rimColGLabel, rimColGSlider, 0.0, 1.0, 0.01, "Rim light tint green.");
-    rimColGSlider.setValue (1.0, juce::dontSendNotification);
-    rimColBLabel.setText ("Rim Color B", juce::dontSendNotification);
-    setupLookSlider (rimColBLabel, rimColBSlider, 0.0, 1.0, 0.01, "Rim light tint blue.");
-    rimColBSlider.setValue (1.0, juce::dontSendNotification);
+    wireColourEditor (lightColourEditor);
+    lightColourEditor.setColour (juce::Colours::white);
+    wireColourEditor (rimColourEditor);
+    rimColourEditor.setColour (juce::Colours::white);
 
     setupLookToggle (domeFillToggle,
                      "Hemisphere dome fill — sky/ground ambient into shadows (needs Lighting). "
@@ -208,24 +290,30 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     setupLookSlider (domeFillStrengthLabel, domeFillStrengthSlider, 0.0, 1.0, 0.01,
                      "How strongly sky/ground ambient fills shadowed regions.");
     domeFillStrengthSlider.setValue (0.35, juce::dontSendNotification);
-    domeSkyRLabel.setText ("Dome Sky R", juce::dontSendNotification);
-    setupLookSlider (domeSkyRLabel, domeSkyRSlider, 0.0, 1.0, 0.01, "Sky hemisphere tint red.");
-    domeSkyRSlider.setValue (juce::Colour (0xff7390bf).getFloatRed(), juce::dontSendNotification);
-    domeSkyGLabel.setText ("Dome Sky G", juce::dontSendNotification);
-    setupLookSlider (domeSkyGLabel, domeSkyGSlider, 0.0, 1.0, 0.01, "Sky hemisphere tint green.");
-    domeSkyGSlider.setValue (juce::Colour (0xff7390bf).getFloatGreen(), juce::dontSendNotification);
-    domeSkyBLabel.setText ("Dome Sky B", juce::dontSendNotification);
-    setupLookSlider (domeSkyBLabel, domeSkyBSlider, 0.0, 1.0, 0.01, "Sky hemisphere tint blue.");
-    domeSkyBSlider.setValue (juce::Colour (0xff7390bf).getFloatBlue(), juce::dontSendNotification);
-    domeGroundRLabel.setText ("Dome Ground R", juce::dontSendNotification);
-    setupLookSlider (domeGroundRLabel, domeGroundRSlider, 0.0, 1.0, 0.01, "Ground hemisphere tint red.");
-    domeGroundRSlider.setValue (juce::Colour (0xff403328).getFloatRed(), juce::dontSendNotification);
-    domeGroundGLabel.setText ("Dome Ground G", juce::dontSendNotification);
-    setupLookSlider (domeGroundGLabel, domeGroundGSlider, 0.0, 1.0, 0.01, "Ground hemisphere tint green.");
-    domeGroundGSlider.setValue (juce::Colour (0xff403328).getFloatGreen(), juce::dontSendNotification);
-    domeGroundBLabel.setText ("Dome Ground B", juce::dontSendNotification);
-    setupLookSlider (domeGroundBLabel, domeGroundBSlider, 0.0, 1.0, 0.01, "Ground hemisphere tint blue.");
-    domeGroundBSlider.setValue (juce::Colour (0xff403328).getFloatBlue(), juce::dontSendNotification);
+    setupLookToggle (domeTextureToggle,
+                     "Sample an equirectangular dome texture (HDRI) instead of solid sky/ground colours. "
+                     "Includes Poly Haven Venice Sunset (CC0).");
+    domeTextureLabel.setText ("Dome Texture", juce::dontSendNotification);
+    styleCombo (domeTextureCombo);
+    domeTextureCombo.addItem ("Venice Sunset (Poly Haven)", 1);
+    domeTextureCombo.addItem ("Load custom…", 2);
+    domeTextureCombo.setSelectedId (1, juce::dontSendNotification);
+    domeTextureCombo.setTooltip (
+        "Built-in Venice Sunset is a free CC0 equirectangular from Poly Haven. "
+        "Load custom accepts JPG/PNG equirectangular maps.");
+    domeTextureCombo.onChange = [this]
+    {
+        if (domeTextureCombo.getSelectedId() == 2)
+            browseDomeTextureFile();
+        else
+            applyLookControlsToMain();
+    };
+    addAndMakeVisible (domeTextureLabel);
+    addAndMakeVisible (domeTextureCombo);
+    wireColourEditor (domeSkyEditor);
+    domeSkyEditor.setColour (juce::Colour (0xff7390bf));
+    wireColourEditor (domeGroundEditor);
+    domeGroundEditor.setColour (juce::Colour (0xff403328));
 
     setupLookToggle (ssgiToggle,
                      "Screen-space GI: short ray-march color bleed into shadows "
@@ -241,8 +329,11 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     ssgiQualityCombo.addItem ("Low", 1);
     ssgiQualityCombo.addItem ("Medium", 2);
     ssgiQualityCombo.addItem ("High", 3);
+    ssgiQualityCombo.addItem ("Ultra", 4);
     ssgiQualityCombo.setSelectedId (2, juce::dontSendNotification);
-    ssgiQualityCombo.setTooltip ("Sample density for screen-space GI gather.");
+    ssgiQualityCombo.setTooltip (
+        "SSGI ray/step density: Low 6×4, Medium 10×6, High 14×8, Ultra 20×12. "
+        "Ultra is the preferred quality step when GI needs more stability.");
     ssgiQualityCombo.onChange = [this] { applyLookControlsToMain(); };
     addAndMakeVisible (ssgiQualityLabel);
     addAndMakeVisible (ssgiQualityCombo);
@@ -321,10 +412,43 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     dofQualityCombo.addItem ("Medium", 2);
     dofQualityCombo.addItem ("High", 3);
     dofQualityCombo.setSelectedId (2, juce::dontSendNotification);
-    dofQualityCombo.setTooltip ("Disc sample count / max bokeh size (8 / 16 / 24 taps).");
+    dofQualityCombo.setTooltip ("Disc sample count / base max bokeh size (8 / 16 / 24 taps).");
     dofQualityCombo.onChange = [this] { applyLookControlsToMain(); };
     addAndMakeVisible (dofQualityLabel);
     addAndMakeVisible (dofQualityCombo);
+    dofBlurScaleLabel.setText ("DOF Blur Scale", juce::dontSendNotification);
+    setupLookSlider (dofBlurScaleLabel, dofBlurScaleSlider, 0.25, 3.0, 0.01,
+                     "Scales max CoC blur radius. Raise when zoomed out if edges stay hard.");
+    dofBlurScaleSlider.setValue (Spectrogram3DComponent::kDofBlurScaleDefault, juce::dontSendNotification);
+    dofCocDilateLabel.setText ("DOF Edge Dilate", juce::dontSendNotification);
+    setupLookSlider (dofCocDilateLabel, dofCocDilateSlider, 0.0, 1.0, 0.01,
+                     "Pulls neighbour CoC into silhouette pixels so thin far edges still gather.");
+    dofCocDilateSlider.setValue (Spectrogram3DComponent::kDofCocDilateDefault, juce::dontSendNotification);
+    dofEdgeSpillLabel.setText ("DOF Edge Spill", juce::dontSendNotification);
+    setupLookSlider (dofEdgeSpillLabel, dofEdgeSpillSlider, 0.0, 1.0, 0.01,
+                     "How strongly out-of-focus mesh bleeds onto Soft BG / sky (silhouette soften).");
+    dofEdgeSpillSlider.setValue (Spectrogram3DComponent::kDofEdgeSpillDefault, juce::dontSendNotification);
+
+    setupLookToggle (tonemapToggle,
+                     "Display transform + color grade (soft path). Off by default — "
+                     "preserves the current LDR look until enabled.");
+    exposureLabel.setText ("Exposure (stops)", juce::dontSendNotification);
+    setupLookSlider (exposureLabel, exposureSlider, -4.0, 4.0, 0.01,
+                     "Exposure in stops (0 = unchanged). Applied when Tonemap is on.");
+    exposureSlider.setValue (-0.3, juce::dontSendNotification);
+    gradeLabel.setText ("Color Grade", juce::dontSendNotification);
+    styleCombo (gradeCombo);
+    gradeCombo.addItem ("ACES (neutral)", 1);
+    gradeCombo.addItem ("Filmic", 2);
+    gradeCombo.addItem ("Warm Cinema", 3);
+    gradeCombo.addItem ("Cool Cinema", 4);
+    gradeCombo.addItem ("Teal Orange", 5);
+    gradeCombo.addItem ("Bleach Bypass", 6);
+    gradeCombo.setSelectedId (3, juce::dontSendNotification); // Warm Cinema
+    gradeCombo.setTooltip ("Display transform look. Default: Warm Cinema at −0.3 EV.");
+    gradeCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (gradeLabel);
+    addAndMakeVisible (gradeCombo);
 
     setupLookToggle (sssToggle,
                      "Subsurface scatter approx (needs Lighting). Uses volume thickness when "
@@ -414,6 +538,8 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (sssQualityLabel);
     styleLabel (dofQualityLabel);
     styleLabel (ssgiQualityLabel);
+    styleLabel (exposureLabel);
+    styleLabel (gradeLabel);
 
     updateLookDevVisibility();
 }
@@ -422,10 +548,12 @@ Spectrogram3DSettingsComponent::Content::~Content()
 {
     meshQualityCombo.setLookAndFeel (nullptr);
     msaaCombo.setLookAndFeel (nullptr);
+    audioLevelTargetCombo.setLookAndFeel (nullptr);
     selfShadowQualityCombo.setLookAndFeel (nullptr);
     sssQualityCombo.setLookAndFeel (nullptr);
     dofQualityCombo.setLookAndFeel (nullptr);
     ssgiQualityCombo.setLookAndFeel (nullptr);
+    gradeCombo.setLookAndFeel (nullptr);
 }
 
 void Spectrogram3DSettingsComponent::Content::setLookChildVisible (juce::Component& c, bool vis)
@@ -435,6 +563,19 @@ void Spectrogram3DSettingsComponent::Content::setLookChildVisible (juce::Compone
 
 void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
 {
+    const bool audioOn = audioLevelToggle.getToggleState();
+    setLookChildVisible (audioLevelTargetLabel, audioOn);
+    setLookChildVisible (audioLevelTargetCombo, audioOn);
+    setLookChildVisible (audioLevelRangeLabel, audioOn);
+    setLookChildVisible (audioLevelRangeSlider, audioOn);
+    setLookChildVisible (audioLevelRangeValueLabel, audioOn);
+    setLookChildVisible (audioLevelHpLabel, audioOn);
+    setLookChildVisible (audioLevelHpSlider, audioOn);
+    setLookChildVisible (audioLevelLpLabel, audioOn);
+    setLookChildVisible (audioLevelLpSlider, audioOn);
+    setLookChildVisible (audioAffectPlayheadToggle, audioOn);
+    setLookChildVisible (audioAffectAntiPlayheadToggle, audioOn);
+
     const bool lit = lightingToggle.getToggleState();
     setLookChildVisible (lightingAmountLabel, lit);
     setLookChildVisible (lightingAmountSlider, lit);
@@ -448,36 +589,21 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (roughnessSlider, lit);
     setLookChildVisible (metalnessLabel, lit);
     setLookChildVisible (metalnessSlider, lit);
+    setLookChildVisible (energyConserveToggle, lit);
     setLookChildVisible (rimLabel, lit);
     setLookChildVisible (rimSlider, lit);
-    setLookChildVisible (lightColRLabel, lit);
-    setLookChildVisible (lightColRSlider, lit);
-    setLookChildVisible (lightColGLabel, lit);
-    setLookChildVisible (lightColGSlider, lit);
-    setLookChildVisible (lightColBLabel, lit);
-    setLookChildVisible (lightColBSlider, lit);
-    setLookChildVisible (rimColRLabel, lit);
-    setLookChildVisible (rimColRSlider, lit);
-    setLookChildVisible (rimColGLabel, lit);
-    setLookChildVisible (rimColGSlider, lit);
-    setLookChildVisible (rimColBLabel, lit);
-    setLookChildVisible (rimColBSlider, lit);
+    setLookChildVisible (lightColourEditor, lit);
+    setLookChildVisible (rimColourEditor, lit);
 
     const bool dome = lit && domeFillToggle.getToggleState();
     setLookChildVisible (domeFillStrengthLabel, dome);
     setLookChildVisible (domeFillStrengthSlider, dome);
-    setLookChildVisible (domeSkyRLabel, dome);
-    setLookChildVisible (domeSkyRSlider, dome);
-    setLookChildVisible (domeSkyGLabel, dome);
-    setLookChildVisible (domeSkyGSlider, dome);
-    setLookChildVisible (domeSkyBLabel, dome);
-    setLookChildVisible (domeSkyBSlider, dome);
-    setLookChildVisible (domeGroundRLabel, dome);
-    setLookChildVisible (domeGroundRSlider, dome);
-    setLookChildVisible (domeGroundGLabel, dome);
-    setLookChildVisible (domeGroundGSlider, dome);
-    setLookChildVisible (domeGroundBLabel, dome);
-    setLookChildVisible (domeGroundBSlider, dome);
+    setLookChildVisible (domeTextureToggle, dome);
+    const bool domeTex = dome && domeTextureToggle.getToggleState();
+    setLookChildVisible (domeTextureLabel, domeTex);
+    setLookChildVisible (domeTextureCombo, domeTex);
+    setLookChildVisible (domeSkyEditor, dome && ! domeTex);
+    setLookChildVisible (domeGroundEditor, dome && ! domeTex);
 
     const bool ssgi = ssgiToggle.getToggleState();
     setLookChildVisible (ssgiStrengthLabel, ssgi);
@@ -520,6 +646,18 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (dofApertureSlider, dof);
     setLookChildVisible (dofQualityLabel, dof);
     setLookChildVisible (dofQualityCombo, dof);
+    setLookChildVisible (dofBlurScaleLabel, dof);
+    setLookChildVisible (dofBlurScaleSlider, dof);
+    setLookChildVisible (dofCocDilateLabel, dof);
+    setLookChildVisible (dofCocDilateSlider, dof);
+    setLookChildVisible (dofEdgeSpillLabel, dof);
+    setLookChildVisible (dofEdgeSpillSlider, dof);
+
+    const bool tonemap = tonemapToggle.getToggleState();
+    setLookChildVisible (exposureLabel, tonemap);
+    setLookChildVisible (exposureSlider, tonemap);
+    setLookChildVisible (gradeLabel, tonemap);
+    setLookChildVisible (gradeCombo, tonemap);
 
     const bool closed = closedMeshToggle.getToggleState();
     const bool sssOn = sssToggle.getToggleState();
@@ -630,6 +768,69 @@ void Spectrogram3DSettingsComponent::Content::layoutToggle (juce::Rectangle<int>
     area.removeFromTop (6);
 }
 
+void Spectrogram3DSettingsComponent::Content::layoutColourEditor (juce::Rectangle<int>& area,
+                                                                  ColourSwatchEditor& editor)
+{
+    editor.setBounds (area.removeFromTop (editor.getPreferredHeight())
+                          .removeFromLeft (juce::jmin (420, area.getWidth())));
+}
+
+void Spectrogram3DSettingsComponent::Content::wireColourEditor (ColourSwatchEditor& editor)
+{
+    editor.onColourChanged = [this] (juce::Colour) { applyLookControlsToMain(); };
+    editor.onHeightChanged = [this]
+    {
+        requestParentRelayout();
+        resized();
+    };
+    addAndMakeVisible (editor);
+}
+
+void Spectrogram3DSettingsComponent::Content::browseDomeTextureFile()
+{
+    domeTextureChooser = std::make_unique<juce::FileChooser> (
+        "Load dome texture (equirectangular JPG/PNG)",
+        juce::File(),
+        "*.jpg;*.jpeg;*.png;*.webp");
+
+    constexpr auto flags = juce::FileBrowserComponent::openMode
+                         | juce::FileBrowserComponent::canSelectFiles;
+    domeTextureChooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+    {
+        const auto f = fc.getResult();
+        if (f.existsAsFile())
+        {
+            if (auto* main = findParentComponentOfClass<MainComponent>())
+            {
+                main->setSpec3DDomeTextureCustomPath (f.getFullPathName(), false);
+                main->setSpec3DDomeTextureSource (
+                    Spectrogram3DComponent::DomeTextureSource::custom, false);
+                main->setSpec3DDomeTextureEnabled (true, true);
+            }
+            domeTextureToggle.setToggleState (true, juce::dontSendNotification);
+            // Keep "Load custom…" selected so the choice stays visible.
+            domeTextureCombo.setSelectedId (2, juce::dontSendNotification);
+            updateLookDevVisibility();
+            requestParentRelayout();
+        }
+        else
+        {
+            // Cancelled — restore previous source in the combo.
+            if (auto* main = findParentComponentOfClass<MainComponent>())
+            {
+                const bool custom = main->getSpec3DDomeTextureSource()
+                    == Spectrogram3DComponent::DomeTextureSource::custom
+                    && main->getSpec3DDomeTextureCustomPath().isNotEmpty();
+                domeTextureCombo.setSelectedId (custom ? 2 : 1, juce::dontSendNotification);
+            }
+            else
+            {
+                domeTextureCombo.setSelectedId (1, juce::dontSendNotification);
+            }
+        }
+    });
+}
+
 void Spectrogram3DSettingsComponent::Content::syncGradientFromBank()
 {
     gradientEditor.setRamp (&colourRamps.get (ColourRampBank::Target::spectrogram3D));
@@ -665,6 +866,25 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     closedMeshToggle.setToggleState (main->isSpec3DClosedMeshEnabled(), juce::dontSendNotification);
     meshHeightSlider.setValue (main->getSpec3DMeshHeight(), juce::dontSendNotification);
     freqMeshBiasSlider.setValue (main->getSpec3DFreqMeshBias(), juce::dontSendNotification);
+    softAngleSlider.setValue (main->getSpec3DNormalCuspAngleDeg(), juce::dontSendNotification);
+
+    audioLevelToggle.setToggleState (main->isSpec3DAudioLevelModEnabled(), juce::dontSendNotification);
+    audioLevelTargetCombo.setSelectedId (
+        (int) main->getSpec3DAudioLevelTarget() + 1, juce::dontSendNotification);
+    audioLevelRangeSlider.setMinValue (main->getSpec3DAudioLevelMinPercent(), juce::dontSendNotification);
+    audioLevelRangeSlider.setMaxValue (main->getSpec3DAudioLevelMaxPercent(), juce::dontSendNotification);
+    {
+        const int lo = juce::roundToInt (audioLevelRangeSlider.getMinValue());
+        const int hi = juce::roundToInt (audioLevelRangeSlider.getMaxValue());
+        audioLevelRangeValueLabel.setText (juce::String (lo) + "%  …  " + juce::String (hi) + "%",
+                                           juce::dontSendNotification);
+    }
+    audioLevelHpSlider.setValue (main->getSpec3DAudioLevelHpHz(), juce::dontSendNotification);
+    audioLevelLpSlider.setValue (main->getSpec3DAudioLevelLpHz(), juce::dontSendNotification);
+    audioAffectPlayheadToggle.setToggleState (main->getSpec3DAudioLevelAffectPlayhead(),
+                                              juce::dontSendNotification);
+    audioAffectAntiPlayheadToggle.setToggleState (main->getSpec3DAudioLevelAffectAntiPlayhead(),
+                                                  juce::dontSendNotification);
 
     lightingToggle.setToggleState (main->isSpec3DLightingEnabled(), juce::dontSendNotification);
     lightingAmountSlider.setValue (main->getSpec3DLightingAmount(), juce::dontSendNotification);
@@ -674,32 +894,19 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     roughnessSlider.setValue (main->getSpec3DRoughnessAmount(), juce::dontSendNotification);
     metalnessSlider.setValue (main->getSpec3DMetalnessAmount(), juce::dontSendNotification);
     rimSlider.setValue (main->getSpec3DRimAmount(), juce::dontSendNotification);
-    {
-        const auto lc = main->getSpec3DLightColour();
-        lightColRSlider.setValue (lc.getFloatRed(), juce::dontSendNotification);
-        lightColGSlider.setValue (lc.getFloatGreen(), juce::dontSendNotification);
-        lightColBSlider.setValue (lc.getFloatBlue(), juce::dontSendNotification);
-    }
-    {
-        const auto rc = main->getSpec3DRimColour();
-        rimColRSlider.setValue (rc.getFloatRed(), juce::dontSendNotification);
-        rimColGSlider.setValue (rc.getFloatGreen(), juce::dontSendNotification);
-        rimColBSlider.setValue (rc.getFloatBlue(), juce::dontSendNotification);
-    }
+    lightColourEditor.setColour (main->getSpec3DLightColour());
+    rimColourEditor.setColour (main->getSpec3DRimColour());
     domeFillToggle.setToggleState (main->isSpec3DDomeFillEnabled(), juce::dontSendNotification);
     domeFillStrengthSlider.setValue (main->getSpec3DDomeFillStrength(), juce::dontSendNotification);
+    domeTextureToggle.setToggleState (main->isSpec3DDomeTextureEnabled(), juce::dontSendNotification);
     {
-        const auto sky = main->getSpec3DDomeSkyColour();
-        domeSkyRSlider.setValue (sky.getFloatRed(), juce::dontSendNotification);
-        domeSkyGSlider.setValue (sky.getFloatGreen(), juce::dontSendNotification);
-        domeSkyBSlider.setValue (sky.getFloatBlue(), juce::dontSendNotification);
+        const bool custom = main->getSpec3DDomeTextureSource()
+                                == Spectrogram3DComponent::DomeTextureSource::custom
+                            && main->getSpec3DDomeTextureCustomPath().isNotEmpty();
+        domeTextureCombo.setSelectedId (custom ? 2 : 1, juce::dontSendNotification);
     }
-    {
-        const auto ground = main->getSpec3DDomeGroundColour();
-        domeGroundRSlider.setValue (ground.getFloatRed(), juce::dontSendNotification);
-        domeGroundGSlider.setValue (ground.getFloatGreen(), juce::dontSendNotification);
-        domeGroundBSlider.setValue (ground.getFloatBlue(), juce::dontSendNotification);
-    }
+    domeSkyEditor.setColour (main->getSpec3DDomeSkyColour());
+    domeGroundEditor.setColour (main->getSpec3DDomeGroundColour());
     ssgiToggle.setToggleState (main->isSpec3DSsgiEnabled(), juce::dontSendNotification);
     ssgiStrengthSlider.setValue (main->getSpec3DSsgiStrength(), juce::dontSendNotification);
     ssgiRadiusSlider.setValue (main->getSpec3DSsgiRadius(), juce::dontSendNotification);
@@ -707,9 +914,11 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
         const auto sq = main->getSpec3DSsgiQuality();
         ssgiQualityCombo.setSelectedId (
             sq == Spectrogram3DComponent::ShadowQuality::low ? 1
-                : (sq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 2),
+                : (sq == Spectrogram3DComponent::ShadowQuality::medium ? 2
+                : (sq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 4)),
             juce::dontSendNotification);
     }
+    energyConserveToggle.setToggleState (main->isSpec3DEnergyConservingEnabled(), juce::dontSendNotification);
     contactShadowToggle.setToggleState (main->isSpec3DContactShadowEnabled(), juce::dontSendNotification);
     contactShadowStrengthSlider.setValue (main->getSpec3DContactShadowStrength(), juce::dontSendNotification);
     selfShadowToggle.setToggleState (main->isSpec3DSelfShadowEnabled(), juce::dontSendNotification);
@@ -739,6 +948,12 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
                 : (dq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 2),
             juce::dontSendNotification);
     }
+    dofBlurScaleSlider.setValue (main->getSpec3DDofBlurScale(), juce::dontSendNotification);
+    dofCocDilateSlider.setValue (main->getSpec3DDofCocDilate(), juce::dontSendNotification);
+    dofEdgeSpillSlider.setValue (main->getSpec3DDofEdgeSpill(), juce::dontSendNotification);
+    tonemapToggle.setToggleState (main->isSpec3DTonemapEnabled(), juce::dontSendNotification);
+    exposureSlider.setValue (main->getSpec3DTonemapExposureStops(), juce::dontSendNotification);
+    gradeCombo.setSelectedId ((int) main->getSpec3DColorGrade() + 1, juce::dontSendNotification);
     sssToggle.setToggleState (main->isSpec3DSssEnabled(), juce::dontSendNotification);
     sssStrengthSlider.setValue (main->getSpec3DSssStrength(), juce::dontSendNotification);
     sssWrapSlider.setValue (main->getSpec3DSssWrap(), juce::dontSendNotification);
@@ -792,6 +1007,9 @@ void Spectrogram3DSettingsComponent::Content::applyStructureControlsToMain()
     main->setSpec3DClosedMeshEnabled (closedMeshToggle.getToggleState(), true);
     main->setSpec3DMeshHeight ((float) meshHeightSlider.getValue(), true);
     main->setSpec3DFreqMeshBias ((float) freqMeshBiasSlider.getValue(), true);
+    // Soften path: Soft Angle + Angle+Area (Labs Soften ≈ cusp 180; organic default).
+    main->setSpec3DNormalWeighting (Spectrogram3DComponent::NormalWeighting::angleAndArea, true);
+    main->setSpec3DNormalCuspAngleDeg ((float) softAngleSlider.getValue(), true);
 }
 
 void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
@@ -801,6 +1019,19 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
         return;
 
     // Look-only: re-shade / re-light existing mesh history — never mode/quality/MSAA.
+    main->setSpec3DAudioLevelModEnabled (audioLevelToggle.getToggleState(), true);
+    {
+        const int id = juce::jlimit (1, 7, audioLevelTargetCombo.getSelectedId());
+        main->setSpec3DAudioLevelTarget (
+            static_cast<Spectrogram3DComponent::AudioLevelTarget> (id - 1), true);
+    }
+    main->setSpec3DAudioLevelMinPercent ((float) audioLevelRangeSlider.getMinValue(), true);
+    main->setSpec3DAudioLevelMaxPercent ((float) audioLevelRangeSlider.getMaxValue(), true);
+    main->setSpec3DAudioLevelHpHz ((float) audioLevelHpSlider.getValue(), true);
+    main->setSpec3DAudioLevelLpHz ((float) audioLevelLpSlider.getValue(), true);
+    main->setSpec3DAudioLevelAffectPlayhead (audioAffectPlayheadToggle.getToggleState(), true);
+    main->setSpec3DAudioLevelAffectAntiPlayhead (audioAffectAntiPlayheadToggle.getToggleState(), true);
+
     main->setSpec3DLightingEnabled (lightingToggle.getToggleState(), true);
     main->setSpec3DLightingAmount ((float) lightingAmountSlider.getValue(), true);
     main->setSpec3DLightAzimuthDeg ((float) lightAzimuthSlider.getValue(), true);
@@ -809,28 +1040,20 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DRoughnessAmount ((float) roughnessSlider.getValue(), true);
     main->setSpec3DMetalnessAmount ((float) metalnessSlider.getValue(), true);
     main->setSpec3DRimAmount ((float) rimSlider.getValue(), true);
-    main->setSpec3DLightColour (juce::Colour::fromFloatRGBA ((float) lightColRSlider.getValue(),
-                                                             (float) lightColGSlider.getValue(),
-                                                             (float) lightColBSlider.getValue(),
-                                                             1.0f),
-                                true);
-    main->setSpec3DRimColour (juce::Colour::fromFloatRGBA ((float) rimColRSlider.getValue(),
-                                                           (float) rimColGSlider.getValue(),
-                                                           (float) rimColBSlider.getValue(),
-                                                           1.0f),
-                              true);
+    main->setSpec3DLightColour (lightColourEditor.getColour(), true);
+    main->setSpec3DRimColour (rimColourEditor.getColour(), true);
     main->setSpec3DDomeFillEnabled (domeFillToggle.getToggleState(), true);
     main->setSpec3DDomeFillStrength ((float) domeFillStrengthSlider.getValue(), true);
-    main->setSpec3DDomeSkyColour (juce::Colour::fromFloatRGBA ((float) domeSkyRSlider.getValue(),
-                                                              (float) domeSkyGSlider.getValue(),
-                                                              (float) domeSkyBSlider.getValue(),
-                                                              1.0f),
-                                  true);
-    main->setSpec3DDomeGroundColour (juce::Colour::fromFloatRGBA ((float) domeGroundRSlider.getValue(),
-                                                                 (float) domeGroundGSlider.getValue(),
-                                                                 (float) domeGroundBSlider.getValue(),
-                                                                 1.0f),
-                                     true);
+    main->setSpec3DDomeSkyColour (domeSkyEditor.getColour(), true);
+    main->setSpec3DDomeGroundColour (domeGroundEditor.getColour(), true);
+    {
+        const int texId = domeTextureCombo.getSelectedId();
+        if (texId == 1)
+            main->setSpec3DDomeTextureSource (Spectrogram3DComponent::DomeTextureSource::veniceSunset, false);
+        else if (texId == 2 && main->getSpec3DDomeTextureCustomPath().isNotEmpty())
+            main->setSpec3DDomeTextureSource (Spectrogram3DComponent::DomeTextureSource::custom, false);
+        main->setSpec3DDomeTextureEnabled (domeTextureToggle.getToggleState(), true);
+    }
     main->setSpec3DSsgiEnabled (ssgiToggle.getToggleState(), true);
     main->setSpec3DSsgiStrength ((float) ssgiStrengthSlider.getValue(), true);
     main->setSpec3DSsgiRadius ((float) ssgiRadiusSlider.getValue(), true);
@@ -838,10 +1061,12 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
         const int id = ssgiQualityCombo.getSelectedId();
         main->setSpec3DSsgiQuality (
             id == 1 ? Spectrogram3DComponent::ShadowQuality::low
+                    : (id == 2 ? Spectrogram3DComponent::ShadowQuality::medium
                     : (id == 3 ? Spectrogram3DComponent::ShadowQuality::high
-                               : Spectrogram3DComponent::ShadowQuality::medium),
+                               : Spectrogram3DComponent::ShadowQuality::ultra)),
             true);
     }
+    main->setSpec3DEnergyConservingEnabled (energyConserveToggle.getToggleState(), true);
     main->setSpec3DContactShadowEnabled (contactShadowToggle.getToggleState(), true);
     main->setSpec3DContactShadowStrength ((float) contactShadowStrengthSlider.getValue(), true);
     main->setSpec3DSelfShadowEnabled (selfShadowToggle.getToggleState(), true);
@@ -872,6 +1097,16 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
                     : (id == 3 ? Spectrogram3DComponent::ShadowQuality::high
                                : Spectrogram3DComponent::ShadowQuality::medium),
             true);
+    }
+    main->setSpec3DDofBlurScale ((float) dofBlurScaleSlider.getValue(), true);
+    main->setSpec3DDofCocDilate ((float) dofCocDilateSlider.getValue(), true);
+    main->setSpec3DDofEdgeSpill ((float) dofEdgeSpillSlider.getValue(), true);
+    main->setSpec3DTonemapEnabled (tonemapToggle.getToggleState(), true);
+    main->setSpec3DTonemapExposureStops ((float) exposureSlider.getValue(), true);
+    {
+        const int id = juce::jlimit (1, 6, gradeCombo.getSelectedId());
+        main->setSpec3DColorGrade (
+            static_cast<Spectrogram3DComponent::ColorGrade> (id - 1), true);
     }
     main->setSpec3DSssEnabled (sssToggle.getToggleState(), true);
     main->setSpec3DSssStrength ((float) sssStrengthSlider.getValue(), true);
@@ -907,21 +1142,44 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     const int rowH = kLabelH + kLabelGap + kSliderH + kRowGap;
     const int toggleH = 22 + 6;
     const int comboRows = 2; // mesh quality + MSAA
-    const int baseSliderRows = 2; // mesh height + HF density
-    const int toggles = 5 + 9; // base (+ closed) + look master toggles (+ SSS + DOF + dome + SSGI)
+    const int baseSliderRows = 3; // mesh height + HF density + soft angle
+    // base (+ closed) + look masters (+ SSS + DOF + dome + SSGI + tonemap
+    // + energy when lit + audio level)
+    int toggles = 5 + 11; // includes tonemap + audio; energy counted when lighting on
+    if (lightingToggle.getToggleState())
+        toggles += 1; // energy conserving
+    if (audioLevelToggle.getToggleState())
+        toggles += 2; // playhead / anti-playhead
     const int buttonRows = 1;
 
     int lookRows = 0;
+    int colourEditorH = 0;
+    if (audioLevelToggle.getToggleState())
+        lookRows += 4; // target, depth, HP, LP
     if (lightingToggle.getToggleState())
-        lookRows += 13; // amount, az/el, specular, roughness, metalness, rim, light RGB, rim RGB
+    {
+        lookRows += 7; // amount, az/el, specular, roughness, metalness, rim
+        colourEditorH += lightColourEditor.getPreferredHeight()
+                       + rimColourEditor.getPreferredHeight();
+    }
     if (lightingToggle.getToggleState() && domeFillToggle.getToggleState())
-        lookRows += 7; // strength, sky RGB, ground RGB
-    if (ssgiToggle.getToggleState()) lookRows += 3; // strength, radius, quality
+    {
+        lookRows += 1; // strength
+        toggles += 1;  // dome texture
+        if (domeTextureToggle.getToggleState())
+            lookRows += 1; // texture combo
+        else
+            colourEditorH += domeSkyEditor.getPreferredHeight()
+                           + domeGroundEditor.getPreferredHeight();
+    }
+    if (ssgiToggle.getToggleState())
+        lookRows += 3; // strength, radius, quality
     if (contactShadowToggle.getToggleState()) lookRows += 1;
     if (selfShadowToggle.getToggleState()) lookRows += 4; // strength, bias, softness, quality
     if (ssaoToggle.getToggleState()) lookRows += 2;
     if (bloomToggle.getToggleState()) lookRows += 2;
-    if (dofToggle.getToggleState()) lookRows += 3; // focus, aperture, quality
+    if (dofToggle.getToggleState()) lookRows += 6; // focus, aperture, quality, blur, dilate, spill
+    if (tonemapToggle.getToggleState()) lookRows += 2; // exposure, grade
     if (sssToggle.getToggleState())
     {
         lookRows += 7; // strength, wrap, transmission, tint RGB, quality
@@ -936,6 +1194,7 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
            + comboRows * rowH
            + baseSliderRows * rowH
            + lookRows * rowH
+           + colourEditorH
            + toggles * toggleH
            + buttonRows * toggleH
            + kLabelH + kSectionGap // look section header
@@ -962,11 +1221,29 @@ void Spectrogram3DSettingsComponent::Content::resized()
     layoutToggle (area, transparentBgToggle);
     layoutToggle (area, reverseFreqAxisToggle);
     layoutToggle (area, closedMeshToggle);
+    layoutSliderRow (area, softAngleLabel, softAngleSlider);
     resetCameraButton.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (160, area.getWidth())));
     area.removeFromTop (kSectionGap);
 
     lookLabel.setBounds (area.removeFromTop (kLabelH));
     area.removeFromTop (kRowGap);
+    layoutToggle (area, audioLevelToggle);
+    if (audioLevelToggle.getToggleState())
+    {
+        layoutComboRow (area, audioLevelTargetLabel, audioLevelTargetCombo);
+        {
+            audioLevelRangeLabel.setBounds (area.removeFromTop (kLabelH));
+            area.removeFromTop (kLabelGap);
+            auto row = area.removeFromTop (kSliderH);
+            audioLevelRangeValueLabel.setBounds (row.removeFromRight (88));
+            audioLevelRangeSlider.setBounds (row);
+            area.removeFromTop (kRowGap);
+        }
+        layoutSliderRow (area, audioLevelHpLabel, audioLevelHpSlider);
+        layoutSliderRow (area, audioLevelLpLabel, audioLevelLpSlider);
+        layoutToggle (area, audioAffectPlayheadToggle);
+        layoutToggle (area, audioAffectAntiPlayheadToggle);
+    }
     layoutToggle (area, lightingToggle);
     if (lightingToggle.getToggleState())
     {
@@ -976,24 +1253,23 @@ void Spectrogram3DSettingsComponent::Content::resized()
         layoutSliderRow (area, specularLabel, specularSlider);
         layoutSliderRow (area, roughnessLabel, roughnessSlider);
         layoutSliderRow (area, metalnessLabel, metalnessSlider);
+        layoutToggle (area, energyConserveToggle);
         layoutSliderRow (area, rimLabel, rimSlider);
-        layoutSliderRow (area, lightColRLabel, lightColRSlider);
-        layoutSliderRow (area, lightColGLabel, lightColGSlider);
-        layoutSliderRow (area, lightColBLabel, lightColBSlider);
-        layoutSliderRow (area, rimColRLabel, rimColRSlider);
-        layoutSliderRow (area, rimColGLabel, rimColGSlider);
-        layoutSliderRow (area, rimColBLabel, rimColBSlider);
+        layoutColourEditor (area, lightColourEditor);
+        layoutColourEditor (area, rimColourEditor);
     }
     layoutToggle (area, domeFillToggle);
     if (lightingToggle.getToggleState() && domeFillToggle.getToggleState())
     {
         layoutSliderRow (area, domeFillStrengthLabel, domeFillStrengthSlider);
-        layoutSliderRow (area, domeSkyRLabel, domeSkyRSlider);
-        layoutSliderRow (area, domeSkyGLabel, domeSkyGSlider);
-        layoutSliderRow (area, domeSkyBLabel, domeSkyBSlider);
-        layoutSliderRow (area, domeGroundRLabel, domeGroundRSlider);
-        layoutSliderRow (area, domeGroundGLabel, domeGroundGSlider);
-        layoutSliderRow (area, domeGroundBLabel, domeGroundBSlider);
+        layoutToggle (area, domeTextureToggle);
+        if (domeTextureToggle.getToggleState())
+            layoutComboRow (area, domeTextureLabel, domeTextureCombo);
+        else
+        {
+            layoutColourEditor (area, domeSkyEditor);
+            layoutColourEditor (area, domeGroundEditor);
+        }
     }
     layoutToggle (area, ssgiToggle);
     if (ssgiToggle.getToggleState())
@@ -1031,6 +1307,15 @@ void Spectrogram3DSettingsComponent::Content::resized()
         layoutSliderRow (area, dofFocusLabel, dofFocusSlider);
         layoutSliderRow (area, dofApertureLabel, dofApertureSlider);
         layoutComboRow (area, dofQualityLabel, dofQualityCombo);
+        layoutSliderRow (area, dofBlurScaleLabel, dofBlurScaleSlider);
+        layoutSliderRow (area, dofCocDilateLabel, dofCocDilateSlider);
+        layoutSliderRow (area, dofEdgeSpillLabel, dofEdgeSpillSlider);
+    }
+    layoutToggle (area, tonemapToggle);
+    if (tonemapToggle.getToggleState())
+    {
+        layoutSliderRow (area, exposureLabel, exposureSlider);
+        layoutComboRow (area, gradeLabel, gradeCombo);
     }
     layoutToggle (area, sssToggle);
     if (sssToggle.getToggleState())
