@@ -19,7 +19,7 @@ class Menu : public juce::Component,
              public juce::Button::Listener
 {
 public:
-    static constexpr int kContentWidth = 800;          // 1200 * 2/3
+    static constexpr int kContentWidth = 533;          // previous 800 * 2/3 — leaves ~half window for maximized scopes
     static constexpr int kContentHeight = 447;         // ~850 / 1.9
     static constexpr int kDragBarHeight = 24;
     static constexpr int kScrollBarThickness = 11;
@@ -160,6 +160,14 @@ private:
         {
             juce::ignoreUnused (newCurrentTabIndex, newTabName);
             owner.refreshContentPanelSize();
+            // Tabs that sync Look toggles from prefs during layout can grow after the
+            // first measure — re-measure once the message queue settles so the scrollbar
+            // covers the full page without requiring a manual resize.
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Menu> (&owner)]
+            {
+                if (safe != nullptr)
+                    safe->refreshContentPanelSize();
+            });
         }
 
     private:

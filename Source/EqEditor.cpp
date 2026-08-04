@@ -2230,7 +2230,18 @@ void EqEditor::loadUiPrefs()
     float spec3DLightEl = 55.0f;
     float spec3DSpecular = 0.35f;
     float spec3DRoughness = 0.45f;
+    float spec3DMetalness = 0.0f;
     float spec3DRim = 0.22f;
+    juce::uint32 spec3DLightCol = 0xffffffff;
+    juce::uint32 spec3DRimCol = 0xffffffff;
+    bool spec3DDome = false;
+    float spec3DDomeStr = 0.35f;
+    juce::uint32 spec3DDomeSky = 0xff7390bf;
+    juce::uint32 spec3DDomeGround = 0xff403328;
+    bool spec3DSsgi = false;
+    float spec3DSsgiStr = 0.40f;
+    float spec3DSsgiRad = 0.45f;
+    int spec3DSsgiQuality = 1; // medium
     bool spec3DContactShadow = false;
     float spec3DContactShadowStr = 0.45f;
     bool spec3DSelfShadow = false;
@@ -2244,6 +2255,10 @@ void EqEditor::loadUiPrefs()
     bool spec3DBloom = false;
     float spec3DBloomStr = 0.45f;
     float spec3DBloomThr = 0.62f;
+    bool spec3DDof = false;
+    float spec3DDofFocus = Spectrogram3DComponent::kDofFocusDefault;
+    float spec3DDofAperture = Spectrogram3DComponent::kDofApertureDefault;
+    int spec3DDofQuality = 1; // medium
     bool spec3DClosedMesh = false;
     bool spec3DAutoRotate = false;
     float spec3DAutoRotatePeriod = Spectrogram3DComponent::kAutoRotatePeriodDefaultSec;
@@ -2363,7 +2378,18 @@ void EqEditor::loadUiPrefs()
                 spec3DLightEl = (float) xml->getDoubleAttribute ("spec3dLightEl", 55.0);
                 spec3DSpecular = (float) xml->getDoubleAttribute ("spec3dSpecular", 0.35);
                 spec3DRoughness = (float) xml->getDoubleAttribute ("spec3dRoughness", 0.45);
+                spec3DMetalness = (float) xml->getDoubleAttribute ("spec3dMetalness", 0.0);
                 spec3DRim = (float) xml->getDoubleAttribute ("spec3dRim", 0.22);
+                spec3DLightCol = (juce::uint32) xml->getIntAttribute ("spec3dLightCol", (int) 0xffffffff);
+                spec3DRimCol = (juce::uint32) xml->getIntAttribute ("spec3dRimCol", (int) 0xffffffff);
+                spec3DDome = xml->getBoolAttribute ("spec3dDome", false);
+                spec3DDomeStr = (float) xml->getDoubleAttribute ("spec3dDomeStr", 0.35);
+                spec3DDomeSky = (juce::uint32) xml->getIntAttribute ("spec3dDomeSky", (int) 0xff7390bf);
+                spec3DDomeGround = (juce::uint32) xml->getIntAttribute ("spec3dDomeGround", (int) 0xff403328);
+                spec3DSsgi = xml->getBoolAttribute ("spec3dSsgi", false);
+                spec3DSsgiStr = (float) xml->getDoubleAttribute ("spec3dSsgiStr", 0.40);
+                spec3DSsgiRad = (float) xml->getDoubleAttribute ("spec3dSsgiRad", 0.45);
+                spec3DSsgiQuality = xml->getIntAttribute ("spec3dSsgiQuality", 1);
                 spec3DContactShadow = xml->getBoolAttribute ("spec3dContactShadow", false);
                 spec3DContactShadowStr = (float) xml->getDoubleAttribute ("spec3dContactShadowStr", 0.45);
                 spec3DSelfShadow = xml->getBoolAttribute ("spec3dSelfShadow", false);
@@ -2377,6 +2403,17 @@ void EqEditor::loadUiPrefs()
                 spec3DBloom = xml->getBoolAttribute ("spec3dBloom", false);
                 spec3DBloomStr = (float) xml->getDoubleAttribute ("spec3dBloomStr", 0.45);
                 spec3DBloomThr = (float) xml->getDoubleAttribute ("spec3dBloomThr", 0.62);
+                spec3DDof = xml->getBoolAttribute ("spec3dDof", false);
+                spec3DDofFocus = (float) xml->getDoubleAttribute (
+                    "spec3dDofFocus", Spectrogram3DComponent::kDofFocusDefault);
+                // Prefer aperture; fall back to legacy amount key.
+                if (xml->hasAttribute ("spec3dDofAperture"))
+                    spec3DDofAperture = (float) xml->getDoubleAttribute (
+                        "spec3dDofAperture", Spectrogram3DComponent::kDofApertureDefault);
+                else
+                    spec3DDofAperture = (float) xml->getDoubleAttribute (
+                        "spec3dDofAmount", Spectrogram3DComponent::kDofApertureDefault);
+                spec3DDofQuality = xml->getIntAttribute ("spec3dDofQuality", 1);
                 // Migrate legacy SSS mode combo (0=off, 1=heightfield, 2=closed).
                 const int legacySssMode = xml->getIntAttribute ("spec3dSssMode", -1);
                 if (xml->hasAttribute ("spec3dClosedMesh"))
@@ -2455,7 +2492,22 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DLightElevationDeg (spec3DLightEl, false);
         mainComponent->setSpec3DSpecularAmount (spec3DSpecular, false);
         mainComponent->setSpec3DRoughnessAmount (spec3DRoughness, false);
+        mainComponent->setSpec3DMetalnessAmount (spec3DMetalness, false);
         mainComponent->setSpec3DRimAmount (spec3DRim, false);
+        mainComponent->setSpec3DLightColour (juce::Colour (spec3DLightCol), false);
+        mainComponent->setSpec3DRimColour (juce::Colour (spec3DRimCol), false);
+        mainComponent->setSpec3DDomeFillEnabled (spec3DDome, false);
+        mainComponent->setSpec3DDomeFillStrength (spec3DDomeStr, false);
+        mainComponent->setSpec3DDomeSkyColour (juce::Colour (spec3DDomeSky), false);
+        mainComponent->setSpec3DDomeGroundColour (juce::Colour (spec3DDomeGround), false);
+        mainComponent->setSpec3DSsgiEnabled (spec3DSsgi, false);
+        mainComponent->setSpec3DSsgiStrength (spec3DSsgiStr, false);
+        mainComponent->setSpec3DSsgiRadius (spec3DSsgiRad, false);
+        mainComponent->setSpec3DSsgiQuality (
+            spec3DSsgiQuality <= 0 ? Spectrogram3DComponent::ShadowQuality::low
+                                  : (spec3DSsgiQuality >= 2 ? Spectrogram3DComponent::ShadowQuality::high
+                                                           : Spectrogram3DComponent::ShadowQuality::medium),
+            false);
         mainComponent->setSpec3DContactShadowEnabled (spec3DContactShadow, false);
         mainComponent->setSpec3DContactShadowStrength (spec3DContactShadowStr, false);
         mainComponent->setSpec3DSelfShadowEnabled (spec3DSelfShadow, false);
@@ -2474,6 +2526,14 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DBloomEnabled (spec3DBloom, false);
         mainComponent->setSpec3DBloomStrength (spec3DBloomStr, false);
         mainComponent->setSpec3DBloomThreshold (spec3DBloomThr, false);
+        mainComponent->setSpec3DDofEnabled (spec3DDof, false);
+        mainComponent->setSpec3DDofFocusDistance (spec3DDofFocus, false);
+        mainComponent->setSpec3DDofAperture (spec3DDofAperture, false);
+        mainComponent->setSpec3DDofQuality (
+            spec3DDofQuality <= 0 ? Spectrogram3DComponent::ShadowQuality::low
+                                 : (spec3DDofQuality >= 2 ? Spectrogram3DComponent::ShadowQuality::high
+                                                         : Spectrogram3DComponent::ShadowQuality::medium),
+            false);
         mainComponent->setSpec3DClosedMeshEnabled (spec3DClosedMesh, false);
         mainComponent->setSpec3DAutoRotateEnabled (spec3DAutoRotate, false);
         mainComponent->setSpec3DAutoRotatePeriodSec (spec3DAutoRotatePeriod, false);
@@ -2572,7 +2632,23 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dLightEl", (double) mainComponent->getSpec3DLightElevationDeg());
         xml->setAttribute ("spec3dSpecular", (double) mainComponent->getSpec3DSpecularAmount());
         xml->setAttribute ("spec3dRoughness", (double) mainComponent->getSpec3DRoughnessAmount());
+        xml->setAttribute ("spec3dMetalness", (double) mainComponent->getSpec3DMetalnessAmount());
         xml->setAttribute ("spec3dRim", (double) mainComponent->getSpec3DRimAmount());
+        xml->setAttribute ("spec3dLightCol", (int) mainComponent->getSpec3DLightColour().getARGB());
+        xml->setAttribute ("spec3dRimCol", (int) mainComponent->getSpec3DRimColour().getARGB());
+        xml->setAttribute ("spec3dDome", mainComponent->isSpec3DDomeFillEnabled());
+        xml->setAttribute ("spec3dDomeStr", (double) mainComponent->getSpec3DDomeFillStrength());
+        xml->setAttribute ("spec3dDomeSky", (int) mainComponent->getSpec3DDomeSkyColour().getARGB());
+        xml->setAttribute ("spec3dDomeGround", (int) mainComponent->getSpec3DDomeGroundColour().getARGB());
+        xml->setAttribute ("spec3dSsgi", mainComponent->isSpec3DSsgiEnabled());
+        xml->setAttribute ("spec3dSsgiStr", (double) mainComponent->getSpec3DSsgiStrength());
+        xml->setAttribute ("spec3dSsgiRad", (double) mainComponent->getSpec3DSsgiRadius());
+        {
+            const auto q = mainComponent->getSpec3DSsgiQuality();
+            xml->setAttribute ("spec3dSsgiQuality",
+                               q == Spectrogram3DComponent::ShadowQuality::low ? 0
+                                   : (q == Spectrogram3DComponent::ShadowQuality::high ? 2 : 1));
+        }
         xml->setAttribute ("spec3dContactShadow", mainComponent->isSpec3DContactShadowEnabled());
         xml->setAttribute ("spec3dContactShadowStr", (double) mainComponent->getSpec3DContactShadowStrength());
         xml->setAttribute ("spec3dSelfShadow", mainComponent->isSpec3DSelfShadowEnabled());
@@ -2591,6 +2667,17 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dBloom", mainComponent->isSpec3DBloomEnabled());
         xml->setAttribute ("spec3dBloomStr", (double) mainComponent->getSpec3DBloomStrength());
         xml->setAttribute ("spec3dBloomThr", (double) mainComponent->getSpec3DBloomThreshold());
+        xml->setAttribute ("spec3dDof", mainComponent->isSpec3DDofEnabled());
+        xml->setAttribute ("spec3dDofFocus", (double) mainComponent->getSpec3DDofFocusDistance());
+        xml->setAttribute ("spec3dDofAperture", (double) mainComponent->getSpec3DDofAperture());
+        // Keep legacy key in sync for older builds.
+        xml->setAttribute ("spec3dDofAmount", (double) mainComponent->getSpec3DDofAperture());
+        {
+            const auto q = mainComponent->getSpec3DDofQuality();
+            xml->setAttribute ("spec3dDofQuality",
+                               q == Spectrogram3DComponent::ShadowQuality::low ? 0
+                                   : (q == Spectrogram3DComponent::ShadowQuality::high ? 2 : 1));
+        }
         xml->setAttribute ("spec3dClosedMesh", mainComponent->isSpec3DClosedMeshEnabled());
         xml->setAttribute ("spec3dAutoRotate", mainComponent->isSpec3DAutoRotateEnabled());
         xml->setAttribute ("spec3dAutoRotatePeriod",

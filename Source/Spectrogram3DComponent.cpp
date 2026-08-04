@@ -42,7 +42,13 @@ namespace
         uniform float uLightingAmount;
         uniform float uSpecular;
         uniform float uRoughness;
+        uniform float uMetalness;
         uniform float uRim;
+        uniform vec3 uLightColour;
+        uniform vec3 uRimColour;
+        uniform float uDomeStrength;
+        uniform vec3 uDomeSky;
+        uniform vec3 uDomeGround;
         uniform sampler2D uHeightMap;
         uniform vec3 uLightDirWorld;
         uniform float uSelfShadow;
@@ -369,20 +375,37 @@ namespace
             float VdotH = max (dot (v, h), 0.0);
 
             float rough = clamp (uRoughness, 0.04, 1.0);
-            float metalish = clamp (uSpecular, 0.0, 1.0);
-            vec3 F0 = mix (vec3 (0.04), albedo, metalish * 0.35);
+            float metal = clamp (uMetalness, 0.0, 1.0);
+            float specAmt = clamp (uSpecular, 0.0, 1.0);
+            vec3 lightCol = max (uLightColour, vec3 (0.0));
+            vec3 rimCol = max (uRimColour, vec3 (0.0));
+            // Standard metalness workflow: metals tint F0 with albedo and kill diffuse.
+            vec3 F0 = mix (vec3 (0.04), albedo, metal);
             float D = distributionGGX (NdotH, rough);
             float G = geometrySchlickGGX (NdotL, rough) * geometrySchlickGGX (NdotV, rough);
             vec3 F = fresnelSchlick (VdotH, F0);
             vec3 specular = (D * G * F) / max (4.0 * NdotV * max (NdotL, 1.0e-4), 1.0e-4);
-            specular *= metalish * shadow;
+            specular *= specAmt * shadow * lightCol;
 
             // Soft Lambert wrap so the lighting terminator isn't a hard edge either.
             float wrap = NdotL * 0.72 + 0.28;
-            vec3 diffuse = albedo * (0.22 * ao + 0.78 * wrap * shadow);
+            vec3 diffuse = albedo * (1.0 - metal) * (0.22 * ao + 0.78 * wrap * shadow) * lightCol;
+
+            // Dome / hemisphere fill — sky vs ground by world-up in view (n.y).
+            float domeAmt = clamp (uDomeStrength, 0.0, 1.0);
+            if (domeAmt > 1.0e-4)
+            {
+                float hemi = clamp (n.y * 0.5 + 0.5, 0.0, 1.0);
+                vec3 domeIrr = mix (max (uDomeGround, vec3 (0.0)),
+                                    max (uDomeSky, vec3 (0.0)), hemi);
+                // Stronger in shadow so occluded valleys pick up interdiffuse-like fill.
+                float fillW = mix (1.0, 0.35, wrap * shadow);
+                diffuse += albedo * (1.0 - metal) * domeIrr * ao * domeAmt * fillW;
+            }
+
             float rim = pow (1.0 - NdotV, 2.5) * uRim * ao;
             vec3 sss = subsurfaceScatter (albedo, n, l, v, shadow);
-            vec3 lit = diffuse + specular + albedo * rim + sss;
+            vec3 lit = diffuse + specular + albedo * rim * rimCol + sss;
             fragColour = vec4 (mix (albedo * shade, lit, amt), 1.0);
         }
     )";
@@ -427,7 +450,8 @@ namespace
         }
     )";
 
-    // mode: 0 = copy, 1 = SSAO, 2 = bloom extract, 3 = blur H, 4 = blur V, 5 = bloom composite
+    // mode: 0 = copy, 1 = SSAO, 2 = bloom extract, 3 = blur H, 4 = blur V,
+    //        5 = bloom composite, 6 = DOF disc gather, 8 = SSGI gather
     constexpr const char* kPostFragmentShader = R"(
         #version 150
         in vec2 vUv;
@@ -444,6 +468,47 @@ namespace
         float depthSample (vec2 uv)
         {
             return texture (uDepth, uv).r;
+        }
+
+        // Matches GlHost::getProjectionMatrix near/far.
+        float linearViewZ (float depth01)
+        {
+            const float nearP = 0.05;
+            const float farP = 80.0;
+            if (depth01 >= 0.9995)
+                return farP;
+            float zNdc = depth01 * 2.0 - 1.0;
+            return (2.0 * nearP * farP) / (farP + nearP - zNdc * (farP - nearP));
+        }
+
+        // Thin-lens CoC in pixels. uRadius = focus (view Z), uStrength = aperture 0–1,
+        // uThreshold = quality (0/1/2 → max blur px + sample count).
+        float circleOfConfusionPx (float depth01)
+        {
+            float focus = max (uRadius, 0.05);
+            float aperture = clamp (uStrength, 0.0, 1.0);
+            float viewZ = linearViewZ (depth01);
+            // Relative CoC — zero on the focus plane; gentle so aperture 0.01 stays sharp.
+            float rel = abs (viewZ - focus) / max (min (viewZ, focus), 0.05);
+            float maxBlur = (uThreshold < 0.5) ? 6.0
+                          : ((uThreshold < 1.5) ? 10.0 : 14.0);
+            return clamp (rel * aperture * maxBlur, 0.0, maxBlur);
+        }
+
+        // Vogel disc (golden-angle) — even circular bokeh taps.
+        vec2 vogelDisk (int i, int n)
+        {
+            float r = sqrt ((float (i) + 0.5) / float (n));
+            float theta = float (i) * 2.399963229728653;
+            return vec2 (cos (theta), sin (theta)) * r;
+        }
+
+        // View-space position from depth (matches GlHost frustum).
+        vec3 viewPosFromDepthUv (vec2 uv, float tanHalfW, float tanHalfH)
+        {
+            float z = linearViewZ (depthSample (uv));
+            vec2 n = uv * 2.0 - 1.0;
+            return vec3 (n.x * tanHalfW * z, n.y * tanHalfH * z, -z);
         }
 
         void main()
@@ -477,6 +542,125 @@ namespace
             {
                 vec3 bloom = texture (uDepth, vUv).rgb; // bloom buffer bound as uDepth slot
                 fragColour = vec4 (src.rgb + bloom * uStrength, src.a);
+                return;
+            }
+            if (uMode == 6)
+            {
+                // Gather DOF — disc samples weighted by neighbour CoC (avoids separable ghosting).
+                float centerCoc = circleOfConfusionPx (depthSample (vUv));
+                if (centerCoc < 0.4)
+                {
+                    fragColour = src;
+                    return;
+                }
+
+                int nSamples = (uThreshold < 0.5) ? 8
+                             : ((uThreshold < 1.5) ? 16 : 24);
+                vec2 texel = 1.0 / max (uResolution, vec2 (1.0));
+                vec3 acc = src.rgb;
+                float wSum = 1.0;
+
+                for (int i = 0; i < 24; ++i)
+                {
+                    if (i >= nSamples)
+                        break;
+
+                    vec2 offset = vogelDisk (i, nSamples) * centerCoc;
+                    vec2 uv2 = clamp (vUv + offset * texel, vec2 (0.0), vec2 (1.0));
+                    float sampleCoc = circleOfConfusionPx (depthSample (uv2));
+                    // Down-weight sharper neighbours so in-focus edges don't bleed into bokeh.
+                    float w = 1.0;
+                    if (sampleCoc + 0.5 < centerCoc)
+                        w = clamp (sampleCoc / max (centerCoc, 1.0e-3), 0.05, 1.0);
+
+                    acc += texture (uTex, uv2).rgb * w;
+                    wSum += w;
+                }
+
+                vec3 blurred = acc / max (wSum, 1.0e-3);
+                // Ease in so tiny apertures don't hard-switch to a full disc.
+                float t = smoothstep (0.4, 1.75, centerCoc);
+                fragColour = vec4 (mix (src.rgb, blurred, t), src.a);
+                return;
+            }
+            if (uMode == 8)
+            {
+                // Screen-space GI: short view-space ray marches gathering lit neighbours.
+                // uStrength = intensity, uRadius = march length scale, uThreshold = quality.
+                float depth = depthSample (vUv);
+                if (depth > 0.999)
+                {
+                    fragColour = src;
+                    return;
+                }
+
+                const float tanHalfW = 1.0 / 1.5;
+                float aspect = uResolution.y / max (uResolution.x, 1.0);
+                float tanHalfH = tanHalfW * aspect;
+
+                vec3 viewPos = viewPosFromDepthUv (vUv, tanHalfW, tanHalfH);
+                vec2 texel = 1.0 / max (uResolution, vec2 (1.0));
+                vec3 ddx = viewPosFromDepthUv (vUv + vec2 (texel.x, 0.0), tanHalfW, tanHalfH) - viewPos;
+                vec3 ddy = viewPosFromDepthUv (vUv + vec2 (0.0, texel.y), tanHalfW, tanHalfH) - viewPos;
+                vec3 nrm = normalize (cross (ddx, ddy));
+                if (dot (nrm, -viewPos) < 0.0) // face camera
+                    nrm = -nrm;
+
+                // Tangent frame for hemisphere sampling.
+                vec3 up = abs (nrm.y) < 0.999 ? vec3 (0.0, 1.0, 0.0) : vec3 (1.0, 0.0, 0.0);
+                vec3 t = normalize (cross (up, nrm));
+                vec3 b = cross (nrm, t);
+
+                int nSamples = (uThreshold < 0.5) ? 6
+                             : ((uThreshold < 1.5) ? 10 : 14);
+                int nSteps = (uThreshold < 0.5) ? 4
+                           : ((uThreshold < 1.5) ? 6 : 8);
+                float maxDist = mix (0.08, 0.55, clamp (uRadius, 0.0, 1.0));
+                float stepLen = maxDist / float (nSteps);
+
+                vec3 gi = vec3 (0.0);
+                float wSum = 0.0;
+                for (int i = 0; i < 14; ++i)
+                {
+                    if (i >= nSamples)
+                        break;
+
+                    // Cosine-weighted-ish hemisphere via Vogel on the disk, lifted to 3D.
+                    vec2 disc = vogelDisk (i, nSamples);
+                    float elev = sqrt (max (0.0, 1.0 - dot (disc, disc)));
+                    vec3 dir = normalize (t * disc.x + b * disc.y + nrm * elev);
+
+                    for (int s = 1; s <= 8; ++s)
+                    {
+                        if (s > nSteps)
+                            break;
+                        vec3 p = viewPos + dir * (stepLen * float (s));
+                        float z = max (-p.z, 1.0e-3);
+                        vec2 uv2 = vec2 (p.x / (tanHalfW * z), p.y / (tanHalfH * z)) * 0.5 + 0.5;
+                        if (uv2.x < 0.0 || uv2.x > 1.0 || uv2.y < 0.0 || uv2.y > 1.0)
+                            break;
+
+                        float sceneZ = linearViewZ (depthSample (uv2));
+                        float thick = mix (0.04, 0.18, clamp (uRadius, 0.0, 1.0));
+                        if (sceneZ < z - 0.008 && sceneZ > z - thick)
+                        {
+                            vec3 rad = texture (uTex, uv2).rgb;
+                            float nd = max (dot (nrm, dir), 0.0);
+                            float atten = 1.0 - float (s) / float (nSteps);
+                            gi += rad * nd * atten;
+                            wSum += nd * atten;
+                            break;
+                        }
+                    }
+                }
+
+                if (wSum > 1.0e-4)
+                    gi /= wSum;
+                float strength = clamp (uStrength, 0.0, 1.0);
+                // Prefer adding into darker pixels (shadow fill) without washing highlights.
+                float lum = dot (src.rgb, vec3 (0.299, 0.587, 0.114));
+                float shadowBias = 1.0 - smoothstep (0.15, 0.75, lum);
+                fragColour = vec4 (src.rgb + gi * strength * mix (0.35, 1.0, shadowBias), src.a);
                 return;
             }
 
@@ -683,7 +867,13 @@ void Spectrogram3DComponent::GlHost::createShaders()
     colourLightingAmountUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uLightingAmount");
     colourSpecularUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSpecular");
     colourRoughnessUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uRoughness");
+    colourMetalnessUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMetalness");
     colourRimUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uRim");
+    colourLightColourUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uLightColour");
+    colourRimColourUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uRimColour");
+    colourDomeStrengthUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uDomeStrength");
+    colourDomeSkyUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uDomeSky");
+    colourDomeGroundUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uDomeGround");
     colourHeightMapUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uHeightMap");
     colourLightDirWorldUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uLightDirWorld");
     colourSelfShadowUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uSelfShadow");
@@ -799,6 +989,12 @@ void Spectrogram3DComponent::GlHost::destroyShaders()
     colourLightDirWorldUniform.reset();
     colourHeightMapUniform.reset();
     colourRimUniform.reset();
+    colourDomeGroundUniform.reset();
+    colourDomeSkyUniform.reset();
+    colourDomeStrengthUniform.reset();
+    colourRimColourUniform.reset();
+    colourLightColourUniform.reset();
+    colourMetalnessUniform.reset();
     colourRoughnessUniform.reset();
     colourSpecularUniform.reset();
     colourLightingAmountUniform.reset();
@@ -1613,6 +1809,21 @@ void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProg
     setF1 (colourLightingAmountUniform.get(), "uLightingAmount", amt);
     setF1 (colourSpecularUniform.get(), "uSpecular", owner.specularAmount);
     setF1 (colourRoughnessUniform.get(), "uRoughness", owner.roughnessAmount);
+    setF1 (colourMetalnessUniform.get(), "uMetalness", owner.metalnessAmount);
+    setF3 (colourLightColourUniform.get(), "uLightColour",
+           owner.lightColour.getFloatRed(), owner.lightColour.getFloatGreen(),
+           owner.lightColour.getFloatBlue());
+    setF3 (colourRimColourUniform.get(), "uRimColour",
+           owner.rimColour.getFloatRed(), owner.rimColour.getFloatGreen(),
+           owner.rimColour.getFloatBlue());
+    setF1 (colourDomeStrengthUniform.get(), "uDomeStrength",
+           (owner.lightingEnabled && owner.domeFillEnabled) ? owner.domeFillStrength : 0.0f);
+    setF3 (colourDomeSkyUniform.get(), "uDomeSky",
+           owner.domeSkyColour.getFloatRed(), owner.domeSkyColour.getFloatGreen(),
+           owner.domeSkyColour.getFloatBlue());
+    setF3 (colourDomeGroundUniform.get(), "uDomeGround",
+           owner.domeGroundColour.getFloatRed(), owner.domeGroundColour.getFloatGreen(),
+           owner.domeGroundColour.getFloatBlue());
     setF1 (colourRimUniform.get(), "uRim", owner.rimAmount);
     setF3 (colourLightDirWorldUniform.get(), "uLightDirWorld", lightWorld.x, lightWorld.y, lightWorld.z);
     setF1 (colourSelfShadowUniform.get(), "uSelfShadow", selfShadow);
@@ -1859,8 +2070,19 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
             dest->releaseAsRenderingTarget();
     };
 
-    // AO / self-shadow run in the mesh shader from the heightfield.
-    // Post path is bloom-only (depth SSAO was unreliable with Soft BG + MSAA).
+    // AO / self-shadow / dome run in the mesh shader.
+    // Post order: SSGI → bloom → DOF (depth SSAO was unreliable with Soft BG + MSAA).
+    if (owner.ssgiEnabled && owner.ssgiStrength > 1.0e-4f)
+    {
+        const float qualityF = owner.ssgiQuality == ShadowQuality::low ? 0.0f
+                             : (owner.ssgiQuality == ShadowQuality::high ? 2.0f : 1.0f);
+        const GLuint sceneTex = (GLuint) softFbo.getTextureID();
+        drawFs (8, &postFboA, sceneTex, softDepthTex,
+                owner.ssgiStrength, owner.ssgiRadius, qualityF, width, height);
+        drawFs (0, nullptr, (GLuint) postFboA.getTextureID(), softDepthTex,
+                1.0f, 1.0f, 0.0f, width, height);
+    }
+
     if (owner.bloomEnabled)
     {
         const GLuint sceneTex = (GLuint) softFbo.getTextureID();
@@ -1873,6 +2095,19 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
         drawFs (5, &postFboB, sceneTex, (GLuint) postFboA.getTextureID(),
                 owner.bloomStrength, 1.0f, 0.0f, width, height);
         drawFs (0, nullptr, (GLuint) postFboB.getTextureID(), softDepthTex,
+                1.0f, 1.0f, 0.0f, width, height);
+    }
+
+    if (owner.dofEnabled && owner.dofAperture > 1.0e-4f)
+    {
+        // Single-pass disc gather (mode 6). uStrength=aperture, uRadius=focus,
+        // uThreshold=quality (0/1/2). Avoids the old separable H/V ghosting.
+        const float qualityF = owner.dofQuality == ShadowQuality::low ? 0.0f
+                             : (owner.dofQuality == ShadowQuality::high ? 2.0f : 1.0f);
+        const GLuint sceneTex = (GLuint) softFbo.getTextureID();
+        drawFs (6, &postFboA, sceneTex, softDepthTex,
+                owner.dofAperture, owner.dofFocusDistance, qualityF, width, height);
+        drawFs (0, nullptr, (GLuint) postFboA.getTextureID(), softDepthTex,
                 1.0f, 1.0f, 0.0f, width, height);
     }
 
@@ -2343,11 +2578,95 @@ void Spectrogram3DComponent::setRoughnessAmount (float amount01) noexcept
     markLookDirty();
 }
 
+void Spectrogram3DComponent::setMetalnessAmount (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (metalnessAmount - amount01) < 1.0e-4f) return;
+    metalnessAmount = amount01;
+    markLookDirty();
+}
+
 void Spectrogram3DComponent::setRimAmount (float amount01) noexcept
 {
     amount01 = juce::jlimit (0.0f, 1.0f, amount01);
     if (std::abs (rimAmount - amount01) < 1.0e-4f) return;
     rimAmount = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setLightColour (juce::Colour c) noexcept
+{
+    if (lightColour == c) return;
+    lightColour = c;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setRimColour (juce::Colour c) noexcept
+{
+    if (rimColour == c) return;
+    rimColour = c;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDomeFillEnabled (bool shouldEnable) noexcept
+{
+    if (domeFillEnabled == shouldEnable) return;
+    domeFillEnabled = shouldEnable;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDomeFillStrength (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (domeFillStrength - amount01) < 1.0e-4f) return;
+    domeFillStrength = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDomeSkyColour (juce::Colour c) noexcept
+{
+    if (domeSkyColour == c) return;
+    domeSkyColour = c;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDomeGroundColour (juce::Colour c) noexcept
+{
+    if (domeGroundColour == c) return;
+    domeGroundColour = c;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsgiEnabled (bool shouldEnable) noexcept
+{
+    if (ssgiEnabled == shouldEnable) return;
+    const bool softBefore = usesSoftComposite();
+    ssgiEnabled = shouldEnable;
+    if (softBefore != usesSoftComposite())
+        applyBackgroundTransparency();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsgiStrength (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssgiStrength - amount01) < 1.0e-4f) return;
+    ssgiStrength = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsgiRadius (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssgiRadius - amount01) < 1.0e-4f) return;
+    ssgiRadius = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsgiQuality (ShadowQuality q) noexcept
+{
+    if (ssgiQuality == q) return;
+    ssgiQuality = q;
     markLookDirty();
 }
 
@@ -2450,6 +2769,41 @@ void Spectrogram3DComponent::setBloomThreshold (float amount01) noexcept
     amount01 = juce::jlimit (0.0f, 1.0f, amount01);
     if (std::abs (bloomThreshold - amount01) < 1.0e-4f) return;
     bloomThreshold = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDofEnabled (bool shouldEnable) noexcept
+{
+    if (dofEnabled == shouldEnable) return;
+    const bool softBefore = usesSoftComposite();
+    dofEnabled = shouldEnable;
+    if (softBefore != usesSoftComposite())
+        applyBackgroundTransparency();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDofFocusDistance (float distance, bool notifyPrefsCallback) noexcept
+{
+    distance = juce::jlimit (kDofFocusMin, kDofFocusMax, distance);
+    if (std::abs (dofFocusDistance - distance) < 1.0e-4f) return;
+    dofFocusDistance = distance;
+    markLookDirty();
+    if (notifyPrefsCallback && onDofFocusChanged != nullptr)
+        onDofFocusChanged();
+}
+
+void Spectrogram3DComponent::setDofAperture (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (dofAperture - amount01) < 1.0e-4f) return;
+    dofAperture = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDofQuality (ShadowQuality q) noexcept
+{
+    if (dofQuality == q) return;
+    dofQuality = q;
     markLookDirty();
 }
 
@@ -3136,18 +3490,14 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
             const uint32_t tB = tA + 1;
             wallQuad (tB, tA, tB + (uint32_t) topCount, tA + (uint32_t) topCount);
         }
-        // x = 0 edge (z increasing) — flip
-        for (int z = 0; z < h - 1; ++z)
-        {
-            const uint32_t tA = (uint32_t) (z * w);
-            const uint32_t tB = (uint32_t) ((z + 1) * w);
-            wallQuad (tB, tA, tB + (uint32_t) topCount, tA + (uint32_t) topCount);
-        }
-        // Playhead wall (x = +1): dedicated verts after top+bottom, biased to +X
-        // so the face doesn’t share a depth plane with history behind the playhead.
-        // Layout: [2*topCount .. 2*topCount+h) top row, then bottom row.
+        // Playhead wall (x = +1) + waterfall-end wall (x = -1): dedicated verts after
+        // top+bottom, biased off the shared depth plane with the nearest history columns.
+        // Layout: [2*topCount .. +h) ph top, [+h .. +2h) ph bot,
+        //         [+2h .. +3h) end top, [+3h .. +4h) end bot.
         const uint32_t phTop = (uint32_t) (topCount * 2);
         const uint32_t phBot = phTop + (uint32_t) h;
+        const uint32_t endTop = phBot + (uint32_t) h;
+        const uint32_t endBot = endTop + (uint32_t) h;
         for (int z = 0; z < h - 1; ++z)
         {
             const uint32_t tA = phTop + (uint32_t) z;
@@ -3155,6 +3505,15 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
             const uint32_t bA = phBot + (uint32_t) z;
             const uint32_t bB = bA + 1;
             wallQuad (tA, tB, bA, bB);
+        }
+        // Waterfall end (x = -1): flip winding for outward (-X) normal.
+        for (int z = 0; z < h - 1; ++z)
+        {
+            const uint32_t tA = endTop + (uint32_t) z;
+            const uint32_t tB = tA + 1;
+            const uint32_t bA = endBot + (uint32_t) z;
+            const uint32_t bB = bA + 1;
+            wallQuad (tB, tA, bB, bA);
         }
     }
 
@@ -3174,12 +3533,13 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
 
     const bool closed = closedMeshEnabled;
     const int topCount = meshW * meshH;
-    // Closed: top + bottom + dedicated playhead wall (top/bottom rows along Z).
-    const int vertCount = closed ? (topCount * 2 + meshH * 2) : topCount;
+    // Closed: top + bottom + dedicated playhead + waterfall-end walls (along Z).
+    const int vertCount = closed ? (topCount * 2 + meshH * 4) : topCount;
     std::vector<Vertex> verts ((size_t) vertCount);
     const float denom = juce::jmax (1.0f, maxDb - minDb);
     const float baseY = closed ? -kClosedMeshFloorBias : 0.0f;
     const float playheadWallX = 1.0f + kClosedPlayheadWallBias;
+    const float waterfallEndWallX = -1.0f - kClosedWaterfallEndWallBias;
 
     const float B = freqMeshBiasB();
 
@@ -3260,6 +3620,8 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
         // Playhead face: copy newest column, push +X past scroll (history moves -X).
         const int phTop = topCount * 2;
         const int phBot = phTop + meshH;
+        const int endTop = phBot + meshH;
+        const int endBot = endTop + meshH;
         for (int z = 0; z < meshH; ++z)
         {
             const auto& src = verts[(size_t) z * (size_t) meshW + (size_t) (meshW - 1)];
@@ -3275,6 +3637,28 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
             bot.x = playheadWallX;
             bot.y = baseY;
             bot.nx = 1.0f;
+            bot.ny = 0.0f;
+            bot.nz = 0.0f;
+            bot.r *= 0.55f;
+            bot.g *= 0.55f;
+            bot.b *= 0.55f;
+        }
+        // Waterfall end: copy oldest column, push −X past history.
+        for (int z = 0; z < meshH; ++z)
+        {
+            const auto& src = verts[(size_t) z * (size_t) meshW];
+            auto& top = verts[(size_t) (endTop + z)];
+            top = src;
+            top.x = waterfallEndWallX;
+            top.nx = -1.0f;
+            top.ny = 0.0f;
+            top.nz = 0.0f;
+
+            auto& bot = verts[(size_t) (endBot + z)];
+            bot = src;
+            bot.x = waterfallEndWallX;
+            bot.y = baseY;
+            bot.nx = -1.0f;
             bot.ny = 0.0f;
             bot.nz = 0.0f;
             bot.r *= 0.55f;
@@ -3514,6 +3898,157 @@ bool Spectrogram3DComponent::isRightMouse (const juce::MouseEvent& e) noexcept
         || (e.mods.isPopupMenu() && ! e.mods.isLeftButtonDown() && ! e.mods.isMiddleButtonDown());
 }
 
+float Spectrogram3DComponent::heightAtWorldXZ (float wx, float wz) const noexcept
+{
+    if (meshW < 2 || meshH < 2 || meshDb.empty() || lastBrightness < 0.0f)
+        return 0.0f;
+
+    const float u = juce::jlimit (0.0f, 1.0f, (wx + 1.0f) * 0.5f);
+    float freqU = reverseFrequencyAxis ? ((wz + 1.0f) * 0.5f)
+                                       : ((1.0f - wz) * 0.5f);
+    freqU = juce::jlimit (0.0f, 1.0f, freqU);
+    const float t = meshTFromFreqAxis (freqU, freqMeshBiasB());
+
+    const float fx = u * (float) (meshW - 1);
+    const float fz = t * (float) (meshH - 1);
+    const int x0 = juce::jlimit (0, meshW - 2, (int) std::floor (fx));
+    const int z0 = juce::jlimit (0, meshH - 2, (int) std::floor (fz));
+    const float tx = fx - (float) x0;
+    const float tz = fz - (float) z0;
+
+    auto sampleDb = [this] (int x, int z) -> float
+    {
+        return meshDb[(size_t) x * (size_t) meshH + (size_t) z];
+    };
+
+    const float d00 = sampleDb (x0, z0);
+    const float d10 = sampleDb (x0 + 1, z0);
+    const float d01 = sampleDb (x0, z0 + 1);
+    const float d11 = sampleDb (x0 + 1, z0 + 1);
+    const float db = d00 * (1.0f - tx) * (1.0f - tz)
+                   + d10 * tx * (1.0f - tz)
+                   + d01 * (1.0f - tx) * tz
+                   + d11 * tx * tz;
+
+    const float denom = juce::jmax (1.0f, lastMaxDb - lastMinDb);
+    const float n = juce::jlimit (0.0f, 1.0f, (db - lastMinDb) / denom);
+    return n * meshHeight;
+}
+
+bool Spectrogram3DComponent::pickDofFocusAtLocalPoint (juce::Point<float> localPos) noexcept
+{
+    const auto view = getGlViewLocal().toFloat();
+    if (view.getWidth() < 2.0f || view.getHeight() < 2.0f)
+        return false;
+    if (! view.contains (localPos))
+        return false;
+
+    const float nx = ((localPos.x - view.getX()) / view.getWidth()) * 2.0f - 1.0f;
+    const float ny = 1.0f - ((localPos.y - view.getY()) / view.getHeight()) * 2.0f;
+
+    juce::Vector3D<float> right, up, forward;
+    cameraBasis (right, up, forward);
+
+    // Eye = look-at + offset; offset matches getTurntableViewMatrix pull-back.
+    const float yaw = juce::degreesToRadians (camera.yawDeg);
+    const float pitch = juce::degreesToRadians (camera.pitchDeg);
+    const float cp = std::cos (pitch);
+    const float sp = std::sin (pitch);
+    const float cy = std::cos (yaw);
+    const float sy = std::sin (yaw);
+    const juce::Vector3D<float> eye {
+        camera.panX + (-sy * cp) * camera.distance,
+        camera.panY + sp * camera.distance,
+        camera.panZ + (cy * cp) * camera.distance
+    };
+
+    // Same frustum as GlHost::getProjectionMatrix (near half-width = 1/1.5).
+    constexpr float kTanHalfW = 1.0f / 1.5f;
+    const float aspect = view.getHeight() / juce::jmax (1.0f, view.getWidth());
+    const float tanHalfH = kTanHalfW * aspect;
+    juce::Vector3D<float> dir {
+        forward.x + right.x * (nx * kTanHalfW) + up.x * (ny * tanHalfH),
+        forward.y + right.y * (nx * kTanHalfW) + up.y * (ny * tanHalfH),
+        forward.z + right.z * (nx * kTanHalfW) + up.z * (ny * tanHalfH)
+    };
+    const float dirLen = juce::jmax (1.0e-6f,
+                                     std::sqrt (dir.x * dir.x + dir.y * dir.y + dir.z * dir.z));
+    dir.x /= dirLen;
+    dir.y /= dirLen;
+    dir.z /= dirLen;
+
+    constexpr float kTMin = 0.05f;
+    constexpr float kTMax = 24.0f;
+    constexpr int kSteps = 96;
+    float tHit = -1.0f;
+    float tPrev = kTMin;
+    bool prevAbove = true;
+
+    for (int i = 0; i <= kSteps; ++i)
+    {
+        const float t = kTMin + (kTMax - kTMin) * ((float) i / (float) kSteps);
+        const juce::Vector3D<float> p {
+            eye.x + dir.x * t,
+            eye.y + dir.y * t,
+            eye.z + dir.z * t
+        };
+
+        // Slightly padded footprint so edge picks still register.
+        if (p.x < -1.15f || p.x > 1.15f || p.z < -1.15f || p.z > 1.15f)
+        {
+            tPrev = t;
+            prevAbove = true;
+            continue;
+        }
+
+        const float h = heightAtWorldXZ (juce::jlimit (-1.0f, 1.0f, p.x),
+                                         juce::jlimit (-1.0f, 1.0f, p.z));
+        const bool above = p.y > h + 0.001f;
+        if (prevAbove && ! above)
+        {
+            // Binary refine the crossing.
+            float lo = tPrev, hi = t;
+            for (int r = 0; r < 12; ++r)
+            {
+                const float mid = 0.5f * (lo + hi);
+                const juce::Vector3D<float> pm {
+                    eye.x + dir.x * mid,
+                    eye.y + dir.y * mid,
+                    eye.z + dir.z * mid
+                };
+                const float hm = heightAtWorldXZ (juce::jlimit (-1.0f, 1.0f, pm.x),
+                                                  juce::jlimit (-1.0f, 1.0f, pm.z));
+                if (pm.y > hm + 0.001f)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            tHit = hi;
+            break;
+        }
+        tPrev = t;
+        prevAbove = above;
+    }
+
+    if (tHit < 0.0f)
+        return false;
+
+    const juce::Vector3D<float> hit {
+        eye.x + dir.x * tHit,
+        eye.y + dir.y * tHit,
+        eye.z + dir.z * tHit
+    };
+    // Post DOF focus uses view-space depth (look-at distance), not Euclidean.
+    const float viewDepth = (hit.x - eye.x) * forward.x
+                          + (hit.y - eye.y) * forward.y
+                          + (hit.z - eye.z) * forward.z;
+    if (viewDepth < kDofFocusMin * 0.5f)
+        return false;
+
+    setDofFocusDistance (viewDepth, true);
+    return true;
+}
+
 void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
 {
     lastDrag = e.position;
@@ -3521,12 +4056,13 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     rightClickDragged = false;
 
     // Turntable controls (no free tumble / roll):
-    //  LMB drag        = orbit around look-at (yaw / elevation)
-    //  RMB drag        = move look-at (truck / pedestal) — keeps orbit centred
-    //  RMB click       = context menu (Save Default / Reset Camera)
-    //  Shift / MMB     = pan look-at on the ground plane
-    //  Alt / Ctrl+LMB  = dolly (distance)
-    //  Wheel           = zoom / dolly
+    //  LMB drag           = orbit around look-at (yaw / elevation)
+    //  RMB drag           = move look-at (truck / pedestal) — keeps orbit centred
+    //  RMB click          = context menu (Save Default / Reset Camera)
+    //  Shift / MMB        = pan look-at on the ground plane
+    //  Alt+LMB            = dolly (distance)
+    //  Ctrl/Cmd+LMB       = set DOF focus distance under cursor
+    //  Wheel              = zoom / dolly
     if (isRightMouse (e))
     {
         dragMode = DragMode::screenPan;
@@ -3537,7 +4073,14 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     {
         dragMode = DragMode::pan;
     }
-    else if (e.mods.isLeftButtonDown() && (e.mods.isAltDown() || e.mods.isCtrlDown() || e.mods.isCommandDown()))
+    else if (e.mods.isLeftButtonDown()
+             && (e.mods.isCtrlDown() || e.mods.isCommandDown())
+             && ! e.mods.isAltDown())
+    {
+        pickDofFocusAtLocalPoint (e.position);
+        dragMode = DragMode::none;
+    }
+    else if (e.mods.isLeftButtonDown() && e.mods.isAltDown())
     {
         dragMode = DragMode::dolly;
     }

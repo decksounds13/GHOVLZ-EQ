@@ -25,7 +25,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
 
-    titleLabel.setText ("Spectrogram 3D", juce::dontSendNotification);
+    titleLabel.setText ("3D Spectrogram", juce::dontSendNotification);
     titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
@@ -169,15 +169,83 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     lightElevationSlider.setValue (55.0, juce::dontSendNotification);
     specularLabel.setText ("Specular", juce::dontSendNotification);
     setupLookSlider (specularLabel, specularSlider, 0.0, 1.0, 0.01,
-                     "Specular intensity / F0 blend for the GGX highlight.");
+                     "GGX specular lobe intensity (highlight strength).");
     specularSlider.setValue (0.35, juce::dontSendNotification);
     roughnessLabel.setText ("Roughness", juce::dontSendNotification);
     setupLookSlider (roughnessLabel, roughnessSlider, 0.04, 1.0, 0.01,
                      "PBR microfacet roughness — low = sharp highlight, high = broad/dull.");
     roughnessSlider.setValue (0.45, juce::dontSendNotification);
+    metalnessLabel.setText ("Metalness", juce::dontSendNotification);
+    setupLookSlider (metalnessLabel, metalnessSlider, 0.0, 1.0, 0.01,
+                     "PBR metalness — 0 = dielectric, 1 = metal (tinted specular, no diffuse).");
+    metalnessSlider.setValue (0.0, juce::dontSendNotification);
     rimLabel.setText ("Rim Light", juce::dontSendNotification);
     setupLookSlider (rimLabel, rimSlider, 0.0, 1.0, 0.01, "View-dependent edge lift.");
     rimSlider.setValue (0.22, juce::dontSendNotification);
+    lightColRLabel.setText ("Light Color R", juce::dontSendNotification);
+    setupLookSlider (lightColRLabel, lightColRSlider, 0.0, 1.0, 0.01, "Key light tint red.");
+    lightColRSlider.setValue (1.0, juce::dontSendNotification);
+    lightColGLabel.setText ("Light Color G", juce::dontSendNotification);
+    setupLookSlider (lightColGLabel, lightColGSlider, 0.0, 1.0, 0.01, "Key light tint green.");
+    lightColGSlider.setValue (1.0, juce::dontSendNotification);
+    lightColBLabel.setText ("Light Color B", juce::dontSendNotification);
+    setupLookSlider (lightColBLabel, lightColBSlider, 0.0, 1.0, 0.01, "Key light tint blue.");
+    lightColBSlider.setValue (1.0, juce::dontSendNotification);
+    rimColRLabel.setText ("Rim Color R", juce::dontSendNotification);
+    setupLookSlider (rimColRLabel, rimColRSlider, 0.0, 1.0, 0.01, "Rim light tint red.");
+    rimColRSlider.setValue (1.0, juce::dontSendNotification);
+    rimColGLabel.setText ("Rim Color G", juce::dontSendNotification);
+    setupLookSlider (rimColGLabel, rimColGSlider, 0.0, 1.0, 0.01, "Rim light tint green.");
+    rimColGSlider.setValue (1.0, juce::dontSendNotification);
+    rimColBLabel.setText ("Rim Color B", juce::dontSendNotification);
+    setupLookSlider (rimColBLabel, rimColBSlider, 0.0, 1.0, 0.01, "Rim light tint blue.");
+    rimColBSlider.setValue (1.0, juce::dontSendNotification);
+
+    setupLookToggle (domeFillToggle,
+                     "Hemisphere dome fill — sky/ground ambient into shadows (needs Lighting). "
+                     "Off by default.");
+    domeFillStrengthLabel.setText ("Dome Fill Strength", juce::dontSendNotification);
+    setupLookSlider (domeFillStrengthLabel, domeFillStrengthSlider, 0.0, 1.0, 0.01,
+                     "How strongly sky/ground ambient fills shadowed regions.");
+    domeFillStrengthSlider.setValue (0.35, juce::dontSendNotification);
+    domeSkyRLabel.setText ("Dome Sky R", juce::dontSendNotification);
+    setupLookSlider (domeSkyRLabel, domeSkyRSlider, 0.0, 1.0, 0.01, "Sky hemisphere tint red.");
+    domeSkyRSlider.setValue (juce::Colour (0xff7390bf).getFloatRed(), juce::dontSendNotification);
+    domeSkyGLabel.setText ("Dome Sky G", juce::dontSendNotification);
+    setupLookSlider (domeSkyGLabel, domeSkyGSlider, 0.0, 1.0, 0.01, "Sky hemisphere tint green.");
+    domeSkyGSlider.setValue (juce::Colour (0xff7390bf).getFloatGreen(), juce::dontSendNotification);
+    domeSkyBLabel.setText ("Dome Sky B", juce::dontSendNotification);
+    setupLookSlider (domeSkyBLabel, domeSkyBSlider, 0.0, 1.0, 0.01, "Sky hemisphere tint blue.");
+    domeSkyBSlider.setValue (juce::Colour (0xff7390bf).getFloatBlue(), juce::dontSendNotification);
+    domeGroundRLabel.setText ("Dome Ground R", juce::dontSendNotification);
+    setupLookSlider (domeGroundRLabel, domeGroundRSlider, 0.0, 1.0, 0.01, "Ground hemisphere tint red.");
+    domeGroundRSlider.setValue (juce::Colour (0xff403328).getFloatRed(), juce::dontSendNotification);
+    domeGroundGLabel.setText ("Dome Ground G", juce::dontSendNotification);
+    setupLookSlider (domeGroundGLabel, domeGroundGSlider, 0.0, 1.0, 0.01, "Ground hemisphere tint green.");
+    domeGroundGSlider.setValue (juce::Colour (0xff403328).getFloatGreen(), juce::dontSendNotification);
+    domeGroundBLabel.setText ("Dome Ground B", juce::dontSendNotification);
+    setupLookSlider (domeGroundBLabel, domeGroundBSlider, 0.0, 1.0, 0.01, "Ground hemisphere tint blue.");
+    domeGroundBSlider.setValue (juce::Colour (0xff403328).getFloatBlue(), juce::dontSendNotification);
+
+    setupLookToggle (ssgiToggle,
+                     "Screen-space GI: short ray-march color bleed into shadows "
+                     "(soft FBO path). Works best with Lighting. Off by default.");
+    ssgiStrengthLabel.setText ("SSGI Strength", juce::dontSendNotification);
+    setupLookSlider (ssgiStrengthLabel, ssgiStrengthSlider, 0.0, 1.0, 0.01, "Indirect bounce mix.");
+    ssgiStrengthSlider.setValue (0.40, juce::dontSendNotification);
+    ssgiRadiusLabel.setText ("SSGI Radius", juce::dontSendNotification);
+    setupLookSlider (ssgiRadiusLabel, ssgiRadiusSlider, 0.0, 1.0, 0.01, "Screen-space gather distance.");
+    ssgiRadiusSlider.setValue (0.45, juce::dontSendNotification);
+    ssgiQualityLabel.setText ("SSGI Quality", juce::dontSendNotification);
+    styleCombo (ssgiQualityCombo);
+    ssgiQualityCombo.addItem ("Low", 1);
+    ssgiQualityCombo.addItem ("Medium", 2);
+    ssgiQualityCombo.addItem ("High", 3);
+    ssgiQualityCombo.setSelectedId (2, juce::dontSendNotification);
+    ssgiQualityCombo.setTooltip ("Sample density for screen-space GI gather.");
+    ssgiQualityCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (ssgiQualityLabel);
+    addAndMakeVisible (ssgiQualityCombo);
 
     setupLookToggle (contactShadowToggle,
                      "Darkens low mesh regions nestled beside taller neighbours "
@@ -230,6 +298,33 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     bloomThresholdLabel.setText ("Bloom Threshold", juce::dontSendNotification);
     setupLookSlider (bloomThresholdLabel, bloomThresholdSlider, 0.0, 1.0, 0.01, "Luminance gate before glow.");
     bloomThresholdSlider.setValue (0.62, juce::dontSendNotification);
+
+    setupLookToggle (dofToggle,
+                     "Realtime post DOF (EEVEE / Marmoset Post Effect style): thin-lens "
+                     "CoC + disc gather. Soft FBO path. Off by default.");
+    dofFocusLabel.setText ("Focus Distance", juce::dontSendNotification);
+    setupLookSlider (dofFocusLabel, dofFocusSlider,
+                     Spectrogram3DComponent::kDofFocusMin,
+                     Spectrogram3DComponent::kDofFocusMax,
+                     0.01,
+                     "Sharp plane distance from the camera (view units). "
+                     "Ctrl+LMB (Cmd+LMB on Mac) on the mesh to set focus under the cursor.");
+    dofFocusSlider.setValue (Spectrogram3DComponent::kDofFocusDefault, juce::dontSendNotification);
+    dofApertureLabel.setText ("Aperture", juce::dontSendNotification);
+    setupLookSlider (dofApertureLabel, dofApertureSlider, 0.0, 1.0, 0.01,
+                     "Substance-style aperture openness — higher = shallower DOF (more blur). "
+                     "Low values stay nearly sharp.");
+    dofApertureSlider.setValue (Spectrogram3DComponent::kDofApertureDefault, juce::dontSendNotification);
+    dofQualityLabel.setText ("DOF Quality", juce::dontSendNotification);
+    styleCombo (dofQualityCombo);
+    dofQualityCombo.addItem ("Low", 1);
+    dofQualityCombo.addItem ("Medium", 2);
+    dofQualityCombo.addItem ("High", 3);
+    dofQualityCombo.setSelectedId (2, juce::dontSendNotification);
+    dofQualityCombo.setTooltip ("Disc sample count / max bokeh size (8 / 16 / 24 taps).");
+    dofQualityCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (dofQualityLabel);
+    addAndMakeVisible (dofQualityCombo);
 
     setupLookToggle (sssToggle,
                      "Subsurface scatter approx (needs Lighting). Uses volume thickness when "
@@ -317,6 +412,8 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (msaaLabel);
     styleLabel (selfShadowQualityLabel);
     styleLabel (sssQualityLabel);
+    styleLabel (dofQualityLabel);
+    styleLabel (ssgiQualityLabel);
 
     updateLookDevVisibility();
 }
@@ -327,6 +424,8 @@ Spectrogram3DSettingsComponent::Content::~Content()
     msaaCombo.setLookAndFeel (nullptr);
     selfShadowQualityCombo.setLookAndFeel (nullptr);
     sssQualityCombo.setLookAndFeel (nullptr);
+    dofQualityCombo.setLookAndFeel (nullptr);
+    ssgiQualityCombo.setLookAndFeel (nullptr);
 }
 
 void Spectrogram3DSettingsComponent::Content::setLookChildVisible (juce::Component& c, bool vis)
@@ -347,8 +446,46 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (specularSlider, lit);
     setLookChildVisible (roughnessLabel, lit);
     setLookChildVisible (roughnessSlider, lit);
+    setLookChildVisible (metalnessLabel, lit);
+    setLookChildVisible (metalnessSlider, lit);
     setLookChildVisible (rimLabel, lit);
     setLookChildVisible (rimSlider, lit);
+    setLookChildVisible (lightColRLabel, lit);
+    setLookChildVisible (lightColRSlider, lit);
+    setLookChildVisible (lightColGLabel, lit);
+    setLookChildVisible (lightColGSlider, lit);
+    setLookChildVisible (lightColBLabel, lit);
+    setLookChildVisible (lightColBSlider, lit);
+    setLookChildVisible (rimColRLabel, lit);
+    setLookChildVisible (rimColRSlider, lit);
+    setLookChildVisible (rimColGLabel, lit);
+    setLookChildVisible (rimColGSlider, lit);
+    setLookChildVisible (rimColBLabel, lit);
+    setLookChildVisible (rimColBSlider, lit);
+
+    const bool dome = lit && domeFillToggle.getToggleState();
+    setLookChildVisible (domeFillStrengthLabel, dome);
+    setLookChildVisible (domeFillStrengthSlider, dome);
+    setLookChildVisible (domeSkyRLabel, dome);
+    setLookChildVisible (domeSkyRSlider, dome);
+    setLookChildVisible (domeSkyGLabel, dome);
+    setLookChildVisible (domeSkyGSlider, dome);
+    setLookChildVisible (domeSkyBLabel, dome);
+    setLookChildVisible (domeSkyBSlider, dome);
+    setLookChildVisible (domeGroundRLabel, dome);
+    setLookChildVisible (domeGroundRSlider, dome);
+    setLookChildVisible (domeGroundGLabel, dome);
+    setLookChildVisible (domeGroundGSlider, dome);
+    setLookChildVisible (domeGroundBLabel, dome);
+    setLookChildVisible (domeGroundBSlider, dome);
+
+    const bool ssgi = ssgiToggle.getToggleState();
+    setLookChildVisible (ssgiStrengthLabel, ssgi);
+    setLookChildVisible (ssgiStrengthSlider, ssgi);
+    setLookChildVisible (ssgiRadiusLabel, ssgi);
+    setLookChildVisible (ssgiRadiusSlider, ssgi);
+    setLookChildVisible (ssgiQualityLabel, ssgi);
+    setLookChildVisible (ssgiQualityCombo, ssgi);
 
     const bool contact = contactShadowToggle.getToggleState();
     setLookChildVisible (contactShadowStrengthLabel, contact);
@@ -375,6 +512,14 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (bloomStrengthSlider, bloom);
     setLookChildVisible (bloomThresholdLabel, bloom);
     setLookChildVisible (bloomThresholdSlider, bloom);
+
+    const bool dof = dofToggle.getToggleState();
+    setLookChildVisible (dofFocusLabel, dof);
+    setLookChildVisible (dofFocusSlider, dof);
+    setLookChildVisible (dofApertureLabel, dof);
+    setLookChildVisible (dofApertureSlider, dof);
+    setLookChildVisible (dofQualityLabel, dof);
+    setLookChildVisible (dofQualityCombo, dof);
 
     const bool closed = closedMeshToggle.getToggleState();
     const bool sssOn = sssToggle.getToggleState();
@@ -527,7 +672,44 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     lightElevationSlider.setValue (main->getSpec3DLightElevationDeg(), juce::dontSendNotification);
     specularSlider.setValue (main->getSpec3DSpecularAmount(), juce::dontSendNotification);
     roughnessSlider.setValue (main->getSpec3DRoughnessAmount(), juce::dontSendNotification);
+    metalnessSlider.setValue (main->getSpec3DMetalnessAmount(), juce::dontSendNotification);
     rimSlider.setValue (main->getSpec3DRimAmount(), juce::dontSendNotification);
+    {
+        const auto lc = main->getSpec3DLightColour();
+        lightColRSlider.setValue (lc.getFloatRed(), juce::dontSendNotification);
+        lightColGSlider.setValue (lc.getFloatGreen(), juce::dontSendNotification);
+        lightColBSlider.setValue (lc.getFloatBlue(), juce::dontSendNotification);
+    }
+    {
+        const auto rc = main->getSpec3DRimColour();
+        rimColRSlider.setValue (rc.getFloatRed(), juce::dontSendNotification);
+        rimColGSlider.setValue (rc.getFloatGreen(), juce::dontSendNotification);
+        rimColBSlider.setValue (rc.getFloatBlue(), juce::dontSendNotification);
+    }
+    domeFillToggle.setToggleState (main->isSpec3DDomeFillEnabled(), juce::dontSendNotification);
+    domeFillStrengthSlider.setValue (main->getSpec3DDomeFillStrength(), juce::dontSendNotification);
+    {
+        const auto sky = main->getSpec3DDomeSkyColour();
+        domeSkyRSlider.setValue (sky.getFloatRed(), juce::dontSendNotification);
+        domeSkyGSlider.setValue (sky.getFloatGreen(), juce::dontSendNotification);
+        domeSkyBSlider.setValue (sky.getFloatBlue(), juce::dontSendNotification);
+    }
+    {
+        const auto ground = main->getSpec3DDomeGroundColour();
+        domeGroundRSlider.setValue (ground.getFloatRed(), juce::dontSendNotification);
+        domeGroundGSlider.setValue (ground.getFloatGreen(), juce::dontSendNotification);
+        domeGroundBSlider.setValue (ground.getFloatBlue(), juce::dontSendNotification);
+    }
+    ssgiToggle.setToggleState (main->isSpec3DSsgiEnabled(), juce::dontSendNotification);
+    ssgiStrengthSlider.setValue (main->getSpec3DSsgiStrength(), juce::dontSendNotification);
+    ssgiRadiusSlider.setValue (main->getSpec3DSsgiRadius(), juce::dontSendNotification);
+    {
+        const auto sq = main->getSpec3DSsgiQuality();
+        ssgiQualityCombo.setSelectedId (
+            sq == Spectrogram3DComponent::ShadowQuality::low ? 1
+                : (sq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 2),
+            juce::dontSendNotification);
+    }
     contactShadowToggle.setToggleState (main->isSpec3DContactShadowEnabled(), juce::dontSendNotification);
     contactShadowStrengthSlider.setValue (main->getSpec3DContactShadowStrength(), juce::dontSendNotification);
     selfShadowToggle.setToggleState (main->isSpec3DSelfShadowEnabled(), juce::dontSendNotification);
@@ -547,6 +729,16 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     bloomToggle.setToggleState (main->isSpec3DBloomEnabled(), juce::dontSendNotification);
     bloomStrengthSlider.setValue (main->getSpec3DBloomStrength(), juce::dontSendNotification);
     bloomThresholdSlider.setValue (main->getSpec3DBloomThreshold(), juce::dontSendNotification);
+    dofToggle.setToggleState (main->isSpec3DDofEnabled(), juce::dontSendNotification);
+    dofFocusSlider.setValue (main->getSpec3DDofFocusDistance(), juce::dontSendNotification);
+    dofApertureSlider.setValue (main->getSpec3DDofAperture(), juce::dontSendNotification);
+    {
+        const auto dq = main->getSpec3DDofQuality();
+        dofQualityCombo.setSelectedId (
+            dq == Spectrogram3DComponent::ShadowQuality::low ? 1
+                : (dq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 2),
+            juce::dontSendNotification);
+    }
     sssToggle.setToggleState (main->isSpec3DSssEnabled(), juce::dontSendNotification);
     sssStrengthSlider.setValue (main->getSpec3DSssStrength(), juce::dontSendNotification);
     sssWrapSlider.setValue (main->getSpec3DSssWrap(), juce::dontSendNotification);
@@ -615,7 +807,41 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DLightElevationDeg ((float) lightElevationSlider.getValue(), true);
     main->setSpec3DSpecularAmount ((float) specularSlider.getValue(), true);
     main->setSpec3DRoughnessAmount ((float) roughnessSlider.getValue(), true);
+    main->setSpec3DMetalnessAmount ((float) metalnessSlider.getValue(), true);
     main->setSpec3DRimAmount ((float) rimSlider.getValue(), true);
+    main->setSpec3DLightColour (juce::Colour::fromFloatRGBA ((float) lightColRSlider.getValue(),
+                                                             (float) lightColGSlider.getValue(),
+                                                             (float) lightColBSlider.getValue(),
+                                                             1.0f),
+                                true);
+    main->setSpec3DRimColour (juce::Colour::fromFloatRGBA ((float) rimColRSlider.getValue(),
+                                                           (float) rimColGSlider.getValue(),
+                                                           (float) rimColBSlider.getValue(),
+                                                           1.0f),
+                              true);
+    main->setSpec3DDomeFillEnabled (domeFillToggle.getToggleState(), true);
+    main->setSpec3DDomeFillStrength ((float) domeFillStrengthSlider.getValue(), true);
+    main->setSpec3DDomeSkyColour (juce::Colour::fromFloatRGBA ((float) domeSkyRSlider.getValue(),
+                                                              (float) domeSkyGSlider.getValue(),
+                                                              (float) domeSkyBSlider.getValue(),
+                                                              1.0f),
+                                  true);
+    main->setSpec3DDomeGroundColour (juce::Colour::fromFloatRGBA ((float) domeGroundRSlider.getValue(),
+                                                                 (float) domeGroundGSlider.getValue(),
+                                                                 (float) domeGroundBSlider.getValue(),
+                                                                 1.0f),
+                                     true);
+    main->setSpec3DSsgiEnabled (ssgiToggle.getToggleState(), true);
+    main->setSpec3DSsgiStrength ((float) ssgiStrengthSlider.getValue(), true);
+    main->setSpec3DSsgiRadius ((float) ssgiRadiusSlider.getValue(), true);
+    {
+        const int id = ssgiQualityCombo.getSelectedId();
+        main->setSpec3DSsgiQuality (
+            id == 1 ? Spectrogram3DComponent::ShadowQuality::low
+                    : (id == 3 ? Spectrogram3DComponent::ShadowQuality::high
+                               : Spectrogram3DComponent::ShadowQuality::medium),
+            true);
+    }
     main->setSpec3DContactShadowEnabled (contactShadowToggle.getToggleState(), true);
     main->setSpec3DContactShadowStrength ((float) contactShadowStrengthSlider.getValue(), true);
     main->setSpec3DSelfShadowEnabled (selfShadowToggle.getToggleState(), true);
@@ -636,6 +862,17 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DBloomEnabled (bloomToggle.getToggleState(), true);
     main->setSpec3DBloomStrength ((float) bloomStrengthSlider.getValue(), true);
     main->setSpec3DBloomThreshold ((float) bloomThresholdSlider.getValue(), true);
+    main->setSpec3DDofEnabled (dofToggle.getToggleState(), true);
+    main->setSpec3DDofFocusDistance ((float) dofFocusSlider.getValue(), true);
+    main->setSpec3DDofAperture ((float) dofApertureSlider.getValue(), true);
+    {
+        const int id = dofQualityCombo.getSelectedId();
+        main->setSpec3DDofQuality (
+            id == 1 ? Spectrogram3DComponent::ShadowQuality::low
+                    : (id == 3 ? Spectrogram3DComponent::ShadowQuality::high
+                               : Spectrogram3DComponent::ShadowQuality::medium),
+            true);
+    }
     main->setSpec3DSssEnabled (sssToggle.getToggleState(), true);
     main->setSpec3DSssStrength ((float) sssStrengthSlider.getValue(), true);
     main->setSpec3DSssWrap ((float) sssWrapSlider.getValue(), true);
@@ -671,15 +908,20 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     const int toggleH = 22 + 6;
     const int comboRows = 2; // mesh quality + MSAA
     const int baseSliderRows = 2; // mesh height + HF density
-    const int toggles = 5 + 6; // base (+ closed) + look master toggles (+ SSS)
+    const int toggles = 5 + 9; // base (+ closed) + look master toggles (+ SSS + DOF + dome + SSGI)
     const int buttonRows = 1;
 
     int lookRows = 0;
-    if (lightingToggle.getToggleState()) lookRows += 6;
+    if (lightingToggle.getToggleState())
+        lookRows += 13; // amount, az/el, specular, roughness, metalness, rim, light RGB, rim RGB
+    if (lightingToggle.getToggleState() && domeFillToggle.getToggleState())
+        lookRows += 7; // strength, sky RGB, ground RGB
+    if (ssgiToggle.getToggleState()) lookRows += 3; // strength, radius, quality
     if (contactShadowToggle.getToggleState()) lookRows += 1;
     if (selfShadowToggle.getToggleState()) lookRows += 4; // strength, bias, softness, quality
     if (ssaoToggle.getToggleState()) lookRows += 2;
     if (bloomToggle.getToggleState()) lookRows += 2;
+    if (dofToggle.getToggleState()) lookRows += 3; // focus, aperture, quality
     if (sssToggle.getToggleState())
     {
         lookRows += 7; // strength, wrap, transmission, tint RGB, quality
@@ -702,9 +944,9 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
 
 void Spectrogram3DSettingsComponent::Content::resized()
 {
-    // Keep Look sub-controls in sync when the panel is laid out / re-opened.
-    if (findParentComponentOfClass<MainComponent>() != nullptr)
-        syncControlsFromMain();
+    // Don't sync from Main here — that changes Look row count mid-layout and
+    // left the Menu scrollbar short until the user resized the panel. Sync is
+    // done from the ctor delay + when the tab/page is shown.
 
     auto area = getLocalBounds().reduced (kPadX, kPadY);
 
@@ -733,7 +975,32 @@ void Spectrogram3DSettingsComponent::Content::resized()
         layoutSliderRow (area, lightElevationLabel, lightElevationSlider);
         layoutSliderRow (area, specularLabel, specularSlider);
         layoutSliderRow (area, roughnessLabel, roughnessSlider);
+        layoutSliderRow (area, metalnessLabel, metalnessSlider);
         layoutSliderRow (area, rimLabel, rimSlider);
+        layoutSliderRow (area, lightColRLabel, lightColRSlider);
+        layoutSliderRow (area, lightColGLabel, lightColGSlider);
+        layoutSliderRow (area, lightColBLabel, lightColBSlider);
+        layoutSliderRow (area, rimColRLabel, rimColRSlider);
+        layoutSliderRow (area, rimColGLabel, rimColGSlider);
+        layoutSliderRow (area, rimColBLabel, rimColBSlider);
+    }
+    layoutToggle (area, domeFillToggle);
+    if (lightingToggle.getToggleState() && domeFillToggle.getToggleState())
+    {
+        layoutSliderRow (area, domeFillStrengthLabel, domeFillStrengthSlider);
+        layoutSliderRow (area, domeSkyRLabel, domeSkyRSlider);
+        layoutSliderRow (area, domeSkyGLabel, domeSkyGSlider);
+        layoutSliderRow (area, domeSkyBLabel, domeSkyBSlider);
+        layoutSliderRow (area, domeGroundRLabel, domeGroundRSlider);
+        layoutSliderRow (area, domeGroundGLabel, domeGroundGSlider);
+        layoutSliderRow (area, domeGroundBLabel, domeGroundBSlider);
+    }
+    layoutToggle (area, ssgiToggle);
+    if (ssgiToggle.getToggleState())
+    {
+        layoutSliderRow (area, ssgiStrengthLabel, ssgiStrengthSlider);
+        layoutSliderRow (area, ssgiRadiusLabel, ssgiRadiusSlider);
+        layoutComboRow (area, ssgiQualityLabel, ssgiQualityCombo);
     }
     layoutToggle (area, contactShadowToggle);
     if (contactShadowToggle.getToggleState())
@@ -757,6 +1024,13 @@ void Spectrogram3DSettingsComponent::Content::resized()
     {
         layoutSliderRow (area, bloomStrengthLabel, bloomStrengthSlider);
         layoutSliderRow (area, bloomThresholdLabel, bloomThresholdSlider);
+    }
+    layoutToggle (area, dofToggle);
+    if (dofToggle.getToggleState())
+    {
+        layoutSliderRow (area, dofFocusLabel, dofFocusSlider);
+        layoutSliderRow (area, dofApertureLabel, dofApertureSlider);
+        layoutComboRow (area, dofQualityLabel, dofQualityCombo);
     }
     layoutToggle (area, sssToggle);
     if (sssToggle.getToggleState())

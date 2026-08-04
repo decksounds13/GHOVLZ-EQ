@@ -290,12 +290,17 @@ void SpectrogramComponent::resetDisplay()
 
 void SpectrogramComponent::setEnabled (bool shouldEnable) noexcept
 {
+    const bool wasEnabled = enabled.load (std::memory_order_relaxed);
     enabled.store (shouldEnable, std::memory_order_relaxed);
     setVisible (shouldEnable);
 
     if (shouldEnable)
     {
-        resetDisplay();
+        // Only wipe history on a true off→on transition. Layout/menu sync calls
+        // setEnabled(true) repeatedly while Spec3D is up — resetting would restart
+        // the waterfall every time the Settings panel moves or resizes.
+        if (! wasEnabled)
+            resetDisplay();
         startTimerHz (60);
     }
     else

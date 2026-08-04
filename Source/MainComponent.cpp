@@ -1149,6 +1149,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.saveUiPrefs(); };
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.saveUiPrefs(); };
+    spectrogram3D.onDofFocusChanged = [this] { editor.saveUiPrefs(); };
     spectrogram3D.onDoubleClick = [this]
     {
         if (scopeModeEnabled)
@@ -2231,12 +2232,92 @@ void MainComponent::setSpec3DRoughnessAmount (float amount01, bool notifyPrefs)
 }
 float MainComponent::getSpec3DRoughnessAmount() const noexcept { return spectrogram3D.getRoughnessAmount(); }
 
+void MainComponent::setSpec3DMetalnessAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setMetalnessAmount (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DMetalnessAmount() const noexcept { return spectrogram3D.getMetalnessAmount(); }
+
 void MainComponent::setSpec3DRimAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setRimAmount (amount01);
     if (notifyPrefs) editor.saveUiPrefs();
 }
 float MainComponent::getSpec3DRimAmount() const noexcept { return spectrogram3D.getRimAmount(); }
+
+void MainComponent::setSpec3DLightColour (juce::Colour c, bool notifyPrefs)
+{
+    spectrogram3D.setLightColour (c);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+juce::Colour MainComponent::getSpec3DLightColour() const noexcept { return spectrogram3D.getLightColour(); }
+
+void MainComponent::setSpec3DRimColour (juce::Colour c, bool notifyPrefs)
+{
+    spectrogram3D.setRimColour (c);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+juce::Colour MainComponent::getSpec3DRimColour() const noexcept { return spectrogram3D.getRimColour(); }
+
+void MainComponent::setSpec3DDomeFillEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setDomeFillEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DDomeFillEnabled() const noexcept { return spectrogram3D.isDomeFillEnabled(); }
+
+void MainComponent::setSpec3DDomeFillStrength (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setDomeFillStrength (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DDomeFillStrength() const noexcept { return spectrogram3D.getDomeFillStrength(); }
+
+void MainComponent::setSpec3DDomeSkyColour (juce::Colour c, bool notifyPrefs)
+{
+    spectrogram3D.setDomeSkyColour (c);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+juce::Colour MainComponent::getSpec3DDomeSkyColour() const noexcept { return spectrogram3D.getDomeSkyColour(); }
+
+void MainComponent::setSpec3DDomeGroundColour (juce::Colour c, bool notifyPrefs)
+{
+    spectrogram3D.setDomeGroundColour (c);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+juce::Colour MainComponent::getSpec3DDomeGroundColour() const noexcept { return spectrogram3D.getDomeGroundColour(); }
+
+void MainComponent::setSpec3DSsgiEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DSsgiEnabled() const noexcept { return spectrogram3D.isSsgiEnabled(); }
+
+void MainComponent::setSpec3DSsgiStrength (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiStrength (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSsgiStrength() const noexcept { return spectrogram3D.getSsgiStrength(); }
+
+void MainComponent::setSpec3DSsgiRadius (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiRadius (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DSsgiRadius() const noexcept { return spectrogram3D.getSsgiRadius(); }
+
+void MainComponent::setSpec3DSsgiQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
+{
+    spectrogram3D.setSsgiQuality (q);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsgiQuality() const noexcept
+{
+    return spectrogram3D.getSsgiQuality();
+}
 
 void MainComponent::setSpec3DContactShadowEnabled (bool shouldEnable, bool notifyPrefs)
 {
@@ -2331,6 +2412,43 @@ void MainComponent::setSpec3DBloomThreshold (float amount01, bool notifyPrefs)
     if (notifyPrefs) editor.saveUiPrefs();
 }
 float MainComponent::getSpec3DBloomThreshold() const noexcept { return spectrogram3D.getBloomThreshold(); }
+
+void MainComponent::setSpec3DDofEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setDofEnabled (shouldEnable);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+bool MainComponent::isSpec3DDofEnabled() const noexcept { return spectrogram3D.isDofEnabled(); }
+
+void MainComponent::setSpec3DDofFocusDistance (float distance, bool notifyPrefs)
+{
+    spectrogram3D.setDofFocusDistance (distance);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DDofFocusDistance() const noexcept { return spectrogram3D.getDofFocusDistance(); }
+
+void MainComponent::setSpec3DDofAperture (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setDofAperture (amount01);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+float MainComponent::getSpec3DDofAperture() const noexcept { return spectrogram3D.getDofAperture(); }
+
+void MainComponent::setSpec3DDofAmount (float amount01, bool notifyPrefs)
+{
+    setSpec3DDofAperture (amount01, notifyPrefs);
+}
+float MainComponent::getSpec3DDofAmount() const noexcept { return getSpec3DDofAperture(); }
+
+void MainComponent::setSpec3DDofQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
+{
+    spectrogram3D.setDofQuality (q);
+    if (notifyPrefs) editor.saveUiPrefs();
+}
+Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DDofQuality() const noexcept
+{
+    return spectrogram3D.getDofQuality();
+}
 
 void MainComponent::setSpec3DSssEnabled (bool shouldEnable, bool notifyPrefs)
 {
@@ -5070,21 +5188,31 @@ void MainComponent::layoutSettingsMenu()
     menu.setTransform ({});
 
     const int contentW = Menu::kContentWidth;
-    const int contentH = Menu::kContentHeight + Menu::kDragBarHeight;
     const int parentW = getWidth();
     const int parentH = getHeight();
     if (parentW <= 0 || parentH <= 0)
         return;
 
+    // Same floor expanded Osc / Gon / Spec3D use: graph pane, just above the
+    // Match / Mod / Help / … button row (and above the piano strip).
+    auto contentArea = getExpandedScopeContentBounds();
+    if (contentArea.isEmpty())
+        contentArea = getLocalBounds();
+    const int bottomChrome = frequencyResponseComponent.getBottomGraphChromeHeight();
+    constexpr int kGapAboveBottomChrome = 4;
+    constexpr int topY = 0;
+    const int maxBottom = juce::jlimit (140, parentH,
+                                        contentArea.getBottom()
+                                            - juce::jmax (0, bottomChrome)
+                                            - kGapAboveBottomChrome);
+
     if (settingsMenuBounds.isEmpty() || ! settingsMenuBoundsFromUser)
     {
-        // Default: right-anchored, design content size (clipped if the host is smaller).
-        constexpr int topY = 0;
+        // Default: right-anchored, full height down to the shared bottom chrome limit.
         const int w = juce::jmin (contentW, parentW);
-        const int h = juce::jmin (contentH, juce::jmax (140, parentH - topY));
+        const int h = juce::jmax (140, maxBottom - topY);
         const int x = juce::jmax (0, parentW - w);
-        const int y = juce::jlimit (0, juce::jmax (0, parentH - h), topY);
-        settingsMenuBounds = { x, y, w, h };
+        settingsMenuBounds = { x, topY, w, h };
     }
 
     auto b = settingsMenuBounds;
@@ -5092,6 +5220,20 @@ void MainComponent::layoutSettingsMenu()
     b.setHeight (juce::jlimit (140, parentH, b.getHeight()));
     b.setX (juce::jlimit (0, juce::jmax (0, parentW - b.getWidth()), b.getX()));
     b.setY (juce::jlimit (0, juce::jmax (0, parentH - b.getHeight()), b.getY()));
+
+    // Keep the panel above the shared bottom-chrome line (even after user drag/resize).
+    if (b.getBottom() > maxBottom)
+    {
+        if (b.getHeight() > maxBottom - topY)
+        {
+            b.setY (topY);
+            b.setHeight (juce::jmax (140, maxBottom - topY));
+        }
+        else
+        {
+            b.setY (juce::jmax (topY, maxBottom - b.getHeight()));
+        }
+    }
 
     updatingSettingsMenuBounds = true;
     menu.setBounds (b);

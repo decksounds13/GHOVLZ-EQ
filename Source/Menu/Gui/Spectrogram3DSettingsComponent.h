@@ -21,6 +21,8 @@ public:
     void resized() override;
 
     int getPreferredContentHeight() const { return content.getPreferredHeight(); }
+    /** Sync Look toggles from Main before Menu measures scroll height. */
+    void syncFromMain() { content.syncControlsFromMain(); }
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -57,6 +59,8 @@ private:
         void applyLookControlsToMain();
         void applyStructureControlsToMain();
 
+        friend class Spectrogram3DSettingsComponent;
+
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
         ColourRampBank& colourRamps;
@@ -92,8 +96,46 @@ private:
         juce::Slider specularSlider;
         juce::Label roughnessLabel;
         juce::Slider roughnessSlider;
+        juce::Label metalnessLabel;
+        juce::Slider metalnessSlider;
         juce::Label rimLabel;
         juce::Slider rimSlider;
+        juce::Label lightColRLabel;
+        juce::Slider lightColRSlider;
+        juce::Label lightColGLabel;
+        juce::Slider lightColGSlider;
+        juce::Label lightColBLabel;
+        juce::Slider lightColBSlider;
+        juce::Label rimColRLabel;
+        juce::Slider rimColRSlider;
+        juce::Label rimColGLabel;
+        juce::Slider rimColGSlider;
+        juce::Label rimColBLabel;
+        juce::Slider rimColBSlider;
+
+        juce::ToggleButton domeFillToggle { "Dome fill" };
+        juce::Label domeFillStrengthLabel;
+        juce::Slider domeFillStrengthSlider;
+        juce::Label domeSkyRLabel;
+        juce::Slider domeSkyRSlider;
+        juce::Label domeSkyGLabel;
+        juce::Slider domeSkyGSlider;
+        juce::Label domeSkyBLabel;
+        juce::Slider domeSkyBSlider;
+        juce::Label domeGroundRLabel;
+        juce::Slider domeGroundRSlider;
+        juce::Label domeGroundGLabel;
+        juce::Slider domeGroundGSlider;
+        juce::Label domeGroundBLabel;
+        juce::Slider domeGroundBSlider;
+
+        juce::ToggleButton ssgiToggle { "SSGI (screen-space GI)" };
+        juce::Label ssgiStrengthLabel;
+        juce::Slider ssgiStrengthSlider;
+        juce::Label ssgiRadiusLabel;
+        juce::Slider ssgiRadiusSlider;
+        juce::Label ssgiQualityLabel;
+        juce::ComboBox ssgiQualityCombo;
 
         juce::ToggleButton contactShadowToggle { "Contact shadow" };
         juce::Label contactShadowStrengthLabel;
@@ -120,6 +162,14 @@ private:
         juce::Slider bloomStrengthSlider;
         juce::Label bloomThresholdLabel;
         juce::Slider bloomThresholdSlider;
+
+        juce::ToggleButton dofToggle { "Depth of field" };
+        juce::Label dofFocusLabel;
+        juce::Slider dofFocusSlider;
+        juce::Label dofApertureLabel;
+        juce::Slider dofApertureSlider;
+        juce::Label dofQualityLabel;
+        juce::ComboBox dofQualityCombo;
 
         juce::ToggleButton sssToggle { "Subsurface (SSS)" };
         juce::Label sssStrengthLabel;

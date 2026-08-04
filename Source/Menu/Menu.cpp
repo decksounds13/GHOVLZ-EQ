@@ -42,7 +42,7 @@ Menu::Menu (SharedResources& resources,
     addOwnedTab ("Oscilloscope", new OscilloscopeSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Goniometer", new GoniometerSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Spectrogram", new SpectrogramSettingsComponent (resources, state, colourRamps));
-    addOwnedTab ("Spectrogram 3D", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
+    addOwnedTab ("3D Spectrogram", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state));
     addOwnedTab ("Loudness", new LoudnessSettingsComponent (resources, state));
     addOwnedTab ("Stereogram", new StereogramSettingsComponent (resources, state, colourRamps));
@@ -53,8 +53,11 @@ Menu::Menu (SharedResources& resources,
 
     tabBar.setLookAndFeel (&customTabBarLookAndFeel);
     tabBar.setTabBarDepth (35);
-    tabBar.setOutline (4.0f);
-    tabBar.setColour (juce::TabbedComponent::outlineColourId, menuBorderColor);
+    // No content outline — the old 4px grey frame looked like a nested border,
+    // especially once the Settings panel was resized wider than the page.
+    juce::ignoreUnused (menuBorderColor);
+    tabBar.setOutline (0.0f);
+    tabBar.setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
     // Never compress into JUCE's "+" extras menu — we page instead.
     tabBar.getTabbedButtonBar().setMinimumTabScaleFactor (1.0);
 
@@ -372,8 +375,27 @@ void Menu::disableSliderScrollWheelRecursive (juce::Component& root)
 void Menu::refreshContentPanelSize()
 {
     constexpr int tabBarDepth = 35;
+
+    // Resolve viewport bounds first so content can fill the panel when the user
+    // widens Settings (avoids a floating content island / grey inset frame).
+    layoutScrollBars();
+    const int contentW = juce::jmax (kContentWidth, viewport.getWidth());
+
+    // Provisional size so tab content can sync/layout before we measure height.
+    contentPanel.setSize (contentW, juce::jmax (kContentHeight, viewport.getHeight()));
+    tabBar.setBounds (contentPanel.getLocalBounds());
+    if (auto* c = tabBar.getCurrentContentComponent())
+    {
+        // Spec3D Look rows depend on prefs — sync before measuring preferred height
+        // so the scrollbar range is correct without a manual resize.
+        if (auto* s3d = dynamic_cast<Spectrogram3DSettingsComponent*> (c))
+            s3d->syncFromMain();
+        c->resized();
+    }
+
     const int preferred = getActiveTabPreferredContentHeight();
-    contentPanel.setSize (kContentWidth, juce::jmax (kContentHeight, tabBarDepth + preferred));
+    const int contentH = juce::jmax (viewport.getHeight(), tabBarDepth + preferred);
+    contentPanel.setSize (contentW, contentH);
     tabBar.setBounds (contentPanel.getLocalBounds());
 
     // Page arrows sit on the tab strip (right), clear of tab labels on each page.
@@ -382,7 +404,7 @@ void Menu::refreshContentPanelSize()
     constexpr int arrowPad = 6;
     constexpr int arrowGap = 3;
     const int arrowY = (tabBarDepth - arrowH) / 2;
-    tabNextButton.setBounds (kContentWidth - arrowPad - arrowW, arrowY, arrowW, arrowH);
+    tabNextButton.setBounds (contentW - arrowPad - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.setBounds (tabNextButton.getX() - arrowGap - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.toFront (false);
     tabNextButton.toFront (false);
@@ -391,6 +413,10 @@ void Menu::refreshContentPanelSize()
     disableSliderScrollWheelRecursive (contentPanel);
 
     layoutScrollBars();
+    if (verticalScrollBar != nullptr)
+        verticalScrollBar->updateThumbPosition();
+    if (horizontalScrollBar != nullptr)
+        horizontalScrollBar->updateThumbPosition();
 }
 
 void Menu::notifyContentHeightChanged()
@@ -402,8 +428,7 @@ void Menu::resized()
 {
     refreshContentPanelSize();
 
-    tabBar.setColour (juce::TabbedComponent::outlineColourId,
-                      sharedResources.sharedColors.menuTabBarBorderColor);
+    tabBar.setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
 
     if (borderResizer != nullptr)
     {
@@ -426,7 +451,7 @@ void Menu::updateColors (const juce::Array<juce::Colour>& colors)
     textButtonLookAndFeel.setGradientColor1 (sharedResources.sharedColors.menuButtonGradientColor1);
     textButtonLookAndFeel.setGradientColor2 (sharedResources.sharedColors.menuButtonGradientColor2);
 
-    tabBar.setColour (juce::TabbedComponent::outlineColourId, sharedResources.sharedColors.menuTabBarBorderColor);
+    tabBar.setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
     tabBar.repaint();
     syncScrollBarColours();
 

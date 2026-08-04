@@ -78,6 +78,11 @@ public:
         z-fight with history just behind the playhead. Scroll direction is -X.
     */
     static constexpr float kClosedPlayheadWallBias = 0.006f;
+    /**
+        Closed waterfall-end wall sits at X = -1 − this (past oldest history),
+        mirroring the playhead bias so the last frames don’t z-fight the end face.
+    */
+    static constexpr float kClosedWaterfallEndWallBias = 0.006f;
 
     /** Visual polish — all effects default off (flat vertex colours). */
     void setLightingEnabled (bool shouldEnable) noexcept;
@@ -92,8 +97,38 @@ public:
     float getSpecularAmount() const noexcept { return specularAmount; }
     void setRoughnessAmount (float amount01) noexcept;
     float getRoughnessAmount() const noexcept { return roughnessAmount; }
+    /** PBR metalness 0–1 (dielectric → metal). Off/default = 0. */
+    void setMetalnessAmount (float amount01) noexcept;
+    float getMetalnessAmount() const noexcept { return metalnessAmount; }
     void setRimAmount (float amount01) noexcept;
     float getRimAmount() const noexcept { return rimAmount; }
+    void setLightColour (juce::Colour c) noexcept;
+    juce::Colour getLightColour() const noexcept { return lightColour; }
+    void setRimColour (juce::Colour c) noexcept;
+    juce::Colour getRimColour() const noexcept { return rimColour; }
+
+    /** Hemisphere dome fill — sky/ground ambient into shadows (mesh shader). */
+    void setDomeFillEnabled (bool shouldEnable) noexcept;
+    bool isDomeFillEnabled() const noexcept { return domeFillEnabled; }
+    void setDomeFillStrength (float amount01) noexcept;
+    float getDomeFillStrength() const noexcept { return domeFillStrength; }
+    void setDomeSkyColour (juce::Colour c) noexcept;
+    juce::Colour getDomeSkyColour() const noexcept { return domeSkyColour; }
+    void setDomeGroundColour (juce::Colour c) noexcept;
+    juce::Colour getDomeGroundColour() const noexcept { return domeGroundColour; }
+
+    /**
+        Screen-space GI (soft post path): short ray-march gather for color bleed
+        into shadows. Off by default.
+    */
+    void setSsgiEnabled (bool shouldEnable) noexcept;
+    bool isSsgiEnabled() const noexcept { return ssgiEnabled; }
+    void setSsgiStrength (float amount01) noexcept;
+    float getSsgiStrength() const noexcept { return ssgiStrength; }
+    void setSsgiRadius (float amount01) noexcept;
+    float getSsgiRadius() const noexcept { return ssgiRadius; }
+    void setSsgiQuality (ShadowQuality q) noexcept;
+    ShadowQuality getSsgiQuality() const noexcept { return ssgiQuality; }
 
     void setContactShadowEnabled (bool shouldEnable) noexcept;
     bool isContactShadowEnabled() const noexcept { return contactShadowEnabled; }
@@ -125,6 +160,30 @@ public:
     float getBloomStrength() const noexcept { return bloomStrength; }
     void setBloomThreshold (float amount01) noexcept;
     float getBloomThreshold() const noexcept { return bloomThreshold; }
+
+    /**
+        Soft-path post DOF (EEVEE / Marmoset Post Effect style): thin-lens CoC +
+        disc gather. Focus distance (view Z) + aperture (higher = more blur) +
+        sample quality.
+    */
+    void setDofEnabled (bool shouldEnable) noexcept;
+    bool isDofEnabled() const noexcept { return dofEnabled; }
+    void setDofFocusDistance (float distance, bool notifyPrefsCallback = false) noexcept;
+    float getDofFocusDistance() const noexcept { return dofFocusDistance; }
+    /** Aperture openness 0–1 (Substance-style; higher = shallower DOF / more blur). */
+    void setDofAperture (float amount01) noexcept;
+    float getDofAperture() const noexcept { return dofAperture; }
+    /** @deprecated Prefer setDofAperture — kept for call-site compatibility. */
+    void setDofAmount (float amount01) noexcept { setDofAperture (amount01); }
+    float getDofAmount() const noexcept { return getDofAperture(); }
+    void setDofQuality (ShadowQuality q) noexcept;
+    ShadowQuality getDofQuality() const noexcept { return dofQuality; }
+    static constexpr float kDofFocusMin = 0.5f;
+    static constexpr float kDofFocusMax = 8.0f;
+    /** Tuned for the default camera (~distance 3) — sharp mid mesh, soft waterfall end. */
+    static constexpr float kDofFocusDefault = 2.75f;
+    static constexpr float kDofApertureDefault = 0.35f;
+    static constexpr float kDofAmountDefault = kDofApertureDefault;
 
     /**
         SSS Look toggle. Thickness path follows Closed Mesh:
@@ -200,6 +259,8 @@ public:
     std::function<void()> onDefaultViewChanged;
     /** Fired when turntable enable/period changes (persist prefs). */
     std::function<void()> onAutoRotateSettingsChanged;
+    /** Fired when DOF focus is picked (Ctrl/Cmd+LMB) or otherwise changed with notify. */
+    std::function<void()> onDofFocusChanged;
     /** If set, double-click invokes this instead of resetCamera(). */
     std::function<void()> onDoubleClick;
 
@@ -314,7 +375,13 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourLightingAmountUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSpecularUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourRoughnessUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMetalnessUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourRimUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourLightColourUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourRimColourUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeStrengthUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeSkyUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourDomeGroundUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourHeightMapUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourLightDirWorldUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourSelfShadowUniform;
@@ -437,9 +504,9 @@ private:
     juce::Colour getClearColour() const noexcept;
     void applyBackgroundTransparency() noexcept;
     void layoutPresentation() noexcept;
-    /** Soft FBO→Image path — Soft BG, docked Scope, or when bloom needs a colour target. */
+    /** Soft FBO→Image path — Soft BG, docked Scope, or when bloom/DOF needs a colour+depth target. */
     bool usesSoftComposite() const noexcept;
-    bool needsPostEffects() const noexcept { return bloomEnabled; }
+    bool needsPostEffects() const noexcept { return bloomEnabled || dofEnabled || ssgiEnabled; }
     void markLookDirty() noexcept;
     juce::Rectangle<int> getInnerFrameLocal() const noexcept;
     juce::Rectangle<int> getGlViewLocal() const noexcept;
@@ -473,6 +540,13 @@ private:
     void handleMouseWheel (const juce::MouseWheelDetails& wheel);
     void handleDoubleClick();
     static bool isRightMouse (const juce::MouseEvent& e) noexcept;
+    /** Heightfield sample at world XZ (top surface Y). */
+    float heightAtWorldXZ (float wx, float wz) const noexcept;
+    /**
+        Ctrl/Cmd+LMB: ray-pick the mesh under the cursor and set DOF focus to the
+        view-space distance of the hit (matches the post DOF focus plane).
+    */
+    bool pickDofFocusAtLocalPoint (juce::Point<float> localPos) noexcept;
 
     SpectrogramComponent* dataSource = nullptr;
     SharedResources* theme = nullptr;
@@ -495,7 +569,18 @@ private:
     float lightElevationDeg = 55.0f;
     float specularAmount = 0.35f;
     float roughnessAmount = 0.45f;
+    float metalnessAmount = 0.0f;
     float rimAmount = 0.22f;
+    juce::Colour lightColour { juce::Colours::white };
+    juce::Colour rimColour { juce::Colours::white };
+    bool domeFillEnabled = false;
+    float domeFillStrength = 0.35f;
+    juce::Colour domeSkyColour { 0xff7390bf };    // soft sky blue-grey
+    juce::Colour domeGroundColour { 0xff403328 }; // warm ground
+    bool ssgiEnabled = false;
+    float ssgiStrength = 0.40f;
+    float ssgiRadius = 0.45f;
+    ShadowQuality ssgiQuality = ShadowQuality::medium;
     bool contactShadowEnabled = false;
     float contactShadowStrength = 0.45f;
     bool selfShadowEnabled = false;
@@ -509,6 +594,10 @@ private:
     bool bloomEnabled = false;
     float bloomStrength = 0.45f;
     float bloomThreshold = 0.62f;
+    bool dofEnabled = false;
+    float dofFocusDistance = kDofFocusDefault;
+    float dofAperture = kDofApertureDefault;
+    ShadowQuality dofQuality = ShadowQuality::medium;
 
     bool closedMeshEnabled = false;
     bool sssEnabled = false;
