@@ -133,8 +133,25 @@ public:
     const SharedResources& getSharedResources() const noexcept { return sharedResources; }
 
     /** Expanded/Scope OpenGL spectrogram heightfield. Compact strip stays 2D. */
+    /** Debounced UI prefs write — use after Look scrubbing instead of sync disk I/O. */
+    void requestUiPrefsSave() noexcept;
+
     void setSpec3DMode (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DMode() const noexcept { return spec3DEnabled; }
+    /** Restored floating Spec3D frame (component bounds, includes shadow pad). */
+    bool hasSpec3DFrameBounds() const noexcept { return spec3DBoundsCustom; }
+    int getSpec3DFramePreferredX() const noexcept { return spec3DPreferredX; }
+    int getSpec3DFramePreferredY() const noexcept { return spec3DPreferredY; }
+    int getSpec3DFramePreferredW() const noexcept { return spec3DPreferredW; }
+    int getSpec3DFramePreferredH() const noexcept { return spec3DPreferredH; }
+    void setSpec3DFrameBounds (int x, int y, int w, int h) noexcept
+    {
+        spec3DPreferredX = x;
+        spec3DPreferredY = y;
+        spec3DPreferredW = w;
+        spec3DPreferredH = h;
+        spec3DBoundsCustom = (w > 0 && h > 0);
+    }
     void setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs = true);
     void setSpec3DFreqMeshBias (float amount01, bool notifyPrefs = true);
     float getSpec3DFreqMeshBias() const noexcept;
@@ -248,6 +265,28 @@ public:
     bool isSpec3DSsgiHalfResEnabled() const noexcept;
     void setSpec3DSsgiMeshNormalsEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DSsgiMeshNormalsEnabled() const noexcept;
+    void setSpec3DSsrEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DSsrEnabled() const noexcept;
+    void setSpec3DSsrStrength (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrStrength() const noexcept;
+    void setSpec3DSsrDistance (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrDistance() const noexcept;
+    void setSpec3DSsrThickness (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrThickness() const noexcept;
+    void setSpec3DSsrQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
+    Spectrogram3DComponent::ShadowQuality getSpec3DSsrQuality() const noexcept;
+    void setSpec3DSsrFresnel (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrFresnel() const noexcept;
+    void setSpec3DSsrRoughnessInfluence (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrRoughnessInfluence() const noexcept;
+    void setSpec3DSsrIntensity (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrIntensity() const noexcept;
+    void setSpec3DSsrEdgeFade (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrEdgeFade() const noexcept;
+    void setSpec3DSsrMetallicBias (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrMetallicBias() const noexcept;
+    void setSpec3DSsrDomeFallback (float amount01, bool notifyPrefs = true);
+    float getSpec3DSsrDomeFallback() const noexcept;
     void setSpec3DEnergyConservingEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DEnergyConservingEnabled() const noexcept;
     void setSpec3DTonemapEnabled (bool shouldEnable, bool notifyPrefs = true);
@@ -270,6 +309,30 @@ public:
     float getSpec3DSelfShadowSoftness() const noexcept;
     void setSpec3DSelfShadowQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
     Spectrogram3DComponent::ShadowQuality getSpec3DSelfShadowQuality() const noexcept;
+    void setSpec3DCastShadowsEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DCastShadowsEnabled() const noexcept;
+    void setSpec3DShadowMapResolution (Spectrogram3DComponent::ShadowMapResolution res, bool notifyPrefs = true);
+    Spectrogram3DComponent::ShadowMapResolution getSpec3DShadowMapResolution() const noexcept;
+    void setSpec3DShadowCascadeCount (int count, bool notifyPrefs = true);
+    int getSpec3DShadowCascadeCount() const noexcept;
+    void setSpec3DShadowCascadeDistributionExponent (float exponent, bool notifyPrefs = true);
+    float getSpec3DShadowCascadeDistributionExponent() const noexcept;
+    void setSpec3DShadowCascadeTransitionFraction (float amount01, bool notifyPrefs = true);
+    float getSpec3DShadowCascadeTransitionFraction() const noexcept;
+    void setSpec3DDebugSphereEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DDebugSphereEnabled() const noexcept;
+    void setSpec3DDebugSphereDiameter (float metres, bool notifyPrefs = true);
+    float getSpec3DDebugSphereDiameter() const noexcept;
+    void setSpec3DDebugSpherePosition (juce::Vector3D<float> worldPos, bool notifyPrefs = true);
+    juce::Vector3D<float> getSpec3DDebugSpherePosition() const noexcept;
+    void setSpec3DDebugSphereAlbedo (juce::Colour c, bool notifyPrefs = true);
+    juce::Colour getSpec3DDebugSphereAlbedo() const noexcept;
+    void setSpec3DDebugSphereRoughness (float amount01, bool notifyPrefs = true);
+    float getSpec3DDebugSphereRoughness() const noexcept;
+    void setSpec3DDebugSphereMetalness (float amount01, bool notifyPrefs = true);
+    float getSpec3DDebugSphereMetalness() const noexcept;
+    void setSpec3DDebugSphereSpecular (float amount01, bool notifyPrefs = true);
+    float getSpec3DDebugSphereSpecular() const noexcept;
     void setSpec3DSsaoEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DSsaoEnabled() const noexcept;
     void setSpec3DSsaoStrength (float amount01, bool notifyPrefs = true);
@@ -286,6 +349,11 @@ public:
     bool isSpec3DDofEnabled() const noexcept;
     void setSpec3DDofFocusDistance (float distance, bool notifyPrefs = true);
     float getSpec3DDofFocusDistance() const noexcept;
+    void setSpec3DDofFStop (float fStop, bool notifyPrefs = true);
+    float getSpec3DDofFStop() const noexcept;
+    void setSpec3DDofFocalLengthMm (float mm, bool notifyPrefs = true);
+    float getSpec3DDofFocalLengthMm() const noexcept;
+    /** @deprecated Maps to F-Stop. */
     void setSpec3DDofAperture (float amount01, bool notifyPrefs = true);
     float getSpec3DDofAperture() const noexcept;
     void setSpec3DDofAmount (float amount01, bool notifyPrefs = true);

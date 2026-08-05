@@ -176,6 +176,34 @@ public:
     void setSsgiMeshNormalsEnabled (bool shouldEnable) noexcept;
     bool isSsgiMeshNormalsEnabled() const noexcept { return ssgiMeshNormalsEnabled; }
 
+    /**
+        Screen-space reflections (soft post path): march the reflection ray against
+        depth and sample the colour buffer (key specular, dome-lit surfaces, etc.).
+        On by default. Misses can fall back to dome sky colour.
+    */
+    void setSsrEnabled (bool shouldEnable) noexcept;
+    bool isSsrEnabled() const noexcept { return ssrEnabled; }
+    void setSsrStrength (float amount01) noexcept;
+    float getSsrStrength() const noexcept { return ssrStrength; }
+    void setSsrDistance (float amount01) noexcept;
+    float getSsrDistance() const noexcept { return ssrDistance; }
+    void setSsrThickness (float amount01) noexcept;
+    float getSsrThickness() const noexcept { return ssrThickness; }
+    void setSsrQuality (ShadowQuality q) noexcept;
+    ShadowQuality getSsrQuality() const noexcept { return ssrQuality; }
+    void setSsrFresnel (float amount01) noexcept;
+    float getSsrFresnel() const noexcept { return ssrFresnel; }
+    void setSsrRoughnessInfluence (float amount01) noexcept;
+    float getSsrRoughnessInfluence() const noexcept { return ssrRoughnessInfluence; }
+    void setSsrIntensity (float amount01) noexcept;
+    float getSsrIntensity() const noexcept { return ssrIntensity; }
+    void setSsrEdgeFade (float amount01) noexcept;
+    float getSsrEdgeFade() const noexcept { return ssrEdgeFade; }
+    void setSsrMetallicBias (float amount01) noexcept;
+    float getSsrMetallicBias() const noexcept { return ssrMetallicBias; }
+    void setSsrDomeFallback (float amount01) noexcept;
+    float getSsrDomeFallback() const noexcept { return ssrDomeFallback; }
+
     void setContactShadowEnabled (bool shouldEnable) noexcept;
     bool isContactShadowEnabled() const noexcept { return contactShadowEnabled; }
     void setContactShadowStrength (float amount01) noexcept;
@@ -192,6 +220,44 @@ public:
     float getSelfShadowSoftness() const noexcept { return selfShadowSoftness; }
     void setSelfShadowQuality (ShadowQuality q) noexcept;
     ShadowQuality getSelfShadowQuality() const noexcept { return selfShadowQuality; }
+
+    /**
+        Directional cast-shadow map (CSM): mesh + debug sphere cast/receive via a
+        light-depth atlas. Cascade count splits a fixed shadow distance into N
+        tiles (does not shrink draw distance); each tile is rendered.
+    */
+    static constexpr int kMaxShadowCascades = 4;
+    enum class ShadowMapResolution { r512 = 512, r1024 = 1024, r2048 = 2048, r4096 = 4096 };
+    void setCastShadowsEnabled (bool shouldEnable) noexcept;
+    bool isCastShadowsEnabled() const noexcept { return castShadowsEnabled; }
+    void setShadowMapResolution (ShadowMapResolution res) noexcept;
+    ShadowMapResolution getShadowMapResolution() const noexcept { return shadowMapResolution; }
+    void setShadowCascadeCount (int count) noexcept;
+    int getShadowCascadeCount() const noexcept { return shadowCascadeCount; }
+    void setShadowCascadeDistributionExponent (float exponent) noexcept;
+    float getShadowCascadeDistributionExponent() const noexcept { return shadowCascadeDistributionExponent; }
+    void setShadowCascadeTransitionFraction (float amount01) noexcept;
+    float getShadowCascadeTransitionFraction() const noexcept { return shadowCascadeTransitionFraction; }
+
+    /** Debug lookdev sphere (soft normals) — off by default. */
+    void setDebugSphereEnabled (bool shouldEnable) noexcept;
+    bool isDebugSphereEnabled() const noexcept { return debugSphereEnabled; }
+    void setDebugSphereDiameter (float metres) noexcept;
+    float getDebugSphereDiameter() const noexcept { return debugSphereDiameter; }
+    void setDebugSpherePosition (juce::Vector3D<float> worldPos) noexcept;
+    juce::Vector3D<float> getDebugSpherePosition() const noexcept { return debugSpherePosition; }
+    void setDebugSphereAlbedo (juce::Colour c) noexcept;
+    juce::Colour getDebugSphereAlbedo() const noexcept { return debugSphereAlbedo; }
+    void setDebugSphereRoughness (float amount01) noexcept;
+    float getDebugSphereRoughness() const noexcept { return debugSphereRoughness; }
+    void setDebugSphereMetalness (float amount01) noexcept;
+    float getDebugSphereMetalness() const noexcept { return debugSphereMetalness; }
+    void setDebugSphereSpecular (float amount01) noexcept;
+    float getDebugSphereSpecular() const noexcept { return debugSphereSpecular; }
+    /** Default diameter = 1/12 of the 2 m waterfall footprint. */
+    static constexpr float kDebugSphereDefaultDiameter = 2.0f / 12.0f;
+    static constexpr float kDebugSphereMinDiameter = 0.02f;
+    static constexpr float kDebugSphereMaxDiameter = 1.5f;
 
     void setSsaoEnabled (bool shouldEnable) noexcept;
     bool isSsaoEnabled() const noexcept { return ssaoEnabled; }
@@ -216,21 +282,35 @@ public:
     bool isDofEnabled() const noexcept { return dofEnabled; }
     void setDofFocusDistance (float distance, bool notifyPrefsCallback = false) noexcept;
     float getDofFocusDistance() const noexcept { return dofFocusDistance; }
-    /** Aperture openness 0–1 (Substance-style; higher = shallower DOF / more blur). */
-    void setDofAperture (float amount01) noexcept;
-    float getDofAperture() const noexcept { return dofAperture; }
-    /** @deprecated Prefer setDofAperture — kept for call-site compatibility. */
-    void setDofAmount (float amount01) noexcept { setDofAperture (amount01); }
+    /**
+        Photography-style F-Stop (Marmoset). Lower = shallower DOF / more blur;
+        higher = wider sharp band. Typical range f/1.4–f/22.
+    */
+    void setDofFStop (float fStop) noexcept;
+    float getDofFStop() const noexcept { return dofFStop; }
+    /**
+        Focal length in mm (DOF scale only — does not change orbit FOV).
+        Longer = shallower feel at the same F-Stop.
+    */
+    void setDofFocalLengthMm (float mm) noexcept;
+    float getDofFocalLengthMm() const noexcept { return dofFocalLengthMm; }
+    /** Combined thin-lens power passed to the CoC shader: (f/35)² / (N/5.6). */
+    float getDofLensPower() const noexcept;
+    /** @deprecated Maps to F-Stop; prefer setDofFStop. */
+    void setDofAperture (float amount) noexcept;
+    float getDofAperture() const noexcept;
+    /** @deprecated Prefer setDofFStop. */
+    void setDofAmount (float amount) noexcept { setDofAperture (amount); }
     float getDofAmount() const noexcept { return getDofAperture(); }
     void setDofQuality (ShadowQuality q) noexcept;
     ShadowQuality getDofQuality() const noexcept { return dofQuality; }
-    /** Scales max CoC blur radius (1 = quality default). Useful for far-camera tuning. */
+    /** @deprecated No-op — blur scale removed. */
     void setDofBlurScale (float scale) noexcept;
-    float getDofBlurScale() const noexcept { return dofBlurScale; }
-    /** Neighbour CoC dilation for silhouette gather (0 = off, 1 = full). */
+    float getDofBlurScale() const noexcept { return 1.0f; }
+    /** Neighbour CoC dilation for Soft BG silhouette gather (0 = off, 1 = full). */
     void setDofCocDilate (float amount01) noexcept;
     float getDofCocDilate() const noexcept { return dofCocDilate; }
-    /** How strongly out-of-focus mesh spills onto background / Soft BG edges. */
+    /** How strongly out-of-focus mesh spills onto Soft BG / sky edges. */
     void setDofEdgeSpill (float amount01) noexcept;
     float getDofEdgeSpill() const noexcept { return dofEdgeSpill; }
 
@@ -252,13 +332,26 @@ public:
     void setColorGrade (ColorGrade grade) noexcept;
     ColorGrade getColorGrade() const noexcept { return colorGrade; }
 
+    /**
+        Focus distance in metres (1 world unit = 1 m for thin-lens DOF).
+        Mesh footprint is 2×2 m (X time × Z frequency); default peak height ≈ 0.55 m.
+    */
     static constexpr float kDofFocusMin = 0.5f;
     /** Match camera dolly max so far framing can still place focus on the mesh. */
     static constexpr float kDofFocusMax = 14.0f;
-    /** Tuned for the default camera (~distance 3) — sharp mid mesh, soft waterfall end. */
+    /** Tuned for the default camera (~3.4 m) — sharp mid mesh, soft waterfall end. */
     static constexpr float kDofFocusDefault = 2.75f;
+    static constexpr float kDofFStopMin = 1.4f;
+    static constexpr float kDofFStopMax = 22.0f;
+    static constexpr float kDofFStopDefault = 5.6f;
+    static constexpr float kDofFocalLengthMinMm = 18.0f;
+    static constexpr float kDofFocalLengthMaxMm = 85.0f;
+    static constexpr float kDofFocalLengthDefaultMm = 35.0f;
+    /** @deprecated Legacy 0–3 openness; migrated to F-Stop. */
     static constexpr float kDofApertureDefault = 0.35f;
+    static constexpr float kDofApertureMax = 3.0f;
     static constexpr float kDofAmountDefault = kDofApertureDefault;
+    /** @deprecated Blur scale removed; kept for prefs XML defaults only. */
     static constexpr float kDofBlurScaleDefault = 1.0f;
     static constexpr float kDofCocDilateDefault = 0.85f;
     static constexpr float kDofEdgeSpillDefault = 0.55f;
@@ -426,6 +519,8 @@ public:
     CameraState getDefaultCameraState() const noexcept { return defaultCamera; }
     CameraState getCameraState() const noexcept { return camera; }
     static CameraState getFactoryCameraState() noexcept;
+    /** Vertical drag from the magnifying-glass control (wheel-equivalent zoom). */
+    void applyUiZoomDrag (float deltaY) noexcept;
 
     std::function<void()> onEscape;
     std::function<void()> onUserResized;
@@ -435,6 +530,8 @@ public:
     std::function<void()> onAutoRotateSettingsChanged;
     /** Fired when DOF focus is picked (Ctrl/Cmd+LMB) or otherwise changed with notify. */
     std::function<void()> onDofFocusChanged;
+    /** Fired when the debug sphere is moved via gizmo (settings sync). */
+    std::function<void()> onDebugSphereChanged;
     /** If set, double-click invokes this instead of resetCamera(). */
     std::function<void()> onDoubleClick;
 
@@ -484,17 +581,22 @@ private:
         bool isGlReady() const noexcept { return glReady; }
         bool hasContextFailed() const noexcept { return contextFailed; }
         void markSoftContentDirty() noexcept { softContentDirty = true; }
+        void markDebugSphereDirty() noexcept { sphereNeedsUpload = true; }
         void invalidateSsgiHistory() noexcept
         {
             ssgiHistoryValid = false;
             ssgiMomentsValid = false;
         }
+        bool projectWorldToNdc (float wx, float wy, float wz,
+                                float& ndcX, float& ndcY, float& ndcZ) const;
 
         void newOpenGLContextCreated() override;
         void renderOpenGL() override;
         void openGLContextClosing() override;
 
         void mouseDown (const juce::MouseEvent& e) override;
+        void mouseMove (const juce::MouseEvent& e) override;
+        void mouseExit (const juce::MouseEvent& e) override;
         void mouseDrag (const juce::MouseEvent& e) override;
         void mouseUp (const juce::MouseEvent& e) override;
         void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
@@ -511,16 +613,31 @@ private:
         void ensureLabelAtlas();
         void drawSoftTint();
         void drawGroundAndGrid();
+        void drawPlayheadTicks();
         void drawContactShadow();
         void drawMesh();
+        void drawDebugSphere();
+        void drawDebugGizmo();
+        void setGizmoXrayUniforms (bool insideGhostPass) const;
         void drawFrequencyLabels();
+        void ensureShadowAtlas();
+        void releaseShadowAtlas();
+        void updateCascadeMatrices();
+        void renderShadowDepthPass();
+        void drawMeshIntoShadow (const juce::Matrix3D<float>& lightVP) const;
+        void drawSphereIntoShadow (const juce::Matrix3D<float>& lightVP) const;
+        void ensureDebugSphereGeometry();
+        void uploadDebugSphereWorldVerts();
+        void bindShadowAtlasForMesh() const;
         void setCornerUniforms (juce::OpenGLShaderProgram& program) const;
         void setLightingUniforms (juce::OpenGLShaderProgram& program) const;
+        void setCastShadowUniforms (juce::OpenGLShaderProgram& program) const;
+        void setMaterialOverrideUniforms (bool enabled, juce::Colour albedo,
+                                         float roughness, float metalness,
+                                         float specular = 1.0f) const;
         juce::Matrix3D<float> getProjectionMatrix() const;
         juce::Matrix3D<float> getViewMatrix() const;
         juce::Vector3D<float> getLightDirectionWorld() const noexcept;
-        bool projectWorldToNdc (float wx, float wy, float wz,
-                                float& ndcX, float& ndcY, float& ndcZ) const;
         juce::Rectangle<int> getViewPixelBounds() const noexcept;
         void ensureSoftFrameBuffer (int width, int height);
         void ensureSoftMsaaBuffers (int width, int height, int samples);
@@ -613,6 +730,8 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> labelPositionAttrib;
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> labelTexAttrib;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelTexUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelProjectionUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelViewUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelResolutionUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelCornerUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> labelClearUniform;
@@ -651,9 +770,51 @@ private:
         unsigned int meshVbo = 0, meshIbo = 0;
         unsigned int floorVbo = 0;
         unsigned int labelVbo = 0;
+        unsigned int sphereVbo = 0, sphereIbo = 0;
+        unsigned int gizmoVbo = 0, gizmoIbo = 0;
         int meshIndexCount = 0;
         int floorVertexCount = 0;
+        int sphereIndexCount = 0;
+        int gizmoIndexCount = 0;
         bool meshNeedsUpload = false;
+        bool sphereNeedsUpload = true;
+
+        unsigned int shadowFbo = 0;
+        unsigned int shadowDepthTex = 0;
+        int shadowAtlasW = 0;
+        int shadowAtlasH = 0;
+        int shadowTileRes = 0;
+        int shadowAtlasCascades = 0;
+        juce::Matrix3D<float> shadowMatrix[kMaxShadowCascades] {};
+        float cascadeSplitFar[kMaxShadowCascades] {};
+        int cascadesBuilt = 0;
+
+        std::unique_ptr<juce::OpenGLShaderProgram> shadowDepthShader;
+        std::unique_ptr<juce::OpenGLShaderProgram::Attribute> shadowDepthPositionAttrib;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> shadowDepthLightVpUniform;
+
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowAtlasUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourCastShadowUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowMatrix0Uniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowMatrix1Uniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowMatrix2Uniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowMatrix3Uniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourCascadeSplitsUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourCascadeCountUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourCascadeTransitionUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourShadowAtlasTilesUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourCastBiasUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourCastSoftnessUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourViewZUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMatOverrideUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMatAlbedoUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMatRoughUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMatMetalUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourMatSpecularUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourGizmoXrayUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourXrayCenterUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourXrayRadiusUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colourXrayAlphaUniform;
 
         juce::OpenGLTexture labelAtlas;
         juce::OpenGLFrameBuffer softFbo;
@@ -695,6 +856,8 @@ private:
         bool floorGridLog = true;
         bool floorGridSoftBg = false;
         bool floorGridReverseFreq = true;
+        /** Bump when soft-floor ribbon layout changes (forces VBO rebuild). */
+        int floorRibbonEpoch = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GlHost)
     };
@@ -705,6 +868,8 @@ private:
     public:
         explicit HitLayer (Spectrogram3DComponent& owner);
         void mouseDown (const juce::MouseEvent& e) override;
+        void mouseMove (const juce::MouseEvent& e) override;
+        void mouseExit (const juce::MouseEvent& e) override;
         void mouseDrag (const juce::MouseEvent& e) override;
         void mouseUp (const juce::MouseEvent& e) override;
         void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
@@ -734,7 +899,7 @@ private:
     bool usesSoftComposite() const noexcept;
     bool needsPostEffects() const noexcept
     {
-        return bloomEnabled || dofEnabled || ssgiEnabled || tonemapEnabled;
+        return bloomEnabled || dofEnabled || ssgiEnabled || ssrEnabled || tonemapEnabled;
     }
     bool needsAdvancedSsgi() const noexcept
     {
@@ -769,6 +934,8 @@ private:
     static juce::String formatGridHz (float hz);
 
     void handleMouseDown (const juce::MouseEvent& e);
+    void handleMouseMove (const juce::MouseEvent& e);
+    void handleMouseExit();
     void handleMouseDrag (const juce::MouseEvent& e);
     void handleMouseUp (const juce::MouseEvent& e);
     void handleMouseWheel (const juce::MouseWheelDetails& wheel);
@@ -831,6 +998,17 @@ private:
     ShadowQuality ssgiAtrousQuality = ShadowQuality::medium;
     bool ssgiHalfResEnabled = false;
     bool ssgiMeshNormalsEnabled = false;
+    bool ssrEnabled = true;
+    float ssrStrength = 0.55f;
+    float ssrDistance = 0.55f;
+    float ssrThickness = 0.40f;
+    ShadowQuality ssrQuality = ShadowQuality::medium;
+    float ssrFresnel = 0.75f;
+    float ssrRoughnessInfluence = 0.85f;
+    float ssrIntensity = 1.0f;
+    float ssrEdgeFade = 0.15f;
+    float ssrMetallicBias = 0.35f;
+    float ssrDomeFallback = 0.65f;
     bool contactShadowEnabled = false;
     float contactShadowStrength = 0.45f;
     bool selfShadowEnabled = false;
@@ -838,6 +1016,18 @@ private:
     float selfShadowBias = 0.35f;       // acne / self-intersection bias
     float selfShadowSoftness = 0.85f;   // terminator / penumbra width (higher = softer)
     ShadowQuality selfShadowQuality = ShadowQuality::medium;
+    bool castShadowsEnabled = false;
+    ShadowMapResolution shadowMapResolution = ShadowMapResolution::r1024;
+    int shadowCascadeCount = 1;
+    float shadowCascadeDistributionExponent = 3.0f;
+    float shadowCascadeTransitionFraction = 0.10f;
+    bool debugSphereEnabled = false;
+    float debugSphereDiameter = kDebugSphereDefaultDiameter;
+    juce::Vector3D<float> debugSpherePosition { 0.6f, kDebugSphereDefaultDiameter * 0.5f, 0.6f };
+    juce::Colour debugSphereAlbedo { juce::Colours::white };
+    float debugSphereRoughness = 0.70f;
+    float debugSphereMetalness = 0.0f;
+    float debugSphereSpecular = 1.0f;
     bool ssaoEnabled = false;
     float ssaoStrength = 0.55f;
     float ssaoRadius = 1.0f;
@@ -846,9 +1036,9 @@ private:
     float bloomThreshold = 0.62f;
     bool dofEnabled = false;
     float dofFocusDistance = kDofFocusDefault;
-    float dofAperture = kDofApertureDefault;
+    float dofFStop = kDofFStopDefault;
+    float dofFocalLengthMm = kDofFocalLengthDefaultMm;
     ShadowQuality dofQuality = ShadowQuality::medium;
-    float dofBlurScale = kDofBlurScaleDefault;
     float dofCocDilate = kDofCocDilateDefault;
     float dofEdgeSpill = kDofEdgeSpillDefault;
     bool tonemapEnabled = false;
@@ -932,8 +1122,16 @@ private:
     juce::Point<float> rightClickStart {};
     bool rightClickCandidate = false;
     bool rightClickDragged = false;
-    enum class DragMode { none, orbit, pan, screenPan, dolly };
+    enum class DragMode { none, orbit, pan, screenPan, dolly, gizmoX, gizmoY, gizmoZ };
     DragMode dragMode = DragMode::none;
+    DragMode gizmoHoverAxis = DragMode::none;
+    DragMode hitTestDebugGizmo (juce::Point<float> localPos) const noexcept;
+    bool tryPickDebugGizmo (juce::Point<float> localPos) noexcept;
+    void updateGizmoHover (juce::Point<float> localPos) noexcept;
+    bool isGizmoXrayActive() const noexcept;
+    void dragDebugGizmo (juce::Point<float> localPos) noexcept;
+    juce::Point<float> gizmoDragStartPos {};
+    juce::Vector3D<float> gizmoDragStartSpherePos {};
     /** Elevation above the horizon (0 = edge-on to the floor, 90 = top-down). */
     static constexpr float kMinPitchDeg = 5.0f;
     static constexpr float kMaxPitchDeg = 89.0f;
@@ -943,6 +1141,7 @@ private:
     bool movingByChrome = false;
 
     std::unique_ptr<juce::ResizableCornerComponent> resizer;
+    std::unique_ptr<juce::Component> zoomHandle;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Spectrogram3DComponent)
 };

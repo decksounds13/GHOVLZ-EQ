@@ -147,6 +147,7 @@
     <ClCompile Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.cpp"/>
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp"/>
     <ClCompile Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.cpp"/>
+    <ClCompile Include="..\..\Source\Menu\Gui\Spectrogram3DDebugComponent.cpp"/>
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp"/>
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp"/>
@@ -3477,6 +3478,7 @@
     <ClInclude Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.h"/>
+    <ClInclude Include="..\..\Source\Menu\Gui\Spectrogram3DDebugComponent.h"/>
     <ClInclude Include="..\..\Source\GoniometerComponent.h"/>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h"/>

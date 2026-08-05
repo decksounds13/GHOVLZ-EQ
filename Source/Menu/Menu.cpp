@@ -6,6 +6,7 @@
 #include "Gui/GoniometerSettingsComponent.h"
 #include "Gui/SpectrogramSettingsComponent.h"
 #include "Gui/Spectrogram3DSettingsComponent.h"
+#include "Gui/Spectrogram3DDebugComponent.h"
 #include "Gui/LevelMetersComponent.h"
 #include "Gui/LoudnessSettingsComponent.h"
 #include "Gui/StereogramSettingsComponent.h"
@@ -43,6 +44,7 @@ Menu::Menu (SharedResources& resources,
     addOwnedTab ("Goniometer", new GoniometerSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Spectrogram", new SpectrogramSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("3D Spectrogram", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
+    addOwnedTab ("3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
     addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state));
     addOwnedTab ("Loudness", new LoudnessSettingsComponent (resources, state));
     addOwnedTab ("Stereogram", new StereogramSettingsComponent (resources, state, colourRamps));
@@ -103,6 +105,20 @@ Menu::Menu (SharedResources& resources,
 ThemeList* Menu::getThemeList() const noexcept
 {
     return appearanceComponentRef != nullptr ? &appearanceComponentRef->getThemeList() : nullptr;
+}
+
+void Menu::syncSpec3DDofFocusFromMain()
+{
+    for (auto& tab : ownedTabContents)
+        if (auto* s3d = dynamic_cast<Spectrogram3DSettingsComponent*> (tab.get()))
+            s3d->syncDofFocusFromMain();
+}
+
+void Menu::syncSpec3DDebugSphereFromMain()
+{
+    for (auto& tab : ownedTabContents)
+        if (auto* dbg = dynamic_cast<Spectrogram3DDebugComponent*> (tab.get()))
+            dbg->syncDebugSphereFromMain();
 }
 
 Menu::~Menu()
@@ -349,6 +365,8 @@ int Menu::getActiveTabPreferredContentHeight() const
         return t->getPreferredContentHeight();
     if (auto* t = dynamic_cast<Spectrogram3DSettingsComponent*> (c))
         return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<Spectrogram3DDebugComponent*> (c))
+        return t->getPreferredContentHeight();
     if (auto* t = dynamic_cast<LevelMetersComponent*> (c))
         return t->getPreferredContentHeight();
     if (auto* t = dynamic_cast<LoudnessSettingsComponent*> (c))
@@ -394,6 +412,8 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
         // so the scrollbar range is correct without a manual resize.
         if (auto* s3d = dynamic_cast<Spectrogram3DSettingsComponent*> (c))
             s3d->syncFromMain();
+        if (auto* dbg = dynamic_cast<Spectrogram3DDebugComponent*> (c))
+            dbg->syncFromMain();
         c->resized();
     }
 

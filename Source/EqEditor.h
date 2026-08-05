@@ -71,7 +71,10 @@ public:
     void setThemeColors (SharedResources* r) noexcept;
 
     void loadUiPrefs();
+    /** Immediate prefs write (shutdown / explicit). Prefer requestSaveUiPrefs while scrubbing UI. */
     void saveUiPrefs() const;
+    /** Coalesce rapid Look/settings changes into one disk write (avoids hitching sliders). */
+    void requestSaveUiPrefs() noexcept;
     void syncScopeModeButton();
     void showScopeTapMenu();
     /** Re-layout brand + bottom chrome after Scope mode toggles (hide logo, shift ? cluster). */
@@ -441,6 +444,8 @@ private:
     bool isButtonUpdate = false;
 
     bool hasForcedRepaint = false;
+    mutable bool uiPrefsSavePending = false;
+    mutable juce::uint32 uiPrefsSaveDueMs = 0;
 
     std::unique_ptr<BandNumberButton> onOffButton1;
     std::unique_ptr<BandNumberButton> onOffButton2;

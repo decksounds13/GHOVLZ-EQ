@@ -47,6 +47,10 @@ public:
 
     AppearanceComponent* getAppearanceComponent() const noexcept { return appearanceComponentRef; }
     ThemeList* getThemeList() const noexcept;
+    /** Push Spec3D DOF focus into the settings slider (Ctrl/Cmd+LMB pick). */
+    void syncSpec3DDofFocusFromMain();
+    /** Push Spec3D debug-sphere pose into the 3D Debug tab (gizmo drag). */
+    void syncSpec3DDebugSphereFromMain();
 
     /** Fixed design size of the scrolled content (not the outer frame). */
     static juce::Rectangle<int> getContentDesignBounds() noexcept

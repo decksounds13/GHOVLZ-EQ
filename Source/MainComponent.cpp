@@ -14,7 +14,7 @@
 
 namespace
 {
-    /** Right-click Rename / Duplicate / Delete — always parented inside the UI theme panel. */
+    /** Right-click Rename / Duplicate / Delete â€” always parented inside the UI theme panel. */
     class ThemePresetContextPanel final : public juce::Component
     {
     public:
@@ -768,7 +768,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     menuDismissCatcher.setVisible (false);
     addChildComponent (menuDismissCatcher);
 
-    // Top chrome: Bypass (left) + A/B/C/D referencing — same look as graph range buttons / Settings area.
+    // Top chrome: Bypass (left) + A/B/C/D referencing â€” same look as graph range buttons / Settings area.
     styleChromeButton (bypassButton);
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip ("Bypass - pass audio through unaffected");
@@ -800,7 +800,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     setupAbButton (slotDButton, EqProcessor::AbSlot::D);
     syncAbButtons();
 
-    // Preset chrome: ◀ | editable name | ▼ | ▶ | Save — EQ/functionality only (UI themes are separate).
+    // Preset chrome: â—€ | editable name | â–¼ | â–¶ | Save â€” EQ/functionality only (UI themes are separate).
     auto setupPresetNavButton = [this] (juce::TextButton& button, int delta, const juce::String& tip)
     {
         styleChromeButton (button);
@@ -861,7 +861,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     refreshPresetNameDisplay();
 
-    // Undo / Redo — top right, just left of Settings.
+    // Undo / Redo â€” top right, just left of Settings.
     styleChromeButton (undoButton);
     undoButton.setTooltip ("Undo");
     undoButton.setAlwaysOnTop (true);
@@ -886,7 +886,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     processor.getUndoManager().addChangeListener (this);
     syncUndoRedoButtons();
 
-    // Eco — same Y as Bypass, X just right of Save. Disables analyser/FFT + all scopes.
+    // Eco â€” same Y as Bypass, X just right of Save. Disables analyser/FFT + all scopes.
     styleChromeButton (ecoButton);
     ecoButton.setClickingTogglesState (true);
     ecoButton.setTooltip ("Eco - disables analyser, spectrum, and all scopes to save CPU. Dynamic (D) and Spectral (S) still work.");
@@ -897,7 +897,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     addAndMakeVisible (ecoButton);
 
-    // OSC — slightly smaller than Eco; reveals waveform strip + zoom / mode / expand buttons.
+    // OSC â€” slightly smaller than Eco; reveals waveform strip + zoom / mode / expand buttons.
     styleChromeButton (oscButton);
     oscButton.setClickingTogglesState (true);
     oscButton.setTooltip ("Enables oscilloscope");
@@ -948,7 +948,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     addChildComponent (oscChannelModeButton);
     addChildComponent (oscExpandButton);
 
-    // Gon — under OSC; mutually exclusive with spectrum analyser.
+    // Gon â€” under OSC; mutually exclusive with spectrum analyser.
     styleChromeButton (gonButton);
     gonButton.setClickingTogglesState (true);
     gonButton.setTooltip ("Goniometer - stereo image + correlation");
@@ -971,7 +971,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     gonExpandButton.setVisible (false);
     addChildComponent (gonExpandButton);
 
-    // Spec — spectrogram strip between UI dice and EQ preset bar.
+    // Spec â€” spectrogram strip between UI dice and EQ preset bar.
     styleChromeButton (specButton);
     specButton.setClickingTogglesState (true);
     specButton.setTooltip ("Spectrogram - scrolling frequency waterfall");
@@ -1147,9 +1147,18 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.setAlwaysOnTop (false);
     spectrogram3D.setAudioLevelProvider ([this] { return processor.getSpec3DVisualLevel01(); });
     spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
-    spectrogram3D.onDefaultViewChanged = [this] { editor.saveUiPrefs(); };
-    spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.saveUiPrefs(); };
-    spectrogram3D.onDofFocusChanged = [this] { editor.saveUiPrefs(); };
+    spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
+    spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.requestSaveUiPrefs(); };
+    spectrogram3D.onDofFocusChanged = [this]
+    {
+        editor.requestSaveUiPrefs();
+        menu.syncSpec3DDofFocusFromMain();
+    };
+    spectrogram3D.onDebugSphereChanged = [this]
+    {
+        editor.requestSaveUiPrefs();
+        menu.syncSpec3DDebugSphereFromMain();
+    };
     spectrogram3D.onDoubleClick = [this]
     {
         if (scopeModeEnabled)
@@ -1469,7 +1478,7 @@ void MainComponent::setOscExpanded (bool shouldExpand, bool notifyPrefs)
     if (shouldExpand)
         grabKeyboardFocus();
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::setGonExpanded (bool shouldExpand, bool notifyPrefs)
@@ -1497,7 +1506,7 @@ void MainComponent::setGonExpanded (bool shouldExpand, bool notifyPrefs)
     if (shouldExpand)
         grabKeyboardFocus();
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::setSpecExpanded (bool shouldExpand, bool notifyPrefs)
@@ -1525,7 +1534,7 @@ void MainComponent::setSpecExpanded (bool shouldExpand, bool notifyPrefs)
     if (shouldExpand)
         grabKeyboardFocus();
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::toggleOscFullGraph()
@@ -1576,7 +1585,7 @@ bool MainComponent::isPointOverSettingsDismissExempt (int catcherX, int catcherY
         return c.isShowing() && c.getBounds().contains (local);
     };
 
-    // Floating / docked 3D spectrogram — keep Settings open for lookdev while orbiting.
+    // Floating / docked 3D spectrogram â€” keep Settings open for lookdev while orbiting.
     if (over (spectrogram3D))
         return true;
 
@@ -1757,10 +1766,17 @@ void MainComponent::layoutFramedScopeWindow (FramedFloatingScopeWindow& frame,
     frame.setResizeLimits (juce::jmax (180, area.getWidth() - toolW), area.getHeight());
     frame.setMovementBounds (area);
 
+    auto centeredXY = [&] (int fw, int fh) -> juce::Point<int>
+    {
+        return { area.getX() + juce::jmax (0, (area.getWidth() - toolW - fw) / 2),
+                 area.getY() + juce::jmax (0, (area.getHeight() - fh) / 3) };
+    };
+
     int w = defaultW;
     int h = defaultH;
-    int frameX = area.getX() + juce::jmax (0, (area.getWidth() - toolW - w) / 2);
-    int frameY = area.getY() + juce::jmax (0, (area.getHeight() - h) / 3);
+    auto c0 = centeredXY (w, h);
+    int frameX = c0.x;
+    int frameY = c0.y;
 
     if (boundsCustom && prefW > 0 && prefH > 0)
     {
@@ -1783,8 +1799,21 @@ void MainComponent::layoutFramedScopeWindow (FramedFloatingScopeWindow& frame,
     const int maxW = juce::jmax (180, area.getWidth() - toolW);
     w = juce::jlimit (180, maxW, w);
     h = juce::jlimit (120, area.getHeight(), h);
-    frameX = juce::jlimit (area.getX(), area.getRight() - w - toolW, frameX);
-    frameY = juce::jlimit (area.getY(), area.getBottom() - h, frameY);
+    const int minX = area.getX();
+    const int maxX = area.getRight() - w - toolW;
+    const int minY = area.getY();
+    const int maxY = area.getBottom() - h;
+    frameX = juce::jlimit (minX, maxX, frameX);
+    frameY = juce::jlimit (minY, maxY, frameY);
+    // Reject corner pins from stale prefs / first-layout 0,0.
+    if (! boundsCustom || prefW <= 0 || prefH <= 0
+        || (frameX <= minX + 8 && (frameY <= minY + 8 || frameY >= maxY - 8))
+        || (frameY >= maxY - 8 && frameX <= minX + 24))
+    {
+        const auto c = centeredXY (w, h);
+        frameX = c.x;
+        frameY = c.y;
+    }
 
     frame.setBounds (frameX, frameY, w, h);
     clampComponentWithToolColumn (frame, toolW);
@@ -1921,7 +1950,7 @@ int MainComponent::getTopChromeClearY() const
 
 void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
 {
-    // OpenGL peer is inset inside spectrogram3D's framed window — keep tools / Settings
+    // OpenGL peer is inset inside spectrogram3D's framed window â€” keep tools / Settings
     // outside the GL host rect (native HWND ignores JUCE z-order).
     auto area = getExpandedScopeContentBounds();
     if (area.isEmpty())
@@ -1929,7 +1958,7 @@ void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
 
     area.setTop (juce::jmax (area.getY(), getTopChromeClearY()));
 
-    // Match / Mod / P / Help / SideCheck sit above the piano — keep GL clear of that row.
+    // Match / Mod / P / Help / SideCheck sit above the piano â€” keep GL clear of that row.
     const int bottomChrome = frequencyResponseComponent.getBottomGraphChromeHeight();
     if (bottomChrome > 0 && area.getHeight() > bottomChrome + 40)
         area.removeFromBottom (bottomChrome);
@@ -1953,17 +1982,49 @@ void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
 
     const int maxFrameW = juce::jmax (220, area.getWidth() - toolW);
 
-    // Restore the user's preferred size/position when it fits; otherwise fill.
-    int w = maxFrameW;
-    int h = area.getHeight();
-    int frameX = area.getX();
-    int frameY = area.getY();
+    // Default: centered floating window (same idea as osc/gon framed scopes).
+    auto centeredXY = [&] (int fw, int fh) -> juce::Point<int>
+    {
+        return { area.getX() + juce::jmax (0, (area.getWidth() - toolW - fw) / 2),
+                 area.getY() + juce::jmax (0, (area.getHeight() - fh) / 3) };
+    };
+
+    int w = juce::jlimit (220, maxFrameW, juce::jmin (maxFrameW, juce::jmax (420, area.getWidth() * 2 / 3)));
+    int h = juce::jlimit (160, area.getHeight(), juce::jmin (area.getHeight(), juce::jmax (280, area.getHeight() * 2 / 3)));
+    auto c0 = centeredXY (w, h);
+    int frameX = c0.x;
+    int frameY = c0.y;
+
     if (spec3DBoundsCustom && spec3DPreferredW > 0 && spec3DPreferredH > 0)
     {
         w = juce::jlimit (220, maxFrameW, spec3DPreferredW);
         h = juce::jlimit (160, area.getHeight(), spec3DPreferredH);
-        frameX = juce::jlimit (area.getX(), area.getRight() - w - toolW, spec3DPreferredX);
-        frameY = juce::jlimit (area.getY(), area.getBottom() - h, spec3DPreferredY);
+        const int minX = area.getX();
+        const int maxX = area.getRight() - w - toolW;
+        const int minY = area.getY();
+        const int maxY = area.getBottom() - h;
+        // 0,0 / missing = never placed. Also reject corner-clamped restores (lower/upper
+        // left) which read as "stuck in the corner" after session load.
+        const bool hasSavedPos = spec3DPreferredX > minX + 4 || spec3DPreferredY > minY + 4;
+        if (hasSavedPos)
+        {
+            frameX = juce::jlimit (minX, maxX, spec3DPreferredX);
+            frameY = juce::jlimit (minY, maxY, spec3DPreferredY);
+            const bool pinnedCorner = (frameX <= minX + 8 && (frameY <= minY + 8 || frameY >= maxY - 8))
+                                   || (frameY >= maxY - 8 && frameX <= minX + 24);
+            if (pinnedCorner)
+            {
+                const auto c = centeredXY (w, h);
+                frameX = c.x;
+                frameY = c.y;
+            }
+        }
+        else
+        {
+            const auto c = centeredXY (w, h);
+            frameX = c.x;
+            frameY = c.y;
+        }
     }
 
     const auto placed = juce::Rectangle<int> (frameX, frameY, w, h);
@@ -2024,7 +2085,7 @@ void MainComponent::syncSpec3DPresentation()
     spectrogram3D.setActive (show3D);
     spectrogram3D.setVisible (show3D);
 
-    // Mesh history comes from the 2D spectrogram feeder — keep analysing whenever 3D is up.
+    // Mesh history comes from the 2D spectrogram feeder â€” keep analysing whenever 3D is up.
     if (show3D)
         spectrogram.setEnabled (true);
 
@@ -2058,6 +2119,11 @@ void MainComponent::syncSpec3DPresentation()
     }
 }
 
+void MainComponent::requestUiPrefsSave() noexcept
+{
+    editor.requestSaveUiPrefs();
+}
+
 void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
 {
     if (scopeModeEnabled)
@@ -2082,14 +2148,14 @@ void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
     resized();
     syncExpandedOscOverlayStack();
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs)
 {
     spectrogram3D.setMeshQuality (q);
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 Spectrogram3DComponent::MeshQuality MainComponent::getSpec3DMeshQuality() const noexcept
@@ -2101,7 +2167,7 @@ void MainComponent::setSpec3DFreqMeshBias (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setFreqMeshBias (amount01);
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 float MainComponent::getSpec3DFreqMeshBias() const noexcept
@@ -2113,7 +2179,7 @@ void MainComponent::setSpec3DFreqMeshBiasPivot (float pivot01, bool notifyPrefs)
 {
     spectrogram3D.setFreqMeshBiasPivot (pivot01);
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 float MainComponent::getSpec3DFreqMeshBiasPivot() const noexcept
@@ -2125,7 +2191,7 @@ void MainComponent::setSpec3DMsaaLevel (Spectrogram3DComponent::MsaaLevel level,
 {
     spectrogram3D.setMsaaLevel (level);
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 Spectrogram3DComponent::MsaaLevel MainComponent::getSpec3DMsaaLevel() const noexcept
@@ -2142,7 +2208,7 @@ void MainComponent::setSpec3DTransparentBackground (bool shouldEnable, bool noti
 {
     spectrogram3D.setTransparentBackground (shouldEnable);
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 bool MainComponent::isSpec3DTransparentBackground() const noexcept
@@ -2154,7 +2220,7 @@ void MainComponent::setSpec3DReverseFrequencyAxis (bool shouldReverse, bool noti
 {
     spectrogram3D.setReverseFrequencyAxis (shouldReverse);
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 bool MainComponent::isSpec3DReverseFrequencyAxis() const noexcept
@@ -2166,7 +2232,7 @@ void MainComponent::setSpec3DMeshHeight (float heightWorld, bool notifyPrefs)
 {
     spectrogram3D.setMeshHeight (heightWorld);
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 float MainComponent::getSpec3DMeshHeight() const noexcept
@@ -2177,7 +2243,7 @@ float MainComponent::getSpec3DMeshHeight() const noexcept
 void MainComponent::setSpec3DClosedMeshEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setClosedMeshEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DClosedMeshEnabled() const noexcept
 {
@@ -2244,7 +2310,7 @@ void MainComponent::setSpec3DAudioLevelModEnabled (bool shouldEnable, bool notif
 {
     spectrogram3D.setAudioLevelModEnabled (shouldEnable);
     syncSpec3DAudioSidechainToProcessor();
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DAudioLevelModEnabled() const noexcept
 {
@@ -2255,7 +2321,7 @@ void MainComponent::setSpec3DAudioLevelTarget (Spectrogram3DComponent::AudioLeve
                                               bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelTarget (target);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::AudioLevelTarget MainComponent::getSpec3DAudioLevelTarget() const noexcept
 {
@@ -2265,7 +2331,7 @@ Spectrogram3DComponent::AudioLevelTarget MainComponent::getSpec3DAudioLevelTarge
 void MainComponent::setSpec3DAudioLevelMinPercent (float pct, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelMinPercent (pct);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DAudioLevelMinPercent() const noexcept
 {
@@ -2275,7 +2341,7 @@ float MainComponent::getSpec3DAudioLevelMinPercent() const noexcept
 void MainComponent::setSpec3DAudioLevelMaxPercent (float pct, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelMaxPercent (pct);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DAudioLevelMaxPercent() const noexcept
 {
@@ -2286,7 +2352,7 @@ void MainComponent::setSpec3DAudioLevelHpHz (float hz, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelHpHz (hz);
     syncSpec3DAudioSidechainToProcessor();
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DAudioLevelHpHz() const noexcept
 {
@@ -2297,7 +2363,7 @@ void MainComponent::setSpec3DAudioLevelLpHz (float hz, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelLpHz (hz);
     syncSpec3DAudioSidechainToProcessor();
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DAudioLevelLpHz() const noexcept
 {
@@ -2308,7 +2374,7 @@ void MainComponent::setSpec3DAudioLevelThresholdDb (float thresholdDb, bool noti
 {
     spectrogram3D.setAudioLevelThresholdDb (thresholdDb);
     syncSpec3DAudioSidechainToProcessor();
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DAudioLevelThresholdDb() const noexcept
 {
@@ -2320,7 +2386,7 @@ void MainComponent::setSpec3DAudioLevelSpeed (Spectrogram3DComponent::AudioLevel
 {
     spectrogram3D.setAudioLevelSpeed (speed);
     syncSpec3DAudioSidechainToProcessor();
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::AudioLevelSpeed MainComponent::getSpec3DAudioLevelSpeed() const noexcept
 {
@@ -2330,7 +2396,7 @@ Spectrogram3DComponent::AudioLevelSpeed MainComponent::getSpec3DAudioLevelSpeed(
 void MainComponent::setSpec3DAudioLevelAffectPlayhead (bool shouldAffect, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelAffectPlayhead (shouldAffect);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::getSpec3DAudioLevelAffectPlayhead() const noexcept
 {
@@ -2340,7 +2406,7 @@ bool MainComponent::getSpec3DAudioLevelAffectPlayhead() const noexcept
 void MainComponent::setSpec3DAudioLevelAffectAntiPlayhead (bool shouldAffect, bool notifyPrefs)
 {
     spectrogram3D.setAudioLevelAffectAntiPlayhead (shouldAffect);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::getSpec3DAudioLevelAffectAntiPlayhead() const noexcept
 {
@@ -2350,7 +2416,7 @@ bool MainComponent::getSpec3DAudioLevelAffectAntiPlayhead() const noexcept
 void MainComponent::setSpec3DNormalCuspAngleDeg (float deg, bool notifyPrefs)
 {
     spectrogram3D.setNormalCuspAngleDeg (deg);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DNormalCuspAngleDeg() const noexcept
 {
@@ -2361,7 +2427,7 @@ void MainComponent::setSpec3DNormalWeighting (Spectrogram3DComponent::NormalWeig
                                              bool notifyPrefs)
 {
     spectrogram3D.setNormalWeighting (method);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::NormalWeighting MainComponent::getSpec3DNormalWeighting() const noexcept
 {
@@ -2371,105 +2437,105 @@ Spectrogram3DComponent::NormalWeighting MainComponent::getSpec3DNormalWeighting(
 void MainComponent::setSpec3DLightingEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setLightingEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DLightingEnabled() const noexcept { return spectrogram3D.isLightingEnabled(); }
 
 void MainComponent::setSpec3DLightingAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setLightingAmount (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DLightingAmount() const noexcept { return spectrogram3D.getLightingAmount(); }
 
 void MainComponent::setSpec3DLightAzimuthDeg (float deg, bool notifyPrefs)
 {
     spectrogram3D.setLightAzimuthDeg (deg);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DLightAzimuthDeg() const noexcept { return spectrogram3D.getLightAzimuthDeg(); }
 
 void MainComponent::setSpec3DLightElevationDeg (float deg, bool notifyPrefs)
 {
     spectrogram3D.setLightElevationDeg (deg);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DLightElevationDeg() const noexcept { return spectrogram3D.getLightElevationDeg(); }
 
 void MainComponent::setSpec3DSpecularAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSpecularAmount (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSpecularAmount() const noexcept { return spectrogram3D.getSpecularAmount(); }
 
 void MainComponent::setSpec3DRoughnessAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setRoughnessAmount (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DRoughnessAmount() const noexcept { return spectrogram3D.getRoughnessAmount(); }
 
 void MainComponent::setSpec3DMetalnessAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setMetalnessAmount (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DMetalnessAmount() const noexcept { return spectrogram3D.getMetalnessAmount(); }
 
 void MainComponent::setSpec3DRimAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setRimAmount (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DRimAmount() const noexcept { return spectrogram3D.getRimAmount(); }
 
 void MainComponent::setSpec3DLightColour (juce::Colour c, bool notifyPrefs)
 {
     spectrogram3D.setLightColour (c);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 juce::Colour MainComponent::getSpec3DLightColour() const noexcept { return spectrogram3D.getLightColour(); }
 
 void MainComponent::setSpec3DRimColour (juce::Colour c, bool notifyPrefs)
 {
     spectrogram3D.setRimColour (c);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 juce::Colour MainComponent::getSpec3DRimColour() const noexcept { return spectrogram3D.getRimColour(); }
 
 void MainComponent::setSpec3DDomeFillEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setDomeFillEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DDomeFillEnabled() const noexcept { return spectrogram3D.isDomeFillEnabled(); }
 
 void MainComponent::setSpec3DDomeFillStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setDomeFillStrength (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DDomeFillStrength() const noexcept { return spectrogram3D.getDomeFillStrength(); }
 
 void MainComponent::setSpec3DDomeSkyColour (juce::Colour c, bool notifyPrefs)
 {
     spectrogram3D.setDomeSkyColour (c);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 juce::Colour MainComponent::getSpec3DDomeSkyColour() const noexcept { return spectrogram3D.getDomeSkyColour(); }
 
 void MainComponent::setSpec3DDomeGroundColour (juce::Colour c, bool notifyPrefs)
 {
     spectrogram3D.setDomeGroundColour (c);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 juce::Colour MainComponent::getSpec3DDomeGroundColour() const noexcept { return spectrogram3D.getDomeGroundColour(); }
 
 void MainComponent::setSpec3DDomeTextureEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setDomeTextureEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DDomeTextureEnabled() const noexcept { return spectrogram3D.isDomeTextureEnabled(); }
 
@@ -2477,7 +2543,7 @@ void MainComponent::setSpec3DDomeTextureSource (Spectrogram3DComponent::DomeText
                                                 bool notifyPrefs)
 {
     spectrogram3D.setDomeTextureSource (source);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::DomeTextureSource MainComponent::getSpec3DDomeTextureSource() const noexcept
 {
@@ -2487,7 +2553,7 @@ Spectrogram3DComponent::DomeTextureSource MainComponent::getSpec3DDomeTextureSou
 void MainComponent::setSpec3DDomeTextureCustomPath (const juce::String& absolutePath, bool notifyPrefs)
 {
     spectrogram3D.setDomeTextureCustomPath (absolutePath);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 juce::String MainComponent::getSpec3DDomeTextureCustomPath() const noexcept
 {
@@ -2497,28 +2563,28 @@ juce::String MainComponent::getSpec3DDomeTextureCustomPath() const noexcept
 void MainComponent::setSpec3DSsgiEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSsgiEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSsgiEnabled() const noexcept { return spectrogram3D.isSsgiEnabled(); }
 
 void MainComponent::setSpec3DSsgiStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSsgiStrength (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSsgiStrength() const noexcept { return spectrogram3D.getSsgiStrength(); }
 
 void MainComponent::setSpec3DSsgiRadius (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSsgiRadius (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSsgiRadius() const noexcept { return spectrogram3D.getSsgiRadius(); }
 
 void MainComponent::setSpec3DSsgiQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
 {
     spectrogram3D.setSsgiQuality (q);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsgiQuality() const noexcept
 {
@@ -2528,35 +2594,35 @@ Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsgiQuality() cons
 void MainComponent::setSpec3DSsgiTemporalEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSsgiTemporalEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSsgiTemporalEnabled() const noexcept { return spectrogram3D.isSsgiTemporalEnabled(); }
 
 void MainComponent::setSpec3DSsgiTemporalAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSsgiTemporalAmount (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSsgiTemporalAmount() const noexcept { return spectrogram3D.getSsgiTemporalAmount(); }
 
 void MainComponent::setSpec3DSsgiDenoiseEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSsgiDenoiseEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSsgiDenoiseEnabled() const noexcept { return spectrogram3D.isSsgiDenoiseEnabled(); }
 
 void MainComponent::setSpec3DSsgiDenoiseAmount (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSsgiDenoiseAmount (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSsgiDenoiseAmount() const noexcept { return spectrogram3D.getSsgiDenoiseAmount(); }
 
 void MainComponent::setSpec3DSsgiDenoiseMode (Spectrogram3DComponent::SsgiDenoiseMode mode, bool notifyPrefs)
 {
     spectrogram3D.setSsgiDenoiseMode (mode);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::SsgiDenoiseMode MainComponent::getSpec3DSsgiDenoiseMode() const noexcept
 {
@@ -2566,7 +2632,7 @@ Spectrogram3DComponent::SsgiDenoiseMode MainComponent::getSpec3DSsgiDenoiseMode(
 void MainComponent::setSpec3DSsgiAtrousQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
 {
     spectrogram3D.setSsgiAtrousQuality (q);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsgiAtrousQuality() const noexcept
 {
@@ -2576,42 +2642,125 @@ Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsgiAtrousQuality(
 void MainComponent::setSpec3DSsgiHalfResEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSsgiHalfResEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSsgiHalfResEnabled() const noexcept { return spectrogram3D.isSsgiHalfResEnabled(); }
 
 void MainComponent::setSpec3DSsgiMeshNormalsEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSsgiMeshNormalsEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSsgiMeshNormalsEnabled() const noexcept { return spectrogram3D.isSsgiMeshNormalsEnabled(); }
+
+void MainComponent::setSpec3DSsrEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setSsrEnabled (shouldEnable);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DSsrEnabled() const noexcept { return spectrogram3D.isSsrEnabled(); }
+
+void MainComponent::setSpec3DSsrStrength (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrStrength (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrStrength() const noexcept { return spectrogram3D.getSsrStrength(); }
+
+void MainComponent::setSpec3DSsrDistance (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrDistance (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrDistance() const noexcept { return spectrogram3D.getSsrDistance(); }
+
+void MainComponent::setSpec3DSsrThickness (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrThickness (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrThickness() const noexcept { return spectrogram3D.getSsrThickness(); }
+
+void MainComponent::setSpec3DSsrQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
+{
+    spectrogram3D.setSsrQuality (q);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSsrQuality() const noexcept
+{
+    return spectrogram3D.getSsrQuality();
+}
+
+void MainComponent::setSpec3DSsrFresnel (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrFresnel (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrFresnel() const noexcept { return spectrogram3D.getSsrFresnel(); }
+
+void MainComponent::setSpec3DSsrRoughnessInfluence (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrRoughnessInfluence (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrRoughnessInfluence() const noexcept
+{
+    return spectrogram3D.getSsrRoughnessInfluence();
+}
+
+void MainComponent::setSpec3DSsrIntensity (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrIntensity (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrIntensity() const noexcept { return spectrogram3D.getSsrIntensity(); }
+
+void MainComponent::setSpec3DSsrEdgeFade (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrEdgeFade (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrEdgeFade() const noexcept { return spectrogram3D.getSsrEdgeFade(); }
+
+void MainComponent::setSpec3DSsrMetallicBias (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrMetallicBias (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrMetallicBias() const noexcept { return spectrogram3D.getSsrMetallicBias(); }
+
+void MainComponent::setSpec3DSsrDomeFallback (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setSsrDomeFallback (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DSsrDomeFallback() const noexcept { return spectrogram3D.getSsrDomeFallback(); }
 
 void MainComponent::setSpec3DEnergyConservingEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setEnergyConservingEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DEnergyConservingEnabled() const noexcept { return spectrogram3D.isEnergyConservingEnabled(); }
 
 void MainComponent::setSpec3DTonemapEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setTonemapEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DTonemapEnabled() const noexcept { return spectrogram3D.isTonemapEnabled(); }
 
 void MainComponent::setSpec3DTonemapExposureStops (float stops, bool notifyPrefs)
 {
     spectrogram3D.setTonemapExposureStops (stops);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DTonemapExposureStops() const noexcept { return spectrogram3D.getTonemapExposureStops(); }
 
 void MainComponent::setSpec3DColorGrade (Spectrogram3DComponent::ColorGrade grade, bool notifyPrefs)
 {
     spectrogram3D.setColorGrade (grade);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::ColorGrade MainComponent::getSpec3DColorGrade() const noexcept
 {
@@ -2621,115 +2770,244 @@ Spectrogram3DComponent::ColorGrade MainComponent::getSpec3DColorGrade() const no
 void MainComponent::setSpec3DContactShadowEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setContactShadowEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DContactShadowEnabled() const noexcept { return spectrogram3D.isContactShadowEnabled(); }
 
 void MainComponent::setSpec3DContactShadowStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setContactShadowStrength (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DContactShadowStrength() const noexcept { return spectrogram3D.getContactShadowStrength(); }
 
 void MainComponent::setSpec3DSelfShadowEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSelfShadowEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSelfShadowEnabled() const noexcept { return spectrogram3D.isSelfShadowEnabled(); }
 
 void MainComponent::setSpec3DSelfShadowStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSelfShadowStrength (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSelfShadowStrength() const noexcept { return spectrogram3D.getSelfShadowStrength(); }
 
 void MainComponent::setSpec3DSelfShadowBias (float bias01, bool notifyPrefs)
 {
     spectrogram3D.setSelfShadowBias (bias01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSelfShadowBias() const noexcept { return spectrogram3D.getSelfShadowBias(); }
 
 void MainComponent::setSpec3DSelfShadowSoftness (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSelfShadowSoftness (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSelfShadowSoftness() const noexcept { return spectrogram3D.getSelfShadowSoftness(); }
 
 void MainComponent::setSpec3DSelfShadowQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
 {
     spectrogram3D.setSelfShadowQuality (q);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSelfShadowQuality() const noexcept
 {
     return spectrogram3D.getSelfShadowQuality();
 }
 
+void MainComponent::setSpec3DCastShadowsEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setCastShadowsEnabled (shouldEnable);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DCastShadowsEnabled() const noexcept { return spectrogram3D.isCastShadowsEnabled(); }
+
+void MainComponent::setSpec3DShadowMapResolution (Spectrogram3DComponent::ShadowMapResolution res,
+                                                  bool notifyPrefs)
+{
+    spectrogram3D.setShadowMapResolution (res);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+Spectrogram3DComponent::ShadowMapResolution MainComponent::getSpec3DShadowMapResolution() const noexcept
+{
+    return spectrogram3D.getShadowMapResolution();
+}
+
+void MainComponent::setSpec3DShadowCascadeCount (int count, bool notifyPrefs)
+{
+    spectrogram3D.setShadowCascadeCount (count);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+int MainComponent::getSpec3DShadowCascadeCount() const noexcept { return spectrogram3D.getShadowCascadeCount(); }
+
+void MainComponent::setSpec3DShadowCascadeDistributionExponent (float exponent, bool notifyPrefs)
+{
+    spectrogram3D.setShadowCascadeDistributionExponent (exponent);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DShadowCascadeDistributionExponent() const noexcept
+{
+    return spectrogram3D.getShadowCascadeDistributionExponent();
+}
+
+void MainComponent::setSpec3DShadowCascadeTransitionFraction (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setShadowCascadeTransitionFraction (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DShadowCascadeTransitionFraction() const noexcept
+{
+    return spectrogram3D.getShadowCascadeTransitionFraction();
+}
+
+void MainComponent::setSpec3DDebugSphereEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setDebugSphereEnabled (shouldEnable);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DDebugSphereEnabled() const noexcept { return spectrogram3D.isDebugSphereEnabled(); }
+
+void MainComponent::setSpec3DDebugSphereDiameter (float metres, bool notifyPrefs)
+{
+    spectrogram3D.setDebugSphereDiameter (metres);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DDebugSphereDiameter() const noexcept
+{
+    return spectrogram3D.getDebugSphereDiameter();
+}
+
+void MainComponent::setSpec3DDebugSpherePosition (juce::Vector3D<float> worldPos, bool notifyPrefs)
+{
+    spectrogram3D.setDebugSpherePosition (worldPos);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+juce::Vector3D<float> MainComponent::getSpec3DDebugSpherePosition() const noexcept
+{
+    return spectrogram3D.getDebugSpherePosition();
+}
+
+void MainComponent::setSpec3DDebugSphereAlbedo (juce::Colour c, bool notifyPrefs)
+{
+    spectrogram3D.setDebugSphereAlbedo (c);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+juce::Colour MainComponent::getSpec3DDebugSphereAlbedo() const noexcept
+{
+    return spectrogram3D.getDebugSphereAlbedo();
+}
+
+void MainComponent::setSpec3DDebugSphereRoughness (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setDebugSphereRoughness (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DDebugSphereRoughness() const noexcept
+{
+    return spectrogram3D.getDebugSphereRoughness();
+}
+
+void MainComponent::setSpec3DDebugSphereMetalness (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setDebugSphereMetalness (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DDebugSphereMetalness() const noexcept
+{
+    return spectrogram3D.getDebugSphereMetalness();
+}
+
+void MainComponent::setSpec3DDebugSphereSpecular (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setDebugSphereSpecular (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DDebugSphereSpecular() const noexcept
+{
+    return spectrogram3D.getDebugSphereSpecular();
+}
+
 void MainComponent::setSpec3DSsaoEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSsaoEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSsaoEnabled() const noexcept { return spectrogram3D.isSsaoEnabled(); }
 
 void MainComponent::setSpec3DSsaoStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSsaoStrength (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSsaoStrength() const noexcept { return spectrogram3D.getSsaoStrength(); }
 
 void MainComponent::setSpec3DSsaoRadius (float radius, bool notifyPrefs)
 {
     spectrogram3D.setSsaoRadius (radius);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSsaoRadius() const noexcept { return spectrogram3D.getSsaoRadius(); }
 
 void MainComponent::setSpec3DBloomEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setBloomEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DBloomEnabled() const noexcept { return spectrogram3D.isBloomEnabled(); }
 
 void MainComponent::setSpec3DBloomStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setBloomStrength (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DBloomStrength() const noexcept { return spectrogram3D.getBloomStrength(); }
 
 void MainComponent::setSpec3DBloomThreshold (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setBloomThreshold (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DBloomThreshold() const noexcept { return spectrogram3D.getBloomThreshold(); }
 
 void MainComponent::setSpec3DDofEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setDofEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DDofEnabled() const noexcept { return spectrogram3D.isDofEnabled(); }
 
 void MainComponent::setSpec3DDofFocusDistance (float distance, bool notifyPrefs)
 {
     spectrogram3D.setDofFocusDistance (distance);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DDofFocusDistance() const noexcept { return spectrogram3D.getDofFocusDistance(); }
+
+void MainComponent::setSpec3DDofFStop (float fStop, bool notifyPrefs)
+{
+    spectrogram3D.setDofFStop (fStop);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DDofFStop() const noexcept { return spectrogram3D.getDofFStop(); }
+
+void MainComponent::setSpec3DDofFocalLengthMm (float mm, bool notifyPrefs)
+{
+    spectrogram3D.setDofFocalLengthMm (mm);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DDofFocalLengthMm() const noexcept
+{
+    return spectrogram3D.getDofFocalLengthMm();
+}
 
 void MainComponent::setSpec3DDofAperture (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setDofAperture (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DDofAperture() const noexcept { return spectrogram3D.getDofAperture(); }
 
@@ -2742,7 +3020,7 @@ float MainComponent::getSpec3DDofAmount() const noexcept { return getSpec3DDofAp
 void MainComponent::setSpec3DDofQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
 {
     spectrogram3D.setDofQuality (q);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DDofQuality() const noexcept
 {
@@ -2752,28 +3030,28 @@ Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DDofQuality() const
 void MainComponent::setSpec3DDofBlurScale (float scale, bool notifyPrefs)
 {
     spectrogram3D.setDofBlurScale (scale);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DDofBlurScale() const noexcept { return spectrogram3D.getDofBlurScale(); }
 
 void MainComponent::setSpec3DDofCocDilate (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setDofCocDilate (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DDofCocDilate() const noexcept { return spectrogram3D.getDofCocDilate(); }
 
 void MainComponent::setSpec3DDofEdgeSpill (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setDofEdgeSpill (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DDofEdgeSpill() const noexcept { return spectrogram3D.getDofEdgeSpill(); }
 
 void MainComponent::setSpec3DSssEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setSssEnabled (shouldEnable);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DSssEnabled() const noexcept
 {
@@ -2783,49 +3061,49 @@ bool MainComponent::isSpec3DSssEnabled() const noexcept
 void MainComponent::setSpec3DSssStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssStrength (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSssStrength() const noexcept { return spectrogram3D.getSssStrength(); }
 
 void MainComponent::setSpec3DSssWrap (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssWrap (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSssWrap() const noexcept { return spectrogram3D.getSssWrap(); }
 
 void MainComponent::setSpec3DSssTransmission (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssTransmission (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSssTransmission() const noexcept { return spectrogram3D.getSssTransmission(); }
 
 void MainComponent::setSpec3DSssTint (juce::Colour c, bool notifyPrefs)
 {
     spectrogram3D.setSssTint (c);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 juce::Colour MainComponent::getSpec3DSssTint() const noexcept { return spectrogram3D.getSssTint(); }
 
 void MainComponent::setSpec3DSssRadius (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssRadius (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSssRadius() const noexcept { return spectrogram3D.getSssRadius(); }
 
 void MainComponent::setSpec3DSssContrast (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssContrast (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSssContrast() const noexcept { return spectrogram3D.getSssContrast(); }
 
 void MainComponent::setSpec3DSssQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
 {
     spectrogram3D.setSssQuality (q);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSssQuality() const noexcept
 {
@@ -2835,14 +3113,14 @@ Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DSssQuality() const
 void MainComponent::setSpec3DSssThicknessScale (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssThicknessScale (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSssThicknessScale() const noexcept { return spectrogram3D.getSssThicknessScale(); }
 
 void MainComponent::setSpec3DSssMaxThickness (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssMaxThickness (amount01);
-    if (notifyPrefs) editor.saveUiPrefs();
+    if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 float MainComponent::getSpec3DSssMaxThickness() const noexcept { return spectrogram3D.getSssMaxThickness(); }
 
@@ -2884,7 +3162,7 @@ void MainComponent::placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rec
         placeOverlayTool (specSpeedUpButton);
         placeOverlayTool (specSpeedDownButton);
         placeOverlayTool (specExpandButton);
-        // 2D/3D cube toggle is for expanded Spec only — Scope has separate modules.
+        // 2D/3D cube toggle is for expanded Spec only â€” Scope has separate modules.
     }
 }
 
@@ -2948,7 +3226,7 @@ void MainComponent::syncExpandedOscOverlayStack()
 {
     // Expanded scope/gon/spec: above graph, below OptionBox + Settings menu.
     // Compact strip: stay in the always-on-top chrome layer.
-    // Scope quad: never always-on-top — post meters must stay above the BR spectrogram.
+    // Scope quad: never always-on-top â€” post meters must stay above the BR spectrogram.
     const bool oscExp = oscExpanded && oscButton.getToggleState();
     const bool gonExp = gonExpanded && gonButton.getToggleState();
     const bool specExp = specExpanded && specButton.getToggleState();
@@ -3164,12 +3442,12 @@ void MainComponent::setEcoMode (bool shouldEnable, bool notifyPrefs)
         return;
     }
 
-    // Eco gates analyser/FFT via processor + Analyser flags — SPECTRUM_ANALYSER_ID
+    // Eco gates analyser/FFT via processor + Analyser flags â€” SPECTRUM_ANALYSER_ID
     // preference is left untouched so turning Eco off restores the previous setting.
     applyEcoMode (shouldEnable);
 
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::applyScopeMode (bool shouldEnable)
@@ -3259,7 +3537,7 @@ void MainComponent::setScopeStripLayout (bool shouldUseStrip, bool notifyPrefs)
     }
 
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 ScopeLayoutPreset MainComponent::captureScopeLayoutPreset (const juce::String& name) const
@@ -3272,7 +3550,7 @@ ScopeLayoutPreset MainComponent::captureScopeLayoutPreset (const juce::String& n
     p.stripHeightPx = scopeStripHeightPx;
     p.splitX = scopeSplitOverlay.getSplitX();
     p.splitY = scopeSplitOverlay.getSplitY();
-    // Inline colour snapshot only — never writes RampPresetStore / UI theme presets.
+    // Inline colour snapshot only â€” never writes RampPresetStore / UI theme presets.
     p.colourRamps = colourRamps.toValueTree();
     return p;
 }
@@ -3298,7 +3576,7 @@ void MainComponent::applyScopeLayoutPreset (const ScopeLayoutPreset& preset, boo
     editor.syncScopeModeLayout();
     resized();
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::setScopeStripHeightPx (int heightDesignPx, bool notifyPrefs)
@@ -3316,7 +3594,7 @@ void MainComponent::setScopeStripHeightPx (int heightDesignPx, bool notifyPrefs)
     }
 
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::syncStripHeightFromWindow (int windowW, int windowH) noexcept
@@ -3380,7 +3658,7 @@ void MainComponent::setScopeEnabledOrder (const std::vector<ScopeModuleId>& orde
         resized();
     }
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 bool MainComponent::isScopeModuleEnabled (ScopeModuleId id) const noexcept
@@ -3567,7 +3845,7 @@ void MainComponent::applyScopePaneReorder (int fromSlot, int toSlot, bool insert
         ensureScopeStripFractions();
     }
 
-    editor.saveUiPrefs();
+    editor.requestSaveUiPrefs();
     resized();
 }
 
@@ -3584,7 +3862,7 @@ void MainComponent::setScopeMode (bool shouldEnable, bool notifyPrefs)
     editor.syncScopeModeLayout();
 
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::setScopeTapPost (bool shouldTapPost, bool notifyPrefs)
@@ -3602,7 +3880,7 @@ void MainComponent::setScopeTapPost (bool shouldTapPost, bool notifyPrefs)
     resized();
 
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 void MainComponent::setDisableGlowShadowEffects (bool shouldDisable, bool notifyPrefs)
@@ -3618,7 +3896,7 @@ void MainComponent::setDisableGlowShadowEffects (bool shouldDisable, bool notify
     frequencyResponseComponent.repaint();
 
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 bool MainComponent::areGlowShadowEffectsDisabled() const noexcept
@@ -3650,7 +3928,7 @@ void MainComponent::showAbMenu (EqProcessor::AbSlot slot)
             continue;
         copyTo.addItem (10 + i, "Snapshot " + EqProcessor::abSlotName (dest));
     }
-    menu.addSubMenu ("Copy settings from snapshot " + slotName + " to…", copyTo);
+    menu.addSubMenu ("Copy settings from snapshot " + slotName + " toâ€¦", copyTo);
 
     juce::PopupMenu swapWith;
     for (int i = 0; i < EqProcessor::abSlotCount; ++i)
@@ -3660,7 +3938,7 @@ void MainComponent::showAbMenu (EqProcessor::AbSlot slot)
             continue;
         swapWith.addItem (20 + i, "Snapshot " + EqProcessor::abSlotName (other));
     }
-    menu.addSubMenu ("Swap with…", swapWith);
+    menu.addSubMenu ("Swap withâ€¦", swapWith);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target),
                         [this, slot] (int result)
@@ -3747,7 +4025,7 @@ void MainComponent::showUiThemePopupMenu()
         return;
 
     juce::Component::SafePointer<MainComponent> safeThis (this);
-    // Filled after launchAsynchronously — used to close the dropdown on apply/save/rename.
+    // Filled after launchAsynchronously â€” used to close the dropdown on apply/save/rename.
     auto activeCallout = std::make_shared<juce::Component::SafePointer<juce::CallOutBox>>();
 
     auto dismissUiCallout = [activeCallout]
@@ -3851,7 +4129,7 @@ void MainComponent::showUiThemePopupMenu()
             return;
 
         safeThis->sharedResources.disableGlowShadowEffects = ! safeThis->sharedResources.disableGlowShadowEffects;
-        safeThis->editor.saveUiPrefs();
+        safeThis->editor.requestSaveUiPrefs();
         safeThis->applyThemeToChildComponents();
         safeThis->m_visualizer.repaint();
         safeThis->oscilloscope.repaint();
@@ -3907,7 +4185,7 @@ void MainComponent::setOrderedRampGradation (bool shouldEnable, bool notifyPrefs
         return;
     sharedResources.sharedColors.orderedRampGradation = shouldEnable;
     if (notifyPrefs)
-        editor.saveUiPrefs();
+        editor.requestSaveUiPrefs();
 }
 
 bool MainComponent::isOrderedRampGradation() const noexcept
@@ -4010,7 +4288,7 @@ void MainComponent::showRandomizeDiceMenu()
                             else if (result == 10) safe->setOrderedRampGradation (false, true);
 
                             if (result >= 1 && result <= 7)
-                                safe->editor.saveUiPrefs();
+                                safe->editor.requestSaveUiPrefs();
                         });
 }
 
@@ -4062,7 +4340,7 @@ void MainComponent::onPresetApplied (const Theme&)
 
 void MainComponent::onPresetListChanged()
 {
-    // Appearance UI theme list changed — chrome EQ name is independent.
+    // Appearance UI theme list changed â€” chrome EQ name is independent.
 }
 
 void MainComponent::ScopeSplitOverlay::setSplitNorm (float xNorm, float yNorm) noexcept
@@ -4137,7 +4415,7 @@ void MainComponent::ScopeSplitOverlay::mouseUp (const juce::MouseEvent&)
 {
     drag = Drag::none;
     setMouseCursor (juce::MouseCursor::NormalCursor);
-    main.editor.saveUiPrefs();
+    main.editor.requestSaveUiPrefs();
 }
 
 void MainComponent::setScopeSplitNorm (float xNorm, float yNorm) noexcept
@@ -4298,7 +4576,7 @@ void MainComponent::ScopeArrangeOverlay::updateDropTarget (juce::Point<int> p) n
         return;
     }
 
-    // Strip: insertion index 0…N from pointer X (midpoints between pane centres).
+    // Strip: insertion index 0â€¦N from pointer X (midpoints between pane centres).
     dropInsertBefore = true;
     dropSlot = (int) slotBounds.size();
     for (int i = 0; i < (int) slotBounds.size(); ++i)
@@ -4435,7 +4713,7 @@ void MainComponent::ScopeArrangeOverlay::mouseUp (const juce::MouseEvent& e)
     if (resizingStrip)
     {
         resizingStrip = false;
-        main.editor.saveUiPrefs();
+        main.editor.requestSaveUiPrefs();
         updateHoverCursor (e.getPosition());
         repaint();
         return;
@@ -4444,7 +4722,7 @@ void MainComponent::ScopeArrangeOverlay::mouseUp (const juce::MouseEvent& e)
     if (resizingColumn >= 0)
     {
         resizingColumn = -1;
-        main.editor.saveUiPrefs();
+        main.editor.requestSaveUiPrefs();
         updateHoverCursor (e.getPosition());
         repaint();
         return;
@@ -4487,7 +4765,7 @@ void MainComponent::ScopeArrangeOverlay::paint (juce::Graphics& g)
                     titleArea, juce::Justification::centred, false);
     }
 
-    // Hover / active edges — same outline colour in tiled and strip.
+    // Hover / active edges â€” same outline colour in tiled and strip.
     if (main.scopeStripLayout && ! stripBounds.isEmpty() && (hoverResize || resizingStrip))
     {
         const float y = (float) stripBounds.getBottom();
@@ -4608,7 +4886,7 @@ void MainComponent::toggleScopePaneFullscreen (ScopeModuleId id)
 void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int> pane,
                                     int toolH, int toolSize, int toolGap)
 {
-    // Tool buttons overlay the pane bottom — module keeps the full tile height.
+    // Tool buttons overlay the pane bottom â€” module keeps the full tile height.
     const auto overlayTools = (toolH > 0)
                                   ? juce::Rectangle<int> (pane.getX() + 2,
                                                           pane.getBottom() - toolH - 1,
@@ -4691,7 +4969,7 @@ void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int>
 
         case ScopeModuleId::spectrogram:
         {
-            // Always 2D — Spectrogram 3D is a separate selectable Scope module.
+            // Always 2D â€” Spectrogram 3D is a separate selectable Scope module.
             auto view = pane;
             if (menu.isVisible())
                 view.setRight (juce::jmin (view.getRight(), menu.getX() - 8));
@@ -4706,7 +4984,7 @@ void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int>
                 placeOverlayTool (specSpeedUpButton, row);
                 placeOverlayTool (specSpeedDownButton, row);
                 placeOverlayTool (specExpandButton, row);
-                // No 2D/3D cube toggle in Scope — Spec and Spec 3D are separate modules.
+                // No 2D/3D cube toggle in Scope â€” Spec and Spec 3D are separate modules.
             }
             syncSpec3DPresentation();
             break;
@@ -4758,7 +5036,7 @@ void MainComponent::layoutScopeModePanes (float scale)
         frequencyResponseComponent.setBounds ({});
 
         ensureScopeStripFractions();
-        // Edge-to-edge strip — Scope / Settings / Arrange overlay the panes.
+        // Edge-to-edge strip â€” Scope / Settings / Arrange overlay the panes.
         const int stripTop = 0;
         const int stripH = juce::jmax (px ((float) kScopeStripHeightMinPx), getHeight() - stripTop);
         auto strip = juce::Rectangle<int> (0, stripTop, getWidth(), stripH).reduced (gap, 0);
@@ -4865,7 +5143,7 @@ void MainComponent::layoutPresetChrome (float scale)
 {
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
 
-    // Scope mode: clear the center for meters. DSP chrome (Bypass / A–D / Eco) follows Pre/Post.
+    // Scope mode: clear the center for meters. DSP chrome (Bypass / Aâ€“D / Eco) follows Pre/Post.
     if (scopeModeEnabled)
     {
         presetPrevButton.setVisible (false);
@@ -4899,7 +5177,7 @@ void MainComponent::layoutPresetChrome (float scale)
 
     int barY = chromeY + chromeH + px (2.0f);
 
-    // Compact: logo is hosted on this component at the top — sit directly under it.
+    // Compact: logo is hosted on this component at the top â€” sit directly under it.
     if (hostedWordmark != nullptr
         && hostedWordmark->getParentComponent() == this
         && hostedWordmark->isVisible()
@@ -4954,7 +5232,7 @@ void MainComponent::resized()
 
     const int editorWidth = getWidth();
     const int editorHeight = getHeight();
-    // Keep meters in the plot area — never grow into / over the piano strip.
+    // Keep meters in the plot area â€” never grow into / over the piano strip.
     const int pianoH = frequencyResponseComponent.getPianoStripHeight();
     const int layoutH = juce::jmax (1, editorHeight - pianoH);
     const int meterWidth = static_cast<int>(editorWidth * 0.015);
@@ -4967,7 +5245,7 @@ void MainComponent::resized()
     const int xRight = editorWidth - padding - totalMeterGroupWidth;
     const int meterY = centerY + px (20.0f);
 
-    // Scope mode uses Level Meter modules only — hide the default edge meters.
+    // Scope mode uses Level Meter modules only â€” hide the default edge meters.
     const bool hideEdgeMeters = scopeModeEnabled;
     verticalGradientMeterL.setVisible (! hideEdgeMeters);
     verticalGradientMeterR.setVisible (! hideEdgeMeters);
@@ -5032,7 +5310,7 @@ void MainComponent::resized()
     }
 
     // Top-left chrome: Bypass | A | B | C | D | UI | Dice.
-    // Scope strip: Bypass / A–D / Eco hidden; UI + Dice overlay panes (no stripTop).
+    // Scope strip: Bypass / Aâ€“D / Eco hidden; UI + Dice overlay panes (no stripTop).
     {
         constexpr int minimizeSize = 22;
         constexpr int minimizeMargin = 6;
@@ -5040,7 +5318,7 @@ void MainComponent::resized()
         const int chromeY = px ((float) minimizeMargin);
         const int gap = px (4.0f);
         const int bypassW = px (62.0f);
-        // Referencing slots — 40% smaller than the previous A/B chrome size.
+        // Referencing slots â€” 40% smaller than the previous A/B chrome size.
         const int abW = px (28.0f * 0.6f);
         const int abH = px (28.0f * 0.6f);
         const int abY = chromeY + (chromeH - abH) / 2;
@@ -5064,7 +5342,7 @@ void MainComponent::resized()
             slotCButton.setBounds ({});
             slotDButton.setBounds ({});
 
-            // Square UI / Dice / Arrange — same size & pad as Scope button (bottom-left).
+            // Square UI / Dice / Arrange â€” same size & pad as Scope button (bottom-left).
             const int pad = px (8.0f);
             const int btn = juce::jlimit (16, 22, px (20.0f));
             const int btnGap = px (6.0f);
@@ -5136,7 +5414,7 @@ void MainComponent::resized()
     layoutPresetChrome (scale);
 
     // Eco / Arrange chrome.
-    // Strip: Eco hidden; Arrange stays (line icon → click for grid). Tiled: Arrange beside Eco.
+    // Strip: Eco hidden; Arrange stays (line icon â†’ click for grid). Tiled: Arrange beside Eco.
     {
         const int chromeH = px (28.0f);
         const int chromeY = px (6.0f);
@@ -5211,7 +5489,7 @@ void MainComponent::resized()
                 const int toolGap = px (1.0f);
                 const int toolSize = juce::jmax (12, toolH - 2);
                 placeScopePane (*scopeFullscreenModule, expandBounds, toolH, toolSize, toolGap);
-                // Don't call sync*ToolButtons here — they key off chrome toggles and would
+                // Don't call sync*ToolButtons here â€” they key off chrome toggles and would
                 // re-show Osc/Gon/Spec tools over unrelated fullscreen panes.
                 if (*scopeFullscreenModule == ScopeModuleId::oscilloscope)
                 {
@@ -5514,7 +5792,7 @@ void MainComponent::layoutSettingsMenu()
         return;
 
     // Same floor expanded Osc / Gon / Spec3D use: graph pane, just above the
-    // Match / Mod / Help / … button row (and above the piano strip).
+    // Match / Mod / Help / â€¦ button row (and above the piano strip).
     auto contentArea = getExpandedScopeContentBounds();
     if (contentArea.isEmpty())
         contentArea = getLocalBounds();
@@ -5600,9 +5878,9 @@ void MainComponent::relayoutPresetChrome()
 
 void MainComponent::raiseMenuSystemAboveWordmark()
 {
-    // Z-order (bottom → top):
-    //   graph → expanded osc/gon/dimmer → brand wordmark → chrome / meters / zoom
-    //   → OptionBox → Settings menu → Settings button
+    // Z-order (bottom â†’ top):
+    //   graph â†’ expanded osc/gon/dimmer â†’ brand wordmark â†’ chrome / meters / zoom
+    //   â†’ OptionBox â†’ Settings menu â†’ Settings button
     const bool oscExp = oscExpanded && oscButton.getToggleState() && oscilloscope.isVisible();
     const bool gonExp = gonExpanded && gonButton.getToggleState() && goniometer.isVisible();
     const bool specExp = specExpanded && specButton.getToggleState() && spectrogram.isVisible();
@@ -5690,7 +5968,7 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     oscExpandButton.toFront (false);
     gonExpandButton.toFront (false);
 
-    // GL last among peers that share its inset bounds — chrome / tools stay outside those
+    // GL last among peers that share its inset bounds â€” chrome / tools stay outside those
     // bounds (native HWND ignores JUCE z-order on overlap).
     if (spectrogram3D.isActive())
         spectrogram3D.toFront (false);

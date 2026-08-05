@@ -8,6 +8,26 @@
 
 namespace
 {
+    // #region agent log
+    inline void agentDbgLog (const char* hypothesisId, const char* location,
+                             const char* message, const juce::String& dataJson)
+    {
+        const juce::String line = juce::String ("{\"sessionId\":\"70daa9\",\"hypothesisId\":\"")
+            + hypothesisId + "\",\"location\":\"" + location + "\",\"message\":\"" + message
+            + "\",\"data\":" + dataJson + ",\"timestamp\":"
+            + juce::String ((juce::int64) juce::Time::currentTimeMillis()) + "}\n";
+        // Absolute path — DAW CWD is unreliable for relative logs.
+        juce::File ("C:/Users/jerem/Desktop/DecksoundsParametricEq/ParametricEqProject/debug-70daa9.log")
+            .appendText (line, false, false);
+        juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
+            .getChildFile ("debug-70daa9.log")
+            .appendText (line, false, false);
+    }
+    // #endregion
+
+    static int gLabelDrawCallsThisFrame = 0;
+    static int gSoftFrameCounter = 0;
+
     constexpr const char* kColourVertexShader = R"(
         #version 150
         in vec3 position;
@@ -20,6 +40,7 @@ namespace
         out vec3 vViewDir;
         out vec3 vWorldPos;
         out vec3 vWorldNormal;
+        out float vViewDepth;
         void main()
         {
             vColour = colour;
@@ -28,6 +49,7 @@ namespace
             vec4 viewPos = viewMatrix * vec4 (position, 1.0);
             vViewDir = normalize (-viewPos.xyz);
             vWorldPos = position;
+            vViewDepth = max (-viewPos.z, 0.0);
             gl_Position = projectionMatrix * viewPos;
         }
     )";
@@ -39,6 +61,7 @@ namespace
         in vec3 vViewDir;
         in vec3 vWorldPos;
         in vec3 vWorldNormal;
+        in float vViewDepth;
         out vec4 fragColour;
         uniform vec2 uResolution;
         uniform float uCornerRadius;
@@ -73,6 +96,31 @@ namespace
         uniform float uShadowSoftness;
         uniform float uShadowQuality; // 0=low, 1=medium, 2=high
         uniform float uContactShadow;
+        // Directional cast-shadow atlas (CSM: fixed far distance, N cascade tiles).
+        uniform sampler2D uShadowAtlas;
+        uniform float uCastShadow;       // 0=off, 1=on
+        uniform mat4 uShadowMatrix0;
+        uniform mat4 uShadowMatrix1;
+        uniform mat4 uShadowMatrix2;
+        uniform mat4 uShadowMatrix3;
+        uniform vec4 uCascadeSplits;    // far view-Z per cascade
+        uniform float uCascadeCount;
+        uniform float uShadowAtlasTiles; // horizontal tiles (= cascade count)
+        uniform float uCastBias;
+        uniform float uCastSoftness;
+        uniform float uCascadeTransition; // blend width as fraction of cascade range
+        uniform float uViewZScale;      // unused reserve for cascade select
+        // Material override for debug sphere (0 = vertex colour / mesh rough/metal/spec).
+        uniform float uMatOverride;
+        uniform vec3 uMatAlbedo;
+        uniform float uMatRoughness;
+        uniform float uMatMetalness;
+        uniform float uMatSpecular;
+        // Gizmo x-ray ghost pass: draw only fragments inside the debug sphere.
+        uniform float uGizmoXray; // 0=off, 1=inside-only ghost
+        uniform vec3 uXrayCenter;
+        uniform float uXrayRadius;
+        uniform float uXrayAlpha;
         // SSS: 0=off, 1=open heightfield taps, 2=closed volume (height-to-base + taps)
         uniform float uSssMode;
         uniform float uSssStrength;
@@ -222,6 +270,83 @@ namespace
             return clamp (1.0 - occ * strength, 0.0, 1.0);
         }
 
+)"
+        R"(        mat4 shadowMatrixForCascade (int c)
+        {
+            if (c <= 0) return uShadowMatrix0;
+            if (c == 1) return uShadowMatrix1;
+            if (c == 2) return uShadowMatrix2;
+            return uShadowMatrix3;
+        }
+
+        // PCF sample one cascade tile (returns 1 = lit).
+        float sampleCastShadowCascade (vec3 worldPos, int cascade)
+        {
+            mat4 sm = shadowMatrixForCascade (cascade);
+            vec4 lp = sm * vec4 (worldPos, 1.0);
+            if (abs (lp.w) < 1.0e-6)
+                return 1.0;
+            vec3 ndc = lp.xyz / lp.w;
+            vec2 uv = ndc.xy * 0.5 + 0.5;
+            float depth = ndc.z * 0.5 + 0.5;
+            if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+                return 1.0;
+
+            float tiles = max (uShadowAtlasTiles, 1.0);
+            float tileW = 1.0 / tiles;
+            uv.x = clamp (uv.x, 0.001, 0.999) * tileW + float (cascade) * tileW;
+            uv.y = clamp (uv.y, 0.001, 0.999);
+
+            float bias = mix (0.0008, 0.008, clamp (uCastBias, 0.0, 1.0));
+            float soft = mix (0.4, 2.2, clamp (uCastSoftness, 0.0, 1.0));
+            vec2 texel = vec2 (tileW / 512.0, 1.0 / 512.0) * soft;
+
+            float lit = 0.0;
+            for (int y = -1; y <= 1; ++y)
+                for (int x = -1; x <= 1; ++x)
+                {
+                    float d = texture (uShadowAtlas, uv + vec2 (float (x), float (y)) * texel).r;
+                    lit += (depth - bias <= d + 1.0e-5) ? 1.0 : 0.0;
+                }
+            return lit / 9.0;
+        }
+
+        // True cast shadows from the directional light-depth atlas (PCF + cascade blend).
+        float sampleCastShadow (vec3 worldPos, float viewDepth)
+        {
+            if (uCastShadow < 0.5 || uShadowAtlasTiles < 0.5)
+                return 1.0;
+
+            int nCasc = int (clamp (uCascadeCount + 0.5, 1.0, 4.0));
+            int cascade = 0;
+            for (int i = 0; i < 3; ++i)
+            {
+                if (i + 1 >= nCasc)
+                    break;
+                if (viewDepth > uCascadeSplits[i])
+                    cascade = i + 1;
+            }
+
+            float shadow = sampleCastShadowCascade (worldPos, cascade);
+
+            // Soften the hard split line (screen-stable diagonal artifact).
+            float trans = clamp (uCascadeTransition, 0.0, 0.45);
+            if (trans > 1.0e-4 && cascade + 1 < nCasc)
+            {
+                float splitFar = uCascadeSplits[cascade];
+                float splitNear = (cascade == 0) ? 0.15 : uCascadeSplits[cascade - 1];
+                float width = max ((splitFar - splitNear) * trans, 0.04);
+                float edge0 = splitFar - width;
+                if (viewDepth > edge0)
+                {
+                    float t = smoothstep (edge0, splitFar, viewDepth);
+                    float shadowNext = sampleCastShadowCascade (worldPos, cascade + 1);
+                    shadow = mix (shadow, shadowNext, t);
+                }
+            }
+            return shadow;
+        }
+
         // Crevice / horizon AO from the heightfield (reliable; no depth buffer).
         float heightfieldAO (vec3 pos)
         {
@@ -363,8 +488,9 @@ namespace
                 return;
             }
 
-            vec3 albedo = vColour;
-            float shadow = heightfieldSelfShadow (vWorldPos);
+            vec3 albedo = (uMatOverride > 0.5) ? uMatAlbedo : vColour;
+            float castSh = sampleCastShadow (vWorldPos, vViewDepth);
+            float shadow = heightfieldSelfShadow (vWorldPos) * castSh;
             float ao = heightfieldAO (vWorldPos);
 
             // Contact: the mesh covers the whole floor, so a ground disc never shows.
@@ -427,7 +553,19 @@ namespace
 
             if (baseAmt < 1.0e-4)
             {
-                fragColour = vec4 (albedo * ao, 1.0); // flat ramp; AO only if enabled
+                // Flat / unlit (gizmo, grid). Optional gizmo x-ray: only fragments
+                // inside the sphere, at reduced alpha — sphere itself stays opaque.
+                float a = 1.0;
+                if (uGizmoXray > 0.5)
+                {
+                    float d = length (vWorldPos - uXrayCenter);
+                    float edge = max (0.004, uXrayRadius * 0.02);
+                    float inside = 1.0 - smoothstep (uXrayRadius - edge, uXrayRadius + edge * 0.35, d);
+                    if (inside < 0.02)
+                        discard;
+                    a = clamp (uXrayAlpha, 0.0, 1.0) * inside;
+                }
+                fragColour = vec4 (albedo * ao, a);
                 return;
             }
 
@@ -440,10 +578,10 @@ namespace
             float NdotH = max (dot (n, h), 0.0);
             float VdotH = max (dot (v, h), 0.0);
 
-            float rough = clamp (uRoughness, 0.04, 1.0);
-            float metal = clamp (uMetalness, 0.0, 1.0);
-            float specAmt = clamp (uSpecular, 0.0, 1.0);
-            if (uAudioModSpec > 0.5)
+            float rough = clamp ((uMatOverride > 0.5) ? uMatRoughness : uRoughness, 0.04, 1.0);
+            float metal = clamp ((uMatOverride > 0.5) ? uMatMetalness : uMetalness, 0.0, 1.0);
+            float specAmt = clamp ((uMatOverride > 0.5) ? uMatSpecular : uSpecular, 0.0, 1.0);
+            if (uMatOverride < 0.5 && uAudioModSpec > 0.5)
                 specAmt = clamp (specAmt * factor, 0.0, 2.0);
             vec3 lightCol = max (uLightColour, vec3 (0.0));
             vec3 rimCol = max (uRimColour, vec3 (0.0));
@@ -455,8 +593,8 @@ namespace
             vec3 specular = (D * G * F) / max (4.0 * NdotV * max (NdotL, 1.0e-4), 1.0e-4);
             specular *= specAmt * shadow * lightCol;
 
-            // Soft Lambert wrap so the lighting terminator isn't a hard edge either.
-            float wrap = NdotL * 0.72 + 0.28;
+            // Soft Lambert wrap on the mesh; lookdev sphere uses hard N·L so rough/spec read clearly.
+            float wrap = (uMatOverride > 0.5) ? NdotL : (NdotL * 0.72 + 0.28);
             vec3 kd = albedo * (1.0 - metal);
             // Opt-in energy split — off preserves the legacy Look.
             if (uEnergyConserve > 0.5)
@@ -464,7 +602,8 @@ namespace
             vec3 diffuse = kd * (0.22 * ao + 0.78 * wrap * shadow) * lightCol;
 
             // Dome / hemisphere fill — sky vs ground, or equirectangular HDRI.
-            float domeAmt = clamp (uDomeStrength, 0.0, 1.0);
+            // Skipped for lookdev sphere so rough/specular aren't washed out by fill.
+            float domeAmt = (uMatOverride > 0.5) ? 0.0 : clamp (uDomeStrength, 0.0, 1.0);
             if (uAudioModDome > 0.5)
                 domeAmt = clamp (domeAmt * factor, 0.0, 2.0);
             if (domeAmt > 1.0e-4)
@@ -489,13 +628,31 @@ namespace
                 diffuse += kd * domeIrr * ao * domeAmt * fillW;
             }
 
-            float rimAmt = uRim;
-            if (uAudioModRim > 0.5)
+            float rimAmt = (uMatOverride > 0.5) ? 0.0 : uRim;
+            if (uMatOverride < 0.5 && uAudioModRim > 0.5)
                 rimAmt = clamp (rimAmt * factor, 0.0, 2.0);
             float rim = pow (1.0 - NdotV, 2.5) * rimAmt * ao;
-            vec3 sss = subsurfaceScatter (albedo, n, l, v, shadow);
+            vec3 sss = (uMatOverride > 0.5) ? vec3 (0.0)
+                                            : subsurfaceScatter (albedo, n, l, v, shadow);
             vec3 lit = diffuse + specular + albedo * rim * rimCol + sss;
             fragColour = vec4 (mix (albedo * shade, lit, amt), 1.0);
+        }
+    )";
+
+    constexpr const char* kShadowDepthVertexShader = R"(
+        #version 150
+        in vec3 position;
+        uniform mat4 uLightVP;
+        void main()
+        {
+            gl_Position = uLightVP * vec4 (position, 1.0);
+        }
+    )";
+
+    constexpr const char* kShadowDepthFragmentShader = R"(
+        #version 150
+        void main()
+        {
         }
     )";
 
@@ -565,12 +722,13 @@ namespace
     )";
 
     // mode: 0 = copy, 1 = SSAO, 2 = bloom extract, 3 = blur H, 4 = blur V,
-    //        5 = bloom composite, 6 = DOF disc gather,
+    //        5 = bloom composite, 6 = DOF disc gather, 7 = SSR (screen-space reflections),
     //        8 = SSGI gather+composite (legacy), 9 = SSGI gather GI-only,
     //        10 = SSGI bilateral denoise (Simple), 11 = SSGI temporal (Simple),
     //        12 = SSGI composite, 13 = tonemap/grade, 14 = SSGI bilateral upsample,
     //        15 = SVGF temporal + variance clamp (Modern), 16 = à-trous (Modern),
-    //        18 = luminance moments update (Modern).
+    //        17 = DOF CoC write (mesh only; sky = 0), 18 = luminance moments (Modern),
+    //        19 = DOF CoC dilate (spread mesh CoC into soft-BG void).
     // Vendor denoisers (NVIDIA NRD/OptiX, Intel OIDN) are intentionally not used:
     // they need D3D11/12, Vulkan, and/or CUDA/SYCL — incompatible with this JUCE
     // OpenGL soft FBO→Image Spec3D path without a full API rewrite.
@@ -605,20 +763,26 @@ namespace
             return (2.0 * nearP * farP) / (farP + nearP - zNdc * (farP - nearP));
         }
 
-        // Thin-lens CoC in pixels. uRadius = focus (view Z), uStrength = aperture 0–1,
-        // uThreshold = quality (0/1/2 → base max blur px + sample count),
-        // uParam = blur scale (DoF mode 6).
+        // Thin-lens CoC (Marmoset/Substance-style). uRadius = focus (view Z),
+        // uStrength = lens power (fMm/35)² / (fStop/5.6) from CPU,
+        // uThreshold = quality (0/1/2 → base max blur px + sample count).
+        // Cleared / soft-BG depth is absence — always CoC 0.
+        // Soft silhouettes: dilate mesh CoC into the void (modes 17→19→6).
         float circleOfConfusionPx (float depth01)
         {
+            if (depth01 >= 0.9995)
+                return 0.0;
             float focus = max (uRadius, 0.05);
-            float aperture = clamp (uStrength, 0.0, 1.0);
-            float viewZ = linearViewZ (depth01);
-            // Relative CoC — zero on the focus plane; gentle so aperture 0.01 stays sharp.
-            float rel = abs (viewZ - focus) / max (min (viewZ, focus), 0.05);
+            float power = clamp (uStrength, 0.0, 16.0);
+            float viewZ = max (linearViewZ (depth01), 0.05);
+            // Diopter difference — zero on the focus plane; F-Stop/focal length scale power.
+            float diopter = abs (1.0 / viewZ - 1.0 / focus);
             float baseBlur = (uThreshold < 0.5) ? 6.0
                            : ((uThreshold < 1.5) ? 10.0 : 14.0);
-            float maxBlur = baseBlur * clamp (uParam, 0.25, 3.0);
-            return clamp (rel * aperture * maxBlur, 0.0, maxBlur);
+            // Scene scale: power=1 (35mm @ f/5.6) ≈ former aperture ~0.35 look.
+            float coc = power * diopter * baseBlur * 12.0;
+            float maxBlur = baseBlur * mix (1.0, 6.0, clamp (power * 0.35, 0.0, 1.0));
+            return clamp (coc, 0.0, maxBlur);
         }
 
         // Vogel disc (golden-angle) — even circular bokeh taps.
@@ -674,28 +838,24 @@ namespace
         R"(            if (uMode == 6)
             {
                 // Gather DOF — disc samples weighted by neighbour CoC (avoids separable ghosting).
-                // Soft BG composites with alpha, so RGB-only blur left hard coverage silhouettes
-                // (especially when the mesh is small / distant on screen). Premultiply + blur A.
+                // Soft BG: sky CoC is 0; uAux holds mesh CoC dilated into the void (modes 17→19)
+                // so OOF silhouettes feather without inventing a far-plane wall.
+                // uAux stores CoC / maxBlur (RGBA8-safe); rescale to pixels here.
+                // Dilated CoC applies to SKY only — never inflate in-focus labels/mesh/grid,
+                // or sharp glyphs gather themselves at offsets (ghost "duplicates").
+                float baseBlur = (uThreshold < 0.5) ? 6.0
+                               : ((uThreshold < 1.5) ? 10.0 : 14.0);
+                float power = clamp (uStrength, 0.0, 16.0);
+                float maxBlur = baseBlur * mix (1.0, 6.0, clamp (power * 0.35, 0.0, 1.0));
                 float centerDepth = depthSample (vUv);
+                bool centerSky = (centerDepth >= 0.9995);
                 float centerCoc = circleOfConfusionPx (centerDepth);
+                float dilatedCoc = texture (uAux, vUv).r * maxBlur;
+                float gatherCoc = centerSky ? max (centerCoc, dilatedCoc) : centerCoc;
                 vec2 texel = 1.0 / max (uResolution, vec2 (1.0));
 
-                // uInvProj[0].xy = (cocDilate, edgeSpill) from CPU tune knobs.
-                float dilateAmt = clamp (uInvProj[0][0], 0.0, 1.0);
+                // uInvProj[0].y = edgeSpill from CPU tune knob (dilate is baked into uAux).
                 float spillAmt = clamp (uInvProj[0][1], 0.0, 1.0);
-
-                // Dilate CoC from neighbours so silhouette pixels (sky next to mesh, or
-                // MSAA-thin edges) still gather — otherwise far shots harden to a cutout.
-                float dilateCoc = centerCoc;
-                dilateCoc = max (dilateCoc, circleOfConfusionPx (depthSample (
-                    clamp (vUv + vec2 (texel.x, 0.0), vec2 (0.0), vec2 (1.0)))));
-                dilateCoc = max (dilateCoc, circleOfConfusionPx (depthSample (
-                    clamp (vUv + vec2 (-texel.x, 0.0), vec2 (0.0), vec2 (1.0)))));
-                dilateCoc = max (dilateCoc, circleOfConfusionPx (depthSample (
-                    clamp (vUv + vec2 (0.0, texel.y), vec2 (0.0), vec2 (1.0)))));
-                dilateCoc = max (dilateCoc, circleOfConfusionPx (depthSample (
-                    clamp (vUv + vec2 (0.0, -texel.y), vec2 (0.0), vec2 (1.0)))));
-                float gatherCoc = max (centerCoc, mix (centerCoc, dilateCoc, dilateAmt));
 
                 if (gatherCoc < 0.4)
                 {
@@ -708,7 +868,6 @@ namespace
                 // Premultiplied accumulation so coverage softens with colour.
                 vec4 acc = vec4 (src.rgb * src.a, src.a);
                 float wSum = 1.0;
-                bool centerSky = (centerDepth >= 0.9995);
                 float spillFloor = mix (0.05, 0.95, spillAmt);
 
                 for (int i = 0; i < 24; ++i)
@@ -724,13 +883,17 @@ namespace
                     vec4 s = texture (uTex, uv2);
 
                     // Down-weight sharper neighbours so in-focus edges don't bleed into bokeh.
-                    // Exception: sky/background centres must accept blurry mesh taps so
-                    // out-of-focus silhouettes expand outward (not a hard cutout).
+                    // Sky centres only pull in mesh that is itself defocused.
                     float w = 1.0;
                     if (! centerSky && sampleCoc + 0.5 < gatherCoc)
                         w = clamp (sampleCoc / max (gatherCoc, 1.0e-3), 0.05, 1.0);
                     if (centerSky && ! sampleSky)
-                        w = max (w, clamp (sampleCoc / max (gatherCoc, 1.0e-3), spillFloor, 1.0));
+                    {
+                        if (sampleCoc < 0.4)
+                            w = 0.0;
+                        else
+                            w = clamp (sampleCoc / max (gatherCoc, 1.0e-3), spillFloor, 1.0);
+                    }
 
                     acc += vec4 (s.rgb * s.a, s.a) * w;
                     wSum += w;
@@ -744,7 +907,182 @@ namespace
                 fragColour = vec4 (mix (src.rgb, outRgb, t), mix (src.a, outA, t));
                 return;
             }
-            // Shared SSGI gather. uParam.x via uParam: frame rotation radians (0 = fixed).
+)"
+        R"(            // SSR — screen-space reflection march.
+            // uStrength = mix, uRadius = march distance, uThreshold = quality,
+            // uParam = hit thickness.
+            // uInvProj packing:
+            //   [0] = (roughness, fresnelAmt, edgeFade, roughInfluence)
+            //   [1] = (intensity, metallicBias, metalness, useMeshNormals)
+            //   [2] = dome sky RGB, [3].x = dome fallback
+            // uAux: packed view-normals (rgb = n*0.5+0.5) when useMeshNormals.
+            if (uMode == 7)
+            {
+                float depth = depthSample (vUv);
+                if (depth > 0.999)
+                {
+                    fragColour = src;
+                    return;
+                }
+
+                const float tanHalfW = 1.0 / 1.5;
+                float aspect = uResolution.y / max (uResolution.x, 1.0);
+                float tanHalfH = tanHalfW * aspect;
+                vec2 texel = 1.0 / max (uResolution, vec2 (1.0));
+
+                vec3 viewPos = viewPosFromDepthUv (vUv, tanHalfW, tanHalfH);
+                vec3 nrm;
+                bool useMeshN = (uInvProj[1][3] > 0.5);
+                if (useMeshN)
+                {
+                    vec3 enc = texture (uAux, vUv).rgb;
+                    float encLen = length (enc);
+                    if (encLen > 0.05)
+                        nrm = normalize (enc * 2.0 - 1.0);
+                    else
+                        useMeshN = false;
+                }
+                if (! useMeshN)
+                {
+                    // Depth derivatives are blocky on curved surfaces — last resort.
+                    vec3 ddx = viewPosFromDepthUv (vUv + vec2 (texel.x, 0.0), tanHalfW, tanHalfH) - viewPos;
+                    vec3 ddy = viewPosFromDepthUv (vUv + vec2 (0.0, texel.y), tanHalfW, tanHalfH) - viewPos;
+                    nrm = normalize (cross (ddx, ddy));
+                    if (dot (nrm, -viewPos) < 0.0)
+                        nrm = -nrm;
+                }
+
+                vec3 viewDir = normalize (viewPos);
+                vec3 reflDir = normalize (reflect (viewDir, nrm));
+                // Facing away from camera / into surface — no useful SSR.
+                if (dot (reflDir, -viewDir) < 0.02)
+                {
+                    fragColour = src;
+                    return;
+                }
+
+                float rough = clamp (uInvProj[0][0], 0.04, 1.0);
+                float fresnelAmt = clamp (uInvProj[0][1], 0.0, 1.0);
+                float edgeFadeAmt = clamp (uInvProj[0][2], 0.0, 1.0);
+                float roughInf = clamp (uInvProj[0][3], 0.0, 1.0);
+                float intensity = max (uInvProj[1][0], 0.0);
+                float metalBias = clamp (uInvProj[1][1], 0.0, 1.0);
+                float metal = clamp (uInvProj[1][2], 0.0, 1.0);
+                vec3 domeSky = max (vec3 (uInvProj[2][0], uInvProj[2][1], uInvProj[2][2]), vec3 (0.0));
+                float domeFb = clamp (uInvProj[3][0], 0.0, 1.0);
+
+                int nSteps = (uThreshold < 0.5) ? 10
+                           : ((uThreshold < 1.5) ? 18
+                           : ((uThreshold < 2.5) ? 28 : 40));
+                float maxDist = mix (0.12, 2.8, clamp (uRadius, 0.0, 1.0));
+                float stepLen = maxDist / float (nSteps);
+                float thick = mix (0.015, 0.40, clamp (uParam, 0.0, 1.0));
+                // Rough surfaces need a wider acceptance slab + softer contribution.
+                thick *= mix (1.0, 2.25, rough * roughInf);
+
+                vec3 hitCol = domeSky * domeFb;
+                float hitW = 0.0;
+                vec2 hitUv = vUv;
+                bool found = false;
+                float prevZ = max (-viewPos.z, 1.0e-3);
+                vec2 prevUv = vUv;
+
+                for (int s = 1; s <= 40; ++s)
+                {
+                    if (s > nSteps)
+                        break;
+                    vec3 p = viewPos + reflDir * (stepLen * float (s));
+                    float z = max (-p.z, 1.0e-3);
+                    vec2 uv2 = vec2 (p.x / (tanHalfW * z), p.y / (tanHalfH * z)) * 0.5 + 0.5;
+                    if (uv2.x < 0.0 || uv2.x > 1.0 || uv2.y < 0.0 || uv2.y > 1.0)
+                        break;
+
+                    float sceneZ = linearViewZ (depthSample (uv2));
+                    float delta = z - sceneZ;
+                    // Crossed into geometry (ray behind surface within thickness).
+                    if (delta > 0.0 && delta < thick && sceneZ < 79.0)
+                    {
+                        // Binary refine between previous and current sample.
+                        vec2 aUv = prevUv;
+                        vec2 bUv = uv2;
+                        float aZ = prevZ;
+                        float bZ = z;
+                        for (int r = 0; r < 6; ++r)
+                        {
+                            vec2 mUv = mix (aUv, bUv, 0.5);
+                            float mRayZ = mix (aZ, bZ, 0.5);
+                            float mScene = linearViewZ (depthSample (mUv));
+                            if (mRayZ > mScene)
+                            {
+                                bUv = mUv;
+                                bZ = mRayZ;
+                            }
+                            else
+                            {
+                                aUv = mUv;
+                                aZ = mRayZ;
+                            }
+                        }
+                        hitUv = bUv;
+                        hitCol = texture (uTex, hitUv).rgb;
+                        hitW = 1.0 - float (s) / float (nSteps);
+                        found = true;
+                        break;
+                    }
+                    prevZ = z;
+                    prevUv = uv2;
+                }
+
+                // Screen-edge fade (stronger with Edge Fade).
+                float edge = smoothstep (0.0, mix (0.02, 0.18, edgeFadeAmt), hitUv.x)
+                           * smoothstep (0.0, mix (0.02, 0.18, edgeFadeAmt), hitUv.y)
+                           * smoothstep (0.0, mix (0.02, 0.18, edgeFadeAmt), 1.0 - hitUv.x)
+                           * smoothstep (0.0, mix (0.02, 0.18, edgeFadeAmt), 1.0 - hitUv.y);
+                if (! found)
+                    edge *= domeFb;
+
+                float ndv = clamp (dot (nrm, -viewDir), 0.0, 1.0);
+                float f0 = mix (0.04, 0.92, metal);
+                float fres = f0 + (1.0 - f0) * pow (1.0 - ndv, 5.0);
+                fres = mix (1.0, fres, fresnelAmt);
+
+                float roughKill = pow (clamp (1.0 - rough, 0.0, 1.0), mix (1.0, 3.5, roughInf));
+                float metalBoost = mix (1.0, 1.0 + metalBias * 1.5, metal);
+                float strength = clamp (uStrength, 0.0, 1.0);
+
+                // Soft hit sample — always a few taps (kills blocky point-sample SSR);
+                // roughness widens the cone further.
+                vec3 refl = hitCol;
+                if (found)
+                {
+                    int nBlur = (uThreshold < 0.5) ? 4
+                              : ((uThreshold < 1.5) ? 6
+                              : ((uThreshold < 2.5) ? 8 : 10));
+                    float blurPx = mix (1.25, 7.0, rough * roughInf);
+                    vec3 acc = hitCol;
+                    float wSum = 1.0;
+                    float hitD = depthSample (hitUv);
+                    for (int i = 0; i < 10; ++i)
+                    {
+                        if (i >= nBlur)
+                            break;
+                        vec2 o = vogelDisk (i, nBlur) * blurPx * texel;
+                        vec2 uvB = clamp (hitUv + o, vec2 (0.0), vec2 (1.0));
+                        float dB = depthSample (uvB);
+                        float dw = exp (-abs (hitD - dB) * 50.0);
+                        acc += texture (uTex, uvB).rgb * dw;
+                        wSum += dw;
+                    }
+                    refl = acc / max (wSum, 1.0e-4);
+                }
+
+                float w = strength * fres * roughKill * metalBoost * intensity
+                        * mix (0.35, 1.0, hitW) * edge;
+                fragColour = vec4 (src.rgb + refl * w, src.a);
+                return;
+            }
+)"
+        R"(            // Shared SSGI gather. uParam.x via uParam: frame rotation radians (0 = fixed).
             // uThreshold quality; uRadius march scale. If uMode==9: GI-only (A=depth01).
             // uMode==8: legacy scene+GI composite (uStrength = intensity).
             // uAux: optional packed mesh normals (rgb = n*0.5+0.5) when uInvProj[0][0] > 0.5
@@ -789,13 +1127,17 @@ namespace
                 vec3 b = cross (nrm, t);
 
                 // Quality: 0=Low 6×4, 1=Med 10×6, 2=High 14×8, 3=Ultra 20×12
+                // Extra march steps at high radius so step length stays small (avoids
+                // discrete "ghost sphere" copies on receivers).
                 int nSamples = (uThreshold < 0.5) ? 6
                              : ((uThreshold < 1.5) ? 10
                              : ((uThreshold < 2.5) ? 14 : 20));
-                int nSteps = (uThreshold < 0.5) ? 4
-                           : ((uThreshold < 1.5) ? 6
-                           : ((uThreshold < 2.5) ? 8 : 12));
-                float maxDist = mix (0.08, 0.55, clamp (uRadius, 0.0, 1.0));
+                int baseSteps = (uThreshold < 0.5) ? 4
+                              : ((uThreshold < 1.5) ? 6
+                              : ((uThreshold < 2.5) ? 8 : 12));
+                float radius01 = clamp (uRadius, 0.0, 1.0);
+                int nSteps = int (min (24.0, float (baseSteps) + radius01 * 12.0));
+                float maxDist = mix (0.08, 0.55, radius01);
                 float stepLen = maxDist / float (nSteps);
                 float rot = uParam;
                 float rc = cos (rot);
@@ -814,25 +1156,46 @@ namespace
                     float elev = sqrt (max (0.0, 1.0 - dot (disc, disc)));
                     vec3 dir = normalize (t * disc.x + b * disc.y + nrm * elev);
 
-                    for (int s = 1; s <= 12; ++s)
+                    for (int s = 1; s <= 24; ++s)
                     {
                         if (s > nSteps)
                             break;
-                        vec3 p = viewPos + dir * (stepLen * float (s));
+                        float travel = stepLen * float (s);
+                        vec3 p = viewPos + dir * travel;
                         float z = max (-p.z, 1.0e-3);
                         vec2 uv2 = vec2 (p.x / (tanHalfW * z), p.y / (tanHalfH * z)) * 0.5 + 0.5;
                         if (uv2.x < 0.0 || uv2.x > 1.0 || uv2.y < 0.0 || uv2.y > 1.0)
                             break;
 
                         float sceneZ = linearViewZ (depthSample (uv2));
-                        float thick = mix (0.04, 0.18, clamp (uRadius, 0.0, 1.0));
+                        // Keep hit slab tight at high radius — wide slabs stamp many ghosts.
+                        float thick = mix (0.05, 0.09, radius01);
                         if (sceneZ < z - 0.008 && sceneZ > z - thick)
                         {
-                            vec3 rad = texture (uTex, uv2).rgb;
+                            // Soft tap around hit UV — thin emissive lines (gizmo) otherwise
+                            // become a star of discrete dashes on the receiver.
+                            vec2 hitTexel = 1.0 / max (uResolution, vec2 (1.0));
+                            vec3 rad = vec3 (0.0);
+                            float rW = 0.0;
+                            for (int oy = -1; oy <= 1; ++oy)
+                            for (int ox = -1; ox <= 1; ++ox)
+                            {
+                                vec2 uvs = clamp (uv2 + vec2 (float (ox), float (oy)) * hitTexel * 1.5,
+                                                  vec2 (0.0), vec2 (1.0));
+                                float tw = (ox == 0 && oy == 0) ? 2.0 : 1.0;
+                                rad += texture (uTex, uvs).rgb * tw;
+                                rW += tw;
+                            }
+                            rad /= max (rW, 1.0e-3);
+                            // Clamp fireflies from emissive UI / hot peaks.
+                            float rLum = dot (rad, vec3 (0.299, 0.587, 0.114));
+                            rad *= min (1.0, 1.15 / max (rLum, 1.0e-3));
                             float nd = max (dot (nrm, dir), 0.0);
                             float atten = 1.0 - float (s) / float (nSteps);
-                            gi += rad * nd * atten;
-                            wSum += nd * atten;
+                            float distW = 1.0 / (1.0 + 8.0 * travel * travel);
+                            float w = nd * atten * distW;
+                            gi += rad * w;
+                            wSum += w;
                             break;
                         }
                     }
@@ -856,6 +1219,9 @@ namespace
             if (uMode == 10)
             {
                 // Bilateral denoise on GI buffer (uTex). uStrength = amount 0–1.
+                // uParam = step scale in texels (à-trous style; 1,2,4… merges vogel "stars").
+                // Depth weights stay loose — tight bilateral fails on curved receivers
+                // (sphere) and leaves the sample star intact.
                 float centerD = depthSample (vUv);
                 vec3 center = src.rgb;
                 if (centerD > 0.999 || uStrength < 1.0e-4)
@@ -864,23 +1230,37 @@ namespace
                     return;
                 }
                 vec2 texel = 1.0 / max (uResolution, vec2 (1.0));
-                float rad = mix (1.0, 3.5, clamp (uStrength, 0.0, 1.0));
+                float stepPx = max (uParam, 1.0);
+                float rad = mix (1.5, 3.5, clamp (uStrength, 0.0, 1.0)) * stepPx;
                 vec3 acc = center;
                 float wSum = 1.0;
-                for (int y = -2; y <= 2; ++y)
-                for (int x = -2; x <= 2; ++x)
+                float cLum = dot (center, vec3 (0.299, 0.587, 0.114));
+                float neighLumAcc = cLum;
+                float neighN = 1.0;
+                for (int y = -4; y <= 4; ++y)
+                for (int x = -4; x <= 4; ++x)
                 {
                     if (x == 0 && y == 0) continue;
-                    vec2 uv2 = clamp (vUv + vec2 (float (x), float (y)) * texel * rad, vec2 (0.0), vec2 (1.0));
+                    vec2 uv2 = clamp (vUv + vec2 (float (x), float (y)) * texel * rad,
+                                      vec2 (0.0), vec2 (1.0));
                     float d2 = depthSample (uv2);
-                    float dw = exp (-abs (centerD - d2) * 80.0);
-                    float spat = exp (-0.35 * float (x * x + y * y));
+                    if (d2 > 0.999) continue;
+                    // Loose depth gate so curved surfaces still blur sample ghosts.
+                    float dw = exp (-abs (centerD - d2) * 12.0);
+                    float spat = exp (-0.12 * float (x * x + y * y));
                     float w = dw * spat;
-                    acc += texture (uTex, uv2).rgb * w;
+                    vec3 s = texture (uTex, uv2).rgb;
+                    acc += s * w;
                     wSum += w;
+                    neighLumAcc += dot (s, vec3 (0.299, 0.587, 0.114));
+                    neighN += 1.0;
                 }
                 vec3 blurred = acc / max (wSum, 1.0e-4);
-                fragColour = vec4 (mix (center, blurred, clamp (uStrength, 0.0, 1.0)), src.a);
+                // Firefly kill: if this pixel is a lone hot sample vs neighbours, snap to blur.
+                float meanLum = neighLumAcc / max (neighN, 1.0);
+                float hot = smoothstep (meanLum * 1.6, meanLum * 3.5, cLum);
+                float amt = max (clamp (uStrength, 0.0, 1.0), hot);
+                fragColour = vec4 (mix (center, blurred, amt), src.a);
                 return;
             }
             if (uMode == 11)
@@ -1084,6 +1464,45 @@ namespace
                 fragColour = vec4 (clamp (outc, 0.0, 1.0), src.a);
                 return;
             }
+            if (uMode == 17)
+            {
+                // DOF CoC write — mesh only (sky / cleared depth → 0).
+                // Store CoC / maxBlur so RGBA8 ping-pong FBOs don't clamp pixel radii.
+                float baseBlur = (uThreshold < 0.5) ? 6.0
+                               : ((uThreshold < 1.5) ? 10.0 : 14.0);
+                float power = clamp (uStrength, 0.0, 16.0);
+                float maxBlur = max (baseBlur * mix (1.0, 6.0, clamp (power * 0.35, 0.0, 1.0)), 1.0e-3);
+                float cocN = circleOfConfusionPx (depthSample (vUv)) / maxBlur;
+                fragColour = vec4 (cocN, cocN, cocN, 1.0);
+                return;
+            }
+            if (uMode == 19)
+            {
+                // DOF CoC dilate — max-filter spreads mesh CoC into the soft-BG void.
+                // uTex = normalised CoC (mode 17), uParam = dilate 0–1, uStrength = lens power,
+                // uThreshold = quality (for max blur radius in pixels).
+                float dilateAmt = clamp (uParam, 0.0, 1.0);
+                float baseBlur = (uThreshold < 0.5) ? 6.0
+                               : ((uThreshold < 1.5) ? 10.0 : 14.0);
+                float power = clamp (uStrength, 0.0, 16.0);
+                float maxBlur = baseBlur * mix (1.0, 6.0, clamp (power * 0.35, 0.0, 1.0));
+                float radius = mix (1.0, maxBlur, dilateAmt);
+                vec2 texel = 1.0 / max (uResolution, vec2 (1.0));
+                float m = texture (uTex, vUv).r;
+                const int nProbe = 16;
+                for (int i = 0; i < nProbe; ++i)
+                {
+                    vec2 uv2 = clamp (vUv + vogelDisk (i, nProbe) * radius * texel,
+                                      vec2 (0.0), vec2 (1.0));
+                    float c2 = texture (uTex, uv2).r;
+                    // Only accept a neighbour if its CoC (px) reaches this far.
+                    float dist = length (vogelDisk (i, nProbe) * radius);
+                    if (c2 * maxBlur >= dist * 0.85)
+                        m = max (m, c2);
+                }
+                fragColour = vec4 (m, m, m, 1.0);
+                return;
+            }
 
             // SSAO — depth-delta taps (stable without perfect inv-projection).
             float depth = depthSample (vUv);
@@ -1119,12 +1538,14 @@ namespace
         #version 150
         in vec3 position;
         in vec2 texCoord;
+        uniform mat4 projectionMatrix;
+        uniform mat4 viewMatrix;
         out vec2 vTex;
         void main()
         {
             vTex = texCoord;
-            // NDC xyz — z from the projected world anchor so the mesh can occlude labels.
-            gl_Position = vec4 (position, 1.0);
+            // World-space billboard — same depth path as the mesh so DOF CoC matches.
+            gl_Position = projectionMatrix * viewMatrix * vec4 (position, 1.0);
         }
     )";
 
@@ -1336,6 +1757,44 @@ void Spectrogram3DComponent::GlHost::createShaders()
     colourAudioAffectAntiUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAudioAffectAnti");
     colourPlayheadWallXUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uPlayheadWallX");
     colourAntiPlayheadWallXUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uAntiPlayheadWallX");
+    colourShadowAtlasUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowAtlas");
+    colourCastShadowUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uCastShadow");
+    colourShadowMatrix0Uniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowMatrix0");
+    colourShadowMatrix1Uniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowMatrix1");
+    colourShadowMatrix2Uniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowMatrix2");
+    colourShadowMatrix3Uniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowMatrix3");
+    colourCascadeSplitsUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uCascadeSplits");
+    colourCascadeCountUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uCascadeCount");
+    colourCascadeTransitionUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uCascadeTransition");
+    colourShadowAtlasTilesUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uShadowAtlasTiles");
+    colourCastBiasUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uCastBias");
+    colourCastSoftnessUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uCastSoftness");
+    colourViewZUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uViewZScale");
+    colourMatOverrideUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMatOverride");
+    colourMatAlbedoUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMatAlbedo");
+    colourMatRoughUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMatRoughness");
+    colourMatMetalUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMatMetalness");
+    colourMatSpecularUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uMatSpecular");
+    colourGizmoXrayUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uGizmoXray");
+    colourXrayCenterUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uXrayCenter");
+    colourXrayRadiusUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uXrayRadius");
+    colourXrayAlphaUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*colourShader, "uXrayAlpha");
+    if (colourGizmoXrayUniform != nullptr)
+        colourGizmoXrayUniform->set (0.0f);
+
+    shadowDepthShader = std::make_unique<juce::OpenGLShaderProgram> (openGLContext);
+    if (! shadowDepthShader->addVertexShader (kShadowDepthVertexShader)
+        || ! shadowDepthShader->addFragmentShader (kShadowDepthFragmentShader)
+        || ! shadowDepthShader->link())
+    {
+        DBG ("Spectrogram3D shadow depth: " + shadowDepthShader->getLastError());
+        shadowDepthShader.reset();
+    }
+    else
+    {
+        shadowDepthPositionAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute> (*shadowDepthShader, "position");
+        shadowDepthLightVpUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*shadowDepthShader, "uLightVP");
+    }
 
     labelShader = std::make_unique<juce::OpenGLShaderProgram> (openGLContext);
     if (! labelShader->addVertexShader (kLabelVertexShader)
@@ -1350,6 +1809,8 @@ void Spectrogram3DComponent::GlHost::createShaders()
         labelPositionAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute> (*labelShader, "position");
         labelTexAttrib = std::make_unique<juce::OpenGLShaderProgram::Attribute> (*labelShader, "texCoord");
         labelTexUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*labelShader, "uTex");
+        labelProjectionUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*labelShader, "projectionMatrix");
+        labelViewUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*labelShader, "viewMatrix");
         labelResolutionUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*labelShader, "uResolution");
         labelCornerUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*labelShader, "uCornerRadius");
         labelClearUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*labelShader, "uClearColour");
@@ -1429,6 +1890,28 @@ void Spectrogram3DComponent::GlHost::createShaders()
 
 void Spectrogram3DComponent::GlHost::destroyShaders()
 {
+    colourXrayAlphaUniform.reset();
+    colourXrayRadiusUniform.reset();
+    colourXrayCenterUniform.reset();
+    colourGizmoXrayUniform.reset();
+    colourMatSpecularUniform.reset();
+    colourMatMetalUniform.reset();
+    colourMatRoughUniform.reset();
+    colourMatAlbedoUniform.reset();
+    colourMatOverrideUniform.reset();
+    colourViewZUniform.reset();
+    colourCastSoftnessUniform.reset();
+    colourCastBiasUniform.reset();
+    colourShadowAtlasTilesUniform.reset();
+    colourCascadeTransitionUniform.reset();
+    colourCascadeCountUniform.reset();
+    colourCascadeSplitsUniform.reset();
+    colourShadowMatrix3Uniform.reset();
+    colourShadowMatrix2Uniform.reset();
+    colourShadowMatrix1Uniform.reset();
+    colourShadowMatrix0Uniform.reset();
+    colourCastShadowUniform.reset();
+    colourShadowAtlasUniform.reset();
     colourContactUniform.reset();
     colourShadowQualityUniform.reset();
     colourShadowSoftnessUniform.reset();
@@ -1468,9 +1951,15 @@ void Spectrogram3DComponent::GlHost::destroyShaders()
     colourPositionAttrib.reset();
     colourShader.reset();
 
+    shadowDepthLightVpUniform.reset();
+    shadowDepthPositionAttrib.reset();
+    shadowDepthShader.reset();
+
     labelClearUniform.reset();
     labelCornerUniform.reset();
     labelResolutionUniform.reset();
+    labelViewUniform.reset();
+    labelProjectionUniform.reset();
     labelTexUniform.reset();
     labelTexAttrib.reset();
     labelPositionAttrib.reset();
@@ -1509,6 +1998,12 @@ void Spectrogram3DComponent::GlHost::destroyShaders()
 void Spectrogram3DComponent::GlHost::newOpenGLContextCreated()
 {
     meshVbo = meshIbo = floorVbo = labelVbo = tintVbo = contactVbo = 0;
+    sphereVbo = sphereIbo = gizmoVbo = gizmoIbo = 0;
+    shadowFbo = shadowDepthTex = 0;
+    shadowAtlasW = shadowAtlasH = shadowTileRes = shadowAtlasCascades = 0;
+    cascadesBuilt = 0;
+    sphereIndexCount = gizmoIndexCount = 0;
+    sphereNeedsUpload = true;
     softDepthTex = 0;
     softMsaaFbo = softMsaaColorRb = softMsaaDepthRb = 0;
     softMsaaW = softMsaaH = softMsaaSamples = 0;
@@ -1533,6 +2028,10 @@ void Spectrogram3DComponent::GlHost::newOpenGLContextCreated()
     juce::gl::glGenBuffers (1, &labelVbo);
     juce::gl::glGenBuffers (1, &tintVbo);
     juce::gl::glGenBuffers (1, &contactVbo);
+    juce::gl::glGenBuffers (1, &sphereVbo);
+    juce::gl::glGenBuffers (1, &sphereIbo);
+    juce::gl::glGenBuffers (1, &gizmoVbo);
+    juce::gl::glGenBuffers (1, &gizmoIbo);
     glReady = (colourShader != nullptr && meshVbo != 0 && meshIbo != 0);
     meshNeedsUpload = true;
     owner.meshNeedsUpload = true;
@@ -1549,6 +2048,7 @@ void Spectrogram3DComponent::GlHost::openGLContextClosing()
         juce::gl::glDeleteTextures (1, &softDepthTex);
         softDepthTex = 0;
     }
+    releaseShadowAtlas();
     if (heightMapTex != 0)
     {
         juce::gl::glDeleteTextures (1, &heightMapTex);
@@ -1565,10 +2065,16 @@ void Spectrogram3DComponent::GlHost::openGLContextClosing()
     if (labelVbo != 0) { juce::gl::glDeleteBuffers (1, &labelVbo); labelVbo = 0; }
     if (tintVbo != 0) { juce::gl::glDeleteBuffers (1, &tintVbo); tintVbo = 0; }
     if (contactVbo != 0) { juce::gl::glDeleteBuffers (1, &contactVbo); contactVbo = 0; }
+    if (sphereVbo != 0) { juce::gl::glDeleteBuffers (1, &sphereVbo); sphereVbo = 0; }
+    if (sphereIbo != 0) { juce::gl::glDeleteBuffers (1, &sphereIbo); sphereIbo = 0; }
+    if (gizmoVbo != 0) { juce::gl::glDeleteBuffers (1, &gizmoVbo); gizmoVbo = 0; }
+    if (gizmoIbo != 0) { juce::gl::glDeleteBuffers (1, &gizmoIbo); gizmoIbo = 0; }
     destroyShaders();
     glReady = false;
     meshIndexCount = 0;
     floorVertexCount = 0;
+    sphereIndexCount = 0;
+    gizmoIndexCount = 0;
 }
 
 void Spectrogram3DComponent::GlHost::setCornerUniforms (juce::OpenGLShaderProgram&) const
@@ -1646,15 +2152,18 @@ void Spectrogram3DComponent::GlHost::ensureFloorGeometry()
     const bool logFreq = (owner.dataSource != nullptr) ? owner.dataSource->isLogFrequencyAxis() : true;
     const bool soft = owner.usesSoftComposite();
     const bool reverse = owner.reverseFrequencyAxis;
+    // Epoch 6: soft — no perimeter, ~1px interior grid, ticks are billboards.
+    constexpr int kFloorRibbonEpoch = 6;
 
     if (floorVbo != 0 && sr == floorGridSr && logFreq == floorGridLog && soft == floorGridSoftBg
-        && reverse == floorGridReverseFreq)
+        && reverse == floorGridReverseFreq && floorRibbonEpoch == kFloorRibbonEpoch)
         return;
 
     floorGridSr = sr;
     floorGridLog = logFreq;
     floorGridSoftBg = soft;
     floorGridReverseFreq = reverse;
+    floorRibbonEpoch = kFloorRibbonEpoch;
     owner.rebuildFreqLabels (sr, logFreq);
     rebuildFloorGeometry();
     labelAtlasReady = false;
@@ -1664,72 +2173,126 @@ void Spectrogram3DComponent::GlHost::rebuildFloorGeometry()
 {
     constexpr float groundY = -0.012f;
     constexpr float gridY = -0.010f;
-    std::vector<Vertex> lines;
-    lines.reserve (160);
+    const bool soft = owner.usesSoftComposite();
+    // Soft: ~1px world ribbons. Solid keeps slightly wider strokes for DOF gather.
+    const float kGridHalfW = soft ? 0.00055f : 0.0045f;
+    // Solid-only thick ticks (soft uses camera-facing billboards in drawPlayheadTicks).
+    constexpr float kTickHalfW = 0.00115f;
+    constexpr float kTickTopY = 0.017f;
+    constexpr float kTickX = 1.022f;
+    std::vector<Vertex> verts;
+    verts.reserve (900);
 
-    auto pushLine = [&lines] (float x0, float y0, float z0, float x1, float y1, float z1, float r, float g, float b)
+    auto pushVert = [&verts] (float x, float y, float z, float r, float g, float b)
     {
-        lines.push_back ({ x0, y0, z0, r, g, b, 0.0f, 1.0f, 0.0f });
-        lines.push_back ({ x1, y1, z1, r, g, b, 0.0f, 1.0f, 0.0f });
+        verts.push_back ({ x, y, z, r, g, b, 0.0f, 1.0f, 0.0f });
+    };
+
+    // Axis-aligned ribbon in XZ (or vertical tick in XY). Two triangles.
+    auto pushRibbon = [&pushVert] (float x0, float y0, float z0,
+                                   float x1, float y1, float z1,
+                                   float halfW, float r, float g, float b)
+    {
+        const float dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+        const float len = std::sqrt (dx * dx + dy * dy + dz * dz);
+        if (len < 1.0e-6f)
+            return;
+        float px = 0.0f, py = 0.0f, pz = 0.0f;
+        if (std::abs (dy) > std::abs (dx) && std::abs (dy) > std::abs (dz))
+        {
+            px = halfW;
+        }
+        else
+        {
+            px = -dz / len * halfW;
+            pz =  dx / len * halfW;
+        }
+
+        pushVert (x0 + px, y0 + py, z0 + pz, r, g, b);
+        pushVert (x0 - px, y0 - py, z0 - pz, r, g, b);
+        pushVert (x1 - px, y1 - py, z1 - pz, r, g, b);
+        pushVert (x0 + px, y0 + py, z0 + pz, r, g, b);
+        pushVert (x1 - px, y1 - py, z1 - pz, r, g, b);
+        pushVert (x1 + px, y1 + py, z1 + pz, r, g, b);
     };
 
     // Opaque ground plane (two triangles). Skipped for soft composite so EQ shows through.
-    if (! owner.usesSoftComposite())
+    if (! soft)
     {
         const float gr = 0.06f, gg = 0.07f, gb = 0.09f;
-        auto pushGround = [&lines, gr, gg, gb] (float x, float y, float z)
-        {
-            lines.push_back ({ x, y, z, gr, gg, gb, 0.0f, 1.0f, 0.0f });
-        };
-        pushGround (-1.0f, groundY, -1.0f);
-        pushGround ( 1.0f, groundY, -1.0f);
-        pushGround ( 1.0f, groundY,  1.0f);
-        pushGround (-1.0f, groundY, -1.0f);
-        pushGround ( 1.0f, groundY,  1.0f);
-        pushGround (-1.0f, groundY,  1.0f);
+        pushVert (-1.0f, groundY, -1.0f, gr, gg, gb);
+        pushVert ( 1.0f, groundY, -1.0f, gr, gg, gb);
+        pushVert ( 1.0f, groundY,  1.0f, gr, gg, gb);
+        pushVert (-1.0f, groundY, -1.0f, gr, gg, gb);
+        pushVert ( 1.0f, groundY,  1.0f, gr, gg, gb);
+        pushVert (-1.0f, groundY,  1.0f, gr, gg, gb);
     }
 
     const float nyquist = (float) (floorGridSr * 0.5);
     const float maxHz = juce::jmin (SpectrogramComponent::kMaxDisplayHz, nyquist * 0.999f);
+    // Soft: inset from ±1 so freq/time strokes never form a rectangular border.
+    const float x0 = soft ? -0.98f : -1.0f;
+    const float x1 = soft ?  0.98f :  1.0f;
+    const float z0 = soft ? -0.98f : -1.0f;
+    const float z1 = soft ?  0.98f :  1.0f;
 
     for (float hz : kMinorHz)
     {
         if (hz < SpectrogramComponent::kMinDisplayHz || hz > maxHz)
             continue;
         const float z = owner.worldZForFreq (hz, floorGridSr, floorGridLog);
-        pushLine (-1.0f, gridY, z, 1.0f, gridY, z, 0.28f, 0.30f, 0.34f);
+        pushRibbon (x0, gridY, z, x1, gridY, z, kGridHalfW * 0.75f, 0.28f, 0.30f, 0.34f);
     }
     for (float hz : kMajorHz)
     {
         if (hz < SpectrogramComponent::kMinDisplayHz || hz > maxHz)
             continue;
         const float z = owner.worldZForFreq (hz, floorGridSr, floorGridLog);
-        pushLine (-1.0f, gridY, z, 1.0f, gridY, z, 0.62f, 0.65f, 0.70f);
-        // Playhead tick
-        pushLine (1.0f, gridY, z, 1.0f, 0.07f, z, 0.85f, 0.85f, 0.88f);
+        const float maj = soft ? 0.48f : 0.62f;
+        pushRibbon (x0, gridY, z, x1, gridY, z, kGridHalfW, maj, maj + 0.03f, maj + 0.08f);
+        // Solid path keeps world ticks; soft uses camera-facing drawPlayheadTicks().
+        if (! soft)
+            pushRibbon (kTickX, gridY, z, kTickX, kTickTopY, z, kTickHalfW, 0.85f, 0.85f, 0.88f);
     }
 
     constexpr int timeDiv = 8;
     for (int i = 0; i <= timeDiv; ++i)
     {
+        // Soft: skip outer time edges (i==0 / i==timeDiv) — those were the L/R border.
+        if (soft && (i == 0 || i == timeDiv))
+            continue;
         const float x = (float) i / (float) timeDiv * 2.0f - 1.0f;
-        const float a = (i == timeDiv) ? 0.75f : 0.32f;
-        pushLine (x, gridY, -1.0f, x, gridY, 1.0f, a, a, a + 0.02f);
+        const float a = (i == timeDiv && ! soft) ? 0.75f : 0.32f;
+        const float half = (i == timeDiv && ! soft) ? kGridHalfW : kGridHalfW * 0.75f;
+        pushRibbon (x, gridY, z0, x, gridY, z1, half, a, a, a + 0.02f);
     }
 
-    pushLine (-1.0f, gridY, -1.0f, 1.0f, gridY, -1.0f, 0.7f, 0.72f, 0.75f);
-    pushLine (1.0f, gridY, -1.0f, 1.0f, gridY, 1.0f, 0.7f, 0.72f, 0.75f);
-    pushLine (1.0f, gridY, 1.0f, -1.0f, gridY, 1.0f, 0.7f, 0.72f, 0.75f);
-    pushLine (-1.0f, gridY, 1.0f, -1.0f, gridY, -1.0f, 0.7f, 0.72f, 0.75f);
+    // Outer frame — solid only. Soft: never draw a perimeter (NO BORDER).
+    if (! soft)
+    {
+        pushRibbon (-1.0f, gridY, -1.0f, 1.0f, gridY, -1.0f, kGridHalfW, 0.7f, 0.72f, 0.75f);
+        pushRibbon (1.0f, gridY, -1.0f, 1.0f, gridY, 1.0f, kGridHalfW, 0.7f, 0.72f, 0.75f);
+        pushRibbon (1.0f, gridY, 1.0f, -1.0f, gridY, 1.0f, kGridHalfW, 0.7f, 0.72f, 0.75f);
+        pushRibbon (-1.0f, gridY, 1.0f, -1.0f, gridY, -1.0f, kGridHalfW, 0.7f, 0.72f, 0.75f);
+    }
 
-    floorVertexCount = (int) lines.size();
+    floorVertexCount = (int) verts.size();
+    // #region agent log
+    agentDbgLog ("J", "rebuildFloorGeometry", "floor_ribbons",
+                 juce::String ("{\"totalVerts\":") + juce::String (floorVertexCount)
+                     + ",\"gridHalfW\":" + juce::String (kGridHalfW, 5)
+                     + ",\"softBg\":" + juce::String (soft ? 1 : 0)
+                     + ",\"noPerimeter\":" + juce::String (soft ? 1 : 0)
+                     + ",\"ticksInVbo\":" + juce::String (soft ? 0 : 1)
+                     + "}");
+    // #endregion
     if (floorVbo == 0)
         juce::gl::glGenBuffers (1, &floorVbo);
 
     juce::gl::glBindBuffer (juce::gl::GL_ARRAY_BUFFER, floorVbo);
     juce::gl::glBufferData (juce::gl::GL_ARRAY_BUFFER,
-                            (GLsizeiptr) (lines.size() * sizeof (Vertex)),
-                            lines.data(), juce::gl::GL_DYNAMIC_DRAW);
+                            (GLsizeiptr) (verts.size() * sizeof (Vertex)),
+                            verts.data(), juce::gl::GL_DYNAMIC_DRAW);
     juce::gl::glBindBuffer (juce::gl::GL_ARRAY_BUFFER, 0);
 }
 
@@ -1759,6 +2322,7 @@ void Spectrogram3DComponent::GlHost::ensureLabelAtlas()
             const int col = i % cols;
             const int row = i / cols;
             auto cell = juce::Rectangle<int> (col * cellW, row * cellH, cellW, cellH);
+            // Soft drop-shadow under glyph (1px). Hypothesis E: can read as a second label.
             g.setColour (juce::Colours::black.withAlpha (0.75f));
             g.drawText (owner.freqLabels[(size_t) i].text, cell.translated (1, 1),
                         juce::Justification::centred, false);
@@ -1778,6 +2342,11 @@ void Spectrogram3DComponent::GlHost::ensureLabelAtlas()
 
         owner.labelAtlasImage = std::move (img);
         owner.labelAtlasDirty = false;
+        // #region agent log
+        agentDbgLog ("E", "ensureLabelAtlas", "atlas_rebuilt_with_shadow",
+                     juce::String ("{\"n\":") + juce::String (n)
+                         + ",\"cellW\":64,\"cellH\":28,\"shadowPx\":1}");
+        // #endregion
     }
 
     labelAtlas.loadImage (owner.labelAtlasImage);
@@ -2327,6 +2896,9 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     ensureFloorGeometry();
     ensureLabelAtlas();
 
+    // Shadow atlas before soft colour target (must not leave soft FBO unbound).
+    renderShadowDepthPass();
+
     const int samples = effectiveMsaaSamples();
     const bool useMsaa = samples >= 2;
     if (useMsaa)
@@ -2350,10 +2922,41 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
 
     uploadDomeTextureIfNeeded();
     drawSoftTint();
-    drawGroundAndGrid();
+    // #region agent log
+    gLabelDrawCallsThisFrame = 0;
+    ++gSoftFrameCounter;
+    // #endregion
+    // Mesh + lookdev sphere + gizmo into SSGI/SSR (gizmo bounce is intentional).
+    // Grid / ticks / labels stay deferred — bright chrome must not seed GI/bloom.
     drawContactShadow();
     drawMesh();
-    drawFrequencyLabels();
+    drawDebugSphere();
+    drawDebugGizmo();
+    const bool postStack = owner.needsPostEffects();
+    if (! postStack)
+    {
+        drawGroundAndGrid();
+        drawPlayheadTicks();
+        drawFrequencyLabels();
+    }
+    // #region agent log
+    if ((gSoftFrameCounter % 30) == 1)
+    {
+        agentDbgLog ("H", "renderSoftComposite", "soft_frame_draw",
+                     juce::String ("{\"frame\":") + juce::String (gSoftFrameCounter)
+                         + ",\"labelDrawCalls\":" + juce::String (gLabelDrawCallsThisFrame)
+                         + ",\"freqLabelCount\":" + juce::String ((int) owner.freqLabels.size())
+                         + ",\"floorVerts\":" + juce::String (floorVertexCount)
+                         + ",\"ssgi\":" + juce::String (owner.ssgiEnabled ? 1 : 0)
+                         + ",\"ssgiStr\":" + juce::String (owner.ssgiStrength, 3)
+                         + ",\"overlaysDeferred\":" + juce::String (postStack ? 1 : 0)
+                         + ",\"ssr\":" + juce::String (owner.ssrEnabled ? 1 : 0)
+                         + ",\"dof\":" + juce::String (owner.dofEnabled ? 1 : 0)
+                         + ",\"bloom\":" + juce::String (owner.bloomEnabled ? 1 : 0)
+                         + ",\"audioLvl\":" + juce::String (owner.audioLevelLive01, 3)
+                         + "}");
+    }
+    // #endregion
 
     if (useMsaa && softMsaaFbo != 0)
     {
@@ -2366,7 +2969,7 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
         glViewport (0, 0, w, h);
     }
 
-    if (owner.needsPostEffects())
+    if (postStack)
         applySsaoAndBloom (w, h);
 
     readbackSoftImage (w, h);
@@ -2517,6 +3120,96 @@ void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProg
            1.0f + kClosedPlayheadWallBias);
     setF1 (colourAntiPlayheadWallXUniform.get(), "uAntiPlayheadWallX",
            -1.0f - kClosedWaterfallEndWallBias);
+
+    setCastShadowUniforms (program);
+    setMaterialOverrideUniforms (false, juce::Colours::white, 0.45f, 0.0f);
+}
+
+void Spectrogram3DComponent::GlHost::setCastShadowUniforms (juce::OpenGLShaderProgram& program) const
+{
+    const bool on = owner.lightingEnabled && owner.castShadowsEnabled
+                    && shadowDepthTex != 0 && cascadesBuilt > 0;
+    auto setF1 = [&program] (juce::OpenGLShaderProgram::Uniform* u, const char* name, float v)
+    {
+        if (u != nullptr && u->uniformID >= 0)
+            u->set (v);
+        else
+            program.setUniform (name, v);
+    };
+    auto setMat = [] (juce::OpenGLShaderProgram::Uniform* u, const juce::Matrix3D<float>& m)
+    {
+        if (u != nullptr && u->uniformID >= 0)
+            u->setMatrix4 (m.mat, 1, false);
+    };
+    juce::ignoreUnused (program);
+
+    setF1 (colourCastShadowUniform.get(), "uCastShadow", on ? 1.0f : 0.0f);
+    setF1 (colourCascadeCountUniform.get(), "uCascadeCount", (float) juce::jmax (1, cascadesBuilt));
+    setF1 (colourShadowAtlasTilesUniform.get(), "uShadowAtlasTiles",
+           (float) juce::jmax (1, shadowAtlasCascades));
+    setF1 (colourCastBiasUniform.get(), "uCastBias", owner.selfShadowBias);
+    setF1 (colourCastSoftnessUniform.get(), "uCastSoftness", owner.selfShadowSoftness);
+    setF1 (colourCascadeTransitionUniform.get(), "uCascadeTransition",
+           owner.shadowCascadeTransitionFraction);
+    setF1 (colourViewZUniform.get(), "uViewZScale", 1.0f);
+
+    const float s0 = cascadeSplitFar[0], s1 = cascadeSplitFar[1];
+    const float s2 = cascadeSplitFar[2], s3 = cascadeSplitFar[3];
+    if (colourCascadeSplitsUniform != nullptr && colourCascadeSplitsUniform->uniformID >= 0)
+        colourCascadeSplitsUniform->set (s0, s1, s2, s3);
+    else
+        program.setUniform ("uCascadeSplits", s0, s1, s2, s3);
+
+    setMat (colourShadowMatrix0Uniform.get(), shadowMatrix[0]);
+    setMat (colourShadowMatrix1Uniform.get(), shadowMatrix[1]);
+    setMat (colourShadowMatrix2Uniform.get(), shadowMatrix[2]);
+    setMat (colourShadowMatrix3Uniform.get(), shadowMatrix[3]);
+
+    if (on)
+        bindShadowAtlasForMesh();
+    else if (colourShadowAtlasUniform != nullptr)
+        colourShadowAtlasUniform->set (3);
+}
+
+void Spectrogram3DComponent::GlHost::setMaterialOverrideUniforms (bool enabled, juce::Colour albedo,
+                                                                 float roughness, float metalness,
+                                                                 float specular) const
+{
+    if (colourShader == nullptr)
+        return;
+    auto& program = *colourShader;
+    auto setF1 = [&program] (juce::OpenGLShaderProgram::Uniform* u, const char* name, float v)
+    {
+        if (u != nullptr && u->uniformID >= 0)
+            u->set (v);
+        else
+            program.setUniform (name, v);
+    };
+    auto setF3 = [&program] (juce::OpenGLShaderProgram::Uniform* u, const char* name,
+                             float a, float b, float c)
+    {
+        if (u != nullptr && u->uniformID >= 0)
+            u->set (a, b, c);
+        else
+            program.setUniform (name, a, b, c);
+    };
+    setF1 (colourMatOverrideUniform.get(), "uMatOverride", enabled ? 1.0f : 0.0f);
+    setF3 (colourMatAlbedoUniform.get(), "uMatAlbedo",
+           albedo.getFloatRed(), albedo.getFloatGreen(), albedo.getFloatBlue());
+    setF1 (colourMatRoughUniform.get(), "uMatRoughness", roughness);
+    setF1 (colourMatMetalUniform.get(), "uMatMetalness", metalness);
+    setF1 (colourMatSpecularUniform.get(), "uMatSpecular", specular);
+}
+
+void Spectrogram3DComponent::GlHost::bindShadowAtlasForMesh() const
+{
+    using namespace juce::gl;
+    if (colourShadowAtlasUniform == nullptr)
+        return;
+    glActiveTexture (GL_TEXTURE3);
+    glBindTexture (GL_TEXTURE_2D, shadowDepthTex);
+    colourShadowAtlasUniform->set (3);
+    glActiveTexture (GL_TEXTURE0);
 }
 
 juce::Vector3D<float> Spectrogram3DComponent::GlHost::getLightDirectionWorld() const noexcept
@@ -2592,11 +3285,150 @@ void Spectrogram3DComponent::GlHost::drawGroundAndGrid()
                                stride, (const void*) (sizeof (float) * 6));
     }
 
-    const int groundVerts = owner.usesSoftComposite() ? 0 : 6;
-    if (groundVerts > 0)
-        glDrawArrays (GL_TRIANGLES, 0, groundVerts);
-    if (floorVertexCount > groundVerts)
-        glDrawArrays (GL_LINES, groundVerts, floorVertexCount - groundVerts);
+    // Ground plane + grid ribbons (all triangles — ribbons replace GL_LINES for clean DOF).
+    if (floorVertexCount > 0)
+        glDrawArrays (GL_TRIANGLES, 0, floorVertexCount);
+
+    if (colourPositionAttrib != nullptr && colourPositionAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) colourPositionAttrib->attributeID);
+    if (colourColourAttrib != nullptr && colourColourAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) colourColourAttrib->attributeID);
+    if (colourNormalAttrib != nullptr && colourNormalAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) colourNormalAttrib->attributeID);
+    unbindDomeTexture();
+    glBindBuffer (GL_ARRAY_BUFFER, 0);
+}
+
+void Spectrogram3DComponent::GlHost::drawPlayheadTicks()
+{
+    using namespace juce::gl;
+    if (! owner.usesSoftComposite() || colourShader == nullptr || labelVbo == 0)
+        return;
+
+    const double sr = floorGridSr > 1.0 ? floorGridSr : 48000.0;
+    const float nyquist = (float) (sr * 0.5);
+    const float maxHz = juce::jmin (SpectrogramComponent::kMaxDisplayHz, nyquist * 0.999f);
+
+    struct V { float x, y, z, r, g, b, nx, ny, nz; };
+    std::vector<V> quads;
+    quads.reserve (80);
+
+    const auto viewRect = owner.getGlViewLocal();
+    const int viewW = juce::jmax (1, viewRect.getWidth());
+    const int viewH = juce::jmax (1, viewRect.getHeight());
+    constexpr float kTanHalfW = 1.0f / 1.5f;
+    const float tanHalfH = kTanHalfW * ((float) viewH / (float) viewW);
+    // ~1.5 px wide, ~9 px tall — screen-constant so MSAA/resolve edges stay thin.
+    const float ndcHalfW = 0.75f / (float) viewW;
+    const float ndcHalfH = 4.5f / (float) viewH;
+
+    juce::Vector3D<float> right, camUp, forward;
+    owner.cameraBasis (right, camUp, forward);
+    juce::ignoreUnused (camUp);
+    const juce::Vector3D<float> up { 0.0f, 1.0f, 0.0f };
+    const auto viewMat = getViewMatrix();
+
+    constexpr float kTickX = 1.022f;
+    constexpr float kTickY = -0.002f;
+    constexpr float kGridY = -0.010f;
+
+    for (float hz : kMajorHz)
+    {
+        if (hz < SpectrogramComponent::kMinDisplayHz || hz > maxHz)
+            continue;
+        const float az = owner.worldZForFreq (hz, sr, floorGridLog);
+        const float ax = kTickX;
+        const float ay = kTickY;
+
+        const float eyeZ = viewMat.mat[2] * ax + viewMat.mat[6] * ay + viewMat.mat[10] * az + viewMat.mat[14];
+        const float viewDist = juce::jmax (0.05f, -eyeZ);
+        const float halfW = ndcHalfW * kTanHalfW * viewDist;
+        const float halfH = ndcHalfH * tanHalfH * viewDist;
+
+        const float fXZ = juce::jmax (1.0e-6f,
+                                      std::sqrt (forward.x * forward.x + forward.z * forward.z));
+        constexpr float bias = 0.014f;
+        const float cx = ax - forward.x / fXZ * bias;
+        const float cy = juce::jmax (kGridY + 0.001f, ay);
+        const float cz = az - forward.z / fXZ * bias;
+
+        auto corner = [&] (float sx, float sy) -> V
+        {
+            return { cx + right.x * sx * halfW + up.x * sy * halfH,
+                     cy + right.y * sx * halfW + up.y * sy * halfH,
+                     cz + right.z * sx * halfW + up.z * sy * halfH,
+                     0.78f, 0.80f, 0.84f, 0.0f, 1.0f, 0.0f };
+        };
+
+        // sy -1..+1: tick sits mostly above the grid line.
+        const V c00 = corner (-1.0f, -0.15f);
+        const V c10 = corner ( 1.0f, -0.15f);
+        const V c11 = corner ( 1.0f,  1.0f);
+        const V c01 = corner (-1.0f,  1.0f);
+        quads.push_back (c00);
+        quads.push_back (c10);
+        quads.push_back (c11);
+        quads.push_back (c00);
+        quads.push_back (c11);
+        quads.push_back (c01);
+    }
+
+    if (quads.empty())
+        return;
+
+    // #region agent log
+    if ((gSoftFrameCounter % 30) == 1)
+        agentDbgLog ("J", "drawPlayheadTicks", "billboard_ticks",
+                     juce::String ("{\"n\":") + juce::String ((int) quads.size() / 6)
+                         + ",\"ndcHalfW\":" + juce::String (ndcHalfW, 5)
+                         + ",\"pxW\":1.5,\"pxH\":9}");
+    // #endregion
+
+    colourShader->use();
+    setCornerUniforms (*colourShader);
+    setLightingUniforms (*colourShader);
+    bindDomeTextureForMesh();
+    if (colourLightingAmountUniform != nullptr)
+        colourLightingAmountUniform->set (0.0f);
+    if (colourSelfShadowUniform != nullptr)
+        colourSelfShadowUniform->set (0.0f);
+    if (colourAoAmountUniform != nullptr)
+        colourAoAmountUniform->set (0.0f);
+    if (colourContactUniform != nullptr)
+        colourContactUniform->set (0.0f);
+    if (colourProjectionUniform != nullptr)
+        colourProjectionUniform->setMatrix4 (getProjectionMatrix().mat, 1, false);
+    if (colourViewUniform != nullptr)
+        colourViewUniform->setMatrix4 (viewMat.mat, 1, false);
+
+    glDisable (GL_CULL_FACE);
+    glEnable (GL_DEPTH_TEST);
+    glDepthMask (GL_TRUE);
+    glDepthFunc (GL_LEQUAL);
+    // Stream through labelVbo (labels re-upload immediately after).
+    glBindBuffer (GL_ARRAY_BUFFER, labelVbo);
+    glBufferData (GL_ARRAY_BUFFER, (GLsizeiptr) (quads.size() * sizeof (V)), quads.data(), GL_STREAM_DRAW);
+
+    const GLsizei stride = (GLsizei) sizeof (V);
+    if (colourPositionAttrib != nullptr && colourPositionAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) colourPositionAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) colourPositionAttrib->attributeID, 3, GL_FLOAT, GL_FALSE, stride, nullptr);
+    }
+    if (colourColourAttrib != nullptr && colourColourAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) colourColourAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) colourColourAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                               stride, (const void*) (sizeof (float) * 3));
+    }
+    if (colourNormalAttrib != nullptr && colourNormalAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) colourNormalAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) colourNormalAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                               stride, (const void*) (sizeof (float) * 6));
+    }
+
+    glDrawArrays (GL_TRIANGLES, 0, (GLsizei) quads.size());
 
     if (colourPositionAttrib != nullptr && colourPositionAttrib->attributeID >= 0)
         glDisableVertexAttribArray ((GLuint) colourPositionAttrib->attributeID);
@@ -2613,6 +3445,801 @@ void Spectrogram3DComponent::GlHost::drawContactShadow()
     // Floor-disc contact is a no-op for this heightfield: the mesh covers the whole
     // XZ domain, so any ground stain is overwritten. Contact is applied in the mesh
     // fragment shader via uContactShadow instead.
+}
+
+namespace
+{
+    juce::Matrix3D<float> makeOrthoShadow (float l, float r, float b, float t, float n, float f)
+    {
+        juce::Matrix3D<float> m;
+        const float rl = juce::jmax (1.0e-5f, r - l);
+        const float tb = juce::jmax (1.0e-5f, t - b);
+        const float fn = juce::jmax (1.0e-5f, f - n);
+        float* d = m.mat;
+        std::memset (d, 0, 16 * sizeof (float));
+        d[0] = 2.0f / rl;
+        d[5] = 2.0f / tb;
+        d[10] = -2.0f / fn;
+        d[12] = -(r + l) / rl;
+        d[13] = -(t + b) / tb;
+        d[14] = -(f + n) / fn;
+        d[15] = 1.0f;
+        return m;
+    }
+
+    juce::Matrix3D<float> makeLookAtShadow (juce::Vector3D<float> eye,
+                                            juce::Vector3D<float> center,
+                                            juce::Vector3D<float> up)
+    {
+        juce::Vector3D<float> f {
+            center.x - eye.x, center.y - eye.y, center.z - eye.z
+        };
+        float fl = juce::jmax (1.0e-6f, std::sqrt (f.x * f.x + f.y * f.y + f.z * f.z));
+        f.x /= fl; f.y /= fl; f.z /= fl;
+        // s = normalize(f × up)
+        juce::Vector3D<float> s {
+            f.y * up.z - f.z * up.y,
+            f.z * up.x - f.x * up.z,
+            f.x * up.y - f.y * up.x
+        };
+        float sl = juce::jmax (1.0e-6f, std::sqrt (s.x * s.x + s.y * s.y + s.z * s.z));
+        s.x /= sl; s.y /= sl; s.z /= sl;
+        // u = s × f
+        juce::Vector3D<float> u {
+            s.y * f.z - s.z * f.y,
+            s.z * f.x - s.x * f.z,
+            s.x * f.y - s.y * f.x
+        };
+        juce::Matrix3D<float> m;
+        float* d = m.mat;
+        d[0] = s.x; d[4] = s.y; d[8] = s.z;  d[12] = -(s.x * eye.x + s.y * eye.y + s.z * eye.z);
+        d[1] = u.x; d[5] = u.y; d[9] = u.z;  d[13] = -(u.x * eye.x + u.y * eye.y + u.z * eye.z);
+        d[2] = -f.x; d[6] = -f.y; d[10] = -f.z; d[14] = (f.x * eye.x + f.y * eye.y + f.z * eye.z);
+        d[3] = 0.0f; d[7] = 0.0f; d[11] = 0.0f; d[15] = 1.0f;
+        return m;
+    }
+}
+
+void Spectrogram3DComponent::GlHost::releaseShadowAtlas()
+{
+    using namespace juce::gl;
+    if (shadowFbo != 0)
+    {
+        glDeleteFramebuffers (1, &shadowFbo);
+        shadowFbo = 0;
+    }
+    if (shadowDepthTex != 0)
+    {
+        glDeleteTextures (1, &shadowDepthTex);
+        shadowDepthTex = 0;
+    }
+    shadowAtlasW = shadowAtlasH = shadowTileRes = shadowAtlasCascades = 0;
+    cascadesBuilt = 0;
+}
+
+void Spectrogram3DComponent::GlHost::ensureShadowAtlas()
+{
+    using namespace juce::gl;
+    const int tile = (int) owner.shadowMapResolution;
+    const int cascades = juce::jlimit (1, kMaxShadowCascades, owner.shadowCascadeCount);
+    const int aw = tile * cascades;
+    const int ah = tile;
+    if (shadowFbo != 0 && shadowDepthTex != 0
+        && shadowTileRes == tile && shadowAtlasCascades == cascades
+        && shadowAtlasW == aw && shadowAtlasH == ah)
+        return;
+
+    releaseShadowAtlas();
+    glGenTextures (1, &shadowDepthTex);
+    glBindTexture (GL_TEXTURE_2D, shadowDepthTex);
+    glTexImage2D (GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, aw, ah, 0,
+                  GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+
+    glGenFramebuffers (1, &shadowFbo);
+    glBindFramebuffer (GL_FRAMEBUFFER, shadowFbo);
+    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowDepthTex, 0);
+    glDrawBuffer (GL_NONE);
+    glReadBuffer (GL_NONE);
+    const bool ok = (glCheckFramebufferStatus (GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    glBindFramebuffer (GL_FRAMEBUFFER, 0);
+    glBindTexture (GL_TEXTURE_2D, 0);
+
+    if (! ok)
+    {
+        releaseShadowAtlas();
+        return;
+    }
+    shadowAtlasW = aw;
+    shadowAtlasH = ah;
+    shadowTileRes = tile;
+    shadowAtlasCascades = cascades;
+}
+
+void Spectrogram3DComponent::GlHost::updateCascadeMatrices()
+{
+    cascadesBuilt = 0;
+    const int nCasc = juce::jlimit (1, kMaxShadowCascades, owner.shadowCascadeCount);
+    auto lightDir = getLightDirectionWorld();
+    float llen = juce::jmax (1.0e-5f,
+                             std::sqrt (lightDir.x * lightDir.x + lightDir.y * lightDir.y
+                                        + lightDir.z * lightDir.z));
+    lightDir.x /= llen; lightDir.y /= llen; lightDir.z /= llen;
+
+    // Scene bounds: mesh footprint + height + debug sphere.
+    float minX = -1.05f, maxX = 1.05f;
+    float minY = -0.05f, maxY = owner.meshHeight + 0.15f;
+    float minZ = -1.05f, maxZ = 1.05f;
+    if (owner.debugSphereEnabled)
+    {
+        const float r = owner.debugSphereDiameter * 0.5f;
+        const auto& p = owner.debugSpherePosition;
+        minX = juce::jmin (minX, p.x - r);
+        maxX = juce::jmax (maxX, p.x + r);
+        minY = juce::jmin (minY, p.y - r);
+        maxY = juce::jmax (maxY, p.y + r);
+        minZ = juce::jmin (minZ, p.z - r);
+        maxZ = juce::jmax (maxZ, p.z + r);
+    }
+    const juce::Vector3D<float> sceneCenter {
+        0.5f * (minX + maxX), 0.5f * (minY + maxY), 0.5f * (minZ + maxZ)
+    };
+    const float extent = juce::jmax (maxX - minX, juce::jmax (maxY - minY, maxZ - minZ)) * 0.55f;
+
+    // Fixed shadow distance — cascade count only subdivides this range.
+    const float nearD = 0.15f;
+    const float farD = juce::jmax (3.0f, owner.camera.distance + extent * 2.0f);
+    const float expN = juce::jlimit (1.0f, 4.0f, owner.shadowCascadeDistributionExponent);
+
+    juce::Vector3D<float> right, upCam, forward;
+    owner.cameraBasis (right, upCam, forward);
+    const juce::Vector3D<float> lookAt {
+        owner.camera.panX, owner.camera.panY, owner.camera.panZ
+    };
+    const juce::Vector3D<float> camEye {
+        lookAt.x - forward.x * owner.camera.distance,
+        lookAt.y - forward.y * owner.camera.distance,
+        lookAt.z - forward.z * owner.camera.distance
+    };
+
+    const auto glView = owner.getGlViewLocal();
+    const float aspect = (float) juce::jmax (1, glView.getHeight())
+                       / (float) juce::jmax (1, glView.getWidth());
+    constexpr float kFovHalfW = 1.0f / 1.5f; // matches getProjectionMatrix
+
+    auto frustumCorner = [&] (float depth, float nx, float ny) -> juce::Vector3D<float>
+    {
+        const float hw = depth * kFovHalfW;
+        const float hh = hw * aspect;
+        return {
+            camEye.x + forward.x * depth + right.x * (nx * hw) + upCam.x * (ny * hh),
+            camEye.y + forward.y * depth + right.y * (nx * hw) + upCam.y * (ny * hh),
+            camEye.z + forward.z * depth + right.z * (nx * hw) + upCam.z * (ny * hh)
+        };
+    };
+
+    auto xform = [] (const juce::Matrix3D<float>& m, const juce::Vector3D<float>& p)
+        -> juce::Vector3D<float>
+    {
+        const float* d = m.mat;
+        return {
+            d[0] * p.x + d[4] * p.y + d[8]  * p.z + d[12],
+            d[1] * p.x + d[5] * p.y + d[9]  * p.z + d[13],
+            d[2] * p.x + d[6] * p.y + d[10] * p.z + d[14]
+        };
+    };
+
+    juce::Vector3D<float> sceneCorners[8];
+    {
+        const float xs[2] = { minX, maxX }, ys[2] = { minY, maxY }, zs[2] = { minZ, maxZ };
+        int k = 0;
+        for (float x : xs)
+            for (float y : ys)
+                for (float z : zs)
+                    sceneCorners[k++] = { x, y, z };
+    }
+
+    float prevFar = nearD;
+    for (int i = 0; i < nCasc; ++i)
+    {
+        const float p = (float) (i + 1) / (float) nCasc;
+        const float logS = nearD * std::pow (farD / juce::jmax (nearD, 1.0e-3f), p);
+        const float linS = nearD + (farD - nearD) * p;
+        const float w = 1.0f / expN; // higher exponent → more logarithmic (UE-like)
+        const float splitFar = juce::jmap (w, linS, logS);
+        cascadeSplitFar[i] = splitFar;
+
+        const float sliceNear = prevFar;
+        const float sliceFar = splitFar;
+
+        // Light looks at scene centre (stable); ortho fitted to this cascade's frustum slice.
+        const float lightDist = extent * 2.5f + 1.0f;
+        const juce::Vector3D<float> lightEye {
+            sceneCenter.x + lightDir.x * lightDist,
+            sceneCenter.y + lightDir.y * lightDist,
+            sceneCenter.z + lightDir.z * lightDist
+        };
+        juce::Vector3D<float> up { 0.0f, 1.0f, 0.0f };
+        if (std::abs (lightDir.y) > 0.95f)
+            up = { 0.0f, 0.0f, 1.0f };
+        const auto lightView = makeLookAtShadow (lightEye, sceneCenter, up);
+
+        float minLX = 1.0e9f, maxLX = -1.0e9f;
+        float minLY = 1.0e9f, maxLY = -1.0e9f;
+        float minLZ = 1.0e9f, maxLZ = -1.0e9f;
+        auto expand = [&] (const juce::Vector3D<float>& world)
+        {
+            const auto lp = xform (lightView, world);
+            minLX = juce::jmin (minLX, lp.x); maxLX = juce::jmax (maxLX, lp.x);
+            minLY = juce::jmin (minLY, lp.y); maxLY = juce::jmax (maxLY, lp.y);
+            minLZ = juce::jmin (minLZ, lp.z); maxLZ = juce::jmax (maxLZ, lp.z);
+        };
+
+        // Frustum slice corners (near cascades → tighter ortho → more texels).
+        for (float nx : { -1.0f, 1.0f })
+            for (float ny : { -1.0f, 1.0f })
+            {
+                expand (frustumCorner (sliceNear, nx, ny));
+                expand (frustumCorner (sliceFar, nx, ny));
+            }
+        // Casters in/near this depth slice (last cascade always takes the full scene).
+        const bool lastCasc = (i == nCasc - 1);
+        for (const auto& c : sceneCorners)
+        {
+            if (lastCasc)
+            {
+                expand (c);
+                continue;
+            }
+            const float dx = c.x - camEye.x, dy = c.y - camEye.y, dz = c.z - camEye.z;
+            const float depth = dx * forward.x + dy * forward.y + dz * forward.z;
+            if (depth >= sliceNear - 0.35f && depth <= sliceFar + 0.35f)
+                expand (c);
+        }
+
+        const float padXY = juce::jmax (0.05f, 0.08f * juce::jmax (maxLX - minLX, maxLY - minLY));
+        minLX -= padXY; maxLX += padXY;
+        minLY -= padXY; maxLY += padXY;
+
+        // View looks down -Z; positive ortho near/far are distances along that axis.
+        const float z0 = -maxLZ;
+        const float z1 = -minLZ;
+        const float zNear = juce::jmax (0.05f, juce::jmin (z0, z1) - 0.25f);
+        const float zFar  = juce::jmax (zNear + 0.25f, juce::jmax (z0, z1) + 0.25f);
+
+        const auto proj = makeOrthoShadow (minLX, maxLX, minLY, maxLY, zNear, zFar);
+        shadowMatrix[i] = proj * lightView;
+        prevFar = splitFar;
+    }
+    for (int i = nCasc; i < kMaxShadowCascades; ++i)
+    {
+        cascadeSplitFar[i] = farD;
+        shadowMatrix[i] = shadowMatrix[juce::jmax (0, nCasc - 1)];
+    }
+    cascadesBuilt = nCasc;
+}
+
+void Spectrogram3DComponent::GlHost::drawMeshIntoShadow (const juce::Matrix3D<float>& lightVP) const
+{
+    using namespace juce::gl;
+    if (meshIndexCount <= 0 || shadowDepthShader == nullptr || meshVbo == 0)
+        return;
+    shadowDepthShader->use();
+    if (shadowDepthLightVpUniform != nullptr)
+        shadowDepthLightVpUniform->setMatrix4 (lightVP.mat, 1, false);
+    glBindBuffer (GL_ARRAY_BUFFER, meshVbo);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, meshIbo);
+    const GLsizei stride = (GLsizei) sizeof (Vertex);
+    if (shadowDepthPositionAttrib != nullptr && shadowDepthPositionAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) shadowDepthPositionAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) shadowDepthPositionAttrib->attributeID, 3, GL_FLOAT,
+                               GL_FALSE, stride, nullptr);
+    }
+    glDrawElements (GL_TRIANGLES, meshIndexCount, GL_UNSIGNED_INT, nullptr);
+    if (shadowDepthPositionAttrib != nullptr && shadowDepthPositionAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) shadowDepthPositionAttrib->attributeID);
+}
+
+void Spectrogram3DComponent::GlHost::drawSphereIntoShadow (const juce::Matrix3D<float>& lightVP) const
+{
+    using namespace juce::gl;
+    if (! owner.debugSphereEnabled || sphereIndexCount <= 0 || shadowDepthShader == nullptr)
+        return;
+    shadowDepthShader->use();
+    if (shadowDepthLightVpUniform != nullptr)
+        shadowDepthLightVpUniform->setMatrix4 (lightVP.mat, 1, false);
+    glBindBuffer (GL_ARRAY_BUFFER, sphereVbo);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, sphereIbo);
+    const GLsizei stride = (GLsizei) sizeof (Vertex);
+    if (shadowDepthPositionAttrib != nullptr && shadowDepthPositionAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) shadowDepthPositionAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) shadowDepthPositionAttrib->attributeID, 3, GL_FLOAT,
+                               GL_FALSE, stride, nullptr);
+    }
+    glDrawElements (GL_TRIANGLES, sphereIndexCount, GL_UNSIGNED_INT, nullptr);
+    if (shadowDepthPositionAttrib != nullptr && shadowDepthPositionAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) shadowDepthPositionAttrib->attributeID);
+}
+
+void Spectrogram3DComponent::GlHost::renderShadowDepthPass()
+{
+    using namespace juce::gl;
+    if (! owner.lightingEnabled || ! owner.castShadowsEnabled || shadowDepthShader == nullptr)
+    {
+        cascadesBuilt = 0;
+        return;
+    }
+
+    ensureShadowAtlas();
+    if (shadowFbo == 0 || shadowDepthTex == 0)
+        return;
+
+    updateCascadeMatrices();
+    uploadMeshIfNeeded();
+    if (owner.debugSphereEnabled)
+    {
+        ensureDebugSphereGeometry();
+        uploadDebugSphereWorldVerts();
+    }
+
+    const int tile = shadowTileRes;
+    const int nCasc = juce::jmax (1, cascadesBuilt);
+    glBindFramebuffer (GL_FRAMEBUFFER, shadowFbo);
+    // Clear the whole atlas once, then fill every cascade tile.
+    glViewport (0, 0, shadowAtlasW, shadowAtlasH);
+    glEnable (GL_DEPTH_TEST);
+    glDepthMask (GL_TRUE);
+    glDisable (GL_BLEND);
+    glDisable (GL_CULL_FACE);
+    glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glClear (GL_DEPTH_BUFFER_BIT);
+    glEnable (GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset (2.0f, 4.0f);
+
+    for (int c = 0; c < nCasc; ++c)
+    {
+        glViewport (c * tile, 0, tile, tile);
+        drawMeshIntoShadow (shadowMatrix[c]);
+        drawSphereIntoShadow (shadowMatrix[c]);
+    }
+
+    glDisable (GL_POLYGON_OFFSET_FILL);
+    glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glBindFramebuffer (GL_FRAMEBUFFER, 0);
+    glBindBuffer (GL_ARRAY_BUFFER, 0);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
+void Spectrogram3DComponent::GlHost::ensureDebugSphereGeometry()
+{
+    using namespace juce::gl;
+    if (sphereVbo == 0 || sphereIbo == 0)
+        return;
+    if (sphereIndexCount > 0 && ! sphereNeedsUpload)
+        return;
+
+    constexpr int kStacks = 32;
+    constexpr int kSlices = 64;
+    std::vector<Vertex> unitVerts;
+    std::vector<juce::uint32> inds;
+    unitVerts.reserve ((size_t) (kStacks + 1) * (size_t) (kSlices + 1));
+    for (int y = 0; y <= kStacks; ++y)
+    {
+        const float v = (float) y / (float) kStacks;
+        const float phi = v * juce::MathConstants<float>::pi;
+        const float sy = std::sin (phi);
+        const float cy = std::cos (phi);
+        for (int x = 0; x <= kSlices; ++x)
+        {
+            const float u = (float) x / (float) kSlices;
+            const float th = u * juce::MathConstants<float>::twoPi;
+            const float nx = sy * std::cos (th);
+            const float ny = cy;
+            const float nz = sy * std::sin (th);
+            Vertex vtx {};
+            vtx.x = nx; vtx.y = ny; vtx.z = nz;
+            vtx.r = 1.0f; vtx.g = 1.0f; vtx.b = 1.0f;
+            vtx.nx = nx; vtx.ny = ny; vtx.nz = nz;
+            unitVerts.push_back (vtx);
+        }
+    }
+    for (int y = 0; y < kStacks; ++y)
+        for (int x = 0; x < kSlices; ++x)
+        {
+            const juce::uint32 i0 = (juce::uint32) (y * (kSlices + 1) + x);
+            const juce::uint32 i1 = i0 + 1;
+            const juce::uint32 i2 = i0 + (juce::uint32) (kSlices + 1);
+            const juce::uint32 i3 = i2 + 1;
+            inds.push_back (i0); inds.push_back (i2); inds.push_back (i1);
+            inds.push_back (i1); inds.push_back (i2); inds.push_back (i3);
+        }
+
+    // Store unit sphere in VBO; world transform applied in uploadDebugSphereWorldVerts.
+    glBindBuffer (GL_ARRAY_BUFFER, sphereVbo);
+    glBufferData (GL_ARRAY_BUFFER, (GLsizeiptr) (unitVerts.size() * sizeof (Vertex)),
+                  unitVerts.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, sphereIbo);
+    glBufferData (GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) (inds.size() * sizeof (juce::uint32)),
+                  inds.data(), GL_STATIC_DRAW);
+    glBindBuffer (GL_ARRAY_BUFFER, 0);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+    sphereIndexCount = (int) inds.size();
+    sphereNeedsUpload = true; // force world upload next
+}
+
+void Spectrogram3DComponent::GlHost::uploadDebugSphereWorldVerts()
+{
+    using namespace juce::gl;
+    if (sphereVbo == 0 || sphereIndexCount <= 0)
+        return;
+
+    constexpr int kStacks = 32;
+    constexpr int kSlices = 64;
+    const float r = owner.debugSphereDiameter * 0.5f;
+    const auto& c = owner.debugSpherePosition;
+    std::vector<Vertex> verts;
+    verts.reserve ((size_t) (kStacks + 1) * (size_t) (kSlices + 1));
+    for (int y = 0; y <= kStacks; ++y)
+    {
+        const float v = (float) y / (float) kStacks;
+        const float phi = v * juce::MathConstants<float>::pi;
+        const float sy = std::sin (phi);
+        const float cy = std::cos (phi);
+        for (int x = 0; x <= kSlices; ++x)
+        {
+            const float u = (float) x / (float) kSlices;
+            const float th = u * juce::MathConstants<float>::twoPi;
+            const float nx = sy * std::cos (th);
+            const float ny = cy;
+            const float nz = sy * std::sin (th);
+            Vertex vtx {};
+            vtx.x = c.x + nx * r;
+            vtx.y = c.y + ny * r;
+            vtx.z = c.z + nz * r;
+            vtx.r = owner.debugSphereAlbedo.getFloatRed();
+            vtx.g = owner.debugSphereAlbedo.getFloatGreen();
+            vtx.b = owner.debugSphereAlbedo.getFloatBlue();
+            vtx.nx = nx; vtx.ny = ny; vtx.nz = nz;
+            verts.push_back (vtx);
+        }
+    }
+    glBindBuffer (GL_ARRAY_BUFFER, sphereVbo);
+    glBufferData (GL_ARRAY_BUFFER, (GLsizeiptr) (verts.size() * sizeof (Vertex)),
+                  verts.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer (GL_ARRAY_BUFFER, 0);
+    sphereNeedsUpload = false;
+}
+
+void Spectrogram3DComponent::GlHost::drawDebugSphere()
+{
+    using namespace juce::gl;
+    if (! owner.debugSphereEnabled || colourShader == nullptr)
+        return;
+
+    ensureDebugSphereGeometry();
+    uploadDebugSphereWorldVerts();
+    if (sphereIndexCount <= 0)
+        return;
+
+    colourShader->use();
+    setCornerUniforms (*colourShader);
+    setLightingUniforms (*colourShader);
+    // Lookdev: own rough/metal/spec; shader skips dome/SSS/wrap so they actually read.
+    setMaterialOverrideUniforms (true, owner.debugSphereAlbedo,
+                                 owner.debugSphereRoughness, owner.debugSphereMetalness,
+                                 owner.debugSphereSpecular);
+    // Sphere is not a heightfield — skip self-shadow / AO / contact; keep cast map.
+    if (colourSelfShadowUniform != nullptr)
+        colourSelfShadowUniform->set (0.0f);
+    if (colourAoAmountUniform != nullptr)
+        colourAoAmountUniform->set (0.0f);
+    if (colourContactUniform != nullptr)
+        colourContactUniform->set (0.0f);
+    if (colourDomeStrengthUniform != nullptr)
+        colourDomeStrengthUniform->set (0.0f);
+    if (colourSssModeUniform != nullptr)
+        colourSssModeUniform->set (0.0f);
+    if (colourRimUniform != nullptr)
+        colourRimUniform->set (0.0f);
+    bindDomeTextureForMesh();
+    if (colourProjectionUniform != nullptr)
+        colourProjectionUniform->setMatrix4 (getProjectionMatrix().mat, 1, false);
+    if (colourViewUniform != nullptr)
+        colourViewUniform->setMatrix4 (getViewMatrix().mat, 1, false);
+
+    glEnable (GL_DEPTH_TEST);
+    glDepthMask (GL_TRUE);
+    glDisable (GL_CULL_FACE);
+    glDisable (GL_BLEND);
+
+    glBindBuffer (GL_ARRAY_BUFFER, sphereVbo);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, sphereIbo);
+    const GLsizei stride = (GLsizei) sizeof (Vertex);
+    if (colourPositionAttrib != nullptr && colourPositionAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) colourPositionAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) colourPositionAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                               stride, nullptr);
+    }
+    if (colourColourAttrib != nullptr && colourColourAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) colourColourAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) colourColourAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                               stride, (const void*) (sizeof (float) * 3));
+    }
+    if (colourNormalAttrib != nullptr && colourNormalAttrib->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) colourNormalAttrib->attributeID);
+        glVertexAttribPointer ((GLuint) colourNormalAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                               stride, (const void*) (sizeof (float) * 6));
+    }
+    glDrawElements (GL_TRIANGLES, sphereIndexCount, GL_UNSIGNED_INT, nullptr);
+    if (colourPositionAttrib != nullptr && colourPositionAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) colourPositionAttrib->attributeID);
+    if (colourColourAttrib != nullptr && colourColourAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) colourColourAttrib->attributeID);
+    if (colourNormalAttrib != nullptr && colourNormalAttrib->attributeID >= 0)
+        glDisableVertexAttribArray ((GLuint) colourNormalAttrib->attributeID);
+
+    setMaterialOverrideUniforms (false, juce::Colours::white, 0.45f, 0.0f);
+    unbindDomeTexture();
+    glActiveTexture (GL_TEXTURE3);
+    glBindTexture (GL_TEXTURE_2D, 0);
+    glActiveTexture (GL_TEXTURE0);
+    glBindBuffer (GL_ARRAY_BUFFER, 0);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
+void Spectrogram3DComponent::GlHost::setGizmoXrayUniforms (bool insideGhostPass) const
+{
+    if (colourGizmoXrayUniform != nullptr)
+        colourGizmoXrayUniform->set (insideGhostPass ? 1.0f : 0.0f);
+    if (colourXrayCenterUniform != nullptr)
+    {
+        const auto& c = owner.debugSpherePosition;
+        colourXrayCenterUniform->set (c.x, c.y, c.z);
+    }
+    if (colourXrayRadiusUniform != nullptr)
+        colourXrayRadiusUniform->set (owner.debugSphereDiameter * 0.5f);
+    if (colourXrayAlphaUniform != nullptr)
+        colourXrayAlphaUniform->set (0.4f);
+}
+
+void Spectrogram3DComponent::GlHost::drawDebugGizmo()
+{
+    using namespace juce::gl;
+    if (! owner.debugSphereEnabled || colourShader == nullptr || gizmoVbo == 0 || gizmoIbo == 0)
+        return;
+
+    const auto& c = owner.debugSpherePosition;
+    const float len = juce::jmax (0.08f, owner.debugSphereDiameter * 0.9f);
+    const float shaftR = juce::jmax (0.0045f, owner.debugSphereDiameter * 0.035f);
+    const float coneR = shaftR * 2.4f;
+    const float coneLen = len * 0.28f;
+    const float shaftLen = juce::jmax (0.02f, len - coneLen);
+    constexpr int kSegs = 14;
+    const bool xray = owner.isGizmoXrayActive();
+    const auto hover = owner.gizmoHoverAxis;
+    const auto drag = owner.dragMode;
+    const auto hotAxis = (drag == DragMode::gizmoX || drag == DragMode::gizmoY || drag == DragMode::gizmoZ)
+        ? drag : hover;
+
+    struct GVert { float x, y, z, r, g, b, nx, ny, nz; };
+    std::vector<GVert> verts;
+    std::vector<juce::uint32> indices;
+    verts.reserve ((size_t) kSegs * 3 * 8);
+    indices.reserve ((size_t) kSegs * 3 * 12);
+
+    auto addAxis = [&] (float ax, float ay, float az, float cr, float cg, float cb, DragMode axisMode)
+    {
+        // Brighten the hovered / active arrow slightly.
+        if (xray && hotAxis == axisMode)
+        {
+            cr = juce::jmin (1.0f, cr * 1.25f + 0.08f);
+            cg = juce::jmin (1.0f, cg * 1.25f + 0.08f);
+            cb = juce::jmin (1.0f, cb * 1.25f + 0.08f);
+        }
+
+        // Orthonormal basis with axis = (ax,ay,az).
+        juce::Vector3D<float> axis { ax, ay, az };
+        juce::Vector3D<float> helper = (std::abs (ax) < 0.9f)
+            ? juce::Vector3D<float> { 1.0f, 0.0f, 0.0f }
+            : juce::Vector3D<float> { 0.0f, 1.0f, 0.0f };
+        juce::Vector3D<float> u {
+            axis.y * helper.z - axis.z * helper.y,
+            axis.z * helper.x - axis.x * helper.z,
+            axis.x * helper.y - axis.y * helper.x
+        };
+        float ul = juce::jmax (1.0e-6f, std::sqrt (u.x * u.x + u.y * u.y + u.z * u.z));
+        u.x /= ul; u.y /= ul; u.z /= ul;
+        juce::Vector3D<float> v {
+            axis.y * u.z - axis.z * u.y,
+            axis.z * u.x - axis.x * u.z,
+            axis.x * u.y - axis.y * u.x
+        };
+
+        auto pushVert = [&] (float px, float py, float pz, float nx, float ny, float nz)
+        {
+            const float nl = juce::jmax (1.0e-6f, std::sqrt (nx * nx + ny * ny + nz * nz));
+            verts.push_back ({ px, py, pz, cr, cg, cb, nx / nl, ny / nl, nz / nl });
+        };
+
+        const juce::uint32 base = (juce::uint32) verts.size();
+        // Shaft cylinder: rings at t=0 and t=shaftLen.
+        for (int ring = 0; ring < 2; ++ring)
+        {
+            const float t = (ring == 0) ? 0.0f : shaftLen;
+            const float px0 = c.x + axis.x * t;
+            const float py0 = c.y + axis.y * t;
+            const float pz0 = c.z + axis.z * t;
+            for (int i = 0; i < kSegs; ++i)
+            {
+                const float a = (float) i * juce::MathConstants<float>::twoPi / (float) kSegs;
+                const float ca = std::cos (a), sa = std::sin (a);
+                const float nx = u.x * ca + v.x * sa;
+                const float ny = u.y * ca + v.y * sa;
+                const float nz = u.z * ca + v.z * sa;
+                pushVert (px0 + nx * shaftR, py0 + ny * shaftR, pz0 + nz * shaftR, nx, ny, nz);
+            }
+        }
+        for (int i = 0; i < kSegs; ++i)
+        {
+            const juce::uint32 i0 = base + (juce::uint32) i;
+            const juce::uint32 i1 = base + (juce::uint32) ((i + 1) % kSegs);
+            const juce::uint32 i2 = base + (juce::uint32) kSegs + (juce::uint32) i;
+            const juce::uint32 i3 = base + (juce::uint32) kSegs + (juce::uint32) ((i + 1) % kSegs);
+            indices.push_back (i0); indices.push_back (i2); indices.push_back (i1);
+            indices.push_back (i1); indices.push_back (i2); indices.push_back (i3);
+        }
+
+        // Cone: base ring at shaftLen, tip at len.
+        const juce::uint32 coneBase = (juce::uint32) verts.size();
+        const float bx = c.x + axis.x * shaftLen;
+        const float by = c.y + axis.y * shaftLen;
+        const float bz = c.z + axis.z * shaftLen;
+        const float tipX = c.x + axis.x * len;
+        const float tipY = c.y + axis.y * len;
+        const float tipZ = c.z + axis.z * len;
+        // Slant normals: blend radial with axis for soft cone shading / SSGI.
+        const float slant = coneR / juce::jmax (coneLen, 1.0e-4f);
+        for (int i = 0; i < kSegs; ++i)
+        {
+            const float a = (float) i * juce::MathConstants<float>::twoPi / (float) kSegs;
+            const float ca = std::cos (a), sa = std::sin (a);
+            const float rx = u.x * ca + v.x * sa;
+            const float ry = u.y * ca + v.y * sa;
+            const float rz = u.z * ca + v.z * sa;
+            pushVert (bx + rx * coneR, by + ry * coneR, bz + rz * coneR,
+                      rx + axis.x * slant, ry + axis.y * slant, rz + axis.z * slant);
+        }
+        const juce::uint32 tipIdx = (juce::uint32) verts.size();
+        pushVert (tipX, tipY, tipZ, axis.x, axis.y, axis.z);
+        for (int i = 0; i < kSegs; ++i)
+        {
+            indices.push_back (coneBase + (juce::uint32) i);
+            indices.push_back (tipIdx);
+            indices.push_back (coneBase + (juce::uint32) ((i + 1) % kSegs));
+        }
+        // Cone base cap (faces toward shaft) so the arrow reads solid in GI.
+        const juce::uint32 capCenter = (juce::uint32) verts.size();
+        pushVert (bx, by, bz, -axis.x, -axis.y, -axis.z);
+        const juce::uint32 capRing = (juce::uint32) verts.size();
+        for (int i = 0; i < kSegs; ++i)
+        {
+            const float a = (float) i * juce::MathConstants<float>::twoPi / (float) kSegs;
+            const float ca = std::cos (a), sa = std::sin (a);
+            const float rx = u.x * ca + v.x * sa;
+            const float ry = u.y * ca + v.y * sa;
+            const float rz = u.z * ca + v.z * sa;
+            pushVert (bx + rx * coneR, by + ry * coneR, bz + rz * coneR,
+                      -axis.x, -axis.y, -axis.z);
+        }
+        for (int i = 0; i < kSegs; ++i)
+        {
+            indices.push_back (capCenter);
+            indices.push_back (capRing + (juce::uint32) ((i + 1) % kSegs));
+            indices.push_back (capRing + (juce::uint32) i);
+        }
+    };
+
+    addAxis (1.0f, 0.0f, 0.0f, 1.0f, 0.18f, 0.18f, DragMode::gizmoX);
+    addAxis (0.0f, 1.0f, 0.0f, 0.22f, 1.0f, 0.22f, DragMode::gizmoY);
+    addAxis (0.0f, 0.0f, 1.0f, 0.28f, 0.48f, 1.0f, DragMode::gizmoZ);
+
+    glBindBuffer (GL_ARRAY_BUFFER, gizmoVbo);
+    glBufferData (GL_ARRAY_BUFFER, (GLsizeiptr) (verts.size() * sizeof (GVert)),
+                  verts.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, gizmoIbo);
+    glBufferData (GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) (indices.size() * sizeof (juce::uint32)),
+                  indices.data(), GL_DYNAMIC_DRAW);
+    gizmoIndexCount = (int) indices.size();
+
+    colourShader->use();
+    setCornerUniforms (*colourShader);
+    setLightingUniforms (*colourShader);
+    // Unlit emissive axes (lookdev) — solid volume so SSGI can hit them evenly.
+    if (colourLightingAmountUniform != nullptr)
+        colourLightingAmountUniform->set (0.0f);
+    if (colourCastShadowUniform != nullptr)
+        colourCastShadowUniform->set (0.0f);
+    if (colourSelfShadowUniform != nullptr)
+        colourSelfShadowUniform->set (0.0f);
+    if (colourAoAmountUniform != nullptr)
+        colourAoAmountUniform->set (0.0f);
+    setMaterialOverrideUniforms (false, juce::Colours::white, 0.45f, 0.0f);
+    setGizmoXrayUniforms (false);
+    if (colourProjectionUniform != nullptr)
+        colourProjectionUniform->setMatrix4 (getProjectionMatrix().mat, 1, false);
+    if (colourViewUniform != nullptr)
+        colourViewUniform->setMatrix4 (getViewMatrix().mat, 1, false);
+
+    const GLsizei stride = (GLsizei) sizeof (GVert);
+    auto bindAttribs = [&]()
+    {
+        if (colourPositionAttrib != nullptr && colourPositionAttrib->attributeID >= 0)
+        {
+            glEnableVertexAttribArray ((GLuint) colourPositionAttrib->attributeID);
+            glVertexAttribPointer ((GLuint) colourPositionAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                                   stride, nullptr);
+        }
+        if (colourColourAttrib != nullptr && colourColourAttrib->attributeID >= 0)
+        {
+            glEnableVertexAttribArray ((GLuint) colourColourAttrib->attributeID);
+            glVertexAttribPointer ((GLuint) colourColourAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                                   stride, (const void*) (sizeof (float) * 3));
+        }
+        if (colourNormalAttrib != nullptr && colourNormalAttrib->attributeID >= 0)
+        {
+            glEnableVertexAttribArray ((GLuint) colourNormalAttrib->attributeID);
+            glVertexAttribPointer ((GLuint) colourNormalAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                                   stride, (const void*) (sizeof (float) * 6));
+        }
+    };
+    auto unbindAttribs = [&]()
+    {
+        if (colourPositionAttrib != nullptr && colourPositionAttrib->attributeID >= 0)
+            glDisableVertexAttribArray ((GLuint) colourPositionAttrib->attributeID);
+        if (colourColourAttrib != nullptr && colourColourAttrib->attributeID >= 0)
+            glDisableVertexAttribArray ((GLuint) colourColourAttrib->attributeID);
+        if (colourNormalAttrib != nullptr && colourNormalAttrib->attributeID >= 0)
+            glDisableVertexAttribArray ((GLuint) colourNormalAttrib->attributeID);
+    };
+
+    // Pass 1: opaque shafts outside the sphere (depth-tested against the sphere).
+    glEnable (GL_DEPTH_TEST);
+    glDepthMask (GL_TRUE);
+    glDisable (GL_BLEND);
+    glDisable (GL_CULL_FACE);
+    bindAttribs();
+    glDrawElements (GL_TRIANGLES, gizmoIndexCount, GL_UNSIGNED_INT, nullptr);
+
+    // Pass 2 (hover/drag): ghost the portion inside the sphere over the opaque surface.
+    if (xray)
+    {
+        setGizmoXrayUniforms (true);
+        glDepthMask (GL_FALSE);
+        glDisable (GL_DEPTH_TEST);
+        glEnable (GL_BLEND);
+        glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable (GL_CULL_FACE);
+        glCullFace (GL_BACK);
+        glDrawElements (GL_TRIANGLES, gizmoIndexCount, GL_UNSIGNED_INT, nullptr);
+        setGizmoXrayUniforms (false);
+        glDisable (GL_BLEND);
+        glDisable (GL_CULL_FACE);
+        glEnable (GL_DEPTH_TEST);
+        glDepthMask (GL_TRUE);
+    }
+
+    unbindAttribs();
+    glBindBuffer (GL_ARRAY_BUFFER, 0);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
 void Spectrogram3DComponent::GlHost::drawMesh()
@@ -2682,17 +4309,19 @@ void Spectrogram3DComponent::GlHost::drawMesh()
 void Spectrogram3DComponent::GlHost::drawMeshNormalsPass (int width, int height)
 {
     using namespace juce::gl;
-    if (normalsShader == nullptr || ! ssgiNormalsFbo.isValid() || meshIndexCount <= 0
-        || meshVbo == 0 || meshIbo == 0)
+    if (normalsShader == nullptr || ! ssgiNormalsFbo.isValid())
         return;
 
-    ssgiNormalsFbo.makeCurrentAndClear();
+    // Reuse soft scene depth (read-only) so mesh + lookdev sphere layer correctly.
+    // Clear colour only — wiping depth would destroy the soft FBO depth attachment.
+    ssgiNormalsFbo.makeCurrentRenderingTarget();
     glViewport (0, 0, width, height);
+    if (softDepthTex != 0)
+        glFramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, softDepthTex, 0);
     glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
     glClear (GL_COLOR_BUFFER_BIT);
-    // No shared depth attachment (softDepthTex is already on softFbo). Empty clear
-    // leaves sky as zero so SSGI falls back to depth derivatives there.
-    glDisable (GL_DEPTH_TEST);
+    glEnable (GL_DEPTH_TEST);
+    glDepthFunc (GL_LEQUAL);
     glDepthMask (GL_FALSE);
     glDisable (GL_BLEND);
     glEnable (GL_CULL_FACE);
@@ -2707,29 +4336,50 @@ void Spectrogram3DComponent::GlHost::drawMeshNormalsPass (int width, int height)
         normalsViewUniform->setMatrix4 (view.mat, 1, false);
 
     const GLsizei stride = (GLsizei) sizeof (Vertex);
-    glBindBuffer (GL_ARRAY_BUFFER, meshVbo);
-    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, meshIbo);
-    if (normalsPositionAttrib != nullptr && normalsPositionAttrib->attributeID >= 0)
+    auto drawNormalsVbo = [&] (unsigned int vbo, unsigned int ibo, int indexCount, bool cull)
     {
-        glEnableVertexAttribArray ((GLuint) normalsPositionAttrib->attributeID);
-        glVertexAttribPointer ((GLuint) normalsPositionAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
-                               stride, nullptr);
-    }
-    if (normalsNormalAttrib != nullptr && normalsNormalAttrib->attributeID >= 0)
+        if (vbo == 0 || ibo == 0 || indexCount <= 0)
+            return;
+        if (cull)
+            glEnable (GL_CULL_FACE);
+        else
+            glDisable (GL_CULL_FACE);
+        glBindBuffer (GL_ARRAY_BUFFER, vbo);
+        glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, ibo);
+        if (normalsPositionAttrib != nullptr && normalsPositionAttrib->attributeID >= 0)
+        {
+            glEnableVertexAttribArray ((GLuint) normalsPositionAttrib->attributeID);
+            glVertexAttribPointer ((GLuint) normalsPositionAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                                   stride, nullptr);
+        }
+        if (normalsNormalAttrib != nullptr && normalsNormalAttrib->attributeID >= 0)
+        {
+            glEnableVertexAttribArray ((GLuint) normalsNormalAttrib->attributeID);
+            glVertexAttribPointer ((GLuint) normalsNormalAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
+                                   stride, (const void*) (sizeof (float) * 6));
+        }
+        glDrawElements (GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
+        if (normalsPositionAttrib != nullptr && normalsPositionAttrib->attributeID >= 0)
+            glDisableVertexAttribArray ((GLuint) normalsPositionAttrib->attributeID);
+        if (normalsNormalAttrib != nullptr && normalsNormalAttrib->attributeID >= 0)
+            glDisableVertexAttribArray ((GLuint) normalsNormalAttrib->attributeID);
+    };
+
+    drawNormalsVbo (meshVbo, meshIbo, meshIndexCount, true);
+
+    if (owner.debugSphereEnabled)
     {
-        glEnableVertexAttribArray ((GLuint) normalsNormalAttrib->attributeID);
-        glVertexAttribPointer ((GLuint) normalsNormalAttrib->attributeID, 3, GL_FLOAT, GL_FALSE,
-                               stride, (const void*) (sizeof (float) * 6));
+        ensureDebugSphereGeometry();
+        uploadDebugSphereWorldVerts();
+        drawNormalsVbo (sphereVbo, sphereIbo, sphereIndexCount, false);
     }
-    glDrawElements (GL_TRIANGLES, meshIndexCount, GL_UNSIGNED_INT, nullptr);
-    if (normalsPositionAttrib != nullptr && normalsPositionAttrib->attributeID >= 0)
-        glDisableVertexAttribArray ((GLuint) normalsPositionAttrib->attributeID);
-    if (normalsNormalAttrib != nullptr && normalsNormalAttrib->attributeID >= 0)
-        glDisableVertexAttribArray ((GLuint) normalsNormalAttrib->attributeID);
+
     glBindBuffer (GL_ARRAY_BUFFER, 0);
     glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
-
+    // Detach shared depth so later softFbo clears cannot race this FBO.
+    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
     glDisable (GL_CULL_FACE);
+    glDisable (GL_DEPTH_TEST);
     glDepthMask (GL_TRUE);
     ssgiNormalsFbo.releaseAsRenderingTarget();
 }
@@ -2771,7 +4421,8 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
             postResolutionUniform->set ((float) vw, (float) vh);
         if (postInvProjUniform != nullptr)
         {
-            // Mode 6 (DoF): column0 = (cocDilate, edgeSpill, …).
+            // Mode 6 (DoF gather): column0.y = edgeSpill (dilate is a separate pass).
+            // Mode 7 (SSR): lookdev pack (rough/fresnel/edge/roughInf, intensity/…).
             // SSGI gather: [0][0] = mesh-normals flag.
             float id[16] = {
                 0, 0, 0, 0,
@@ -2781,8 +4432,22 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
             };
             if (mode == 6)
             {
-                id[0] = owner.dofCocDilate;
                 id[1] = owner.dofEdgeSpill;
+            }
+            else if (mode == 7)
+            {
+                id[0] = owner.roughnessAmount;
+                id[1] = owner.ssrFresnel;
+                id[2] = owner.ssrEdgeFade;
+                id[3] = owner.ssrRoughnessInfluence;
+                id[4] = owner.ssrIntensity;
+                id[5] = owner.ssrMetallicBias;
+                id[6] = owner.metalnessAmount;
+                id[7] = useMeshNormalsFlag ? 1.0f : 0.0f;
+                id[8] = owner.domeSkyColour.getFloatRed();
+                id[9] = owner.domeSkyColour.getFloatGreen();
+                id[10] = owner.domeSkyColour.getFloatBlue();
+                id[12] = owner.ssrDomeFallback;
             }
             else
             {
@@ -2793,6 +4458,12 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
 
         glActiveTexture (GL_TEXTURE0);
         glBindTexture (GL_TEXTURE_2D, colourTex);
+        // SSR hit UVs are sub-pixel — linear colour sampling avoids blocky mirrors.
+        if (mode == 7 && colourTex != 0)
+        {
+            glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
         if (postTexUniform != nullptr) postTexUniform->set (0);
         glActiveTexture (GL_TEXTURE1);
         glBindTexture (GL_TEXTURE_2D, secondTex);
@@ -2830,7 +4501,21 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
     ++postFrameIndex;
 
     // AO / self-shadow / dome run in the mesh shader.
-    // Post order: SSGI → bloom → DOF → tonemap.
+    // Post order: SSGI → SSR → bloom → grid/ticks/labels → DOF → tonemap.
+    // #region agent log
+    if ((gSoftFrameCounter % 30) == 1 && owner.ssgiEnabled)
+    {
+        agentDbgLog ("H", "applySsaoAndBloom", "ssgi_pass_mesh_only",
+                     juce::String ("{\"ssgi\":1")
+                         + ",\"ssgiStr\":" + juce::String (owner.ssgiStrength, 3)
+                         + ",\"ssgiRadius\":" + juce::String (owner.ssgiRadius, 3)
+                         + ",\"advanced\":" + juce::String (owner.needsAdvancedSsgi() ? 1 : 0)
+                         + ",\"audioLvl\":" + juce::String (owner.audioLevelLive01, 3)
+                         + ",\"labelsInSceneYet\":" + juce::String (gLabelDrawCallsThisFrame)
+                         + ",\"gridInSceneYet\":0"
+                         + "}");
+    }
+    // #endregion
     if (owner.ssgiEnabled && owner.ssgiStrength > 1.0e-4f)
     {
         const float qualityF = owner.ssgiQuality == ShadowQuality::low ? 0.0f
@@ -2843,11 +4528,26 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
 
         if (! advanced)
         {
-            // Default single-pass path — Strength / Radius / Quality only.
-            drawFs (8, &postFboA, sceneTex, softDepthTex, 0,
-                    owner.ssgiStrength, owner.ssgiRadius, qualityF, 0.0f,
+            // Gather → multi-scale bilateral (merges vogel-disk stars/copies) → composite.
+            drawFs (9, &postFboA, sceneTex, softDepthTex, 0,
+                    1.0f, owner.ssgiRadius, qualityF, 0.0f,
                     width, height, false);
-            drawFs (0, nullptr, (GLuint) postFboA.getTextureID(), softDepthTex, 0,
+            const float denoiseAmt = juce::jlimit (0.70f, 1.0f,
+                                                   0.70f + owner.ssgiRadius * 0.30f);
+            juce::OpenGLFrameBuffer* cur = &postFboA;
+            juce::OpenGLFrameBuffer* other = &postFboB;
+            float stepPx = 1.0f;
+            for (int pass = 0; pass < 4; ++pass)
+            {
+                drawFs (10, other, (GLuint) cur->getTextureID(), softDepthTex, 0,
+                        denoiseAmt, 1.0f, 0.0f, stepPx,
+                        width, height, false);
+                std::swap (cur, other);
+                stepPx *= 2.0f;
+            }
+            drawFs (12, other, sceneTex, (GLuint) cur->getTextureID(), 0,
+                    owner.ssgiStrength, 1.0f, 0.0f, 0.0f, width, height, false);
+            drawFs (0, nullptr, (GLuint) other->getTextureID(), softDepthTex, 0,
                     1.0f, 1.0f, 0.0f, 0.0f, width, height, false);
         }
         else
@@ -2971,6 +4671,37 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
         }
     }
 
+    if (owner.ssrEnabled && owner.ssrStrength > 1.0e-4f)
+    {
+        // #region agent log
+        static int ssrLogN = 0;
+        if ((++ssrLogN % 30) == 1)
+            agentDbgLog ("A", "applySsaoAndBloom", "ssr_pass_running",
+                         juce::String ("{\"ssrStr\":") + juce::String (owner.ssrStrength, 3)
+                             + ",\"ssrDist\":" + juce::String (owner.ssrDistance, 3)
+                             + ",\"n\":" + juce::String (ssrLogN) + "}");
+        // #endregion
+        const float qualityF = owner.ssrQuality == ShadowQuality::low ? 0.0f
+                             : (owner.ssrQuality == ShadowQuality::medium ? 1.0f
+                             : (owner.ssrQuality == ShadowQuality::high ? 2.0f : 3.0f));
+        const GLuint sceneTex = (GLuint) softFbo.getTextureID();
+
+        // Smooth mesh + sphere view-normals — depth derivatives were the "8-bit" look.
+        ensureSsgiSupportBuffers (width, height, false, false, true, false);
+        GLuint normalsTex = 0;
+        if (ssgiNormalsFbo.isValid())
+        {
+            drawMeshNormalsPass (width, height);
+            normalsTex = (GLuint) ssgiNormalsFbo.getTextureID();
+        }
+
+        drawFs (7, &postFboA, sceneTex, softDepthTex, normalsTex,
+                owner.ssrStrength, owner.ssrDistance, qualityF, owner.ssrThickness,
+                width, height, normalsTex != 0);
+        drawFs (0, nullptr, (GLuint) postFboA.getTextureID(), softDepthTex, 0,
+                1.0f, 1.0f, 0.0f, 0.0f, width, height, false);
+    }
+
     if (owner.bloomEnabled)
     {
         const GLuint sceneTex = (GLuint) softFbo.getTextureID();
@@ -2986,13 +4717,46 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
                 1.0f, 1.0f, 0.0f, 0.0f, width, height, false);
     }
 
-    if (owner.dofEnabled && owner.dofAperture > 1.0e-4f)
+    // Grid / ticks / labels after SSGI+SSR+bloom — chrome must not feed GI/bloom.
+    // Gizmo stays in the pre-SSGI colour buffer so it can bounce. Still before DOF.
+    {
+        softFbo.makeCurrentRenderingTarget();
+        glViewport (0, 0, width, height);
+        drawGroundAndGrid();
+        drawPlayheadTicks();
+        drawFrequencyLabels();
+        // #region agent log
+        if ((gSoftFrameCounter % 30) == 1)
+        {
+            agentDbgLog ("J", "applySsaoAndBloom", "overlays_after_bloom",
+                         juce::String ("{\"labelDrawCalls\":") + juce::String (gLabelDrawCallsThisFrame)
+                             + ",\"floorVerts\":" + juce::String (floorVertexCount)
+                             + ",\"ssgi\":" + juce::String (owner.ssgiEnabled ? 1 : 0)
+                             + ",\"bloom\":" + juce::String (owner.bloomEnabled ? 1 : 0)
+                             + ",\"ssr\":" + juce::String (owner.ssrEnabled ? 1 : 0)
+                             + ",\"noChromeBorder\":1"
+                             + ",\"frame\":" + juce::String (gSoftFrameCounter)
+                             + "}");
+        }
+        // #endregion
+    }
+
+    if (owner.dofEnabled)
     {
         const float qualityF = owner.dofQuality == ShadowQuality::low ? 0.0f
                              : (owner.dofQuality == ShadowQuality::high ? 2.0f : 1.0f);
+        const float lensPower = owner.getDofLensPower();
         const GLuint sceneTex = (GLuint) softFbo.getTextureID();
-        drawFs (6, &postFboA, sceneTex, softDepthTex, 0,
-                owner.dofAperture, owner.dofFocusDistance, qualityF, owner.dofBlurScale,
+        // Mesh CoC → dilate into soft-BG void → gather (industry transparent-BG pattern).
+        // uStrength = thin-lens power from F-Stop + Focal Length.
+        drawFs (17, &postFboA, sceneTex, softDepthTex, 0,
+                lensPower, owner.dofFocusDistance, qualityF, 0.0f,
+                width, height, false);
+        drawFs (19, &postFboB, (GLuint) postFboA.getTextureID(), softDepthTex, 0,
+                lensPower, 1.0f, qualityF, owner.dofCocDilate,
+                width, height, false);
+        drawFs (6, &postFboA, sceneTex, softDepthTex, (GLuint) postFboB.getTextureID(),
+                lensPower, owner.dofFocusDistance, qualityF, 0.0f,
                 width, height, false);
         drawFs (0, nullptr, (GLuint) postFboA.getTextureID(), softDepthTex, 0,
                 1.0f, 1.0f, 0.0f, 0.0f, width, height, false);
@@ -3021,36 +4785,105 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
     if (labelShader == nullptr || ! labelAtlasReady || owner.freqLabels.empty() || labelVbo == 0)
         return;
 
+    // #region agent log
+    ++gLabelDrawCallsThisFrame;
+    // #endregion
+
     struct V { float x, y, z, u, v; };
     std::vector<V> quads;
     quads.reserve (owner.freqLabels.size() * 6);
 
-    const auto view = owner.getGlViewLocal();
-    const float pxW = 52.0f / (float) juce::jmax (1, view.getWidth());
-    const float pxH = 22.0f / (float) juce::jmax (1, view.getHeight());
-    const float halfW = pxW;
-    const float halfH = pxH;
+    const auto viewRect = owner.getGlViewLocal();
+    const int viewW = juce::jmax (1, viewRect.getWidth());
+    const int viewH = juce::jmax (1, viewRect.getHeight());
+    // Match prior on-screen size (~52×22 px) at the label's view depth.
+    constexpr float kTanHalfW = 1.0f / 1.5f;
+    const float tanHalfH = kTanHalfW * ((float) viewH / (float) viewW);
+    const float ndcHalfW = 52.0f / (float) viewW;
+    const float ndcHalfH = 22.0f / (float) viewH * 0.85f;
+
+    // Cylindrical billboard: horizontal = camera right (Y=0), vertical = world up.
+    // Full camera-facing quads pitched with the view and sliced through the waterfall,
+    // which looked like stacks of ghost labels even with DOF off.
+    juce::Vector3D<float> right, camUp, forward;
+    owner.cameraBasis (right, camUp, forward);
+    juce::ignoreUnused (camUp);
+    const juce::Vector3D<float> up { 0.0f, 1.0f, 0.0f };
+    const auto viewMat = getViewMatrix();
 
     for (const auto& lb : owner.freqLabels)
     {
-        // Ground plane, just past the playhead edge (x=1) — tight to the grid ticks.
+        // Just past the playhead edge — slightly above the grid.
         constexpr float kLabelWorldX = 1.008f;
-        constexpr float kLabelWorldY = -0.006f; // sit on / slightly above grid
-        float ndcX = 0.0f, ndcY = 0.0f, ndcZ = 0.0f;
-        if (! projectWorldToNdc (kLabelWorldX, kLabelWorldY, lb.worldZ, ndcX, ndcY, ndcZ))
-            continue;
+        constexpr float kLabelWorldY = -0.006f;
+        const float ax = kLabelWorldX;
+        const float ay = kLabelWorldY;
+        const float az = lb.worldZ;
 
-        const float x0 = ndcX + 0.0015f;
-        const float x1 = x0 + halfW * 2.0f;
-        const float y0 = ndcY - halfH * 0.85f;
-        const float y1 = ndcY + halfH * 0.85f;
+        // View-space Z (positive distance) for screen-constant sizing.
+        const float eyeX = viewMat.mat[0] * ax + viewMat.mat[4] * ay + viewMat.mat[8]  * az + viewMat.mat[12];
+        const float eyeY = viewMat.mat[1] * ax + viewMat.mat[5] * ay + viewMat.mat[9]  * az + viewMat.mat[13];
+        const float eyeZ = viewMat.mat[2] * ax + viewMat.mat[6] * ay + viewMat.mat[10] * az + viewMat.mat[14];
+        juce::ignoreUnused (eyeX, eyeY);
+        const float viewDist = juce::jmax (0.05f, -eyeZ);
+        const float halfW = ndcHalfW * kTanHalfW * viewDist;
+        const float halfH = ndcHalfH * tanHalfH * viewDist;
+        // Nudge in XZ toward the camera (keep Y) so depth wins vs floor without lifting glyphs.
+        const float fXZ = juce::jmax (1.0e-6f,
+                                      std::sqrt (forward.x * forward.x + forward.z * forward.z));
+        constexpr float bias = 0.012f;
+        const float cx = ax - forward.x / fXZ * bias;
+        const float cy = ay;
+        const float cz = az - forward.z / fXZ * bias;
 
-        quads.push_back ({ x0, y0, ndcZ, lb.u0, lb.v0 });
-        quads.push_back ({ x1, y0, ndcZ, lb.u1, lb.v0 });
-        quads.push_back ({ x1, y1, ndcZ, lb.u1, lb.v1 });
-        quads.push_back ({ x0, y0, ndcZ, lb.u0, lb.v0 });
-        quads.push_back ({ x1, y1, ndcZ, lb.u1, lb.v1 });
-        quads.push_back ({ x0, y1, ndcZ, lb.u0, lb.v1 });
+        auto corner = [&] (float sx, float sy) -> V
+        {
+            return { cx + right.x * sx * halfW + up.x * sy * halfH,
+                     cy + right.y * sx * halfW + up.y * sy * halfH,
+                     cz + right.z * sx * halfW + up.z * sy * halfH,
+                     0.0f, 0.0f };
+        };
+
+        V c00 = corner (0.0f, -1.0f); c00.u = lb.u0; c00.v = lb.v0;
+        V c10 = corner (2.0f, -1.0f); c10.u = lb.u1; c10.v = lb.v0;
+        V c11 = corner (2.0f,  1.0f); c11.u = lb.u1; c11.v = lb.v1;
+        V c01 = corner (0.0f,  1.0f); c01.u = lb.u0; c01.v = lb.v1;
+
+        quads.push_back (c00);
+        quads.push_back (c10);
+        quads.push_back (c11);
+        quads.push_back (c00);
+        quads.push_back (c11);
+        quads.push_back (c01);
+
+        // #region agent log
+        // Log first + 100Hz every ~15 frames: yMin below gridY (-0.01) => unoccluded ghosts (F).
+        if (gLabelDrawCallsThisFrame == 1 && (gSoftFrameCounter % 15) == 1
+            && (&lb == &owner.freqLabels.front() || std::abs (lb.hz - 100.0f) < 0.5f))
+        {
+            const float yMin = juce::jmin (c00.y, juce::jmin (c10.y, juce::jmin (c11.y, c01.y)));
+            const float yMax = juce::jmax (c00.y, juce::jmax (c10.y, juce::jmax (c11.y, c01.y)));
+            const float xMin = juce::jmin (c00.x, juce::jmin (c10.x, juce::jmin (c11.x, c01.x)));
+            const float xMax = juce::jmax (c00.x, juce::jmax (c10.x, juce::jmax (c11.x, c01.x)));
+            constexpr float kGridY = -0.010f;
+            agentDbgLog ("F", "drawFrequencyLabels", "label_billboard_extent",
+                         juce::String ("{\"hz\":") + juce::String (lb.hz, 1)
+                             + ",\"yMin\":" + juce::String (yMin, 4)
+                             + ",\"yMax\":" + juce::String (yMax, 4)
+                             + ",\"belowGrid\":" + juce::String (yMin < kGridY ? 1 : 0)
+                             + ",\"gridY\":" + juce::String (kGridY, 3)
+                             + ",\"xMin\":" + juce::String (xMin, 4)
+                             + ",\"xMax\":" + juce::String (xMax, 4)
+                             + ",\"xSpan\":" + juce::String (xMax - xMin, 4)
+                             + ",\"halfW\":" + juce::String (halfW, 4)
+                             + ",\"halfH\":" + juce::String (halfH, 4)
+                             + ",\"rightX\":" + juce::String (right.x, 3)
+                             + ",\"rightZ\":" + juce::String (right.z, 3)
+                             + ",\"labelCount\":" + juce::String ((int) owner.freqLabels.size())
+                             + ",\"softBg\":" + juce::String (owner.usesSoftComposite() ? 1 : 0)
+                             + "}");
+        }
+        // #endregion
     }
 
     if (quads.empty())
@@ -3061,6 +4894,10 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
 
     labelShader->use();
     setCornerUniforms (*labelShader);
+    if (labelProjectionUniform != nullptr)
+        labelProjectionUniform->setMatrix4 (getProjectionMatrix().mat, 1, false);
+    if (labelViewUniform != nullptr)
+        labelViewUniform->setMatrix4 (viewMat.mat, 1, false);
     if (labelTexUniform != nullptr)
         labelTexUniform->set (0);
     labelAtlas.bind();
@@ -3069,7 +4906,8 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
     glEnable (GL_BLEND);
     glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable (GL_DEPTH_TEST);
-    glDepthMask (GL_FALSE);
+    // Write depth so DOF CoC uses the label plane, not cleared far-plane depth.
+    glDepthMask (GL_TRUE);
     glDepthFunc (GL_LEQUAL);
     glDisable (GL_CULL_FACE);
 
@@ -3132,9 +4970,12 @@ void Spectrogram3DComponent::GlHost::renderOpenGL()
     const auto px = getViewPixelBounds();
     glViewport (0, 0, px.getWidth(), px.getHeight());
 
-    drawGroundAndGrid();
+    renderShadowDepthPass();
     drawContactShadow();
     drawMesh();
+    drawDebugSphere();
+    drawDebugGizmo();
+    drawGroundAndGrid();
     drawFrequencyLabels();
 }
 
@@ -3143,6 +4984,16 @@ void Spectrogram3DComponent::GlHost::mouseDown (const juce::MouseEvent& e)
     if (! hasKeyboardFocus (true))
         grabKeyboardFocus();
     owner.handleMouseDown (e.getEventRelativeTo (&owner));
+}
+
+void Spectrogram3DComponent::GlHost::mouseMove (const juce::MouseEvent& e)
+{
+    owner.handleMouseMove (e.getEventRelativeTo (&owner));
+}
+
+void Spectrogram3DComponent::GlHost::mouseExit (const juce::MouseEvent&)
+{
+    owner.handleMouseExit();
 }
 
 void Spectrogram3DComponent::GlHost::mouseDrag (const juce::MouseEvent& e)
@@ -3185,6 +5036,16 @@ void Spectrogram3DComponent::HitLayer::mouseDown (const juce::MouseEvent& e)
     if (! hasKeyboardFocus (true))
         grabKeyboardFocus();
     owner.handleMouseDown (e.getEventRelativeTo (&owner));
+}
+
+void Spectrogram3DComponent::HitLayer::mouseMove (const juce::MouseEvent& e)
+{
+    owner.handleMouseMove (e.getEventRelativeTo (&owner));
+}
+
+void Spectrogram3DComponent::HitLayer::mouseExit (const juce::MouseEvent&)
+{
+    owner.handleMouseExit();
 }
 
 void Spectrogram3DComponent::HitLayer::mouseDrag (const juce::MouseEvent& e)
@@ -3245,6 +5106,70 @@ namespace
                         b.getRight(), b.getBottom() - 5.0f, 1.1f);
         }
     };
+
+    /** Top-right magnifying glass — click-drag vertically for wheel-equivalent zoom. */
+    class ZoomHandleOverlay final : public juce::Component
+    {
+    public:
+        explicit ZoomHandleOverlay (Spectrogram3DComponent& o)
+            : owner (o)
+        {
+            setOpaque (false);
+            setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+            setRepaintsOnMouseActivity (true);
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto b = getLocalBounds().toFloat();
+            const bool hot = isMouseOverOrDragging();
+            const float plateA = hot ? 0.55f : 0.38f;
+            g.setColour (juce::Colours::black.withAlpha (plateA));
+            g.fillEllipse (b.reduced (1.0f));
+            g.setColour (juce::Colours::white.withAlpha (hot ? 0.28f : 0.16f));
+            g.drawEllipse (b.reduced (1.0f), 1.0f);
+
+            // Lens
+            const float lensR = b.getWidth() * 0.22f;
+            const juce::Point<float> lensC (b.getCentreX() - b.getWidth() * 0.06f,
+                                            b.getCentreY() - b.getHeight() * 0.06f);
+            g.setColour (juce::Colours::whitesmoke.withAlpha (hot ? 0.95f : 0.78f));
+            g.drawEllipse (lensC.x - lensR, lensC.y - lensR, lensR * 2.0f, lensR * 2.0f,
+                           hot ? 2.0f : 1.6f);
+
+            // Handle
+            const float hx0 = lensC.x + lensR * 0.65f;
+            const float hy0 = lensC.y + lensR * 0.65f;
+            const float hx1 = b.getRight() - b.getWidth() * 0.18f;
+            const float hy1 = b.getBottom() - b.getHeight() * 0.18f;
+            g.drawLine (hx0, hy0, hx1, hy1, hot ? 2.4f : 2.0f);
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            dragging = e.mods.isLeftButtonDown() && ! e.mods.isPopupMenu();
+            lastY = e.position.y;
+        }
+
+        void mouseDrag (const juce::MouseEvent& e) override
+        {
+            if (! dragging)
+                return;
+            const float dy = e.position.y - lastY;
+            lastY = e.position.y;
+            owner.applyUiZoomDrag (dy);
+        }
+
+        void mouseUp (const juce::MouseEvent&) override
+        {
+            dragging = false;
+        }
+
+    private:
+        Spectrogram3DComponent& owner;
+        bool dragging = false;
+        float lastY = 0.0f;
+    };
 }
 
 //==============================================================================
@@ -3268,6 +5193,10 @@ Spectrogram3DComponent::Spectrogram3DComponent()
     addAndMakeVisible (*resizer);
     resizer->setAlwaysOnTop (true);
 
+    zoomHandle = std::make_unique<ZoomHandleOverlay> (*this);
+    addChildComponent (*zoomHandle);
+    zoomHandle->setAlwaysOnTop (true);
+
     defaultCamera = getFactoryCameraState();
     camera = defaultCamera;
     applyChromeMode();
@@ -3276,6 +5205,7 @@ Spectrogram3DComponent::Spectrogram3DComponent()
 Spectrogram3DComponent::~Spectrogram3DComponent()
 {
     stopTimer();
+    zoomHandle.reset();
     resizer.reset();
     hitLayer.reset();
     glHost.reset();
@@ -3648,6 +5578,95 @@ void Spectrogram3DComponent::setSsgiEnabled (bool shouldEnable) noexcept
     markLookDirty();
 }
 
+void Spectrogram3DComponent::setSsrEnabled (bool shouldEnable) noexcept
+{
+    if (ssrEnabled == shouldEnable) return;
+    const bool softBefore = usesSoftComposite();
+    ssrEnabled = shouldEnable;
+    if (softBefore != usesSoftComposite())
+        applyBackgroundTransparency();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrStrength (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrStrength - amount01) < 1.0e-4f) return;
+    ssrStrength = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrDistance (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrDistance - amount01) < 1.0e-4f) return;
+    ssrDistance = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrThickness (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrThickness - amount01) < 1.0e-4f) return;
+    ssrThickness = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrQuality (ShadowQuality q) noexcept
+{
+    if (ssrQuality == q) return;
+    ssrQuality = q;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrFresnel (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrFresnel - amount01) < 1.0e-4f) return;
+    ssrFresnel = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrRoughnessInfluence (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrRoughnessInfluence - amount01) < 1.0e-4f) return;
+    ssrRoughnessInfluence = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrIntensity (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 2.0f, amount01);
+    if (std::abs (ssrIntensity - amount01) < 1.0e-4f) return;
+    ssrIntensity = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrEdgeFade (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrEdgeFade - amount01) < 1.0e-4f) return;
+    ssrEdgeFade = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrMetallicBias (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrMetallicBias - amount01) < 1.0e-4f) return;
+    ssrMetallicBias = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setSsrDomeFallback (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (ssrDomeFallback - amount01) < 1.0e-4f) return;
+    ssrDomeFallback = amount01;
+    markLookDirty();
+}
+
 void Spectrogram3DComponent::setSsgiStrength (float amount01) noexcept
 {
     amount01 = juce::jlimit (0.0f, 1.0f, amount01);
@@ -3821,6 +5840,115 @@ void Spectrogram3DComponent::setSelfShadowQuality (ShadowQuality q) noexcept
     markLookDirty();
 }
 
+void Spectrogram3DComponent::setCastShadowsEnabled (bool shouldEnable) noexcept
+{
+    if (castShadowsEnabled == shouldEnable) return;
+    castShadowsEnabled = shouldEnable;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setShadowMapResolution (ShadowMapResolution res) noexcept
+{
+    if (shadowMapResolution == res) return;
+    shadowMapResolution = res;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setShadowCascadeCount (int count) noexcept
+{
+    count = juce::jlimit (1, kMaxShadowCascades, count);
+    if (shadowCascadeCount == count) return;
+    shadowCascadeCount = count;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setShadowCascadeDistributionExponent (float exponent) noexcept
+{
+    exponent = juce::jlimit (1.0f, 4.0f, exponent);
+    if (std::abs (shadowCascadeDistributionExponent - exponent) < 1.0e-4f) return;
+    shadowCascadeDistributionExponent = exponent;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setShadowCascadeTransitionFraction (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 0.3f, amount01);
+    if (std::abs (shadowCascadeTransitionFraction - amount01) < 1.0e-4f) return;
+    shadowCascadeTransitionFraction = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDebugSphereEnabled (bool shouldEnable) noexcept
+{
+    if (debugSphereEnabled == shouldEnable) return;
+    debugSphereEnabled = shouldEnable;
+    if (glHost != nullptr)
+        glHost->markDebugSphereDirty();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDebugSphereDiameter (float metres) noexcept
+{
+    metres = juce::jlimit (kDebugSphereMinDiameter, kDebugSphereMaxDiameter, metres);
+    if (std::abs (debugSphereDiameter - metres) < 1.0e-5f) return;
+    debugSphereDiameter = metres;
+    // Keep resting on the floor when only size changes and Y was on the floor.
+    if (std::abs (debugSpherePosition.y - (debugSphereDiameter * 0.5f)) < 0.02f
+        || debugSpherePosition.y < metres * 0.5f)
+        debugSpherePosition.y = metres * 0.5f;
+    if (glHost != nullptr)
+        glHost->markDebugSphereDirty();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDebugSpherePosition (juce::Vector3D<float> worldPos) noexcept
+{
+    worldPos.x = juce::jlimit (-2.5f, 2.5f, worldPos.x);
+    worldPos.y = juce::jlimit (0.0f, 3.0f, worldPos.y);
+    worldPos.z = juce::jlimit (-2.5f, 2.5f, worldPos.z);
+    if (std::abs (debugSpherePosition.x - worldPos.x) < 1.0e-5f
+        && std::abs (debugSpherePosition.y - worldPos.y) < 1.0e-5f
+        && std::abs (debugSpherePosition.z - worldPos.z) < 1.0e-5f)
+        return;
+    debugSpherePosition = worldPos;
+    if (glHost != nullptr)
+        glHost->markDebugSphereDirty();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDebugSphereAlbedo (juce::Colour c) noexcept
+{
+    if (debugSphereAlbedo == c) return;
+    debugSphereAlbedo = c;
+    if (glHost != nullptr)
+        glHost->markDebugSphereDirty();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDebugSphereRoughness (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.04f, 1.0f, amount01);
+    if (std::abs (debugSphereRoughness - amount01) < 1.0e-4f) return;
+    debugSphereRoughness = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDebugSphereMetalness (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (debugSphereMetalness - amount01) < 1.0e-4f) return;
+    debugSphereMetalness = amount01;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDebugSphereSpecular (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (debugSphereSpecular - amount01) < 1.0e-4f) return;
+    debugSphereSpecular = amount01;
+    markLookDirty();
+}
+
 void Spectrogram3DComponent::setSsaoEnabled (bool shouldEnable) noexcept
 {
     if (ssaoEnabled == shouldEnable) return;
@@ -3890,12 +6018,41 @@ void Spectrogram3DComponent::setDofFocusDistance (float distance, bool notifyPre
         onDofFocusChanged();
 }
 
-void Spectrogram3DComponent::setDofAperture (float amount01) noexcept
+float Spectrogram3DComponent::getDofLensPower() const noexcept
 {
-    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
-    if (std::abs (dofAperture - amount01) < 1.0e-4f) return;
-    dofAperture = amount01;
+    const float fNorm = dofFocalLengthMm / 35.0f;
+    const float nNorm = juce::jmax (0.05f, dofFStop / 5.6f);
+    return (fNorm * fNorm) / nNorm;
+}
+
+void Spectrogram3DComponent::setDofFStop (float fStop) noexcept
+{
+    fStop = juce::jlimit (kDofFStopMin, kDofFStopMax, fStop);
+    if (std::abs (dofFStop - fStop) < 1.0e-4f) return;
+    dofFStop = fStop;
     markLookDirty();
+}
+
+void Spectrogram3DComponent::setDofFocalLengthMm (float mm) noexcept
+{
+    mm = juce::jlimit (kDofFocalLengthMinMm, kDofFocalLengthMaxMm, mm);
+    if (std::abs (dofFocalLengthMm - mm) < 1.0e-3f) return;
+    dofFocalLengthMm = mm;
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setDofAperture (float amount) noexcept
+{
+    // Legacy 0–3 openness → F-Stop (higher openness = lower f-number).
+    amount = juce::jlimit (0.0f, kDofApertureMax, amount);
+    const float t = amount / kDofApertureMax;
+    setDofFStop (juce::jmap (t, kDofFStopMax, kDofFStopMin));
+}
+
+float Spectrogram3DComponent::getDofAperture() const noexcept
+{
+    const float t = juce::jmap (dofFStop, kDofFStopMin, kDofFStopMax, 1.0f, 0.0f);
+    return t * kDofApertureMax;
 }
 
 void Spectrogram3DComponent::setDofQuality (ShadowQuality q) noexcept
@@ -3905,12 +6062,9 @@ void Spectrogram3DComponent::setDofQuality (ShadowQuality q) noexcept
     markLookDirty();
 }
 
-void Spectrogram3DComponent::setDofBlurScale (float scale) noexcept
+void Spectrogram3DComponent::setDofBlurScale (float) noexcept
 {
-    scale = juce::jlimit (0.25f, 3.0f, scale);
-    if (std::abs (dofBlurScale - scale) < 1.0e-4f) return;
-    dofBlurScale = scale;
-    markLookDirty();
+    // Removed — F-Stop + Focal Length drive CoC. Kept as no-op for prefs compat.
 }
 
 void Spectrogram3DComponent::setDofCocDilate (float amount01) noexcept
@@ -4042,9 +6196,11 @@ void Spectrogram3DComponent::markLookDirty() noexcept
 
 void Spectrogram3DComponent::GlHost::applyBackgroundTransparency() noexcept
 {
-    // Soft mode paints via Image compositing; HWND stays opaque for the tiny peer.
-    setOpaque (true);
-    setInterceptsMouseClicks (! owner.usesSoftComposite(), true);
+    // Soft: non-opaque peer so the parked context HWND doesn't punch a black square.
+    // Hard: opaque nested HWND for direct display.
+    const bool soft = owner.usesSoftComposite();
+    setOpaque (! soft);
+    setInterceptsMouseClicks (! soft, true);
     openGLContext.setComponentPaintingEnabled (false);
 }
 
@@ -4073,11 +6229,13 @@ void Spectrogram3DComponent::layoutPresentation() noexcept
     if (soft)
     {
         // Small peer keeps the GL context alive for FBO work (not used for display).
-        // Keep it a bit larger than 2×2 — some hosts fail to attach tiny contexts.
-        constexpr int kPeer = 16;
-        const int x = juce::jmax (0, getWidth() - kPeer);
-        const int y = juce::jmax (0, getHeight() - kPeer);
-        glHost->setBounds (x, y, kPeer, kPeer);
+        // Park far outside this component so the native HWND is clipped by the
+        // plugin window — placing it in the shadow pad (or bottom-right) reads as
+        // a black square over the chrome / resize grip under Direct2D.
+        constexpr int kPeer = 4;
+        constexpr int kPark = -20000;
+        glHost->setOpaque (false);
+        glHost->setBounds (kPark, kPark, kPeer, kPeer);
         glHost->setVisible (active);
         glHost->setInterceptsMouseClicks (false, false);
         glHost->toBack();
@@ -4091,6 +6249,20 @@ void Spectrogram3DComponent::layoutPresentation() noexcept
 
     if (active)
         glHost->requestAttachAsync();
+
+    if (zoomHandle != nullptr)
+    {
+        constexpr int kSize = 28;
+        constexpr int kTopOffset = 50;
+        constexpr int kMargin = 8;
+        const auto gl = getGlViewLocal();
+        zoomHandle->setBounds (gl.getRight() - kMargin - kSize,
+                               gl.getY() + kTopOffset,
+                               kSize, kSize);
+        zoomHandle->setVisible (active);
+        if (zoomHandle->isVisible())
+            zoomHandle->toFront (false);
+    }
 
     if (resizer != nullptr && resizer->isVisible())
         resizer->toFront (false);
@@ -4718,13 +6890,18 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
         }
     }
 
-    g.setColour (juce::Colours::white.withAlpha (chromeMode == ChromeMode::docked ? 0.12f : 0.22f));
-    g.strokePath (panel, juce::PathStrokeType (chromeMode == ChromeMode::docked ? 1.0f : 1.2f));
-    if (chromeMode == ChromeMode::floating)
+    // Soft BG: no chrome outline — a white panel stroke read as a thick border
+    // around the whole graph. Docked Scope keeps a hairline for separation.
+    if (! transparentBackground)
     {
-        g.setColour (juce::Colours::white.withAlpha (0.06f));
-        g.strokePath (panel, juce::PathStrokeType (1.0f),
-                      juce::AffineTransform::translation (0.0f, 1.0f));
+        g.setColour (juce::Colours::white.withAlpha (chromeMode == ChromeMode::docked ? 0.12f : 0.22f));
+        g.strokePath (panel, juce::PathStrokeType (chromeMode == ChromeMode::docked ? 1.0f : 1.2f));
+        if (chromeMode == ChromeMode::floating)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.06f));
+            g.strokePath (panel, juce::PathStrokeType (1.0f),
+                          juce::AffineTransform::translation (0.0f, 1.0f));
+        }
     }
 
     if (active && glHost != nullptr && (glHost->hasContextFailed() || ! glHost->isGlReady()))
@@ -4832,6 +7009,9 @@ bool Spectrogram3DComponent::isInMoveChrome (juce::Point<int> localPos) const no
     if (glHost != nullptr && ! usesSoftComposite() && glHost->getBounds().contains (localPos))
         return false;
     if (resizer != nullptr && resizer->getBounds().contains (localPos))
+        return false;
+    if (zoomHandle != nullptr && zoomHandle->isVisible()
+        && zoomHandle->getBounds().contains (localPos))
         return false;
     return getLocalBounds().contains (localPos);
 }
@@ -5784,6 +7964,170 @@ bool Spectrogram3DComponent::pickDofFocusAtLocalPoint (juce::Point<float> localP
     return true;
 }
 
+Spectrogram3DComponent::DragMode Spectrogram3DComponent::hitTestDebugGizmo (juce::Point<float> localPos) const noexcept
+{
+    if (! debugSphereEnabled || glHost == nullptr || ! glHost->isGlReady())
+        return DragMode::none;
+
+    const auto& c = debugSpherePosition;
+    const float len = juce::jmax (0.08f, debugSphereDiameter * 0.9f);
+    struct Axis { juce::Vector3D<float> end; DragMode mode; };
+    const Axis axes[] = {
+        { { c.x + len, c.y, c.z }, DragMode::gizmoX },
+        { { c.x, c.y + len, c.z }, DragMode::gizmoY },
+        { { c.x, c.y, c.z + len }, DragMode::gizmoZ },
+    };
+
+    const auto view = getGlViewLocal().toFloat();
+    // Slightly wider pick for cylinder+cone shafts.
+    float bestDist = 22.0f;
+    DragMode best = DragMode::none;
+    for (const auto& ax : axes)
+    {
+        float ndc0x, ndc0y, ndc0z, ndc1x, ndc1y, ndc1z;
+        if (! glHost->projectWorldToNdc (c.x, c.y, c.z, ndc0x, ndc0y, ndc0z)
+            || ! glHost->projectWorldToNdc (ax.end.x, ax.end.y, ax.end.z, ndc1x, ndc1y, ndc1z))
+            continue;
+        const float x0 = view.getX() + (ndc0x * 0.5f + 0.5f) * view.getWidth();
+        const float y0 = view.getY() + (1.0f - (ndc0y * 0.5f + 0.5f)) * view.getHeight();
+        const float x1 = view.getX() + (ndc1x * 0.5f + 0.5f) * view.getWidth();
+        const float y1 = view.getY() + (1.0f - (ndc1y * 0.5f + 0.5f)) * view.getHeight();
+        // Distance from point to segment.
+        const float vx = x1 - x0, vy = y1 - y0;
+        const float wx = localPos.x - x0, wy = localPos.y - y0;
+        const float vv = vx * vx + vy * vy;
+        const float t = vv > 1.0e-6f ? juce::jlimit (0.0f, 1.0f, (wx * vx + wy * vy) / vv) : 0.0f;
+        const float dx = localPos.x - (x0 + vx * t);
+        const float dy = localPos.y - (y0 + vy * t);
+        const float d = std::sqrt (dx * dx + dy * dy);
+        if (d < bestDist)
+        {
+            bestDist = d;
+            best = ax.mode;
+        }
+    }
+    return best;
+}
+
+bool Spectrogram3DComponent::tryPickDebugGizmo (juce::Point<float> localPos) noexcept
+{
+    const auto best = hitTestDebugGizmo (localPos);
+    if (best == DragMode::none)
+        return false;
+
+    dragMode = best;
+    gizmoHoverAxis = best;
+    gizmoDragStartPos = localPos;
+    gizmoDragStartSpherePos = debugSpherePosition;
+    return true;
+}
+
+bool Spectrogram3DComponent::isGizmoXrayActive() const noexcept
+{
+    return gizmoHoverAxis != DragMode::none
+        || dragMode == DragMode::gizmoX
+        || dragMode == DragMode::gizmoY
+        || dragMode == DragMode::gizmoZ;
+}
+
+void Spectrogram3DComponent::updateGizmoHover (juce::Point<float> localPos) noexcept
+{
+    // Keep hover latched while dragging an axis.
+    if (dragMode == DragMode::gizmoX || dragMode == DragMode::gizmoY || dragMode == DragMode::gizmoZ)
+    {
+        if (gizmoHoverAxis != dragMode)
+        {
+            gizmoHoverAxis = dragMode;
+            markSoftContentDirty();
+            if (glHost != nullptr)
+                glHost->triggerRedraw();
+            if (usesSoftComposite())
+                repaint();
+        }
+        return;
+    }
+
+    const auto next = hitTestDebugGizmo (localPos);
+    if (next == gizmoHoverAxis)
+        return;
+
+    gizmoHoverAxis = next;
+    markSoftContentDirty();
+    if (glHost != nullptr)
+        glHost->triggerRedraw();
+    if (usesSoftComposite())
+        repaint();
+}
+
+void Spectrogram3DComponent::handleMouseMove (const juce::MouseEvent& e)
+{
+    updateGizmoHover (e.position);
+    setMouseCursor (isInMoveChrome (e.getPosition()) ? juce::MouseCursor::DraggingHandCursor
+                     : (gizmoHoverAxis != DragMode::none ? juce::MouseCursor::DraggingHandCursor
+                                                        : juce::MouseCursor::NormalCursor));
+}
+
+void Spectrogram3DComponent::handleMouseExit()
+{
+    if (dragMode == DragMode::gizmoX || dragMode == DragMode::gizmoY || dragMode == DragMode::gizmoZ)
+        return;
+    if (gizmoHoverAxis == DragMode::none)
+        return;
+    gizmoHoverAxis = DragMode::none;
+    markSoftContentDirty();
+    if (glHost != nullptr)
+        glHost->triggerRedraw();
+    if (usesSoftComposite())
+        repaint();
+}
+
+void Spectrogram3DComponent::dragDebugGizmo (juce::Point<float> localPos) noexcept
+{
+    if (glHost == nullptr)
+        return;
+    const auto view = getGlViewLocal().toFloat();
+    if (view.getWidth() < 2.0f || view.getHeight() < 2.0f)
+        return;
+
+    // Approximate world units per pixel at the sphere depth.
+    const float worldPerPx = juce::jmax (0.0005f, camera.distance * 0.0018f);
+    const float dx = (localPos.x - gizmoDragStartPos.x) * worldPerPx;
+    const float dy = (gizmoDragStartPos.y - localPos.y) * worldPerPx; // screen Y down
+
+    juce::Vector3D<float> right, up, forward;
+    cameraBasis (right, up, forward);
+    juce::Vector3D<float> p = gizmoDragStartSpherePos;
+    if (dragMode == DragMode::gizmoX)
+        p.x += dx * right.x + dy * up.x; // project screen drag onto world X via camera axes then clamp to X
+    else if (dragMode == DragMode::gizmoY)
+        p.y += dy;
+    else if (dragMode == DragMode::gizmoZ)
+        p.z += dx * right.z + dy * up.z;
+
+    // Axis-constrain: only move the active component from the camera-space drag.
+    if (dragMode == DragMode::gizmoX)
+    {
+        const float along = dx * right.x + dy * up.x;
+        p = gizmoDragStartSpherePos;
+        p.x += along;
+    }
+    else if (dragMode == DragMode::gizmoY)
+    {
+        p = gizmoDragStartSpherePos;
+        p.y += dy;
+    }
+    else if (dragMode == DragMode::gizmoZ)
+    {
+        const float along = dx * right.z + dy * up.z;
+        p = gizmoDragStartSpherePos;
+        p.z += along;
+    }
+
+    setDebugSpherePosition (p);
+    if (onDebugSphereChanged != nullptr)
+        onDebugSphereChanged();
+}
+
 void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
 {
     lastDrag = e.position;
@@ -5793,12 +8137,12 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     // Turntable controls (no free tumble / roll):
     //  LMB drag           = orbit around look-at (yaw / elevation)
     //  RMB drag           = move look-at (truck / pedestal) — keeps orbit centred
-    //  RMB click          = freeze / unfreeze waterfall (look-dev)
-    //  Shift+RMB click    = context menu (Freeze / Save Default / Turntable / …)
+    //  RMB click          = context menu (Freeze / Save Default / Turntable / …)
     //  Shift / MMB        = pan look-at on the ground plane
     //  Alt+LMB            = dolly (distance)
     //  Ctrl/Cmd+LMB       = set DOF focus distance under cursor
     //  Wheel              = zoom / dolly
+    //  LMB on debug gizmo = axis-constrained sphere move
     if (isRightMouse (e))
     {
         dragMode = DragMode::screenPan;
@@ -5820,6 +8164,10 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     {
         dragMode = DragMode::dolly;
     }
+    else if (e.mods.isLeftButtonDown() && tryPickDebugGizmo (e.position))
+    {
+        // dragMode set by tryPickDebugGizmo
+    }
     else if (e.mods.isLeftButtonDown())
     {
         dragMode = DragMode::orbit;
@@ -5840,6 +8188,13 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
 
     if (dragMode == DragMode::none)
         return;
+
+    if (dragMode == DragMode::gizmoX || dragMode == DragMode::gizmoY || dragMode == DragMode::gizmoZ)
+    {
+        dragDebugGizmo (e.position);
+        lastDrag = e.position;
+        return;
+    }
 
     const auto d = e.position - lastDrag;
     lastDrag = e.position;
@@ -5910,18 +8265,36 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
 
 void Spectrogram3DComponent::handleMouseUp (const juce::MouseEvent& e)
 {
-    // RMB click (no meaningful drag): freeze toggle, or Shift+RMB for the view menu.
+    // RMB click (no meaningful drag): full view menu (includes Freeze).
     if (rightClickCandidate && ! rightClickDragged)
-    {
-        if (e.mods.isShiftDown())
-            showContextMenu (e.getScreenPosition());
-        else
-            setWaterfallFrozen (! waterfallFrozen);
-    }
+        showContextMenu (e.getScreenPosition());
 
     rightClickCandidate = false;
     rightClickDragged = false;
     dragMode = DragMode::none;
+}
+
+void Spectrogram3DComponent::applyUiZoomDrag (float deltaY) noexcept
+{
+    // Vertical drag only — same distance zoom as the scroll wheel (not orbit/pan).
+    // Drag down → zoom out; drag up → zoom in.
+    if (zoomOscillateEnabled)
+    {
+        zoomOscillateBaseDistance *= (1.0f + deltaY * 0.012f);
+        zoomOscillateBaseDistance = juce::jlimit (0.35f, 14.0f, zoomOscillateBaseDistance);
+        applyZoomOscillateDistance();
+    }
+    else
+    {
+        camera.distance *= (1.0f + deltaY * 0.012f);
+        clampCamera();
+    }
+
+    markSoftContentDirty();
+    if (glHost != nullptr)
+        glHost->triggerRedraw();
+    if (usesSoftComposite())
+        repaint();
 }
 
 void Spectrogram3DComponent::handleMouseWheel (const juce::MouseWheelDetails& wheel)

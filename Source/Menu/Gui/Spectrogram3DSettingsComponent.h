@@ -24,6 +24,8 @@ public:
     int getPreferredContentHeight() const { return content.getPreferredHeight(); }
     /** Sync Look toggles from Main before Menu measures scroll height. */
     void syncFromMain() { content.syncControlsFromMain(); }
+    /** Mirror live DOF focus (Ctrl/Cmd+LMB pick) onto the Focus Distance slider. */
+    void syncDofFocusFromMain() { content.syncDofFocusFromMain(); }
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -58,6 +60,7 @@ private:
         void updateLookDevVisibility();
         void requestParentRelayout();
         void syncControlsFromMain();
+        void syncDofFocusFromMain();
         void applyControlsToMain();
         void applyLookControlsToMain();
         void applyStructureControlsToMain();
@@ -151,6 +154,28 @@ private:
         juce::Label ssgiQualityLabel;
         juce::ComboBox ssgiQualityCombo;
 
+        juce::ToggleButton ssrToggle { "SSR (screen-space reflections)" };
+        juce::Label ssrStrengthLabel;
+        juce::Slider ssrStrengthSlider;
+        juce::Label ssrDistanceLabel;
+        juce::Slider ssrDistanceSlider;
+        juce::Label ssrThicknessLabel;
+        juce::Slider ssrThicknessSlider;
+        juce::Label ssrQualityLabel;
+        juce::ComboBox ssrQualityCombo;
+        juce::Label ssrFresnelLabel;
+        juce::Slider ssrFresnelSlider;
+        juce::Label ssrRoughInfLabel;
+        juce::Slider ssrRoughInfSlider;
+        juce::Label ssrIntensityLabel;
+        juce::Slider ssrIntensitySlider;
+        juce::Label ssrEdgeFadeLabel;
+        juce::Slider ssrEdgeFadeSlider;
+        juce::Label ssrMetalBiasLabel;
+        juce::Slider ssrMetalBiasSlider;
+        juce::Label ssrDomeFbLabel;
+        juce::Slider ssrDomeFbSlider;
+
         juce::ToggleButton contactShadowToggle { "Contact shadow" };
         juce::Label contactShadowStrengthLabel;
         juce::Slider contactShadowStrengthSlider;
@@ -164,6 +189,16 @@ private:
         juce::Slider selfShadowSoftnessSlider;
         juce::Label selfShadowQualityLabel;
         juce::ComboBox selfShadowQualityCombo;
+
+        juce::ToggleButton castShadowsToggle { "Cast Shadows (shadow map)" };
+        juce::Label shadowResLabel;
+        juce::ComboBox shadowResCombo;
+        juce::Label cascadeCountLabel;
+        juce::ComboBox cascadeCountCombo;
+        juce::Label cascadeDistLabel;
+        juce::Slider cascadeDistSlider;
+        juce::Label cascadeTransLabel;
+        juce::Slider cascadeTransSlider;
 
         juce::ToggleButton ssaoToggle { "Ambient occlusion" };
         juce::Label ssaoStrengthLabel;
@@ -180,12 +215,12 @@ private:
         juce::ToggleButton dofToggle { "Depth of field" };
         juce::Label dofFocusLabel;
         juce::Slider dofFocusSlider;
-        juce::Label dofApertureLabel;
-        juce::Slider dofApertureSlider;
+        juce::Label dofFStopLabel;
+        juce::Slider dofFStopSlider;
+        juce::Label dofFocalLengthLabel;
+        juce::Slider dofFocalLengthSlider;
         juce::Label dofQualityLabel;
         juce::ComboBox dofQualityCombo;
-        juce::Label dofBlurScaleLabel;
-        juce::Slider dofBlurScaleSlider;
         juce::Label dofCocDilateLabel;
         juce::Slider dofCocDilateSlider;
         juce::Label dofEdgeSpillLabel;
