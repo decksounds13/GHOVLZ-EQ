@@ -423,6 +423,18 @@ int Menu::getActiveTabPreferredContentHeight() const
     return kContentHeight - tabBarDepth;
 }
 
+int Menu::getActiveTabPreferredContentWidth() const
+{
+    auto* c = tabBar.getCurrentContentComponent();
+    if (c == nullptr)
+        return kContentWidth;
+
+    if (auto* t = dynamic_cast<Spectrogram3DSettingsComponent*> (c))
+        return juce::jmax (kContentWidth, t->getPreferredContentWidth());
+
+    return kContentWidth;
+}
+
 void Menu::disableSliderScrollWheelRecursive (juce::Component& root)
 {
     if (auto* slider = dynamic_cast<juce::Slider*> (&root))
@@ -444,7 +456,13 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
     // Resolve viewport bounds first so content can fill the panel when the user
     // widens Settings (avoids a floating content island / grey inset frame).
     layoutScrollBars();
-    const int contentW = juce::jmax (kContentWidth, viewport.getWidth());
+
+    // Grow the settings window when the active tab needs more width (e.g. particle matrix).
+    const int preferredW = getActiveTabPreferredContentWidth();
+    if (preferredW > getWidth())
+        setSize (preferredW, getHeight());
+
+    const int contentW = juce::jmax (kContentWidth, preferredW, viewport.getWidth());
 
     // Provisional size so tab content can sync/layout before we measure height.
     contentPanel.setSize (contentW, juce::jmax (kContentHeight, viewport.getHeight()));

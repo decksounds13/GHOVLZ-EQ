@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 
 <Project DefaultTargets="Build"
          ToolsVersion="17.0"
@@ -151,6 +151,7 @@
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp"/>
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp"/>
+    <ClCompile Include="..\..\Source\Spec3DParticleSystem.cpp"/>
     <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp"/>
     <ClCompile Include="..\..\Source\FramedFloatingScopeWindow.cpp"/>
@@ -3487,6 +3488,7 @@
     <ClInclude Include="..\..\Source\GoniometerComponent.h"/>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h"/>
+    <ClInclude Include="..\..\Source\Spec3DParticleSystem.h"/>
     <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h"/>
     <ClInclude Include="..\..\Source\ScopeModules.h"/>
     <ClInclude Include="..\..\Source\ScopeLayoutPresets.h"/>
@@ -5466,3 +5468,4 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
 </Project>
+

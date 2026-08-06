@@ -60,7 +60,7 @@ public:
         return { 0, 0, kContentWidth, kContentHeight };
     }
 
-    /** Call when an active tab's preferred height changes (look toggles, gradients, …). */
+    /** Call when an active tab's preferred height/width changes (look toggles, gradients, …). */
     void notifyContentHeightChanged();
 
     /** Invoked by the title-bar close (X) control. Host should hide the Settings panel. */
@@ -153,6 +153,7 @@ private:
     /** @param preserveScrollPosition keep viewport offset (toggles / resize). Tab changes pass false. */
     void refreshContentPanelSize (bool preserveScrollPosition = false);
     int getActiveTabPreferredContentHeight() const;
+    int getActiveTabPreferredContentWidth() const;
     /** Sliders would eat the wheel for value tweaks — prefer scrolling the Settings page. */
     static void disableSliderScrollWheelRecursive (juce::Component& root);
 

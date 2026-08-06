@@ -1,4 +1,5 @@
 #include "Spectrogram3DComponent.h"
+#include "Spec3DParticleSystem.h"
 #include "SpectrogramComponent.h"
 #include "Menu/SharedResources.h"
 #include "ComboBoxLookAndFeel.h"
@@ -2077,6 +2078,8 @@ void Spectrogram3DComponent::GlHost::openGLContextClosing()
     if (sphereIbo != 0) { juce::gl::glDeleteBuffers (1, &sphereIbo); sphereIbo = 0; }
     if (gizmoVbo != 0) { juce::gl::glDeleteBuffers (1, &gizmoVbo); gizmoVbo = 0; }
     if (gizmoIbo != 0) { juce::gl::glDeleteBuffers (1, &gizmoIbo); gizmoIbo = 0; }
+    if (owner.particleSystem != nullptr)
+        owner.particleSystem->releaseGl();
     destroyShaders();
     glReady = false;
     meshIndexCount = 0;
@@ -2954,7 +2957,7 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     // Mesh + lookdev sphere + gizmo into SSGI/SSR (gizmo bounce is intentional).
     // Grid / ticks / labels stay deferred — bright chrome must not seed GI/bloom.
     drawContactShadow();
-    drawMesh();
+    drawSpectrogramSurface();
     drawDebugSphere();
     drawDebugGizmo();
     const bool postStack = owner.needsPostEffects();
@@ -3830,7 +3833,9 @@ void Spectrogram3DComponent::GlHost::renderShadowDepthPass()
     for (int c = 0; c < nCasc; ++c)
     {
         glViewport (c * tile, 0, tile, tile);
-        drawMeshIntoShadow (shadowMatrix[c]);
+        // Particle mode: no mesh casters (particles do not cast in v1).
+        if (! owner.particleModeEnabled)
+            drawMeshIntoShadow (shadowMatrix[c]);
         drawSphereIntoShadow (shadowMatrix[c]);
     }
 
@@ -4265,6 +4270,24 @@ void Spectrogram3DComponent::GlHost::drawDebugGizmo()
     unbindAttribs();
     glBindBuffer (GL_ARRAY_BUFFER, 0);
     glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
+void Spectrogram3DComponent::GlHost::drawSpectrogramSurface()
+{
+    if (owner.particleModeEnabled)
+    {
+        owner.ensureParticleSystem();
+        if (owner.particleSystem != nullptr)
+        {
+            owner.particleSystem->ensureGl (openGLContext);
+            juce::Vector3D<float> right, up, forward;
+            owner.cameraBasis (right, up, forward);
+            juce::ignoreUnused (forward);
+            owner.particleSystem->draw (getProjectionMatrix(), getViewMatrix(), right, up);
+        }
+        return;
+    }
+    drawMesh();
 }
 
 void Spectrogram3DComponent::GlHost::drawMesh()
@@ -4995,7 +5018,7 @@ void Spectrogram3DComponent::GlHost::renderOpenGL()
 
     renderShadowDepthPass();
     drawContactShadow();
-    drawMesh();
+    drawSpectrogramSurface();
     drawDebugSphere();
     drawDebugGizmo();
     drawGroundAndGrid();
@@ -5222,6 +5245,7 @@ Spectrogram3DComponent::Spectrogram3DComponent()
 
     defaultCamera = getFactoryCameraState();
     camera = defaultCamera;
+    initDefaultParticleModSlots();
     applyChromeMode();
 }
 
@@ -5427,6 +5451,163 @@ void Spectrogram3DComponent::setTransparentBackground (bool shouldEnable) noexce
     if (glHost != nullptr)
         glHost->triggerRedraw();
     repaint();
+}
+
+void Spectrogram3DComponent::ensureParticleSystem()
+{
+    if (particleSystem == nullptr)
+        particleSystem = std::make_unique<Spec3DParticleSystem> (*this);
+}
+
+void Spectrogram3DComponent::setParticleModeEnabled (bool shouldEnable) noexcept
+{
+    if (particleModeEnabled == shouldEnable) return;
+    particleModeEnabled = shouldEnable;
+    if (particleModeEnabled)
+        ensureParticleSystem();
+    markLookDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcept
+{
+    if (mode != ParticleEmitMode::slice && mode != ParticleEmitMode::continuous)
+        mode = ParticleEmitMode::slice;
+    if (particleEmitMode == mode) return;
+    particleEmitMode = mode;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmission (float amount) noexcept
+{
+    amount = juce::jlimit (0.0f, 5.0f, amount);
+    if (std::abs (particleEmission - amount) < 1.0e-4f) return;
+    particleEmission = amount;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::initDefaultParticleModSlots() noexcept
+{
+    for (auto& s : particleModSlots)
+        s = {};
+
+    // Slot 0: amplitude → emission (off by default — enable in matrix UI)
+    particleModSlots[0].enabled = false;
+    particleModSlots[0].source = ParticleModSource::amplitude;
+    particleModSlots[0].dest = ParticleModDest::emission;
+    particleModSlots[0].op = ParticleModOp::multiply;
+    particleModSlots[0].amount = 1.0f;
+
+    // Slot 1: bin dB → colour gain
+    particleModSlots[1].enabled = false;
+    particleModSlots[1].source = ParticleModSource::binDb;
+    particleModSlots[1].dest = ParticleModDest::colourGain;
+    particleModSlots[1].op = ParticleModOp::multiply;
+    particleModSlots[1].amount = 1.0f;
+
+    // Slot 2: bin freq → colour hue
+    particleModSlots[2].enabled = false;
+    particleModSlots[2].source = ParticleModSource::binFreq;
+    particleModSlots[2].dest = ParticleModDest::colourHue;
+    particleModSlots[2].op = ParticleModOp::set;
+    particleModSlots[2].amount = 1.0f;
+}
+
+ParticleModSlot Spectrogram3DComponent::getParticleModSlot (int index) const noexcept
+{
+    if (juce::isPositiveAndBelow (index, kParticleModSlotCount))
+        return particleModSlots[(size_t) index];
+    return {};
+}
+
+void Spectrogram3DComponent::setParticleModSlot (int index, const ParticleModSlot& slot) noexcept
+{
+    if (! juce::isPositiveAndBelow (index, kParticleModSlotCount))
+        return;
+    particleModSlots[(size_t) index] = slot;
+    auto& s = particleModSlots[(size_t) index];
+    s.amount = juce::jlimit (0.0f, 4.0f, slot.amount);
+    s.constant = juce::jlimit (0.0f, 1.0f, slot.constant);
+    s.curveShape = juce::jlimit (-1.0f, 1.0f, slot.curveShape);
+    s.threshold = juce::jlimit (0.0f, 1.0f, slot.threshold);
+    s.attackMs = juce::jlimit (0.1f, 2000.0f, slot.attackMs);
+    s.releaseMs = juce::jlimit (0.1f, 5000.0f, slot.releaseMs);
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleRiseSpeed (float unitsPerSec) noexcept
+{
+    unitsPerSec = juce::jlimit (0.05f, 5.0f, unitsPerSec);
+    if (std::abs (particleRiseSpeed - unitsPerSec) < 1.0e-4f) return;
+    particleRiseSpeed = unitsPerSec;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleVelRandom (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (particleVelRandom - amount01) < 1.0e-4f) return;
+    particleVelRandom = amount01;
+}
+
+void Spectrogram3DComponent::setParticleLifespan (float seconds) noexcept
+{
+    seconds = juce::jlimit (0.0f, 60.0f, seconds);
+    if (std::abs (particleLifespan - seconds) < 1.0e-4f) return;
+    particleLifespan = seconds;
+}
+
+void Spectrogram3DComponent::setParticleLifespanRandom (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (particleLifespanRandom - amount01) < 1.0e-4f) return;
+    particleLifespanRandom = amount01;
+}
+
+void Spectrogram3DComponent::setParticleSize (float worldSize) noexcept
+{
+    worldSize = juce::jlimit (0.001f, 0.08f, worldSize);
+    if (std::abs (particleSize - worldSize) < 1.0e-5f) return;
+    particleSize = worldSize;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmissiveEnabled (bool shouldEnable) noexcept
+{
+    if (particleEmissiveEnabled == shouldEnable) return;
+    particleEmissiveEnabled = shouldEnable;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmissiveStrength (float amount) noexcept
+{
+    amount = juce::jlimit (0.0f, 4.0f, amount);
+    if (std::abs (particleEmissiveStrength - amount) < 1.0e-4f) return;
+    particleEmissiveStrength = amount;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleRoughness (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.04f, 1.0f, amount01);
+    if (std::abs (particleRoughness - amount01) < 1.0e-4f) return;
+    particleRoughness = amount01;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleMetalness (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (particleMetalness - amount01) < 1.0e-4f) return;
+    particleMetalness = amount01;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpecular (float amount01) noexcept
+{
+    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
+    if (std::abs (particleSpecular - amount01) < 1.0e-4f) return;
+    particleSpecular = amount01;
+    markSoftContentDirty();
 }
 
 void Spectrogram3DComponent::setLightingEnabled (bool shouldEnable) noexcept
@@ -7100,6 +7281,26 @@ void Spectrogram3DComponent::timerCallback()
 
     const bool meshRebuilt = updateMeshFromSource();
 
+    // Particle mode: sim only when enabled (lazy system). Always dirties soft content
+    // while active so rising particles animate.
+    if (particleModeEnabled)
+    {
+        ensureParticleSystem();
+        if (particleSystem != nullptr)
+        {
+            float pdt = 1.0f / 30.0f;
+            if (particleLastUpdateSec > 0.0)
+                pdt = juce::jlimit (0.0f, 0.1f, (float) (nowSec - particleLastUpdateSec));
+            particleLastUpdateSec = nowSec;
+            particleSystem->update (pdt);
+            markSoftContentDirty();
+        }
+    }
+    else
+    {
+        particleLastUpdateSec = 0.0;
+    }
+
     // Lighting automation only writes uniforms. Fold into the mesh soft frame when
     // possible; if the waterfall is idle, throttle light-only soft redraws (~12 Hz)
     // so DOF/post is not run at full timer rate.
@@ -7272,6 +7473,10 @@ void Spectrogram3DComponent::seedMeshFromHistory (const std::vector<float>& hist
     for (int i = 0; i < cols; ++i)
         fillMeshColumn (meshW - cols + i,
                         history.data() + (size_t) (srcStart + i) * (size_t) histH, histH);
+
+    // Full history reseed — drop particles so they do not sit on stale columns.
+    if (particleSystem != nullptr)
+        particleSystem->clear();
 }
 
 void Spectrogram3DComponent::appendMeshColumnsFromHistory (const std::vector<float>& history,
@@ -7292,6 +7497,10 @@ void Spectrogram3DComponent::appendMeshColumnsFromHistory (const std::vector<flo
         fillMeshColumn (meshW - numNew + i,
                         history.data() + (size_t) srcCol * (size_t) histH, histH);
     }
+
+    // Keep particles locked to the same history columns as meshDb (scroll −X).
+    if (particleModeEnabled && particleSystem != nullptr)
+        particleSystem->scrollHistory (numNew);
 }
 
 void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)

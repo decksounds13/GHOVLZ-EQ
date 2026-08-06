@@ -83,6 +83,7 @@ private:
     void showLaneLabelMenu (int autoIdx, juce::Point<int> screenPos);
     void toggleLaneEnabled (int autoIdx);
     void showKeyInterpMenu (int autoIdx, int keyIdx, bool isColour, juce::Point<int> screenPos);
+    void beginEditFloatKeyValue (int autoIdx, int keyIdx);
     void openColourKeyPicker (int autoIdx, int keyIdx);
 
     SharedResources& resources;

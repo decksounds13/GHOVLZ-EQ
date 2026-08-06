@@ -3125,6 +3125,135 @@ bool MainComponent::isSpec3DSssEnabled() const noexcept
     return spectrogram3D.isSssEnabled();
 }
 
+void MainComponent::setSpec3DParticleModeEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setParticleModeEnabled (shouldEnable);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DParticleModeEnabled() const noexcept
+{
+    return spectrogram3D.isParticleModeEnabled();
+}
+void MainComponent::setSpec3DParticleEmitMode (int mode, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmitMode (
+        mode == 1 ? Spectrogram3DComponent::ParticleEmitMode::continuous
+                  : Spectrogram3DComponent::ParticleEmitMode::slice);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+int MainComponent::getSpec3DParticleEmitMode() const noexcept
+{
+    return (int) spectrogram3D.getParticleEmitMode();
+}
+void MainComponent::setSpec3DParticleEmission (float amount, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmission (amount);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleEmission() const noexcept
+{
+    return spectrogram3D.getParticleEmission();
+}
+void MainComponent::setSpec3DParticleModSlot (int index, const ParticleModSlot& slot, bool notifyPrefs)
+{
+    spectrogram3D.setParticleModSlot (index, slot);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+ParticleModSlot MainComponent::getSpec3DParticleModSlot (int index) const noexcept
+{
+    return spectrogram3D.getParticleModSlot (index);
+}
+void MainComponent::setSpec3DParticleRiseSpeed (float unitsPerSec, bool notifyPrefs)
+{
+    spectrogram3D.setParticleRiseSpeed (unitsPerSec);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleRiseSpeed() const noexcept
+{
+    return spectrogram3D.getParticleRiseSpeed();
+}
+void MainComponent::setSpec3DParticleVelRandom (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setParticleVelRandom (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleVelRandom() const noexcept
+{
+    return spectrogram3D.getParticleVelRandom();
+}
+void MainComponent::setSpec3DParticleLifespan (float seconds, bool notifyPrefs)
+{
+    spectrogram3D.setParticleLifespan (seconds);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleLifespan() const noexcept
+{
+    return spectrogram3D.getParticleLifespan();
+}
+void MainComponent::setSpec3DParticleLifespanRandom (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setParticleLifespanRandom (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleLifespanRandom() const noexcept
+{
+    return spectrogram3D.getParticleLifespanRandom();
+}
+void MainComponent::setSpec3DParticleSize (float worldSize, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSize (worldSize);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSize() const noexcept
+{
+    return spectrogram3D.getParticleSize();
+}
+void MainComponent::setSpec3DParticleEmissiveEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmissiveEnabled (shouldEnable);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DParticleEmissiveEnabled() const noexcept
+{
+    return spectrogram3D.isParticleEmissiveEnabled();
+}
+void MainComponent::setSpec3DParticleEmissiveStrength (float amount, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmissiveStrength (amount);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleEmissiveStrength() const noexcept
+{
+    return spectrogram3D.getParticleEmissiveStrength();
+}
+void MainComponent::setSpec3DParticleRoughness (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setParticleRoughness (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleRoughness() const noexcept
+{
+    return spectrogram3D.getParticleRoughness();
+}
+void MainComponent::setSpec3DParticleMetalness (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setParticleMetalness (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleMetalness() const noexcept
+{
+    return spectrogram3D.getParticleMetalness();
+}
+void MainComponent::setSpec3DParticleSpecular (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSpecular (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSpecular() const noexcept
+{
+    return spectrogram3D.getParticleSpecular();
+}
+
 void MainComponent::setSpec3DSssStrength (float amount01, bool notifyPrefs)
 {
     spectrogram3D.setSssStrength (amount01);

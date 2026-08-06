@@ -1027,6 +1027,9 @@
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\Spec3DParticleSystem.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp">
       <Filter>ParametricEqProject\Source\Assets</Filter>
     </ClCompile>
@@ -4783,6 +4786,9 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Spec3DParticleSystem.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h">

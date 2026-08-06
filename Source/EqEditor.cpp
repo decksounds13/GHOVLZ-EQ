@@ -2424,6 +2424,20 @@ void EqEditor::loadUiPrefs()
     int spec3DSssQuality = 1; // medium
     float spec3DSssThickScale = 0.50f;
     float spec3DSssMaxThick = 0.70f;
+    bool spec3DParticle = false;
+    int spec3DParticleEmitMode = 0; // 0 = slice, 1 = continuous
+    float spec3DParticleEmission = 0.5f;
+    float spec3DParticleSpeed = 1.0f;
+    float spec3DParticleVelRandom = 0.0f;
+    float spec3DParticleLifespan = 0.0f;
+    float spec3DParticleLifespanRandom = 0.0f;
+    float spec3DParticleSize = 0.008f;
+    bool spec3DParticleEmissive = true;
+    float spec3DParticleEmissiveStr = 1.0f;
+    float spec3DParticleRough = 0.45f;
+    float spec3DParticleMetal = 0.0f;
+    float spec3DParticleSpec = 0.35f;
+    std::array<ParticleModSlot, kParticleModSlotCount> spec3DParticleMods {};
     bool oscExpandedOnLoad = false;
     bool gonExpandedOnLoad = false;
     bool specExpandedOnLoad = false;
@@ -2711,6 +2725,54 @@ void EqEditor::loadUiPrefs()
                 spec3DSssQuality = xml->getIntAttribute ("spec3dSssQuality", 1);
                 spec3DSssThickScale = (float) xml->getDoubleAttribute ("spec3dSssThickScale", 0.50);
                 spec3DSssMaxThick = (float) xml->getDoubleAttribute ("spec3dSssMaxThick", 0.70);
+                spec3DParticle = xml->getBoolAttribute ("spec3dParticleMode", false);
+                spec3DParticleEmitMode = xml->getIntAttribute ("spec3dParticleEmitMode", 0);
+                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 0.5);
+                // Migrate old 0..1 emission into 0..5 range (v1 max felt sparse).
+                if (spec3DParticleEmission > 0.0f && spec3DParticleEmission <= 1.0f
+                    && ! xml->hasAttribute ("spec3dParticleEmissionV2"))
+                    spec3DParticleEmission = juce::jmin (5.0f, spec3DParticleEmission * 1.5f);
+                spec3DParticleSpeed = (float) xml->getDoubleAttribute ("spec3dParticleSpeed", 1.0);
+                spec3DParticleVelRandom = (float) xml->getDoubleAttribute ("spec3dParticleVelRandom", 0.0);
+                spec3DParticleLifespan = (float) xml->getDoubleAttribute ("spec3dParticleLifespan", 0.0);
+                spec3DParticleLifespanRandom = (float) xml->getDoubleAttribute ("spec3dParticleLifespanRandom", 0.0);
+                spec3DParticleSize = (float) xml->getDoubleAttribute ("spec3dParticleSize", 0.008);
+                spec3DParticleEmissive = xml->getBoolAttribute ("spec3dParticleEmissive", true);
+                spec3DParticleEmissiveStr = (float) xml->getDoubleAttribute ("spec3dParticleEmissiveStr", 1.0);
+                spec3DParticleRough = (float) xml->getDoubleAttribute ("spec3dParticleRough", 0.45);
+                spec3DParticleMetal = (float) xml->getDoubleAttribute ("spec3dParticleMetal", 0.0);
+                spec3DParticleSpec = (float) xml->getDoubleAttribute ("spec3dParticleSpec", 0.35);
+                for (int i = 0; i < kParticleModSlotCount; ++i)
+                {
+                    const auto key = "spec3dPMod" + juce::String (i);
+                    const auto s = xml->getStringAttribute (key, {});
+                    if (s.isEmpty())
+                        continue;
+                    // en,src,dst,op,amt,k[,curve,thrEn,thr,atk,rel]
+                    juce::StringArray parts;
+                    parts.addTokens (s, ",", "");
+                    if (parts.size() < 4)
+                        continue;
+                    auto& slot = spec3DParticleMods[(size_t) i];
+                    slot.enabled = parts[0].getIntValue() != 0;
+                    slot.source = (ParticleModSource) juce::jlimit (0, 6, parts[1].getIntValue());
+                    slot.dest = (ParticleModDest) juce::jlimit (0, 7, parts[2].getIntValue());
+                    slot.op = (ParticleModOp) juce::jlimit (0, 2, parts[3].getIntValue());
+                    if (parts.size() > 4)
+                        slot.amount = (float) parts[4].getDoubleValue();
+                    if (parts.size() > 5)
+                        slot.constant = (float) parts[5].getDoubleValue();
+                    if (parts.size() > 6)
+                        slot.curveShape = (float) parts[6].getDoubleValue();
+                    if (parts.size() > 7)
+                        slot.thresholdEnabled = parts[7].getIntValue() != 0;
+                    if (parts.size() > 8)
+                        slot.threshold = (float) parts[8].getDoubleValue();
+                    if (parts.size() > 9)
+                        slot.attackMs = (float) parts[9].getDoubleValue();
+                    if (parts.size() > 10)
+                        slot.releaseMs = (float) parts[10].getDoubleValue();
+                }
                 oscExpandedOnLoad = xml->getBoolAttribute ("oscExpanded", false);
                 gonExpandedOnLoad = xml->getBoolAttribute ("gonExpanded", false);
                 specExpandedOnLoad = xml->getBoolAttribute ("specExpanded", false);
@@ -2912,6 +2974,21 @@ void EqEditor::loadUiPrefs()
             false);
         mainComponent->setSpec3DSssThicknessScale (spec3DSssThickScale, false);
         mainComponent->setSpec3DSssMaxThickness (spec3DSssMaxThick, false);
+        mainComponent->setSpec3DParticleModeEnabled (spec3DParticle, false);
+        mainComponent->setSpec3DParticleEmitMode (spec3DParticleEmitMode, false);
+        mainComponent->setSpec3DParticleEmission (spec3DParticleEmission, false);
+        mainComponent->setSpec3DParticleRiseSpeed (spec3DParticleSpeed, false);
+        mainComponent->setSpec3DParticleVelRandom (spec3DParticleVelRandom, false);
+        mainComponent->setSpec3DParticleLifespan (spec3DParticleLifespan, false);
+        mainComponent->setSpec3DParticleLifespanRandom (spec3DParticleLifespanRandom, false);
+        mainComponent->setSpec3DParticleSize (spec3DParticleSize, false);
+        mainComponent->setSpec3DParticleEmissiveEnabled (spec3DParticleEmissive, false);
+        mainComponent->setSpec3DParticleEmissiveStrength (spec3DParticleEmissiveStr, false);
+        mainComponent->setSpec3DParticleRoughness (spec3DParticleRough, false);
+        mainComponent->setSpec3DParticleMetalness (spec3DParticleMetal, false);
+        mainComponent->setSpec3DParticleSpecular (spec3DParticleSpec, false);
+        for (int i = 0; i < kParticleModSlotCount; ++i)
+            mainComponent->setSpec3DParticleModSlot (i, spec3DParticleMods[(size_t) i], false);
         if (spec3DCamCustom)
             mainComponent->setSpec3DDefaultCamera (spec3DCam, true);
         // Restore floating 3D / expanded overlays as last left.
@@ -3194,6 +3271,36 @@ void EqEditor::saveUiPrefs() const
         }
         xml->setAttribute ("spec3dSssThickScale", (double) mainComponent->getSpec3DSssThicknessScale());
         xml->setAttribute ("spec3dSssMaxThick", (double) mainComponent->getSpec3DSssMaxThickness());
+        xml->setAttribute ("spec3dParticleMode", mainComponent->isSpec3DParticleModeEnabled());
+        xml->setAttribute ("spec3dParticleEmitMode", mainComponent->getSpec3DParticleEmitMode());
+        xml->setAttribute ("spec3dParticleEmission", (double) mainComponent->getSpec3DParticleEmission());
+        xml->setAttribute ("spec3dParticleEmissionV2", 1);
+        xml->setAttribute ("spec3dParticleSpeed", (double) mainComponent->getSpec3DParticleRiseSpeed());
+        xml->setAttribute ("spec3dParticleVelRandom", (double) mainComponent->getSpec3DParticleVelRandom());
+        xml->setAttribute ("spec3dParticleLifespan", (double) mainComponent->getSpec3DParticleLifespan());
+        xml->setAttribute ("spec3dParticleLifespanRandom", (double) mainComponent->getSpec3DParticleLifespanRandom());
+        xml->setAttribute ("spec3dParticleSize", (double) mainComponent->getSpec3DParticleSize());
+        xml->setAttribute ("spec3dParticleEmissive", mainComponent->isSpec3DParticleEmissiveEnabled());
+        xml->setAttribute ("spec3dParticleEmissiveStr", (double) mainComponent->getSpec3DParticleEmissiveStrength());
+        xml->setAttribute ("spec3dParticleRough", (double) mainComponent->getSpec3DParticleRoughness());
+        xml->setAttribute ("spec3dParticleMetal", (double) mainComponent->getSpec3DParticleMetalness());
+        xml->setAttribute ("spec3dParticleSpec", (double) mainComponent->getSpec3DParticleSpecular());
+        for (int i = 0; i < kParticleModSlotCount; ++i)
+        {
+            const auto slot = mainComponent->getSpec3DParticleModSlot (i);
+            xml->setAttribute ("spec3dPMod" + juce::String (i),
+                               juce::String (slot.enabled ? 1 : 0) + ","
+                               + juce::String ((int) slot.source) + ","
+                               + juce::String ((int) slot.dest) + ","
+                               + juce::String ((int) slot.op) + ","
+                               + juce::String (slot.amount, 4) + ","
+                               + juce::String (slot.constant, 4) + ","
+                               + juce::String (slot.curveShape, 4) + ","
+                               + juce::String (slot.thresholdEnabled ? 1 : 0) + ","
+                               + juce::String (slot.threshold, 4) + ","
+                               + juce::String (slot.attackMs, 2) + ","
+                               + juce::String (slot.releaseMs, 2));
+        }
         xml->setAttribute ("oscExpanded", mainComponent->isOscExpanded());
         xml->setAttribute ("gonExpanded", mainComponent->isGonExpanded());
         xml->setAttribute ("specExpanded", mainComponent->isSpecExpanded());

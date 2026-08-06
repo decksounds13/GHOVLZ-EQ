@@ -3,10 +3,12 @@
 #include <JuceHeader.h>
 #include "ColourRamp/Spec3DRampSequence.h"
 #include "MelatoninBlur/melatonin/shadows.h"
+#include "Spec3DParticleSystem.h"
 #include <atomic>
 #include <vector>
 #include <cstdint>
 #include <functional>
+#include <array>
 
 class SpectrogramComponent;
 class SharedResources;
@@ -22,6 +24,7 @@ class Spectrogram3DComponent : public juce::Component,
                                private juce::Timer
 {
 public:
+    friend class Spec3DParticleSystem;
     /** overkill kept for prefs migration only — clamped to ultra. */
     enum class MeshQuality { low = 0, medium, high, ultra, overkill };
     enum class ChromeMode { floating, docked };
@@ -502,6 +505,49 @@ public:
     /** Ramp morph only: refresh vertex RGB from meshDb + current 3D LUT (no normals/positions). */
     void recolourVertexColoursOnly() noexcept;
 
+    // ── Particle mode (modular; default off — zero cost until enabled) ─────────
+    /** Slice = all bins fire together (waterfall columns). Continuous = random bins for even fill. */
+    enum class ParticleEmitMode : int { slice = 0, continuous = 1 };
+
+    void setParticleModeEnabled (bool shouldEnable) noexcept;
+    bool isParticleModeEnabled() const noexcept { return particleModeEnabled; }
+    void setParticleEmitMode (ParticleEmitMode mode) noexcept;
+    ParticleEmitMode getParticleEmitMode() const noexcept { return particleEmitMode; }
+    /** Emission rate scale 0..5 (higher = more particles). */
+    void setParticleEmission (float amount) noexcept;
+    float getParticleEmission() const noexcept { return particleEmission; }
+
+    static constexpr int getParticleModSlotCount() noexcept { return kParticleModSlotCount; }
+    ParticleModSlot getParticleModSlot (int index) const noexcept;
+    void setParticleModSlot (int index, const ParticleModSlot& slot) noexcept;
+    const std::array<ParticleModSlot, kParticleModSlotCount>& getParticleModSlots() const noexcept
+    {
+        return particleModSlots;
+    }
+    void setParticleRiseSpeed (float unitsPerSec) noexcept;
+    float getParticleRiseSpeed() const noexcept { return particleRiseSpeed; }
+    /** 0 = fixed rise speed; 1 = ±100% random at spawn. */
+    void setParticleVelRandom (float amount01) noexcept;
+    float getParticleVelRandom() const noexcept { return particleVelRandom; }
+    /** Seconds; 0 = indefinite (live until scrolled off history). */
+    void setParticleLifespan (float seconds) noexcept;
+    float getParticleLifespan() const noexcept { return particleLifespan; }
+    /** 0 = fixed lifespan; 1 = ±100% random at spawn (ignored when lifespan is 0). */
+    void setParticleLifespanRandom (float amount01) noexcept;
+    float getParticleLifespanRandom() const noexcept { return particleLifespanRandom; }
+    void setParticleSize (float worldSize) noexcept;
+    float getParticleSize() const noexcept { return particleSize; }
+    void setParticleEmissiveEnabled (bool shouldEnable) noexcept;
+    bool isParticleEmissiveEnabled() const noexcept { return particleEmissiveEnabled; }
+    void setParticleEmissiveStrength (float amount) noexcept;
+    float getParticleEmissiveStrength() const noexcept { return particleEmissiveStrength; }
+    void setParticleRoughness (float amount01) noexcept;
+    float getParticleRoughness() const noexcept { return particleRoughness; }
+    void setParticleMetalness (float amount01) noexcept;
+    float getParticleMetalness() const noexcept { return particleMetalness; }
+    void setParticleSpecular (float amount01) noexcept;
+    float getParticleSpecular() const noexcept { return particleSpecular; }
+
     /** @deprecated Use getMeshHeight() — kept as alias for call sites expecting a constant. */
     static constexpr float kMeshHeight = kDefaultMeshHeight;
 
@@ -639,6 +685,8 @@ private:
         void drawPlayheadTicks();
         void drawContactShadow();
         void drawMesh();
+        /** Mesh or particles depending on particleModeEnabled. */
+        void drawSpectrogramSurface();
         void drawDebugSphere();
         void drawDebugGizmo();
         void setGizmoXrayUniforms (bool insideGhostPass) const;
@@ -990,6 +1038,26 @@ private:
     float meshHeight = kDefaultMeshHeight;
     static constexpr int kMaxFreqMeshRows = 768; // hard cap — bias must not explode GPU cost
     static constexpr float kFreqMeshBiasMaxB = 4.0f; // B at slider=1 (with pivot=0 → ~2.33× rows)
+
+    // Particle mode (default off — Spec3DParticleSystem allocated lazily on enable)
+    bool particleModeEnabled = false;
+    ParticleEmitMode particleEmitMode = ParticleEmitMode::slice;
+    float particleEmission = 0.5f; // 0..5
+    float particleRiseSpeed = 1.0f;
+    float particleVelRandom = 0.0f;
+    float particleLifespan = 0.0f;       // 0 = indefinite
+    float particleLifespanRandom = 0.0f;
+    float particleSize = 0.008f;
+    bool particleEmissiveEnabled = true;
+    float particleEmissiveStrength = 1.0f;
+    float particleRoughness = 0.45f;
+    float particleMetalness = 0.0f;
+    float particleSpecular = 0.35f;
+    std::array<ParticleModSlot, kParticleModSlotCount> particleModSlots {};
+    std::unique_ptr<Spec3DParticleSystem> particleSystem;
+    double particleLastUpdateSec = 0.0;
+    void ensureParticleSystem();
+    void initDefaultParticleModSlots() noexcept;
 
     bool lightingEnabled = false;
     float lightingAmount = 0.70f;

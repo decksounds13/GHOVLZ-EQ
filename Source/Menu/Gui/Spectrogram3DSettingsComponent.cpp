@@ -606,6 +606,211 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (gradeLabel);
     addAndMakeVisible (gradeCombo);
 
+    setupLookToggle (particleToggle,
+                     "Replace the mesh with a playhead particle spectrogram. Off by default "
+                     "(no cost when disabled).");
+    styleLabel (particleEmitModeLabel);
+    particleEmitModeLabel.setText ("Emitter", juce::dontSendNotification);
+    styleCombo (particleEmitModeCombo);
+    particleEmitModeCombo.addItem ("Slice (columns)", 1);
+    particleEmitModeCombo.addItem ("Continuous (even fill)", 2);
+    particleEmitModeCombo.setSelectedId (1, juce::dontSendNotification);
+    particleEmitModeCombo.setTooltip (
+        "Slice: bins fire in phase → coherent waterfall columns. "
+        "Continuous: random bins over time → even surface fill.");
+    particleEmitModeCombo.onChange = [this]
+    {
+        applyLookControlsToMain();
+        requestParentRelayout();
+    };
+    addAndMakeVisible (particleEmitModeLabel);
+    addAndMakeVisible (particleEmitModeCombo);
+    particleEmissionLabel.setText ("Emission", juce::dontSendNotification);
+    setupLookSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 5.0, 0.01,
+                     "Spawn rate scale (0–5). Scales with frequency resolution. Higher = denser.");
+    particleEmissionSlider.setValue (0.5, juce::dontSendNotification);
+    particleSpeedLabel.setText ("Rise speed", juce::dontSendNotification);
+    setupLookSlider (particleSpeedLabel, particleSpeedSlider, 0.05, 5.0, 0.01,
+                     "Base upward velocity (world units / second). Particles stop at mesh height.");
+    particleSpeedSlider.setValue (1.0, juce::dontSendNotification);
+    particleVelRandomLabel.setText ("Velocity random", juce::dontSendNotification);
+    setupLookSlider (particleVelRandomLabel, particleVelRandomSlider, 0.0, 1.0, 0.01,
+                     "Randomize initial rise speed at spawn (±% of Rise speed). 0 = fixed.");
+    particleVelRandomSlider.setValue (0.0, juce::dontSendNotification);
+    particleLifespanLabel.setText ("Lifespan (s)", juce::dontSendNotification);
+    setupLookSlider (particleLifespanLabel, particleLifespanSlider, 0.0, 30.0, 0.05,
+                     "Particle lifetime in seconds. 0 = indefinite (until scrolled off history).");
+    particleLifespanSlider.setValue (0.0, juce::dontSendNotification);
+    // Relayout when lifespan crosses 0 so Lifespan random shows/hides.
+    particleLifespanSlider.onValueChange = [this]
+    {
+        updateLookDevVisibility();
+        applyLookControlsToMain();
+        requestParentRelayout();
+    };
+    particleLifespanRandomLabel.setText ("Lifespan random", juce::dontSendNotification);
+    setupLookSlider (particleLifespanRandomLabel, particleLifespanRandomSlider, 0.0, 1.0, 0.01,
+                     "Randomize lifetime at spawn (±% of Lifespan). Ignored when lifespan is 0.");
+    particleLifespanRandomSlider.setValue (0.0, juce::dontSendNotification);
+    particleSizeLabel.setText ("Particle size", juce::dontSendNotification);
+    setupLookSlider (particleSizeLabel, particleSizeSlider, 0.001, 0.08, 0.0005,
+                     "Billboard radius in world units (mesh is ~2×2).");
+    particleSizeSlider.setValue (0.008, juce::dontSendNotification);
+    setupLookToggle (particleEmissiveToggle,
+                     "Emissive = self-lit ramp colours. Off = simple PBR with lighting.");
+    particleEmissiveStrLabel.setText ("Emissive strength", juce::dontSendNotification);
+    setupLookSlider (particleEmissiveStrLabel, particleEmissiveStrSlider, 0.0, 4.0, 0.01,
+                     "Brightness multiplier when emissive is on.");
+    particleEmissiveStrSlider.setValue (1.0, juce::dontSendNotification);
+    particleRoughLabel.setText ("Particle roughness", juce::dontSendNotification);
+    setupLookSlider (particleRoughLabel, particleRoughSlider, 0.04, 1.0, 0.01, "PBR roughness.");
+    particleRoughSlider.setValue (0.45, juce::dontSendNotification);
+    particleMetalLabel.setText ("Particle metalness", juce::dontSendNotification);
+    setupLookSlider (particleMetalLabel, particleMetalSlider, 0.0, 1.0, 0.01, "PBR metalness.");
+    particleMetalSlider.setValue (0.0, juce::dontSendNotification);
+    particleSpecLabel.setText ("Particle specular", juce::dontSendNotification);
+    setupLookSlider (particleSpecLabel, particleSpecSlider, 0.0, 1.0, 0.01, "PBR specular amount.");
+    particleSpecSlider.setValue (0.35, juce::dontSendNotification);
+
+    styleLabel (particleModLabel);
+    particleModLabel.setText ("Particle mod matrix", juce::dontSendNotification);
+    particleModLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
+    addAndMakeVisible (particleModLabel);
+    styleLabel (particleModHintLabel);
+    particleModHintLabel.setText (
+        "Source → [Thr] → Dest. Curve: drag to bend (dbl-click = linear). Thr: gate + A/R env.",
+        juce::dontSendNotification);
+    particleModHintLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
+    addAndMakeVisible (particleModHintLabel);
+
+    auto fillModSource = [] (juce::ComboBox& c)
+    {
+        c.clear (juce::dontSendNotification);
+        c.addItem ("None", 1);
+        c.addItem ("Amplitude", 2);
+        c.addItem ("Bin dB", 3);
+        c.addItem ("Bin freq", 4);
+        c.addItem ("Age", 5);
+        c.addItem ("History", 6);
+        c.addItem ("Constant", 7);
+        c.setSelectedId (1, juce::dontSendNotification);
+    };
+    auto fillModDest = [] (juce::ComboBox& c)
+    {
+        c.clear (juce::dontSendNotification);
+        c.addItem ("Emission", 1);
+        c.addItem ("Rise speed", 2);
+        c.addItem ("Lifespan", 3);
+        c.addItem ("Size", 4);
+        c.addItem ("Colour gain", 5);
+        c.addItem ("Colour hue", 6);
+        c.addItem ("Emissive", 7);
+        c.addItem ("Alpha", 8);
+        c.setSelectedId (1, juce::dontSendNotification);
+    };
+    auto fillModOp = [] (juce::ComboBox& c)
+    {
+        c.clear (juce::dontSendNotification);
+        c.addItem ("Set", 1);
+        c.addItem ("Multiply", 2);
+        c.addItem ("Add", 3);
+        c.setSelectedId (2, juce::dontSendNotification);
+    };
+
+    for (int i = 0; i < kParticleModSlotCount; ++i)
+    {
+        auto& row = particleModRows[(size_t) i];
+        styleToggle (row.enable);
+        row.enable.setButtonText ("R" + juce::String (i + 1));
+        row.enable.setTooltip ("Enable mod slot " + juce::String (i + 1));
+        row.enable.onClick = [this]
+        {
+            updateLookDevVisibility();
+            applyLookControlsToMain();
+            requestParentRelayout();
+        };
+        addAndMakeVisible (row.enable);
+
+        styleCombo (row.source);
+        fillModSource (row.source);
+        row.source.setTooltip ("Modulation source");
+        row.source.onChange = [this]
+        {
+            updateLookDevVisibility();
+            applyLookControlsToMain();
+            requestParentRelayout();
+        };
+        addAndMakeVisible (row.source);
+
+        styleToggle (row.thresholdToggle);
+        row.thresholdToggle.setButtonText ("Thr");
+        row.thresholdToggle.setTooltip (
+            "Threshold gate + envelope. Off = no follower CPU for this slot.");
+        row.thresholdToggle.onClick = [this]
+        {
+            updateLookDevVisibility();
+            applyLookControlsToMain();
+            requestParentRelayout();
+        };
+        addAndMakeVisible (row.thresholdToggle);
+
+        styleSlider (row.thresholdSlider);
+        row.thresholdSlider.setSliderStyle (juce::Slider::LinearVertical);
+        row.thresholdSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        row.thresholdSlider.setRange (0.0, 1.0, 0.01);
+        row.thresholdSlider.setValue (0.25, juce::dontSendNotification);
+        row.thresholdSlider.setTooltip ("Gate threshold (0–1). Signal below is cut.");
+        row.thresholdSlider.onValueChange = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.thresholdSlider);
+
+        row.attackKnob.setCustomRange (0.1, 500.0, 0.1);
+        row.attackKnob.setValue (10.0, juce::dontSendNotification);
+        row.attackKnob.setTooltip ("Envelope attack (ms)");
+        row.attackKnob.setThemeColors (&sharedResources);
+        row.attackKnob.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        row.attackKnob.onValueChange = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.attackKnob);
+
+        row.releaseKnob.setCustomRange (0.1, 2000.0, 0.1);
+        row.releaseKnob.setValue (80.0, juce::dontSendNotification);
+        row.releaseKnob.setTooltip ("Envelope release (ms)");
+        row.releaseKnob.setThemeColors (&sharedResources);
+        row.releaseKnob.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        row.releaseKnob.onValueChange = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.releaseKnob);
+
+        styleCombo (row.dest);
+        fillModDest (row.dest);
+        row.dest.setTooltip ("Modulation destination");
+        row.dest.onChange = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.dest);
+
+        styleCombo (row.op);
+        fillModOp (row.op);
+        row.op.setTooltip ("Set = lerp to source, Multiply = scale by source, Add = offset");
+        row.op.onChange = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.op);
+
+        row.curve.onShapeChanged = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.curve);
+
+        styleSlider (row.amount);
+        row.amount.setRange (0.0, 4.0, 0.01);
+        row.amount.setValue (1.0, juce::dontSendNotification);
+        row.amount.setTooltip ("Modulation depth / amount");
+        row.amount.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 18);
+        row.amount.onValueChange = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.amount);
+
+        styleSlider (row.constant);
+        row.constant.setRange (0.0, 1.0, 0.01);
+        row.constant.setValue (0.5, juce::dontSendNotification);
+        row.constant.setTooltip ("Constant source value (when Source = Constant)");
+        row.constant.setTextBoxStyle (juce::Slider::TextBoxRight, false, 36, 18);
+        row.constant.onValueChange = [this] { applyLookControlsToMain(); };
+        addAndMakeVisible (row.constant);
+    }
+
     setupLookToggle (sssToggle,
                      "Subsurface scatter approx (needs Lighting). Uses volume thickness when "
                      "Closed mesh is on; otherwise heightfield ridge taps. Off by default.");
@@ -862,6 +1067,53 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (exposureSlider, tonemap);
     setLookChildVisible (gradeLabel, tonemap);
     setLookChildVisible (gradeCombo, tonemap);
+
+    const bool particleOn = particleToggle.getToggleState();
+    setLookChildVisible (particleEmitModeLabel, particleOn);
+    setLookChildVisible (particleEmitModeCombo, particleOn);
+    setLookChildVisible (particleEmissionLabel, particleOn);
+    setLookChildVisible (particleEmissionSlider, particleOn);
+    setLookChildVisible (particleSpeedLabel, particleOn);
+    setLookChildVisible (particleSpeedSlider, particleOn);
+    setLookChildVisible (particleVelRandomLabel, particleOn);
+    setLookChildVisible (particleVelRandomSlider, particleOn);
+    setLookChildVisible (particleLifespanLabel, particleOn);
+    setLookChildVisible (particleLifespanSlider, particleOn);
+    const bool lifeOn = particleOn && particleLifespanSlider.getValue() > 1.0e-4;
+    setLookChildVisible (particleLifespanRandomLabel, lifeOn);
+    setLookChildVisible (particleLifespanRandomSlider, lifeOn);
+    setLookChildVisible (particleSizeLabel, particleOn);
+    setLookChildVisible (particleSizeSlider, particleOn);
+    setLookChildVisible (particleEmissiveToggle, particleOn);
+    const bool particleEmissive = particleOn && particleEmissiveToggle.getToggleState();
+    const bool particlePbr = particleOn && ! particleEmissiveToggle.getToggleState();
+    setLookChildVisible (particleEmissiveStrLabel, particleEmissive);
+    setLookChildVisible (particleEmissiveStrSlider, particleEmissive);
+    setLookChildVisible (particleRoughLabel, particlePbr);
+    setLookChildVisible (particleRoughSlider, particlePbr);
+    setLookChildVisible (particleMetalLabel, particlePbr);
+    setLookChildVisible (particleMetalSlider, particlePbr);
+    setLookChildVisible (particleSpecLabel, particlePbr);
+    setLookChildVisible (particleSpecSlider, particlePbr);
+    setLookChildVisible (particleModLabel, particleOn);
+    setLookChildVisible (particleModHintLabel, particleOn);
+    for (int i = 0; i < kParticleModSlotCount; ++i)
+    {
+        auto& row = particleModRows[(size_t) i];
+        setLookChildVisible (row.enable, particleOn);
+        setLookChildVisible (row.source, particleOn);
+        setLookChildVisible (row.thresholdToggle, particleOn);
+        const bool thrOn = particleOn && row.thresholdToggle.getToggleState();
+        setLookChildVisible (row.thresholdSlider, thrOn);
+        setLookChildVisible (row.attackKnob, thrOn);
+        setLookChildVisible (row.releaseKnob, thrOn);
+        setLookChildVisible (row.dest, particleOn);
+        setLookChildVisible (row.op, particleOn);
+        setLookChildVisible (row.curve, particleOn);
+        setLookChildVisible (row.amount, particleOn);
+        const bool showConst = particleOn && row.source.getSelectedId() == 7; // Constant
+        setLookChildVisible (row.constant, showConst);
+    }
 
     const bool closed = closedMeshToggle.getToggleState();
     const bool sssOn = sssToggle.getToggleState();
@@ -1242,6 +1494,35 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     }
     sssThickScaleSlider.setValue (main->getSpec3DSssThicknessScale(), juce::dontSendNotification);
     sssMaxThickSlider.setValue (main->getSpec3DSssMaxThickness(), juce::dontSendNotification);
+    particleToggle.setToggleState (main->isSpec3DParticleModeEnabled(), juce::dontSendNotification);
+    particleEmitModeCombo.setSelectedId (main->getSpec3DParticleEmitMode() + 1, juce::dontSendNotification);
+    particleEmissionSlider.setValue (main->getSpec3DParticleEmission(), juce::dontSendNotification);
+    particleSpeedSlider.setValue (main->getSpec3DParticleRiseSpeed(), juce::dontSendNotification);
+    particleVelRandomSlider.setValue (main->getSpec3DParticleVelRandom(), juce::dontSendNotification);
+    particleLifespanSlider.setValue (main->getSpec3DParticleLifespan(), juce::dontSendNotification);
+    particleLifespanRandomSlider.setValue (main->getSpec3DParticleLifespanRandom(), juce::dontSendNotification);
+    particleSizeSlider.setValue (main->getSpec3DParticleSize(), juce::dontSendNotification);
+    particleEmissiveToggle.setToggleState (main->isSpec3DParticleEmissiveEnabled(), juce::dontSendNotification);
+    particleEmissiveStrSlider.setValue (main->getSpec3DParticleEmissiveStrength(), juce::dontSendNotification);
+    particleRoughSlider.setValue (main->getSpec3DParticleRoughness(), juce::dontSendNotification);
+    particleMetalSlider.setValue (main->getSpec3DParticleMetalness(), juce::dontSendNotification);
+    particleSpecSlider.setValue (main->getSpec3DParticleSpecular(), juce::dontSendNotification);
+    for (int i = 0; i < kParticleModSlotCount; ++i)
+    {
+        const auto slot = main->getSpec3DParticleModSlot (i);
+        auto& row = particleModRows[(size_t) i];
+        row.enable.setToggleState (slot.enabled, juce::dontSendNotification);
+        row.source.setSelectedId ((int) slot.source + 1, juce::dontSendNotification);
+        row.thresholdToggle.setToggleState (slot.thresholdEnabled, juce::dontSendNotification);
+        row.thresholdSlider.setValue (slot.threshold, juce::dontSendNotification);
+        row.attackKnob.setValue (slot.attackMs, juce::dontSendNotification);
+        row.releaseKnob.setValue (slot.releaseMs, juce::dontSendNotification);
+        row.dest.setSelectedId ((int) slot.dest + 1, juce::dontSendNotification);
+        row.op.setSelectedId ((int) slot.op + 1, juce::dontSendNotification);
+        row.curve.setShape (slot.curveShape);
+        row.amount.setValue (slot.amount, juce::dontSendNotification);
+        row.constant.setValue (slot.constant, juce::dontSendNotification);
+    }
 
     updateLookDevVisibility();
 }
@@ -1440,6 +1721,36 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     }
     main->setSpec3DSssThicknessScale ((float) sssThickScaleSlider.getValue(), kSave);
     main->setSpec3DSssMaxThickness ((float) sssMaxThickSlider.getValue(), kSave);
+    main->setSpec3DParticleModeEnabled (particleToggle.getToggleState(), kSave);
+    main->setSpec3DParticleEmitMode (juce::jmax (0, particleEmitModeCombo.getSelectedId() - 1), kSave);
+    main->setSpec3DParticleEmission ((float) particleEmissionSlider.getValue(), kSave);
+    main->setSpec3DParticleRiseSpeed ((float) particleSpeedSlider.getValue(), kSave);
+    main->setSpec3DParticleVelRandom ((float) particleVelRandomSlider.getValue(), kSave);
+    main->setSpec3DParticleLifespan ((float) particleLifespanSlider.getValue(), kSave);
+    main->setSpec3DParticleLifespanRandom ((float) particleLifespanRandomSlider.getValue(), kSave);
+    main->setSpec3DParticleSize ((float) particleSizeSlider.getValue(), kSave);
+    main->setSpec3DParticleEmissiveEnabled (particleEmissiveToggle.getToggleState(), kSave);
+    main->setSpec3DParticleEmissiveStrength ((float) particleEmissiveStrSlider.getValue(), kSave);
+    main->setSpec3DParticleRoughness ((float) particleRoughSlider.getValue(), kSave);
+    main->setSpec3DParticleMetalness ((float) particleMetalSlider.getValue(), kSave);
+    main->setSpec3DParticleSpecular ((float) particleSpecSlider.getValue(), kSave);
+    for (int i = 0; i < kParticleModSlotCount; ++i)
+    {
+        const auto& row = particleModRows[(size_t) i];
+        ParticleModSlot slot;
+        slot.enabled = row.enable.getToggleState();
+        slot.source = (ParticleModSource) juce::jmax (0, row.source.getSelectedId() - 1);
+        slot.thresholdEnabled = row.thresholdToggle.getToggleState();
+        slot.threshold = (float) row.thresholdSlider.getValue();
+        slot.attackMs = (float) row.attackKnob.getValue();
+        slot.releaseMs = (float) row.releaseKnob.getValue();
+        slot.dest = (ParticleModDest) juce::jmax (0, row.dest.getSelectedId() - 1);
+        slot.op = (ParticleModOp) juce::jmax (0, row.op.getSelectedId() - 1);
+        slot.curveShape = row.curve.getShape();
+        slot.amount = (float) row.amount.getValue();
+        slot.constant = (float) row.constant.getValue();
+        main->setSpec3DParticleModSlot (i, slot, kSave);
+    }
     main->requestUiPrefsSave();
 }
 
@@ -1457,11 +1768,13 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     const int baseSliderRows = 4; // mesh height + HF density + density start + soft angle
     // base (+ closed) + look masters (+ SSS + DOF + dome + SSGI + SSR + tonemap
     // + cast shadows + energy when lit + audio level)
-    int toggles = 5 + 13; // includes tonemap + audio + SSR + cast; energy counted when lighting on
+    int toggles = 5 + 14; // includes tonemap + audio + SSR + cast + particle; energy when lit
     if (lightingToggle.getToggleState())
         toggles += 1; // energy conserving
     if (audioLevelToggle.getToggleState())
         toggles += 2; // playhead / anti-playhead
+    if (particleToggle.getToggleState())
+        toggles += 1; // emissive checkbox under particle mode
     const int buttonRows = 1;
 
     int lookRows = 0;
@@ -1508,6 +1821,23 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
         else
             lookRows += 2; // radius, contrast
     }
+    int particleModExtra = 0;
+    if (particleToggle.getToggleState())
+    {
+        lookRows += 1; // emitter mode combo
+        lookRows += 4; // emission, speed, vel random, lifespan
+        if (particleLifespanSlider.getValue() > 1.0e-4)
+            lookRows += 1; // lifespan random
+        lookRows += 1; // size
+        if (particleEmissiveToggle.getToggleState())
+            lookRows += 1; // emissive strength
+        else
+            lookRows += 3; // rough, metal, spec
+        // mod matrix: header + hint + 8 rows (taller when threshold open)
+        particleModExtra = 24 + 18;
+        for (int i = 0; i < kParticleModSlotCount; ++i)
+            particleModExtra += particleModRows[(size_t) i].thresholdToggle.getToggleState() ? 40 : 32;
+    }
 
     return kPadY * 2
            + 24 + 8
@@ -1515,10 +1845,26 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
            + baseSliderRows * rowH
            + lookRows * rowH
            + colourEditorH
+           + particleModExtra
            + toggles * toggleH
            + buttonRows * toggleH
            + kLabelH + kSectionGap // look section header
            + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
+}
+
+int Spectrogram3DSettingsComponent::Content::getPreferredWidth() const
+{
+    // Base menu width is Menu::kContentWidth (533). Matrix needs more room.
+    if (! particleToggle.getToggleState())
+        return 533;
+
+    bool anyThr = false;
+    for (int i = 0; i < kParticleModSlotCount; ++i)
+        if (particleModRows[(size_t) i].thresholdToggle.getToggleState())
+            anyThr = true;
+
+    // en + src + thr + [thr vert + A/R] + dest + op + curve + amount [+ const]
+    return anyThr ? 920 : 780;
 }
 
 void Spectrogram3DSettingsComponent::Content::resized()
@@ -1688,6 +2034,81 @@ void Spectrogram3DSettingsComponent::Content::resized()
         {
             layoutSliderRow (area, sssRadiusLabel, sssRadiusSlider);
             layoutSliderRow (area, sssContrastLabel, sssContrastSlider);
+        }
+    }
+    layoutToggle (area, particleToggle);
+    if (particleToggle.getToggleState())
+    {
+        layoutComboRow (area, particleEmitModeLabel, particleEmitModeCombo);
+        layoutSliderRow (area, particleEmissionLabel, particleEmissionSlider);
+        layoutSliderRow (area, particleSpeedLabel, particleSpeedSlider);
+        layoutSliderRow (area, particleVelRandomLabel, particleVelRandomSlider);
+        layoutSliderRow (area, particleLifespanLabel, particleLifespanSlider);
+        if (particleLifespanSlider.getValue() > 1.0e-4)
+            layoutSliderRow (area, particleLifespanRandomLabel, particleLifespanRandomSlider);
+        layoutSliderRow (area, particleSizeLabel, particleSizeSlider);
+        layoutToggle (area, particleEmissiveToggle);
+        if (particleEmissiveToggle.getToggleState())
+            layoutSliderRow (area, particleEmissiveStrLabel, particleEmissiveStrSlider);
+        else
+        {
+            layoutSliderRow (area, particleRoughLabel, particleRoughSlider);
+            layoutSliderRow (area, particleMetalLabel, particleMetalSlider);
+            layoutSliderRow (area, particleSpecLabel, particleSpecSlider);
+        }
+
+        particleModLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (2);
+        particleModHintLabel.setBounds (area.removeFromTop (16));
+        area.removeFromTop (4);
+        for (int i = 0; i < kParticleModSlotCount; ++i)
+        {
+            auto& row = particleModRows[(size_t) i];
+            const bool thrOn = row.thresholdToggle.getToggleState();
+            const int rowH = thrOn ? 36 : 28;
+            auto r = area.removeFromTop (rowH);
+            area.removeFromTop (4);
+
+            row.enable.setBounds (r.removeFromLeft (32).withSizeKeepingCentre (32, 22));
+            r.removeFromLeft (3);
+            row.source.setBounds (r.removeFromLeft (78).withSizeKeepingCentre (78, 22));
+            r.removeFromLeft (3);
+            // Threshold checkbox sits between source and destination
+            row.thresholdToggle.setBounds (r.removeFromLeft (36).withSizeKeepingCentre (36, 22));
+            r.removeFromLeft (2);
+            if (thrOn)
+            {
+                row.thresholdSlider.setBounds (r.removeFromLeft (16).reduced (0, 2));
+                r.removeFromLeft (2);
+                const int knob = 26;
+                auto atk = r.removeFromLeft (knob);
+                row.attackKnob.setBounds (atk.withSizeKeepingCentre (knob, knob));
+                r.removeFromLeft (2);
+                auto rel = r.removeFromLeft (knob);
+                row.releaseKnob.setBounds (rel.withSizeKeepingCentre (knob, knob));
+                r.removeFromLeft (3);
+            }
+            row.dest.setBounds (r.removeFromLeft (78).withSizeKeepingCentre (78, 22));
+            r.removeFromLeft (3);
+            row.op.setBounds (r.removeFromLeft (64).withSizeKeepingCentre (64, 22));
+            r.removeFromLeft (3);
+            // Curve sits just before amount (Serum-style)
+            const int curveSz = juce::jmin (rowH - 2, 28);
+            row.curve.setBounds (r.removeFromLeft (curveSz).withSizeKeepingCentre (curveSz, curveSz));
+            r.removeFromLeft (3);
+            if (row.source.getSelectedId() == 7)
+            {
+                row.amount.setBounds (r.removeFromLeft (juce::jmin (88, r.getWidth() / 2))
+                                         .withSizeKeepingCentre (juce::jmin (88, r.getWidth() / 2), 22));
+                r.removeFromLeft (3);
+                row.constant.setBounds (r.removeFromLeft (juce::jmin (72, r.getWidth()))
+                                           .withSizeKeepingCentre (juce::jmin (72, r.getWidth()), 22));
+            }
+            else
+            {
+                row.amount.setBounds (r.removeFromLeft (juce::jmin (110, r.getWidth()))
+                                         .withSizeKeepingCentre (juce::jmin (110, r.getWidth()), 22));
+            }
         }
     }
     area.removeFromTop (kSectionGap);

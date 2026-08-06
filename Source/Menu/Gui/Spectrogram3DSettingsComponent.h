@@ -1,12 +1,15 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 
 #include "../../ColourRamp/ColourRampBank.h"
 #include "../../ColourRamp/ColourSwatchEditor.h"
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../../Spectrogram3DComponent.h"
+#include "../../RotaryImageKnob1.h"
+#include "ParticleModCurveEditor.h"
 #include "../SharedResources.h"
 
 class Spectrogram3DSettingsComponent : public juce::Component,
@@ -22,6 +25,8 @@ public:
     void resized() override;
 
     int getPreferredContentHeight() const { return content.getPreferredHeight(); }
+    /** Wider when particle mod matrix is open (Menu grows to fit). */
+    int getPreferredContentWidth() const { return content.getPreferredWidth(); }
     /** Sync Look toggles from Main before Menu measures scroll height. */
     void syncFromMain() { content.syncControlsFromMain(); }
     /** Mirror live DOF focus (Ctrl/Cmd+LMB pick) onto the Focus Distance slider. */
@@ -44,6 +49,7 @@ private:
 
         void resized() override;
         int getPreferredHeight() const;
+        int getPreferredWidth() const;
         void syncGradientFromBank();
 
     private:
@@ -259,6 +265,49 @@ private:
         juce::Slider sssThickScaleSlider;
         juce::Label sssMaxThickLabel;
         juce::Slider sssMaxThickSlider;
+
+        juce::ToggleButton particleToggle { "Particle mode" };
+        juce::Label particleEmitModeLabel;
+        juce::ComboBox particleEmitModeCombo;
+        juce::Label particleEmissionLabel;
+        juce::Slider particleEmissionSlider;
+        juce::Label particleSpeedLabel;
+        juce::Slider particleSpeedSlider;
+        juce::Label particleVelRandomLabel;
+        juce::Slider particleVelRandomSlider;
+        juce::Label particleLifespanLabel;
+        juce::Slider particleLifespanSlider;
+        juce::Label particleLifespanRandomLabel;
+        juce::Slider particleLifespanRandomSlider;
+        juce::Label particleSizeLabel;
+        juce::Slider particleSizeSlider;
+        juce::ToggleButton particleEmissiveToggle { "Emissive particles" };
+        juce::Label particleEmissiveStrLabel;
+        juce::Slider particleEmissiveStrSlider;
+        juce::Label particleRoughLabel;
+        juce::Slider particleRoughSlider;
+        juce::Label particleMetalLabel;
+        juce::Slider particleMetalSlider;
+        juce::Label particleSpecLabel;
+        juce::Slider particleSpecSlider;
+
+        juce::Label particleModLabel;
+        juce::Label particleModHintLabel;
+        struct ParticleModRow
+        {
+            juce::ToggleButton enable { "On" };
+            juce::ComboBox source;
+            juce::ToggleButton thresholdToggle { "Thr" };
+            juce::Slider thresholdSlider;       // vertical
+            RotaryImageKnob1 attackKnob;
+            RotaryImageKnob1 releaseKnob;
+            juce::ComboBox dest;
+            juce::ComboBox op;
+            ParticleModCurveEditor curve;
+            juce::Slider amount;
+            juce::Slider constant;
+        };
+        std::array<ParticleModRow, kParticleModSlotCount> particleModRows;
 
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;

@@ -1196,6 +1196,8 @@ void Spec3DRampTimelineComponent::showKeyInterpMenu (int autoIdx, int keyIdx, bo
 {
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    if (! isColour)
+        menu.addItem (2, "Edit value…");
     menu.addItem (1, "Delete key");
     menu.addSeparator();
     menu.addItem (10, "Step");
@@ -1215,6 +1217,11 @@ void Spec3DRampTimelineComponent::showKeyInterpMenu (int autoIdx, int keyIdx, bo
                             if (! juce::isPositiveAndBelow (autoIdx, (int) safe->sequence.autoLanes.size()))
                                 return;
                             auto& lane = safe->sequence.autoLanes[(size_t) autoIdx];
+                            if (r == 2 && ! isColour)
+                            {
+                                safe->beginEditFloatKeyValue (autoIdx, keyIdx);
+                                return;
+                            }
                             if (r == 1)
                             {
                                 if (isColour && keyIdx < (int) lane.colourEnv.keys.size())
@@ -1239,6 +1246,62 @@ void Spec3DRampTimelineComponent::showKeyInterpMenu (int autoIdx, int keyIdx, bo
                             if (r == 20 && isColour)
                                 safe->openColourKeyPicker (autoIdx, keyIdx);
                         });
+}
+
+void Spec3DRampTimelineComponent::beginEditFloatKeyValue (int autoIdx, int keyIdx)
+{
+    if (! juce::isPositiveAndBelow (autoIdx, (int) sequence.autoLanes.size()))
+        return;
+    auto& lane = sequence.autoLanes[(size_t) autoIdx];
+    if (lane.isColourLane() || keyIdx < 0 || keyIdx >= (int) lane.floatEnv.keys.size())
+        return;
+
+    auto& env = lane.floatEnv;
+    const float cur = env.keys[(size_t) keyIdx].value;
+    const bool wideRange = (env.maxV - env.minV) > 2.0f; // azimuth / elevation vs 0–1 amounts
+    const juce::String initial = juce::String (cur, wideRange ? 1 : 3);
+    const juce::String rangeText = lane.label + " (" + juce::String (env.minV, wideRange ? 0 : 2)
+                                   + " – " + juce::String (env.maxV, wideRange ? 0 : 2) + ")";
+
+    auto* aw = new juce::AlertWindow ("Edit key value", rangeText, juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("value", initial, "Value");
+    aw->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this),
+         aw, autoIdx, keyIdx] (int r)
+        {
+            if (r == 1 && safe != nullptr
+                && juce::isPositiveAndBelow (autoIdx, (int) safe->sequence.autoLanes.size()))
+            {
+                auto& ln = safe->sequence.autoLanes[(size_t) autoIdx];
+                if (! ln.isColourLane()
+                    && keyIdx >= 0 && keyIdx < (int) ln.floatEnv.keys.size())
+                {
+                    const auto text = aw->getTextEditorContents ("value").trim();
+                    // Require at least one digit so "abc" is rejected (getDoubleValue → 0).
+                    bool hasDigit = false;
+                    for (int i = 0; i < text.length(); ++i)
+                    {
+                        if (juce::CharacterFunctions::isDigit (text[i]))
+                        {
+                            hasDigit = true;
+                            break;
+                        }
+                    }
+                    if (hasDigit)
+                    {
+                        const float v = juce::jlimit (ln.floatEnv.minV, ln.floatEnv.maxV,
+                                                      (float) text.getDoubleValue());
+                        ln.floatEnv.keys[(size_t) keyIdx].value = v;
+                        safe->notifyChanged();
+                        safe->repaint();
+                    }
+                }
+            }
+            delete aw;
+        }));
 }
 
 void Spec3DRampTimelineComponent::openColourKeyPicker (int autoIdx, int keyIdx)

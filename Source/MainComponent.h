@@ -408,6 +408,35 @@ public:
     void setSpec3DSssMaxThickness (float amount01, bool notifyPrefs = true);
     float getSpec3DSssMaxThickness() const noexcept;
 
+    void setSpec3DParticleModeEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DParticleModeEnabled() const noexcept;
+    void setSpec3DParticleEmitMode (int mode, bool notifyPrefs = true);
+    int getSpec3DParticleEmitMode() const noexcept;
+    void setSpec3DParticleEmission (float amount, bool notifyPrefs = true);
+    float getSpec3DParticleEmission() const noexcept;
+    void setSpec3DParticleModSlot (int index, const ParticleModSlot& slot, bool notifyPrefs = true);
+    ParticleModSlot getSpec3DParticleModSlot (int index) const noexcept;
+    void setSpec3DParticleRiseSpeed (float unitsPerSec, bool notifyPrefs = true);
+    float getSpec3DParticleRiseSpeed() const noexcept;
+    void setSpec3DParticleVelRandom (float amount01, bool notifyPrefs = true);
+    float getSpec3DParticleVelRandom() const noexcept;
+    void setSpec3DParticleLifespan (float seconds, bool notifyPrefs = true);
+    float getSpec3DParticleLifespan() const noexcept;
+    void setSpec3DParticleLifespanRandom (float amount01, bool notifyPrefs = true);
+    float getSpec3DParticleLifespanRandom() const noexcept;
+    void setSpec3DParticleSize (float worldSize, bool notifyPrefs = true);
+    float getSpec3DParticleSize() const noexcept;
+    void setSpec3DParticleEmissiveEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DParticleEmissiveEnabled() const noexcept;
+    void setSpec3DParticleEmissiveStrength (float amount, bool notifyPrefs = true);
+    float getSpec3DParticleEmissiveStrength() const noexcept;
+    void setSpec3DParticleRoughness (float amount01, bool notifyPrefs = true);
+    float getSpec3DParticleRoughness() const noexcept;
+    void setSpec3DParticleMetalness (float amount01, bool notifyPrefs = true);
+    float getSpec3DParticleMetalness() const noexcept;
+    void setSpec3DParticleSpecular (float amount01, bool notifyPrefs = true);
+    float getSpec3DParticleSpecular() const noexcept;
+
     void resetSpec3DCamera() noexcept { spectrogram3D.resetCamera(); }
     void setSpec3DDefaultCamera (const Spectrogram3DComponent::CameraState& state, bool applyNow = true) noexcept;
     Spectrogram3DComponent::CameraState getSpec3DDefaultCamera() const noexcept;
