@@ -65,13 +65,13 @@ ThemeList::ThemeList(SharedResources& resources)
         }
     }
 
-    // Apply colours only on construction — avoid overwriting host-restored EQ state.
+    // Colours only on construction — no GlobalUi / EQ (session + host restore those).
     if (selectedRow != -1) {
-        applyPreset (selectedRow, false);
+        applyPreset (selectedRow, false, false);
     }
     else {
         selectedRow = 0;
-        applyPreset (selectedRow, false);
+        applyPreset (selectedRow, false, false);
     }
     DBG("[ThemeList] Calling updateContent on listBox");
     listBox.updateContent();
@@ -387,12 +387,13 @@ void ThemeList::addPreset (const juce::String& name, bool appendDateSuffix)
     Theme newPreset (sharedResources.sharedColors);
     newPreset.setCreated (currentTime);
     newPreset.setModified (currentTime);
-    // UI themes are colours-only — EQ/functionality presets live in EqPresetStore.
+    // Global UI: colours + modular snapshot. Never embed EQ DSP.
     newPreset.clearPluginState();
+    newPreset.setGlobalUi (captureCurrentGlobalUi());
 
     juce::String uniqueName = name.trim();
     if (uniqueName.isEmpty())
-        uniqueName = "Preset";
+        uniqueName = "Global UI Preset";
 
     if (appendDateSuffix)
         uniqueName = uniqueName + "_" + currentTime.formatted ("%m-%d-%Y");
@@ -420,7 +421,14 @@ void ThemeList::addPreset (const juce::String& name, bool appendDateSuffix)
     listeners.call ([] (Listener& listener) { listener.onPresetListChanged(); });
 }
 
-void ThemeList::applyPreset (int index, bool shouldApplyPluginState)
+juce::ValueTree ThemeList::captureCurrentGlobalUi() const
+{
+    if (captureGlobalUi)
+        return captureGlobalUi();
+    return {};
+}
+
+void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool shouldApplyGlobalUiModules)
 {
     needsRepainting = true;
 
@@ -433,6 +441,10 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState)
     listBox.selectRow (index);
     selectedRow = index;
 
+    if (shouldApplyGlobalUiModules && selectedTheme.hasGlobalUi() && applyGlobalUi)
+        applyGlobalUi (selectedTheme.getGlobalUi());
+
+    // Legacy themes only — chrome UI list passes false for plugin state.
     if (shouldApplyPluginState && selectedTheme.hasPluginState())
         applyPluginState (selectedTheme.getPluginState());
 
@@ -661,8 +673,9 @@ void ThemeList::overwritePreset (int index, const juce::String& name)
     Theme newPreset (sharedResources.sharedColors);
     newPreset.setCreated (index < themeCreatedTimes.size() ? themeCreatedTimes[index] : currentTime);
     newPreset.setModified (currentTime);
-    // UI themes are colours-only — EQ/functionality presets live in EqPresetStore.
+    // Global UI: colours + modular snapshot (not EQ).
     newPreset.clearPluginState();
+    newPreset.setGlobalUi (captureCurrentGlobalUi());
 
     presets.set (index, newPreset);
 

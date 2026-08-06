@@ -157,6 +157,7 @@
     <ClCompile Include="..\..\Source\ScopeLevelMeterModule.cpp"/>
     <ClCompile Include="..\..\Source\LoudnessComponent.cpp"/>
     <ClCompile Include="..\..\Source\ScopeLayoutPresets.cpp"/>
+    <ClCompile Include="..\..\Source\ModuleLookPresets.cpp"/>
     <ClCompile Include="..\..\Source\StereogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\HistogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp"/>
@@ -3485,6 +3486,7 @@
     <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h"/>
     <ClInclude Include="..\..\Source\ScopeModules.h"/>
     <ClInclude Include="..\..\Source\ScopeLayoutPresets.h"/>
+    <ClInclude Include="..\..\Source\ModuleLookPresets.h"/>
     <ClInclude Include="..\..\Source\ScopeLevelMeterModule.h"/>
     <ClInclude Include="..\..\Source\LoudnessComponent.h"/>
     <ClInclude Include="..\..\Source\StereogramComponent.h"/>

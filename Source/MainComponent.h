@@ -20,6 +20,7 @@
 #include "FramedFloatingScopeWindow.h"
 #include "ScopeModules.h"
 #include "ScopeLayoutPresets.h"
+#include "ModuleLookPresets.h"
 #include "ScopeLevelMeterModule.h"
 #include "LoudnessComponent.h"
 #include "StereogramComponent.h"
@@ -102,8 +103,21 @@ public:
 
     bool isScopeModuleEnabled (ScopeModuleId id) const noexcept;
     void setScopeModuleEnabled (ScopeModuleId id, bool enabled, bool notifyPrefs = true);
-    /** Right-click module menu (tiled + strip): module actions + Remove Module. */
+    /** Right-click: module look presets + module actions + Remove Module (Scope). */
     void showScopeModuleContextMenu (ScopeModuleId id, juce::Component* anchor);
+
+    static std::optional<ModuleLookPresets::Kind> moduleLookKindForScope (ScopeModuleId id) noexcept;
+    juce::ValueTree captureModuleLook (ModuleLookPresets::Kind kind);
+    void applyModuleLook (ModuleLookPresets::Kind kind, const juce::ValueTree& look, bool notifyPrefs = true);
+    bool saveModuleLookDefault (ModuleLookPresets::Kind kind);
+    bool saveModuleLookNamed (ModuleLookPresets::Kind kind, const juce::String& name);
+    void promptSaveModuleLookPreset (ModuleLookPresets::Kind kind);
+    void appendModuleLookMenuItems (juce::PopupMenu& menu, ModuleLookPresets::Kind kind, int baseId);
+    bool handleModuleLookMenuResult (ModuleLookPresets::Kind kind, int result, int baseId);
+
+    /** Global UI: colours live on Theme; this is ramps + scope layout + all module looks. */
+    juce::ValueTree captureGlobalUiModules();
+    void applyGlobalUiModules (const juce::ValueTree& globalUi);
 
     /** Scope-mode tap only (compact chrome scopes unchanged). Persisted via ui_prefs. */
     void setScopeTapPost (bool shouldTapPost, bool notifyPrefs = true);

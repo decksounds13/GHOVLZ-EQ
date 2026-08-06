@@ -1,6 +1,7 @@
 ﻿#include "FftComponent.h"
 
 #include "../../MainComponent.h"
+#include "../../ModuleLookPresets.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
 
@@ -254,7 +255,7 @@ void FftComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
 
 void FftComponent::Content::saveAnalyserDefaults()
 {
-    const bool ok = AnalyserDefaults::saveFrom (treeState);
+    const bool ok = ModuleLookPresets::saveDefaultFromApvts (ModuleLookPresets::Kind::fft, treeState);
     saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
     juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
     {

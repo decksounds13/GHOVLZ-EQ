@@ -51,6 +51,8 @@ public:
     void syncSpec3DDofFocusFromMain();
     /** Push Spec3D debug-sphere pose into the 3D Debug tab (gizmo drag). */
     void syncSpec3DDebugSphereFromMain();
+    /** Push full Spec3D look/structure into the 3D Spectrogram settings tab. */
+    void syncSpec3DSettingsFromMain();
 
     /** Fixed design size of the scrolled content (not the outer frame). */
     static juce::Rectangle<int> getContentDesignBounds() noexcept

@@ -67,6 +67,12 @@ juce::XmlElement* Theme::toXml() const
         }
     }
 
+    if (globalUi.isValid() && globalUi.hasType ("GlobalUi"))
+    {
+        if (auto bundleXml = globalUi.createXml())
+            xml->addChildElement (bundleXml.release());
+    }
+
     return xml;
 }
 
@@ -139,6 +145,10 @@ void Theme::fromXml (const juce::XmlElement& xmlElement)
     if (auto* stateWrapper = xmlElement.getChildByName ("STATE"))
         if (auto* stateChild = stateWrapper->getFirstChildElement())
             pluginState = juce::ValueTree::fromXml (*stateChild);
+
+    globalUi = {};
+    if (auto* globalEl = xmlElement.getChildByName ("GlobalUi"))
+        globalUi = juce::ValueTree::fromXml (*globalEl);
 }
 
 void Theme::savePresetsToXML (juce::Array<Theme>& themes,

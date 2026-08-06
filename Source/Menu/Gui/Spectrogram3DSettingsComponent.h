@@ -52,6 +52,8 @@ private:
         void styleToggle (juce::ToggleButton& toggle);
         void styleCombo (juce::ComboBox& combo);
         void styleSaveDefaultButton (juce::TextButton& button);
+        void saveModuleLookDefault();
+        void saveModuleLookPreset();
         void layoutSliderRow (juce::Rectangle<int>& area, juce::Label& label, juce::Slider& slider);
         void layoutComboRow (juce::Rectangle<int>& area, juce::Label& label, juce::ComboBox& combo);
         void layoutToggle (juce::Rectangle<int>& area, juce::ToggleButton& toggle);
@@ -98,6 +100,8 @@ private:
         juce::Label softAngleLabel;
         juce::Slider softAngleSlider;
         juce::TextButton resetCameraButton { "Reset 3D Camera" };
+        juce::TextButton saveDefaultButton { "Save Default" };
+        juce::TextButton savePresetButton { "Save Preset..." };
 
         juce::Label lookLabel;
         juce::ToggleButton audioLevelToggle { "Audio level affects" };

@@ -526,6 +526,10 @@ public:
     std::function<void()> onUserResized;
     std::function<void()> onUserMoved;
     std::function<void()> onDefaultViewChanged;
+    /** Append look-preset items (ids >= 100). */
+    std::function<void (juce::PopupMenu&)> onAugmentContextMenu;
+    /** Return true if result was handled. */
+    std::function<bool (int)> onContextMenuResult;
     /** Fired when turntable / zoom-oscillate settings change (persist prefs). */
     std::function<void()> onAutoRotateSettingsChanged;
     /** Fired when DOF focus is picked (Ctrl/Cmd+LMB) or otherwise changed with notify. */

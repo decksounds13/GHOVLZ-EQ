@@ -1,6 +1,7 @@
 #include "Spectrogram3DSettingsComponent.h"
 
 #include "../../MainComponent.h"
+#include "../../ModuleLookPresets.h"
 #include "../../ScopeModules.h"
 #include "../../SpectrogramComponent.h"
 #include "../Menu.h"
@@ -168,6 +169,16 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
             main->resetSpec3DCamera();
     };
     addAndMakeVisible (resetCameraButton);
+
+    styleSaveDefaultButton (saveDefaultButton);
+    saveDefaultButton.setTooltip ("Save this module's current look as default for Spectrogram 3D.");
+    saveDefaultButton.onClick = [this] { saveModuleLookDefault(); };
+    addAndMakeVisible (saveDefaultButton);
+
+    styleSaveDefaultButton (savePresetButton);
+    savePresetButton.setTooltip ("Save current look as a named preset for this module.");
+    savePresetButton.onClick = [this] { saveModuleLookPreset(); };
+    addAndMakeVisible (savePresetButton);
 
     lookLabel.setText ("Look (SSR on by default)", juce::dontSendNotification);
     styleLabel (lookLabel);
@@ -934,6 +945,25 @@ void Spectrogram3DSettingsComponent::Content::styleSaveDefaultButton (juce::Text
     button.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
 }
 
+void Spectrogram3DSettingsComponent::Content::saveModuleLookDefault()
+{
+    auto* main = findParentComponentOfClass<MainComponent>();
+    const bool ok = main != nullptr
+                        && main->saveModuleLookDefault (ModuleLookPresets::Kind::spectrogram3D);
+    saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
+    juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
+    {
+        if (safe != nullptr)
+            safe->setButtonText ("Save Default");
+    });
+}
+
+void Spectrogram3DSettingsComponent::Content::saveModuleLookPreset()
+{
+    if (auto* main = findParentComponentOfClass<MainComponent>())
+        main->promptSaveModuleLookPreset (ModuleLookPresets::Kind::spectrogram3D);
+}
+
 void Spectrogram3DSettingsComponent::Content::layoutSliderRow (juce::Rectangle<int>& area,
                                                                juce::Label& label,
                                                                juce::Slider& slider)
@@ -1499,7 +1529,13 @@ void Spectrogram3DSettingsComponent::Content::resized()
 
     auto area = getLocalBounds().reduced (kPadX, kPadY);
 
-    titleLabel.setBounds (area.removeFromTop (24));
+    {
+        auto titleRow = area.removeFromTop (24);
+        savePresetButton.setBounds (titleRow.removeFromRight (108).withHeight (22).withY (titleRow.getY() + 1));
+        titleRow.removeFromRight (6);
+        saveDefaultButton.setBounds (titleRow.removeFromRight (108).withHeight (22).withY (titleRow.getY() + 1));
+        titleLabel.setBounds (titleRow);
+    }
     area.removeFromTop (8);
 
     layoutToggle (area, enable3DToggle);

@@ -1,6 +1,7 @@
 #include "SpectrogramSettingsComponent.h"
 
 #include "../../MainComponent.h"
+#include "../../ModuleLookPresets.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
 
@@ -409,7 +410,7 @@ void SpectrogramSettingsComponent::Content::styleSaveDefaultButton (juce::TextBu
 
 void SpectrogramSettingsComponent::Content::saveAnalyserDefaults()
 {
-    const bool ok = AnalyserDefaults::saveFrom (treeState);
+    const bool ok = ModuleLookPresets::saveDefaultFromApvts (ModuleLookPresets::Kind::spectrogram, treeState);
     saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
     juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
     {

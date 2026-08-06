@@ -34,18 +34,26 @@ public:
     void setProcessor (EqProcessor* processorToUse) noexcept { processor = processorToUse; }
     EqProcessor* getProcessor() const noexcept { return processor; }
 
+    /** Capture/apply modular Global UI pieces (ramps, scope layout, module looks). */
+    void setGlobalUiCapture (std::function<juce::ValueTree()> fn) { captureGlobalUi = std::move (fn); }
+    void setGlobalUiApply (std::function<void (const juce::ValueTree&)> fn) { applyGlobalUi = std::move (fn); }
+
     void paintOverChildren(juce::Graphics& g) override;
     int getNumRows() override;
     void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override;
     void listBoxItemClicked(int row, const juce::MouseEvent&) override;
     void resized() override;
 
-    /** Append a preset from current colours + plugin state.
+    /** Append a preset: colours + GlobalUi modules (not EQ).
         If appendDateSuffix is true (Appearance "New"), appends _MM-DD-YYYY. */
     void addPreset (const juce::String& name, bool appendDateSuffix = true);
     void saveCurrentPreset (const juce::String& name);
-    /** Apply colours (always) and plugin state when applyPluginState is true and the preset has STATE. */
-    void applyPreset (int index, bool applyPluginState = true);
+    /**
+        Apply colours always.
+        GlobalUi modules when present (unless applyGlobalUiModules is false).
+        Legacy full EQ STATE only when applyPluginState is true.
+    */
+    void applyPreset (int index, bool applyPluginState = false, bool applyGlobalUiModules = true);
     void updateUI();
     void createDefaultPreset();
     void overwritePreset (int index, const juce::String& name);
@@ -99,6 +107,7 @@ public:
 private:
     juce::ValueTree capturePluginState() const;
     void applyPluginState (const juce::ValueTree& state);
+    juce::ValueTree captureCurrentGlobalUi() const;
     void persistPresetsToXml();
 
     juce::Array<juce::Time> themeCreatedTimes;
@@ -113,6 +122,8 @@ private:
 
     UIElementsList* uiElementsList{ nullptr };
     EqProcessor* processor{ nullptr };
+    std::function<juce::ValueTree()> captureGlobalUi;
+    std::function<void (const juce::ValueTree&)> applyGlobalUi;
 
     std::unique_ptr<CustomScrollBar> customScrollBar;
 

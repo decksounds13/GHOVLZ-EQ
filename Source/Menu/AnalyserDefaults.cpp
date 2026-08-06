@@ -157,6 +157,31 @@ AnalyserDefaults AnalyserDefaults::load()
     return defaults;
 }
 
+static void writeAnalyserAttr (juce::XmlElement& xml,
+                               juce::AudioProcessorValueTreeState& treeState,
+                               const juce::String& id)
+{
+    auto* param = treeState.getParameter (id);
+    if (param == nullptr)
+        return;
+
+    if (id == "BLOCK_ID")
+    {
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param))
+        {
+            const auto names = AnalyserDefaults::getBlockSizeNames();
+            const int idx = juce::jlimit (0, names.size() - 1, choice->getIndex());
+            xml.setAttribute (id, names[idx]);
+            return;
+        }
+    }
+
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param))
+        xml.setAttribute (id, choice->getIndex());
+    else if (auto* raw = treeState.getRawParameterValue (id))
+        xml.setAttribute (id, (double) raw->load());
+}
+
 bool AnalyserDefaults::saveFrom (juce::AudioProcessorValueTreeState& treeState)
 {
     auto xml = std::make_unique<juce::XmlElement> ("AnalyserDefaults");
@@ -165,37 +190,37 @@ bool AnalyserDefaults::saveFrom (juce::AudioProcessorValueTreeState& treeState)
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
 
     for (const auto& id : getParameterIds())
-    {
-        auto* param = treeState.getParameter (id);
-        if (param == nullptr)
-            continue;
-
-        if (id == "BLOCK_ID")
-        {
-            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param))
-            {
-                const auto names = getBlockSizeNames();
-                const int idx = juce::jlimit (0, names.size() - 1, choice->getIndex());
-                xml->setAttribute (id, names[idx]);
-                continue;
-            }
-        }
-
-        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (param))
-        {
-            xml->setAttribute (id, choice->getIndex());
-        }
-        else if (auto* raw = treeState.getRawParameterValue (id))
-        {
-            xml->setAttribute (id, (double) raw->load());
-        }
-    }
+        writeAnalyserAttr (*xml, treeState, id);
 
     auto file = getDefaultsFile();
     file.getParentDirectory().createDirectory();
     if (! file.getParentDirectory().isDirectory())
         return false;
 
+    return xml->writeTo (file);
+}
+
+bool AnalyserDefaults::mergeIdsFrom (juce::AudioProcessorValueTreeState& treeState,
+                                     const juce::StringArray& ids)
+{
+    if (ids.isEmpty())
+        return true;
+
+    auto file = getDefaultsFile();
+    std::unique_ptr<juce::XmlElement> xml;
+    if (file.existsAsFile())
+        xml = juce::parseXML (file);
+    if (xml == nullptr || ! xml->hasTagName ("AnalyserDefaults"))
+        xml = std::make_unique<juce::XmlElement> ("AnalyserDefaults");
+
+    xml->setAttribute ("version", 2);
+    xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
+    for (const auto& id : ids)
+        writeAnalyserAttr (*xml, treeState, id);
+
+    file.getParentDirectory().createDirectory();
+    if (! file.getParentDirectory().isDirectory())
+        return false;
     return xml->writeTo (file);
 }
 

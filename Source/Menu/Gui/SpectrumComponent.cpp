@@ -1,6 +1,7 @@
 ﻿#include "SpectrumComponent.h"
 
 #include "../../MainComponent.h"
+#include "../../ModuleLookPresets.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
 
@@ -363,7 +364,7 @@ void SpectrumComponent::Content::styleSettingsCombo (juce::ComboBox& combo)
 
 void SpectrumComponent::Content::saveAnalyserDefaults()
 {
-    const bool ok = AnalyserDefaults::saveFrom (treeState);
+    const bool ok = ModuleLookPresets::saveDefaultFromApvts (ModuleLookPresets::Kind::spectrum, treeState);
     saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
     juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
     {

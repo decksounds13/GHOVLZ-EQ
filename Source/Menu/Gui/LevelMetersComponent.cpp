@@ -1,5 +1,6 @@
 #include "LevelMetersComponent.h"
 
+#include "../../ModuleLookPresets.h"
 #include "../AnalyserDefaults.h"
 
 namespace
@@ -137,7 +138,7 @@ void LevelMetersComponent::Content::styleModeCombo (juce::ComboBox& combo)
 
 void LevelMetersComponent::Content::saveAnalyserDefaults()
 {
-    const bool ok = AnalyserDefaults::saveFrom (treeState);
+    const bool ok = ModuleLookPresets::saveDefaultFromApvts (ModuleLookPresets::Kind::levelMeters, treeState);
     saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
     juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
     {

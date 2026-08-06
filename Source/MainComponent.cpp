@@ -5,6 +5,8 @@
 #include "Visualizer/Analyser.h"
 #include "ComboBoxLookAndFeel.h"
 #include "EqPresetStore.h"
+#include "ModuleLookPresets.h"
+#include "Menu/AnalyserDefaults.h"
 #include "Menu/Gui/ThemeList.h"
 #include "ColourRamp/GradientStripEditor.h"
 #include <functional>
@@ -1148,6 +1150,14 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.setAudioLevelProvider ([this] { return processor.getSpec3DVisualLevel01(); });
     spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
+    spectrogram3D.onAugmentContextMenu = [this] (juce::PopupMenu& menu)
+    {
+        appendModuleLookMenuItems (menu, ModuleLookPresets::Kind::spectrogram3D, 1000);
+    };
+    spectrogram3D.onContextMenuResult = [this] (int result)
+    {
+        return handleModuleLookMenuResult (ModuleLookPresets::Kind::spectrogram3D, result, 1000);
+    };
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onDofFocusChanged = [this]
     {
@@ -1250,6 +1260,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     if (auto* themes = menu.getThemeList())
     {
         themes->setProcessor (&processor);
+        themes->setGlobalUiCapture ([this] { return captureGlobalUiModules(); });
+        themes->setGlobalUiApply ([this] (const juce::ValueTree& g) { applyGlobalUiModules (g); });
         themes->addListener (this);
         refreshPresetNameDisplay();
     }
@@ -3666,9 +3678,525 @@ bool MainComponent::isScopeModuleEnabled (ScopeModuleId id) const noexcept
     return std::find (scopeEnabledOrder.begin(), scopeEnabledOrder.end(), id) != scopeEnabledOrder.end();
 }
 
+std::optional<ModuleLookPresets::Kind> MainComponent::moduleLookKindForScope (ScopeModuleId id) noexcept
+{
+    using K = ModuleLookPresets::Kind;
+    switch (id)
+    {
+        case ScopeModuleId::oscilloscope:  return K::oscilloscope;
+        case ScopeModuleId::goniometer:    return K::goniometer;
+        case ScopeModuleId::spectrogram:   return K::spectrogram;
+        case ScopeModuleId::spectrogram3D: return K::spectrogram3D;
+        case ScopeModuleId::spectrum:      return K::spectrum;
+        case ScopeModuleId::histogram:     return K::histogram;
+        case ScopeModuleId::stereogram:    return K::stereogram;
+        case ScopeModuleId::loudness:      return K::loudness;
+        case ScopeModuleId::levelIn:
+        case ScopeModuleId::levelOut:      return K::levelMeters;
+        default:                           return std::nullopt;
+    }
+}
+
+namespace
+{
+    constexpr int kLookSaveDefault = 0;
+    constexpr int kLookSavePreset  = 1;
+    constexpr int kLookLoadDefault = 2;
+    constexpr int kLookLoadBase    = 10;
+    constexpr int kLookDeleteBase  = 200;
+
+    int meshQToInt (Spectrogram3DComponent::MeshQuality q) noexcept
+    {
+        switch (q)
+        {
+            case Spectrogram3DComponent::MeshQuality::low: return 0;
+            case Spectrogram3DComponent::MeshQuality::high: return 2;
+            case Spectrogram3DComponent::MeshQuality::ultra: return 3;
+            case Spectrogram3DComponent::MeshQuality::overkill: return 4;
+            default: return 1;
+        }
+    }
+    Spectrogram3DComponent::MeshQuality meshQFromInt (int v) noexcept
+    {
+        if (v <= 0) return Spectrogram3DComponent::MeshQuality::low;
+        if (v == 2) return Spectrogram3DComponent::MeshQuality::high;
+        if (v >= 3) return Spectrogram3DComponent::MeshQuality::ultra;
+        return Spectrogram3DComponent::MeshQuality::medium;
+    }
+    int msaaToInt (Spectrogram3DComponent::MsaaLevel l) noexcept
+    {
+        switch (l)
+        {
+            case Spectrogram3DComponent::MsaaLevel::off: return 0;
+            case Spectrogram3DComponent::MsaaLevel::x8: return 8;
+            case Spectrogram3DComponent::MsaaLevel::x16: return 16;
+            default: return 4;
+        }
+    }
+    Spectrogram3DComponent::MsaaLevel msaaFromInt (int v) noexcept
+    {
+        if (v <= 0) return Spectrogram3DComponent::MsaaLevel::off;
+        if (v >= 16) return Spectrogram3DComponent::MsaaLevel::x16;
+        if (v >= 8) return Spectrogram3DComponent::MsaaLevel::x8;
+        return Spectrogram3DComponent::MsaaLevel::x4;
+    }
+    int shQToInt (Spectrogram3DComponent::ShadowQuality q) noexcept
+    {
+        switch (q)
+        {
+            case Spectrogram3DComponent::ShadowQuality::low: return 0;
+            case Spectrogram3DComponent::ShadowQuality::high: return 2;
+            case Spectrogram3DComponent::ShadowQuality::ultra: return 3;
+            default: return 1;
+        }
+    }
+    Spectrogram3DComponent::ShadowQuality shQFromInt (int v) noexcept
+    {
+        if (v <= 0) return Spectrogram3DComponent::ShadowQuality::low;
+        if (v >= 3) return Spectrogram3DComponent::ShadowQuality::ultra;
+        if (v == 2) return Spectrogram3DComponent::ShadowQuality::high;
+        return Spectrogram3DComponent::ShadowQuality::medium;
+    }
+}
+
+juce::ValueTree MainComponent::captureModuleLook (ModuleLookPresets::Kind kind)
+{
+    auto root = ModuleLookPresets::captureFromApvts (kind, processor.treeState);
+    if (kind != ModuleLookPresets::Kind::spectrogram3D)
+        return root;
+
+    juce::ValueTree look ("Spec3DLook");
+    auto setB = [&] (const char* n, bool v) { look.setProperty (n, v, nullptr); };
+    auto setF = [&] (const char* n, float v) { look.setProperty (n, (double) v, nullptr); };
+    auto setI = [&] (const char* n, int v) { look.setProperty (n, v, nullptr); };
+    auto setC = [&] (const char* n, juce::Colour c) { look.setProperty (n, (int) c.getARGB(), nullptr); };
+
+    setI ("meshQuality", meshQToInt (getSpec3DMeshQuality()));
+    setF ("freqMeshBias", getSpec3DFreqMeshBias());
+    setF ("freqMeshBiasPivot", getSpec3DFreqMeshBiasPivot());
+    setI ("msaaLevel", msaaToInt (getSpec3DMsaaLevel()));
+    setB ("transparentBg", isSpec3DTransparentBackground());
+    setB ("reverseFreq", isSpec3DReverseFrequencyAxis());
+    setF ("meshHeight", getSpec3DMeshHeight());
+    setB ("closedMesh", isSpec3DClosedMeshEnabled());
+    setF ("normalCusp", getSpec3DNormalCuspAngleDeg());
+
+    setB ("audioLevel", isSpec3DAudioLevelModEnabled());
+    setI ("audioTarget", (int) getSpec3DAudioLevelTarget());
+    setF ("audioMinPct", getSpec3DAudioLevelMinPercent());
+    setF ("audioMaxPct", getSpec3DAudioLevelMaxPercent());
+    setF ("audioHp", getSpec3DAudioLevelHpHz());
+    setF ("audioLp", getSpec3DAudioLevelLpHz());
+    setF ("audioThresh", getSpec3DAudioLevelThresholdDb());
+    setI ("audioSpeed", (int) getSpec3DAudioLevelSpeed());
+    setB ("audioPlayhead", getSpec3DAudioLevelAffectPlayhead());
+    setB ("audioAntiPlayhead", getSpec3DAudioLevelAffectAntiPlayhead());
+
+    setB ("lighting", isSpec3DLightingEnabled());
+    setF ("lightingAmt", getSpec3DLightingAmount());
+    setF ("lightAz", getSpec3DLightAzimuthDeg());
+    setF ("lightEl", getSpec3DLightElevationDeg());
+    setF ("specular", getSpec3DSpecularAmount());
+    setF ("roughness", getSpec3DRoughnessAmount());
+    setF ("metalness", getSpec3DMetalnessAmount());
+    setF ("rim", getSpec3DRimAmount());
+    setC ("lightCol", getSpec3DLightColour());
+    setC ("rimCol", getSpec3DRimColour());
+    setB ("dome", isSpec3DDomeFillEnabled());
+    setF ("domeStr", getSpec3DDomeFillStrength());
+    setC ("domeSky", getSpec3DDomeSkyColour());
+    setC ("domeGround", getSpec3DDomeGroundColour());
+    setB ("domeTex", isSpec3DDomeTextureEnabled());
+    setI ("domeTexSrc", (int) getSpec3DDomeTextureSource());
+    look.setProperty ("domeTexPath", getSpec3DDomeTextureCustomPath(), nullptr);
+
+    setB ("ssgi", isSpec3DSsgiEnabled());
+    setF ("ssgiStr", getSpec3DSsgiStrength());
+    setF ("ssgiRad", getSpec3DSsgiRadius());
+    setI ("ssgiQuality", shQToInt (getSpec3DSsgiQuality()));
+    setB ("ssr", isSpec3DSsrEnabled());
+    setF ("ssrStr", getSpec3DSsrStrength());
+    setF ("ssrDist", getSpec3DSsrDistance());
+    setF ("ssrThick", getSpec3DSsrThickness());
+    setI ("ssrQuality", shQToInt (getSpec3DSsrQuality()));
+    setF ("ssrFresnel", getSpec3DSsrFresnel());
+    setF ("ssrRoughInf", getSpec3DSsrRoughnessInfluence());
+    setF ("ssrIntensity", getSpec3DSsrIntensity());
+    setF ("ssrEdgeFade", getSpec3DSsrEdgeFade());
+    setF ("ssrMetalBias", getSpec3DSsrMetallicBias());
+    setF ("ssrDomeFb", getSpec3DSsrDomeFallback());
+    setB ("energyConserve", isSpec3DEnergyConservingEnabled());
+    setB ("tonemap", isSpec3DTonemapEnabled());
+    setF ("exposure", getSpec3DTonemapExposureStops());
+    setI ("grade", (int) getSpec3DColorGrade());
+    setB ("contactShadow", isSpec3DContactShadowEnabled());
+    setF ("contactShadowStr", getSpec3DContactShadowStrength());
+    setB ("selfShadow", isSpec3DSelfShadowEnabled());
+    setF ("selfShadowStr", getSpec3DSelfShadowStrength());
+    setF ("selfShadowBias", getSpec3DSelfShadowBias());
+    setF ("selfShadowSoft", getSpec3DSelfShadowSoftness());
+    setI ("selfShadowQuality", shQToInt (getSpec3DSelfShadowQuality()));
+    setB ("castShadows", isSpec3DCastShadowsEnabled());
+    setB ("ssao", isSpec3DSsaoEnabled());
+    setF ("ssaoStr", getSpec3DSsaoStrength());
+    setF ("ssaoRad", getSpec3DSsaoRadius());
+    setB ("bloom", isSpec3DBloomEnabled());
+    setF ("bloomStr", getSpec3DBloomStrength());
+    setF ("bloomThr", getSpec3DBloomThreshold());
+    setB ("dof", isSpec3DDofEnabled());
+    setF ("dofFocus", getSpec3DDofFocusDistance());
+    setF ("dofFStop", getSpec3DDofFStop());
+    setF ("dofFocalMm", getSpec3DDofFocalLengthMm());
+    setI ("dofQuality", shQToInt (getSpec3DDofQuality()));
+    setF ("dofCocDilate", getSpec3DDofCocDilate());
+    setF ("dofEdgeSpill", getSpec3DDofEdgeSpill());
+    setB ("sss", isSpec3DSssEnabled());
+    setF ("sssStr", getSpec3DSssStrength());
+    setF ("sssWrap", getSpec3DSssWrap());
+    setF ("sssTrans", getSpec3DSssTransmission());
+    setC ("sssTint", getSpec3DSssTint());
+    setF ("sssRad", getSpec3DSssRadius());
+    setF ("sssContrast", getSpec3DSssContrast());
+    setI ("sssQuality", shQToInt (getSpec3DSssQuality()));
+    setF ("sssThickScale", getSpec3DSssThicknessScale());
+    setF ("sssMaxThick", getSpec3DSssMaxThickness());
+    setB ("autoRotate", isSpec3DAutoRotateEnabled());
+    setF ("autoRotatePeriod", getSpec3DAutoRotatePeriodSec());
+    setB ("zoomOsc", isSpec3DZoomOscillateEnabled());
+    setF ("zoomOscDepth", getSpec3DZoomOscillateDepth());
+    setF ("zoomOscPeriod", getSpec3DZoomOscillatePeriodSec());
+
+    root.appendChild (std::move (look), nullptr);
+    return root;
+}
+
+void MainComponent::applyModuleLook (ModuleLookPresets::Kind kind, const juce::ValueTree& look, bool notifyPrefs)
+{
+    if (! look.isValid())
+        return;
+
+    ModuleLookPresets::applyToApvts (kind, processor.treeState, look);
+
+    if (kind == ModuleLookPresets::Kind::spectrogram3D)
+    {
+        auto s = look.getChildWithName ("Spec3DLook");
+        if (! s.isValid() && look.hasType ("Spec3DLook"))
+            s = look;
+        if (s.isValid())
+        {
+            constexpr bool kSave = false;
+            auto getB = [&] (const char* n, bool d) { return (bool) s.getProperty (n, d); };
+            auto getF = [&] (const char* n, float d) { return (float) (double) s.getProperty (n, (double) d); };
+            auto getI = [&] (const char* n, int d) { return (int) s.getProperty (n, d); };
+            auto getC = [&] (const char* n, juce::Colour d)
+            {
+                return s.hasProperty (n) ? juce::Colour ((juce::uint32) (int) s.getProperty (n)) : d;
+            };
+
+            setSpec3DMeshQuality (meshQFromInt (getI ("meshQuality", 1)), kSave);
+            setSpec3DFreqMeshBias (getF ("freqMeshBias", 0.0f), kSave);
+            setSpec3DFreqMeshBiasPivot (getF ("freqMeshBiasPivot", 0.5f), kSave);
+            setSpec3DMsaaLevel (msaaFromInt (getI ("msaaLevel", 4)), kSave);
+            setSpec3DTransparentBackground (getB ("transparentBg", true), kSave);
+            setSpec3DReverseFrequencyAxis (getB ("reverseFreq", true), kSave);
+            setSpec3DMeshHeight (getF ("meshHeight", Spectrogram3DComponent::kDefaultMeshHeight), kSave);
+            setSpec3DClosedMeshEnabled (getB ("closedMesh", false), kSave);
+            setSpec3DNormalCuspAngleDeg (getF ("normalCusp", Spectrogram3DComponent::kNormalCuspDefaultDeg), kSave);
+
+            setSpec3DAudioLevelModEnabled (getB ("audioLevel", false), kSave);
+            setSpec3DAudioLevelTarget (static_cast<Spectrogram3DComponent::AudioLevelTarget> (getI ("audioTarget", 0)), kSave);
+            setSpec3DAudioLevelMinPercent (getF ("audioMinPct", Spectrogram3DComponent::kAudioLevelMinPercentDefault), kSave);
+            setSpec3DAudioLevelMaxPercent (getF ("audioMaxPct", Spectrogram3DComponent::kAudioLevelMaxPercentDefault), kSave);
+            setSpec3DAudioLevelHpHz (getF ("audioHp", Spectrogram3DComponent::kAudioLevelHpDefaultHz), kSave);
+            setSpec3DAudioLevelLpHz (getF ("audioLp", Spectrogram3DComponent::kAudioLevelLpDefaultHz), kSave);
+            setSpec3DAudioLevelThresholdDb (getF ("audioThresh", Spectrogram3DComponent::kAudioLevelThresholdDefaultDb), kSave);
+            setSpec3DAudioLevelSpeed (static_cast<Spectrogram3DComponent::AudioLevelSpeed> (getI ("audioSpeed", 0)), kSave);
+            setSpec3DAudioLevelAffectPlayhead (getB ("audioPlayhead", false), kSave);
+            setSpec3DAudioLevelAffectAntiPlayhead (getB ("audioAntiPlayhead", false), kSave);
+
+            setSpec3DLightingEnabled (getB ("lighting", false), kSave);
+            setSpec3DLightingAmount (getF ("lightingAmt", 0.70f), kSave);
+            setSpec3DLightAzimuthDeg (getF ("lightAz", -40.0f), kSave);
+            setSpec3DLightElevationDeg (getF ("lightEl", 55.0f), kSave);
+            setSpec3DSpecularAmount (getF ("specular", 0.35f), kSave);
+            setSpec3DRoughnessAmount (getF ("roughness", 0.45f), kSave);
+            setSpec3DMetalnessAmount (getF ("metalness", 0.0f), kSave);
+            setSpec3DRimAmount (getF ("rim", 0.22f), kSave);
+            setSpec3DLightColour (getC ("lightCol", juce::Colours::white), kSave);
+            setSpec3DRimColour (getC ("rimCol", juce::Colours::white), kSave);
+            setSpec3DDomeFillEnabled (getB ("dome", false), kSave);
+            setSpec3DDomeFillStrength (getF ("domeStr", 0.35f), kSave);
+            setSpec3DDomeSkyColour (getC ("domeSky", juce::Colour (0xff7390bf)), kSave);
+            setSpec3DDomeGroundColour (getC ("domeGround", juce::Colour (0xff403328)), kSave);
+            setSpec3DDomeTextureCustomPath (s.getProperty ("domeTexPath").toString(), kSave);
+            setSpec3DDomeTextureSource (getI ("domeTexSrc", 0) == 1
+                                            ? Spectrogram3DComponent::DomeTextureSource::custom
+                                            : Spectrogram3DComponent::DomeTextureSource::veniceSunset, kSave);
+            setSpec3DDomeTextureEnabled (getB ("domeTex", false), kSave);
+
+            setSpec3DSsgiEnabled (getB ("ssgi", false), kSave);
+            setSpec3DSsgiStrength (getF ("ssgiStr", 0.40f), kSave);
+            setSpec3DSsgiRadius (getF ("ssgiRad", 0.45f), kSave);
+            setSpec3DSsgiQuality (shQFromInt (getI ("ssgiQuality", 1)), kSave);
+            setSpec3DSsrEnabled (getB ("ssr", true), kSave);
+            setSpec3DSsrStrength (getF ("ssrStr", 0.55f), kSave);
+            setSpec3DSsrDistance (getF ("ssrDist", 0.55f), kSave);
+            setSpec3DSsrThickness (getF ("ssrThick", 0.40f), kSave);
+            setSpec3DSsrQuality (shQFromInt (getI ("ssrQuality", 1)), kSave);
+            setSpec3DSsrFresnel (getF ("ssrFresnel", 0.75f), kSave);
+            setSpec3DSsrRoughnessInfluence (getF ("ssrRoughInf", 0.85f), kSave);
+            setSpec3DSsrIntensity (getF ("ssrIntensity", 1.0f), kSave);
+            setSpec3DSsrEdgeFade (getF ("ssrEdgeFade", 0.15f), kSave);
+            setSpec3DSsrMetallicBias (getF ("ssrMetalBias", 0.35f), kSave);
+            setSpec3DSsrDomeFallback (getF ("ssrDomeFb", 0.65f), kSave);
+            setSpec3DEnergyConservingEnabled (getB ("energyConserve", false), kSave);
+            setSpec3DTonemapEnabled (getB ("tonemap", false), kSave);
+            setSpec3DTonemapExposureStops (getF ("exposure", -0.3f), kSave);
+            setSpec3DColorGrade (static_cast<Spectrogram3DComponent::ColorGrade> (juce::jlimit (0, 5, getI ("grade", 2))), kSave);
+            setSpec3DContactShadowEnabled (getB ("contactShadow", false), kSave);
+            setSpec3DContactShadowStrength (getF ("contactShadowStr", 0.45f), kSave);
+            setSpec3DSelfShadowEnabled (getB ("selfShadow", false), kSave);
+            setSpec3DSelfShadowStrength (getF ("selfShadowStr", 0.85f), kSave);
+            setSpec3DSelfShadowBias (getF ("selfShadowBias", 0.35f), kSave);
+            setSpec3DSelfShadowSoftness (getF ("selfShadowSoft", 0.85f), kSave);
+            setSpec3DSelfShadowQuality (shQFromInt (getI ("selfShadowQuality", 1)), kSave);
+            setSpec3DCastShadowsEnabled (getB ("castShadows", false), kSave);
+            setSpec3DSsaoEnabled (getB ("ssao", false), kSave);
+            setSpec3DSsaoStrength (getF ("ssaoStr", 0.55f), kSave);
+            setSpec3DSsaoRadius (getF ("ssaoRad", 1.0f), kSave);
+            setSpec3DBloomEnabled (getB ("bloom", false), kSave);
+            setSpec3DBloomStrength (getF ("bloomStr", 0.45f), kSave);
+            setSpec3DBloomThreshold (getF ("bloomThr", 0.62f), kSave);
+            setSpec3DDofEnabled (getB ("dof", false), kSave);
+            setSpec3DDofFocusDistance (getF ("dofFocus", Spectrogram3DComponent::kDofFocusDefault), kSave);
+            setSpec3DDofFStop (getF ("dofFStop", Spectrogram3DComponent::kDofFStopDefault), kSave);
+            setSpec3DDofFocalLengthMm (getF ("dofFocalMm", Spectrogram3DComponent::kDofFocalLengthDefaultMm), kSave);
+            setSpec3DDofQuality (shQFromInt (getI ("dofQuality", 1)), kSave);
+            setSpec3DDofCocDilate (getF ("dofCocDilate", Spectrogram3DComponent::kDofCocDilateDefault), kSave);
+            setSpec3DDofEdgeSpill (getF ("dofEdgeSpill", Spectrogram3DComponent::kDofEdgeSpillDefault), kSave);
+            setSpec3DSssEnabled (getB ("sss", false), kSave);
+            setSpec3DSssStrength (getF ("sssStr", 0.45f), kSave);
+            setSpec3DSssWrap (getF ("sssWrap", 0.55f), kSave);
+            setSpec3DSssTransmission (getF ("sssTrans", 0.65f), kSave);
+            setSpec3DSssTint (getC ("sssTint", juce::Colour (0xffe8b090)), kSave);
+            setSpec3DSssRadius (getF ("sssRad", 0.40f), kSave);
+            setSpec3DSssContrast (getF ("sssContrast", 0.50f), kSave);
+            setSpec3DSssQuality (shQFromInt (getI ("sssQuality", 1)), kSave);
+            setSpec3DSssThicknessScale (getF ("sssThickScale", 0.50f), kSave);
+            setSpec3DSssMaxThickness (getF ("sssMaxThick", 0.70f), kSave);
+            setSpec3DAutoRotateEnabled (getB ("autoRotate", false), kSave);
+            setSpec3DAutoRotatePeriodSec (getF ("autoRotatePeriod", Spectrogram3DComponent::kAutoRotatePeriodDefaultSec), kSave);
+            setSpec3DZoomOscillateEnabled (getB ("zoomOsc", false), kSave);
+            setSpec3DZoomOscillateDepth (getF ("zoomOscDepth", Spectrogram3DComponent::kZoomOscillateDepthDefault), kSave);
+            setSpec3DZoomOscillatePeriodSec (getF ("zoomOscPeriod", Spectrogram3DComponent::kZoomOscillatePeriodDefaultSec), kSave);
+
+            menu.syncSpec3DSettingsFromMain();
+            menu.notifyContentHeightChanged();
+        }
+    }
+
+    if (notifyPrefs)
+        requestUiPrefsSave();
+}
+
+bool MainComponent::saveModuleLookDefault (ModuleLookPresets::Kind kind)
+{
+    const auto look = captureModuleLook (kind);
+    const bool ok = ModuleLookPresets::saveDefault (kind, look);
+    AnalyserDefaults::mergeIdsFrom (processor.treeState, ModuleLookPresets::parameterIdsForKind (kind));
+    return ok;
+}
+
+bool MainComponent::saveModuleLookNamed (ModuleLookPresets::Kind kind, const juce::String& name)
+{
+    return ModuleLookPresets::saveNamed (kind, name, captureModuleLook (kind));
+}
+
+void MainComponent::promptSaveModuleLookPreset (ModuleLookPresets::Kind kind)
+{
+    auto* aw = new juce::AlertWindow (
+        "Save look preset",
+        juce::String ("Name this ") + ModuleLookPresets::kindDisplayName (kind) + " look preset:",
+        juce::AlertWindow::NoIcon);
+    aw->addTextEditor ("name", juce::String (ModuleLookPresets::kindDisplayName (kind)) + " Look", "Name");
+    aw->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<juce::AlertWindow> awSafe (aw);
+    juce::Component::SafePointer<MainComponent> safe (this);
+    aw->enterModalState (true,
+        juce::ModalCallbackFunction::create (
+            [safe, awSafe, kind] (int r)
+            {
+                if (safe == nullptr || r != 1 || awSafe == nullptr)
+                    return;
+                const auto name = awSafe->getTextEditorContents ("name").trim();
+                if (name.isNotEmpty())
+                    safe->saveModuleLookNamed (kind, name);
+            }),
+        true);
+}
+
+void MainComponent::appendModuleLookMenuItems (juce::PopupMenu& menu, ModuleLookPresets::Kind kind, int baseId)
+{
+    menu.addSectionHeader (juce::String (ModuleLookPresets::kindDisplayName (kind)) + " Look");
+    menu.addItem (baseId + kLookSaveDefault, "Save current look as default");
+    menu.addItem (baseId + kLookSavePreset, "Save current look as preset...");
+    menu.addItem (baseId + kLookLoadDefault, "Load look default",
+                  ModuleLookPresets::loadDefault (kind).isValid());
+
+    const auto names = ModuleLookPresets::listNames (kind);
+    juce::PopupMenu loadSub;
+    if (names.empty())
+        loadSub.addItem (-1, "(no saved presets)", false, false);
+    else
+        for (int i = 0; i < (int) names.size(); ++i)
+            loadSub.addItem (baseId + kLookLoadBase + i, names[(size_t) i]);
+    menu.addSubMenu ("Load look preset", loadSub);
+
+    if (! names.empty())
+    {
+        juce::PopupMenu delSub;
+        for (int i = 0; i < (int) names.size(); ++i)
+            delSub.addItem (baseId + kLookDeleteBase + i, names[(size_t) i]);
+        menu.addSubMenu ("Delete look preset", delSub);
+    }
+}
+
+bool MainComponent::handleModuleLookMenuResult (ModuleLookPresets::Kind kind, int result, int baseId)
+{
+    if (result < baseId)
+        return false;
+    const int rel = result - baseId;
+    if (rel == kLookSaveDefault)
+    {
+        saveModuleLookDefault (kind);
+        return true;
+    }
+    if (rel == kLookSavePreset)
+    {
+        promptSaveModuleLookPreset (kind);
+        return true;
+    }
+    if (rel == kLookLoadDefault)
+    {
+        auto def = ModuleLookPresets::loadDefault (kind);
+        if (def.isValid())
+            applyModuleLook (kind, def, true);
+        return true;
+    }
+    if (rel >= kLookLoadBase && rel < kLookDeleteBase)
+    {
+        const auto names = ModuleLookPresets::listNames (kind);
+        const int idx = rel - kLookLoadBase;
+        if (idx >= 0 && idx < (int) names.size())
+        {
+            auto p = ModuleLookPresets::loadNamed (kind, names[(size_t) idx]);
+            if (p.isValid())
+                applyModuleLook (kind, p, true);
+        }
+        return true;
+    }
+    if (rel >= kLookDeleteBase)
+    {
+        const auto names = ModuleLookPresets::listNames (kind);
+        const int idx = rel - kLookDeleteBase;
+        if (idx >= 0 && idx < (int) names.size())
+            ModuleLookPresets::deleteNamed (kind, names[(size_t) idx]);
+        return true;
+    }
+    return false;
+}
+
+juce::ValueTree MainComponent::captureGlobalUiModules()
+{
+    juce::ValueTree root ("GlobalUi");
+
+    auto ramps = colourRamps.toValueTree();
+    if (ramps.isValid())
+        root.appendChild (std::move (ramps), nullptr);
+
+    {
+        auto layout = captureScopeLayoutPreset ("_global");
+        juce::ValueTree layoutTree ("ScopeLayout");
+        layoutTree.setProperty ("strip", layout.strip, nullptr);
+        layoutTree.setProperty ("modules", ScopeModules::orderToString (layout.modules), nullptr);
+        layoutTree.setProperty ("fractions", ScopeLayoutPresets::encodeFractions (layout.stripFractions), nullptr);
+        layoutTree.setProperty ("stripHeightPx", layout.stripHeightPx, nullptr);
+        layoutTree.setProperty ("splitX", (double) layout.splitX, nullptr);
+        layoutTree.setProperty ("splitY", (double) layout.splitY, nullptr);
+        root.appendChild (std::move (layoutTree), nullptr);
+    }
+
+    {
+        juce::ValueTree looks ("ModuleLooks");
+        for (int i = 0; i < (int) ModuleLookPresets::Kind::numKinds; ++i)
+        {
+            auto look = captureModuleLook (static_cast<ModuleLookPresets::Kind> (i));
+            if (look.isValid())
+                looks.appendChild (std::move (look), nullptr);
+        }
+        if (looks.getNumChildren() > 0)
+            root.appendChild (std::move (looks), nullptr);
+    }
+
+    return root;
+}
+
+void MainComponent::applyGlobalUiModules (const juce::ValueTree& globalUi)
+{
+    if (! globalUi.isValid() || ! globalUi.hasType ("GlobalUi"))
+        return;
+
+    if (auto ramps = globalUi.getChildWithName ("ColourRamps"); ramps.isValid())
+    {
+        colourRamps.applyFromValueTree (ramps, false);
+        colourRamps.notifyPreview();
+        applyColourRampsToMeters();
+    }
+
+    if (auto layoutTree = globalUi.getChildWithName ("ScopeLayout"); layoutTree.isValid())
+    {
+        ScopeLayoutPreset layout;
+        layout.name = "_global";
+        layout.strip = (bool) layoutTree.getProperty ("strip", false);
+        layout.modules = ScopeModules::orderFromString (
+            layoutTree.getProperty ("modules",
+                                    ScopeModules::orderToString (ScopeModules::defaultEnabledOrder())).toString());
+        layout.stripHeightPx = (int) layoutTree.getProperty ("stripHeightPx", 200);
+        layout.splitX = (float) (double) layoutTree.getProperty ("splitX", 0.5);
+        layout.splitY = (float) (double) layoutTree.getProperty ("splitY", 0.5);
+        layout.stripFractions = ScopeLayoutPresets::decodeFractions (
+            layoutTree.getProperty ("fractions").toString(), (int) layout.modules.size());
+        applyScopeLayoutPreset (layout, false);
+    }
+
+    if (auto looks = globalUi.getChildWithName ("ModuleLooks"); looks.isValid())
+    {
+        for (int i = 0; i < looks.getNumChildren(); ++i)
+        {
+            auto look = looks.getChild (i);
+            if (! look.isValid() || ! look.hasType ("ModuleLook"))
+                continue;
+            const auto kindName = look.getProperty ("kind").toString();
+            for (int k = 0; k < (int) ModuleLookPresets::Kind::numKinds; ++k)
+            {
+                const auto kind = static_cast<ModuleLookPresets::Kind> (k);
+                if (kindName == ModuleLookPresets::kindFolder (kind))
+                {
+                    applyModuleLook (kind, look, false);
+                    break;
+                }
+            }
+        }
+        requestUiPrefsSave();
+    }
+
+    persistSessionUiTheme();
+}
+
 void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Component* anchor)
 {
-    if (! scopeModeEnabled || anchor == nullptr)
+    if (anchor == nullptr)
         return;
 
     juce::PopupMenu menu;
@@ -3679,12 +4207,22 @@ void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Componen
     const int tapInId = 20;
     const int tapOutId = 21;
     const int oscRedrawId = 30;
+    const int lookBaseId = 1000;
     bool hasExtras = false;
+
+    const auto lookKind = moduleLookKindForScope (id);
+    if (lookKind.has_value())
+    {
+        appendModuleLookMenuItems (menu, *lookKind, lookBaseId);
+        hasExtras = true;
+    }
 
     switch (id)
     {
         case ScopeModuleId::loudness:
         case ScopeModuleId::histogram:
+            if (hasExtras)
+                menu.addSeparator();
             menu.addItem (resetIntegId, "Reset Integrated");
             hasExtras = true;
             break;
@@ -3692,6 +4230,8 @@ void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Componen
         case ScopeModuleId::levelIn:
         case ScopeModuleId::levelOut:
         {
+            if (hasExtras)
+                menu.addSeparator();
             auto& meter = (id == ScopeModuleId::levelOut) ? levelMeterOut : levelMeterIn;
             menu.addSectionHeader ("Level Meter Tap");
             menu.addItem (tapInId, "Input", true, meter.getTap() == ScopeLevelMeterModule::Tap::input);
@@ -3701,6 +4241,8 @@ void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Componen
         }
 
         case ScopeModuleId::oscilloscope:
+            if (hasExtras)
+                menu.addSeparator();
             menu.addItem (oscRedrawId, "Redraw in place", true, ! oscilloscope.isScrollMode());
             hasExtras = true;
             break;
@@ -3709,22 +4251,28 @@ void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Componen
             break;
     }
 
-    if (hasExtras)
-        menu.addSeparator();
-
-    const bool canRemove = scopeEnabledOrder.size() > 1;
-    menu.addItem (removeId, "Remove Module", canRemove);
+    if (scopeModeEnabled)
+    {
+        if (hasExtras)
+            menu.addSeparator();
+        menu.addItem (removeId, "Remove Module", scopeEnabledOrder.size() > 1);
+    }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
-                        [safe = juce::Component::SafePointer<MainComponent> (this), id,
-                         removeId, resetIntegId, tapInId, tapOutId, oscRedrawId] (int result)
+                        [safe = juce::Component::SafePointer<MainComponent> (this), id, lookKind,
+                         removeId, resetIntegId, tapInId, tapOutId, oscRedrawId, lookBaseId] (int result)
                         {
                             if (safe == nullptr || result <= 0)
                                 return;
 
+                            if (lookKind.has_value()
+                                && safe->handleModuleLookMenuResult (*lookKind, result, lookBaseId))
+                                return;
+
                             if (result == removeId)
                             {
-                                safe->setScopeModuleEnabled (id, false, true);
+                                if (safe->scopeModeEnabled)
+                                    safe->setScopeModuleEnabled (id, false, true);
                                 return;
                             }
 

@@ -114,6 +114,13 @@ void Menu::syncSpec3DDofFocusFromMain()
             s3d->syncDofFocusFromMain();
 }
 
+void Menu::syncSpec3DSettingsFromMain()
+{
+    for (auto& tab : ownedTabContents)
+        if (auto* s3d = dynamic_cast<Spectrogram3DSettingsComponent*> (tab.get()))
+            s3d->syncFromMain();
+}
+
 void Menu::syncSpec3DDebugSphereFromMain()
 {
     for (auto& tab : ownedTabContents)

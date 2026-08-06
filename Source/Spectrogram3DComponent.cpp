@@ -7786,12 +7786,19 @@ void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
         menu.addCustomItem (7, std::make_unique<ZoomOscillateDepthMenuItem> (*this), nullptr, "Zoom depth");
         menu.addCustomItem (8, std::make_unique<ZoomOscillateRateMenuItem> (*this), nullptr, "Zoom rate");
     }
+    if (onAugmentContextMenu != nullptr)
+    {
+        menu.addSeparator();
+        onAugmentContextMenu (menu);
+    }
     menu.showMenuAsync (juce::PopupMenu::Options()
                             .withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 })
                             .withMousePosition(),
         [safe = juce::Component::SafePointer<Spectrogram3DComponent> (this)] (int result)
         {
             if (safe == nullptr || result <= 0)
+                return;
+            if (safe->onContextMenuResult != nullptr && safe->onContextMenuResult (result))
                 return;
             if (result == 1)
                 safe->setWaterfallFrozen (! safe->isWaterfallFrozen());

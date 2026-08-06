@@ -1,6 +1,7 @@
 #include "GoniometerSettingsComponent.h"
 
 #include "../../MainComponent.h"
+#include "../../ModuleLookPresets.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
 
@@ -222,7 +223,7 @@ void GoniometerSettingsComponent::Content::styleSaveDefaultButton (juce::TextBut
 
 void GoniometerSettingsComponent::Content::saveAnalyserDefaults()
 {
-    const bool ok = AnalyserDefaults::saveFrom (treeState);
+    const bool ok = ModuleLookPresets::saveDefaultFromApvts (ModuleLookPresets::Kind::goniometer, treeState);
     saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
     juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
     {

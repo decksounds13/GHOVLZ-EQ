@@ -12,6 +12,10 @@ public:
     /** Write current APVTS values for analyser appearance params. */
     static bool saveFrom (juce::AudioProcessorValueTreeState& treeState);
 
+    /** Merge only these IDs into analyser_defaults.xml (keeps other modules). */
+    static bool mergeIdsFrom (juce::AudioProcessorValueTreeState& treeState,
+                              const juce::StringArray& ids);
+
     float getFloat (const juce::String& id, float fallback) const;
     bool  getBool  (const juce::String& id, bool fallback) const;
     int   getInt   (const juce::String& id, int fallback) const;

@@ -29,6 +29,15 @@ public:
     void setPluginState (const juce::ValueTree& state) { pluginState = state; }
     void clearPluginState() { pluginState = {}; }
 
+    /**
+        Global UI modules (type "GlobalUi"): colour ramps + scope layout + ModuleLooks.
+        Colours live on Theme itself. Not EQ DSP.
+    */
+    const juce::ValueTree& getGlobalUi() const noexcept { return globalUi; }
+    bool hasGlobalUi() const noexcept { return globalUi.isValid() && globalUi.hasType ("GlobalUi"); }
+    void setGlobalUi (const juce::ValueTree& state) { globalUi = state; }
+    void clearGlobalUi() { globalUi = {}; }
+
     void savePresetsToXML(juce::Array<Theme>& themes,
         const juce::StringArray& presetNames,
         const juce::Array<juce::Time>& themeCreatedTimes,
@@ -61,6 +70,7 @@ private:
     juce::Time modified;
     juce::String name;
     juce::ValueTree pluginState;
+    juce::ValueTree globalUi;
 
     // Helper function to get color attribute names
     juce::StringArray getColorAttributeNames() const;
