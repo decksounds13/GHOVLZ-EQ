@@ -2908,8 +2908,9 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     {
         glBindFramebuffer (GL_FRAMEBUFFER, softMsaaFbo);
         glViewport (0, 0, w, h);
-        const auto clear = owner.getClearColour();
-        glClearColor (clear.getFloatRed(), clear.getFloatGreen(), clear.getFloatBlue(), clear.getFloatAlpha());
+        // Transparent clear only — soft/opaque plate is a single JUCE panel fill
+        // (match FramedFloatingScopeWindow; avoid double-tint vs Osc/Gon).
+        glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
         glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable (GL_MULTISAMPLE);
     }
@@ -2921,7 +2922,8 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     }
 
     uploadDomeTextureIfNeeded();
-    drawSoftTint();
+    // Soft tint is NOT drawn into the FBO: Component::paint fills the rounded
+    // panel once (same recipe as Osc/Gon). FBO is scene-only over that plate.
     // #region agent log
     gLabelDrawCallsThisFrame = 0;
     ++gSoftFrameCounter;
@@ -6849,6 +6851,7 @@ void Spectrogram3DComponent::resized()
 
 void Spectrogram3DComponent::paint (juce::Graphics& g)
 {
+    // Match FramedFloatingScopeWindow (Osc / Gon / Spec 2D): shadow → panel fill → content → stroke.
     const auto inner = getInnerFrameLocal().toFloat();
     const float radius = chromeMode == ChromeMode::docked ? 4.0f : kCornerRadius;
     juce::Path panel;
@@ -6858,12 +6861,11 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
         && (theme == nullptr || ! theme->disableGlowShadowEffects))
         panelShadow.render (g, panel);
 
-    if (! usesSoftComposite())
-    {
-        g.setColour (getClearColour());
-        g.fillPath (panel);
-    }
-    else if (active)
+    // Soft / opaque plate (same recipe as Osc soft-fill: oscBackground @ ~90/255).
+    g.setColour (getClearColour());
+    g.fillPath (panel);
+
+    if (usesSoftComposite() && active)
     {
         juce::Image softImg;
         {
@@ -6871,37 +6873,24 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
             softImg = softCompositeImage;
         }
 
-        // Soft BG: FBO image already includes the translucent tint — do not pre-fill
-        // a second translucent plate (that made the whole view look washed out).
-        // Soft BG off (docked Scope): opaque plate under the FBO image.
-        if (! transparentBackground || ! softImg.isValid())
-        {
-            g.setColour (getClearColour());
-            g.fillPath (panel);
-        }
-
         if (softImg.isValid())
         {
             juce::Graphics::ScopedSaveState ss (g);
             g.reduceClipRegion (panel);
             g.setOpacity (1.0f);
+            // Scene-only FBO (transparent clear); soft plate is the panel fill above.
             g.drawImage (softImg, getGlViewLocal().toFloat(),
                          juce::RectanglePlacement::stretchToFit, false);
         }
     }
 
-    // Soft BG: no chrome outline — a white panel stroke read as a thick border
-    // around the whole graph. Docked Scope keeps a hairline for separation.
-    if (! transparentBackground)
+    g.setColour (juce::Colours::white.withAlpha (chromeMode == ChromeMode::docked ? 0.12f : 0.22f));
+    g.strokePath (panel, juce::PathStrokeType (chromeMode == ChromeMode::docked ? 1.0f : 1.2f));
+    if (chromeMode == ChromeMode::floating)
     {
-        g.setColour (juce::Colours::white.withAlpha (chromeMode == ChromeMode::docked ? 0.12f : 0.22f));
-        g.strokePath (panel, juce::PathStrokeType (chromeMode == ChromeMode::docked ? 1.0f : 1.2f));
-        if (chromeMode == ChromeMode::floating)
-        {
-            g.setColour (juce::Colours::white.withAlpha (0.06f));
-            g.strokePath (panel, juce::PathStrokeType (1.0f),
-                          juce::AffineTransform::translation (0.0f, 1.0f));
-        }
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.strokePath (panel, juce::PathStrokeType (1.0f),
+                      juce::AffineTransform::translation (0.0f, 1.0f));
     }
 
     if (active && glHost != nullptr && (glHost->hasContextFailed() || ! glHost->isGlReady()))

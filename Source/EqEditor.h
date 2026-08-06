@@ -75,6 +75,10 @@ public:
     void saveUiPrefs() const;
     /** Coalesce rapid Look/settings changes into one disk write (avoids hitching sliders). */
     void requestSaveUiPrefs() noexcept;
+    /** Last-used UI colours (Documents/…/last_ui_theme.xml — same reliability as dice prefs). */
+    void saveLastUiThemeToDisk() const;
+    /** @param into optional target (needed while MainComponent is still constructing). */
+    bool loadLastUiThemeFromDisk (class SharedResources* into = nullptr);
     void syncScopeModeButton();
     void showScopeTapMenu();
     /** Re-layout brand + bottom chrome after Scope mode toggles (hide logo, shift ? cluster). */
@@ -131,6 +135,7 @@ private:
     void enforceSideCheckHpLpOrder (juce::Slider* changed);
     void applyTooltipsEnabled();
     static juce::File getUiPrefsFile();
+    static juce::File getLastUiThemeFile();
     int getTopBandHeight() const;
     int getGraphHeightForWidth (int width) const;
     /** Mod panel / faceplate strip height (matched so expanded UI isn't overly tall). */

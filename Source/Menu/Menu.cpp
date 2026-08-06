@@ -98,6 +98,18 @@ Menu::Menu (SharedResources& resources,
     borderResizer->setBorderThickness ({ 5, 5, 5, 5 });
     addAndMakeVisible (*borderResizer);
 
+    // Title-bar close — Settings hamburger sits under the panel when open.
+    closeButton.setButtonText (juce::String::charToString ((juce::juce_wchar) 0x00D7)); // ×
+    closeButton.setTooltip ("Close settings");
+    closeButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    closeButton.onClick = [this]
+    {
+        if (onCloseRequest != nullptr)
+            onCloseRequest();
+    };
+    styleCloseButton();
+    addAndMakeVisible (closeButton);
+
     setPaintingIsUnclipped (true);
     setSize (kContentWidth, kContentHeight + kDragBarHeight);
 }
@@ -197,7 +209,31 @@ void Menu::rebuildTabsForCurrentPage()
 
 bool Menu::isInDragBar (juce::Point<int> localPos) const noexcept
 {
-    return localPos.y >= 0 && localPos.y < kDragBarHeight;
+    if (localPos.y < 0 || localPos.y >= kDragBarHeight)
+        return false;
+    // Leave the close control for its own click handler.
+    if (closeButton.isVisible() && closeButton.getBounds().contains (localPos))
+        return false;
+    return true;
+}
+
+void Menu::styleCloseButton() noexcept
+{
+    const auto ink = sharedResources.sharedColors.menuLabelTextColor1;
+    closeButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    closeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
+    closeButton.setColour (juce::TextButton::textColourOffId, ink.withAlpha (0.85f));
+    closeButton.setColour (juce::TextButton::textColourOnId, ink);
+    closeButton.setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
+}
+
+void Menu::layoutCloseButton() noexcept
+{
+    constexpr int size = 22;
+    constexpr int padR = 6;
+    const int y = juce::jmax (1, (kDragBarHeight - size) / 2);
+    closeButton.setBounds (getWidth() - padR - size, y, size, size);
+    closeButton.toFront (false);
 }
 
 void Menu::mouseDown (const juce::MouseEvent& e)
@@ -344,10 +380,10 @@ void Menu::paint (juce::Graphics& g)
 
     g.setColour (sharedResources.sharedColors.menuLabelTextColor1.withAlpha (0.9f));
     g.setFont (juce::FontOptions().withHeight (13.0f).withStyle ("Bold"));
-    g.drawText ("Settings",
-                getLocalBounds().removeFromTop (kDragBarHeight).reduced (10, 0),
-                juce::Justification::centredLeft,
-                false);
+    // Leave room for the title-bar close (X) on the right.
+    auto titleArea = getLocalBounds().removeFromTop (kDragBarHeight).reduced (10, 0);
+    titleArea.removeFromRight (28);
+    g.drawText ("Settings", titleArea, juce::Justification::centredLeft, false);
 
     g.setColour (sharedResources.sharedColors.menuTabBarBorderColor.withAlpha (0.55f));
     g.drawRoundedRectangle (0.5f, 0.5f, (float) getWidth() - 1.0f, (float) getHeight() - 1.0f, 14.0f, 1.5f);
@@ -470,6 +506,9 @@ void Menu::resized()
         borderResizer->setBounds (getLocalBounds());
         borderResizer->toFront (false);
     }
+
+    // After the border resizer so the X stays clickable on the top-right edge.
+    layoutCloseButton();
 }
 
 void Menu::buttonClicked (juce::Button* button)
@@ -489,6 +528,7 @@ void Menu::updateColors (const juce::Array<juce::Colour>& colors)
     tabBar.setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
     tabBar.repaint();
     syncScrollBarColours();
+    styleCloseButton();
 
     if (appearanceComponentRef != nullptr)
         appearanceComponentRef->repaintNewPresetButton();

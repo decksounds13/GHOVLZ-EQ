@@ -162,6 +162,21 @@ public:
     bool tryRestoreSessionUiTheme (SharedColors& colours, juce::ValueTree& colourRampsOut) const;
     bool hasSessionUiTheme() const noexcept { return sessionUiThemeValid; }
 
+    /**
+        Full non-DSP UI blob (prefs, theme colours, GlobalUi modules, live layout flags).
+        Type "UiSession". Host-persisted via get/setStateInformation so project reopen
+        restores the UI as last left.
+    */
+    void storeSessionUiState (const juce::ValueTree& state);
+    bool tryGetSessionUiState (juce::ValueTree& out) const;
+    bool hasSessionUiState() const noexcept;
+
+    /** Attach / extract UiSession for host state (gzip+base64 property + child). */
+    void attachSessionUiToState (juce::ValueTree& state) const;
+    static juce::ValueTree extractSessionUiFromState (juce::ValueTree& state);
+    /** Mirror sessionUiState onto the live APVTS tree so copyState always carries UI. */
+    void syncSessionUiOntoLiveTree();
+
     /** A/B/C/D referencing — four full APVTS snapshots (bypass excluded). */
     enum class AbSlot { A = 0, B = 1, C = 2, D = 3 };
 
@@ -779,6 +794,7 @@ private:
     bool sessionUiThemeValid = false;
     SharedColors sessionUiColors;
     juce::ValueTree sessionColourRamps;
+    juce::ValueTree sessionUiState; // type "UiSession"
 
     juce::ValueTree captureStateForSnapshot();
     void applySnapshotState (const juce::ValueTree& snapshot);

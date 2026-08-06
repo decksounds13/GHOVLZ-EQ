@@ -63,6 +63,9 @@ public:
     /** Call when an active tab's preferred height changes (look toggles, gradients, …). */
     void notifyContentHeightChanged();
 
+    /** Invoked by the title-bar close (X) control. Host should hide the Settings panel. */
+    std::function<void()> onCloseRequest;
+
 private:
     /** Chevron pager for tab pages (same idea as faceplate bank arrows). */
     class TabPageArrowButton : public juce::Button
@@ -204,6 +207,10 @@ private:
     std::unique_ptr<juce::ResizableBorderComponent> borderResizer;
     juce::ComponentDragger dragger;
     bool dragging = false;
+
+    juce::TextButton closeButton;
+    void layoutCloseButton() noexcept;
+    void styleCloseButton() noexcept;
 
     melatonin::DropShadow panelShadow {
         { juce::Colours::black.withAlpha (0.55f), 16, { 0, 6 }, 0 }

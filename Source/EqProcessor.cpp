@@ -4,6 +4,7 @@
 #include "HistogramComponent.h"
 #include "EqEditor.h"
 #include "BinaryData.h"
+#include "Menu/Theme.h"
 #include "FrequencyResponseComponent.h"
 #include "OscilloscopeComponent.h"
 #include "GoniometerComponent.h"
@@ -4474,11 +4475,105 @@ juce::AudioProcessorEditor* EqProcessor::createEditor()
     return new EqEditor(*this, treeState, m_analyser);  // Assuming `parameters` and `analyser` are member variables of EqProcessor
 }
 
+namespace
+{
+    constexpr const char* kUiSessionB64Prop = "uiSessionB64";
+    constexpr const char* kUiSessionXmlPropLegacy = "uiSessionXml"; // old broken raw-XML-in-attribute
+
+    void replaceChildOfType (juce::ValueTree& parent, const juce::Identifier& type, juce::ValueTree child)
+    {
+        for (int i = parent.getNumChildren(); --i >= 0;)
+            if (parent.getChild (i).hasType (type))
+                parent.removeChild (i, nullptr);
+        if (child.isValid())
+            parent.appendChild (std::move (child), nullptr);
+    }
+
+    juce::ValueTree themeTreeFromColors (const SharedColors& colours)
+    {
+        Theme theme (colours);
+        if (auto themeXml = std::unique_ptr<juce::XmlElement> (theme.toXml()))
+            return juce::ValueTree::fromXml (*themeXml);
+        return {};
+    }
+
+    /** Gzip + Base64 — safe as a ValueTree property (no nested raw XML in attributes). */
+    juce::String encodeUiSessionB64 (const juce::ValueTree& session)
+    {
+        if (! session.isValid() || ! session.hasType ("UiSession"))
+            return {};
+
+        auto xml = session.createXml();
+        if (xml == nullptr)
+            return {};
+
+        const auto text = xml->toString();
+        juce::MemoryOutputStream mo;
+        {
+            juce::GZIPCompressorOutputStream gzip (mo);
+            gzip.write (text.toRawUTF8(), text.getNumBytesAsUTF8());
+        }
+        return mo.getMemoryBlock().toBase64Encoding();
+    }
+
+    juce::ValueTree decodeUiSessionB64 (const juce::String& b64)
+    {
+        if (b64.isEmpty())
+            return {};
+
+        juce::MemoryBlock mb;
+        if (! mb.fromBase64Encoding (b64) || mb.isEmpty())
+            return {};
+
+        juce::MemoryInputStream mi (mb, false);
+        juce::GZIPDecompressorInputStream gzip (mi);
+        const auto text = gzip.readEntireStreamAsString();
+        if (text.isEmpty())
+            return {};
+
+        if (auto parsed = juce::parseXML (text))
+            if (parsed->hasTagName ("UiSession"))
+                return juce::ValueTree::fromXml (*parsed);
+
+        return {};
+    }
+
+    void stripUiSessionMarkers (juce::ValueTree& state)
+    {
+        state.removeProperty (kUiSessionB64Prop, nullptr);
+        state.removeProperty (kUiSessionXmlPropLegacy, nullptr);
+        for (int i = state.getNumChildren(); --i >= 0;)
+            if (state.getChild (i).hasType ("UiSession"))
+                state.removeChild (i, nullptr);
+    }
+}
+
 void EqProcessor::storeSessionUiTheme (const SharedColors& colours, const juce::ValueTree& colourRamps)
 {
     sessionUiColors = colours;
     sessionColourRamps = colourRamps.createCopy();
     sessionUiThemeValid = true;
+
+    // Keep the host-persisted blob current on every colour/ramp change (not only debounced prefs).
+    if (! sessionUiState.isValid() || ! sessionUiState.hasType ("UiSession"))
+        sessionUiState = juce::ValueTree ("UiSession");
+
+    if (auto themeTree = themeTreeFromColors (colours); themeTree.isValid())
+        replaceChildOfType (sessionUiState, "Theme", std::move (themeTree));
+
+    if (colourRamps.isValid() && colourRamps.hasType ("ColourRamps"))
+    {
+        auto globalUi = sessionUiState.getChildWithName ("GlobalUi");
+        if (! globalUi.isValid())
+        {
+            globalUi = juce::ValueTree ("GlobalUi");
+            sessionUiState.appendChild (globalUi, nullptr);
+        }
+        auto liveGlobal = sessionUiState.getChildWithName ("GlobalUi");
+        replaceChildOfType (liveGlobal, "ColourRamps", colourRamps.createCopy());
+    }
+
+    syncSessionUiOntoLiveTree();
 }
 
 bool EqProcessor::tryRestoreSessionUiTheme (SharedColors& colours, juce::ValueTree& colourRampsOut) const
@@ -4489,6 +4584,115 @@ bool EqProcessor::tryRestoreSessionUiTheme (SharedColors& colours, juce::ValueTr
     colours = sessionUiColors;
     colourRampsOut = sessionColourRamps.createCopy();
     return true;
+}
+
+void EqProcessor::storeSessionUiState (const juce::ValueTree& state)
+{
+    if (! state.isValid() || ! state.hasType ("UiSession"))
+        return;
+
+    sessionUiState = state.createCopy();
+
+    // Keep in-memory theme in sync so editor reopen without a host re-load still works.
+    if (auto themeTree = sessionUiState.getChildWithName ("Theme"); themeTree.isValid())
+    {
+        if (auto themeXml = themeTree.createXml())
+        {
+            Theme theme;
+            theme.fromXml (*themeXml);
+            sessionUiColors = theme.getColors();
+            sessionUiThemeValid = true;
+        }
+    }
+
+    if (auto globalUi = sessionUiState.getChildWithName ("GlobalUi"); globalUi.isValid())
+    {
+        if (auto ramps = globalUi.getChildWithName ("ColourRamps"); ramps.isValid())
+        {
+            sessionColourRamps = ramps.createCopy();
+            sessionUiThemeValid = true;
+        }
+    }
+
+    syncSessionUiOntoLiveTree();
+}
+
+bool EqProcessor::tryGetSessionUiState (juce::ValueTree& out) const
+{
+    if (! sessionUiState.isValid() || ! sessionUiState.hasType ("UiSession"))
+        return false;
+    out = sessionUiState.createCopy();
+    return true;
+}
+
+bool EqProcessor::hasSessionUiState() const noexcept
+{
+    return sessionUiState.isValid() && sessionUiState.hasType ("UiSession");
+}
+
+void EqProcessor::attachSessionUiToState (juce::ValueTree& state) const
+{
+    if (! sessionUiState.isValid() || ! sessionUiState.hasType ("UiSession"))
+        return;
+
+    stripUiSessionMarkers (state);
+
+    // Compact binary property — does not inflate / corrupt the PARAMETERS XML tree.
+    const auto b64 = encodeUiSessionB64 (sessionUiState);
+    if (b64.isNotEmpty())
+        state.setProperty (kUiSessionB64Prop, b64, nullptr);
+
+    // Nested child for tools / older experimental builds that only look for children.
+    state.appendChild (sessionUiState.createCopy(), nullptr);
+}
+
+juce::ValueTree EqProcessor::extractSessionUiFromState (juce::ValueTree& state)
+{
+    juce::ValueTree found;
+
+    // 1) gzip+base64 (current)
+    found = decodeUiSessionB64 (state.getProperty (kUiSessionB64Prop).toString());
+
+    // 2) legacy raw XML property (may be truncated / broken — only if still valid)
+    if (! found.isValid())
+    {
+        const auto legacy = state.getProperty (kUiSessionXmlPropLegacy).toString();
+        if (legacy.isNotEmpty())
+            if (auto parsed = juce::parseXML (legacy))
+                if (parsed->hasTagName ("UiSession"))
+                    found = juce::ValueTree::fromXml (*parsed);
+    }
+
+    // 3) nested child
+    if (! found.isValid())
+    {
+        for (int i = 0; i < state.getNumChildren(); ++i)
+        {
+            if (state.getChild (i).hasType ("UiSession"))
+            {
+                found = state.getChild (i).createCopy();
+                break;
+            }
+        }
+    }
+
+    stripUiSessionMarkers (state);
+    return found;
+}
+
+void EqProcessor::syncSessionUiOntoLiveTree()
+{
+    // Keep a copy on the live APVTS tree so host getState via copyState includes UI
+    // even if attachSessionUiToState is skipped, and so round-trips stay consistent.
+    stripUiSessionMarkers (treeState.state);
+    if (! sessionUiState.isValid() || ! sessionUiState.hasType ("UiSession"))
+        return;
+
+    const auto b64 = encodeUiSessionB64 (sessionUiState);
+    if (b64.isNotEmpty())
+        treeState.state.setProperty (kUiSessionB64Prop, b64, nullptr);
+
+    treeState.state.appendChild (sessionUiState.createCopy(), nullptr);
 }
 
 
@@ -4746,6 +4950,12 @@ void EqProcessor::getStateInformation(juce::MemoryBlock& destData)
     // Keep the active slot's snapshot in sync with live edits before persisting.
     saveCurrentToAbSlot (activeAbSlot);
 
+    // Flush live UI into session blob (also writes ui_prefs.xml for new instances).
+    if (auto* ed = dynamic_cast<EqEditor*> (getActiveEditor()))
+        ed->saveUiPrefs();
+    else
+        syncSessionUiOntoLiveTree(); // keep last known UI mirrored if editor already closed
+
     auto state = treeState.copyState();
 
     if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter ("BLOCK_ID")))
@@ -4771,8 +4981,13 @@ void EqProcessor::getStateInformation(juce::MemoryBlock& destData)
             state.appendChild (matchTree, nullptr);
     }
 
+    // Non-DSP UI as last left (theme colours, scope layout, Spec3D, overlays, …).
+    // Always re-attach from the member blob so we don't depend on copyState alone.
+    attachSessionUiToState (state);
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
-    copyXmlToBinary (*xml, destData);
+    if (xml != nullptr)
+        copyXmlToBinary (*xml, destData);
 }
 
 void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -4783,6 +4998,9 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
         return;
 
     auto state = juce::ValueTree::fromXml (*xmlState);
+    if (! state.isValid())
+        return;
+
     AnalyserDefaults::migrateBlockIdInState (state);
     migrateModSourceChoicesIfNeeded (state);
 
@@ -4790,7 +5008,7 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
     const auto abProps = state.createCopy();
     const auto shapeTree = takeShapeCurveFromState (state);
     juce::ValueTree matchUserTree;
-    for (int i = 0; i < state.getNumChildren(); ++i)
+    for (int i = state.getNumChildren(); --i >= 0;)
     {
         if (state.getChild (i).hasType ("matchUserCurves"))
         {
@@ -4799,6 +5017,10 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
             break;
         }
     }
+
+    // Pull UI before replaceState (b64 / legacy property / child).
+    const auto uiSessionTree = extractSessionUiFromState (state);
+
     state.removeProperty ("abActiveSlot", nullptr);
     state.removeProperty ("abSnapshotA", nullptr);
     state.removeProperty ("abSnapshotB", nullptr);
@@ -4824,6 +5046,17 @@ void EqProcessor::setStateInformation(const void* data, int sizeInBytes)
 
     if (matchUserTree.isValid())
         matchEngine.fromUserPresetsTree (matchUserTree);
+
+    // Host / project UI as last left (only when present — EQ presets without UiSession leave UI alone).
+    if (uiSessionTree.isValid() && uiSessionTree.hasType ("UiSession"))
+    {
+        storeSessionUiState (uiSessionTree); // also syncs onto live tree
+
+        // Apply to open editor (Ableton may call setState after createEditor).
+        // If the editor is not open yet, MainComponent/EqEditor restore from session on construct.
+        if (auto* ed = dynamic_cast<EqEditor*> (getActiveEditor()))
+            ed->loadUiPrefs();
+    }
 }
 
 

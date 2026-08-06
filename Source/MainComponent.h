@@ -119,6 +119,9 @@ public:
     juce::ValueTree captureGlobalUiModules();
     void applyGlobalUiModules (const juce::ValueTree& globalUi);
 
+    /** Re-apply processor session theme (colours + ramps) after host setState. */
+    void reapplySessionUiThemeFromProcessor();
+
     /** Scope-mode tap only (compact chrome scopes unchanged). Persisted via ui_prefs. */
     void setScopeTapPost (bool shouldTapPost, bool notifyPrefs = true);
     bool isScopeTapPost() const noexcept { return scopeTapPost; }

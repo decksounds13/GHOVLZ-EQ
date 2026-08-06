@@ -65,14 +65,14 @@ ThemeList::ThemeList(SharedResources& resources)
         }
     }
 
-    // Colours only on construction — no GlobalUi / EQ (session + host restore those).
-    if (selectedRow != -1) {
-        applyPreset (selectedRow, false, false);
-    }
-    else {
+    // Select Default Preset row for the list only — do NOT apply colours here.
+    // Host setState / MainComponent restore session UI after construction; applying
+    // Default here wiped project colours on every Ableton reopen.
+    if (selectedRow < 0)
         selectedRow = 0;
-        applyPreset (selectedRow, false, false);
-    }
+    if (selectedRow >= 0 && selectedRow < getNumRows())
+        listBox.selectRow (selectedRow, false, false);
+
     DBG("[ThemeList] Calling updateContent on listBox");
     listBox.updateContent();
     listBox.repaint();

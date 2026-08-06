@@ -715,6 +715,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     levelMeterIn (p, treeState, ScopeLevelMeterModule::Tap::input, "Level Meter 1"),
     levelMeterOut (p, treeState, ScopeLevelMeterModule::Tap::output, "Level Meter 2")
 {
+    // Host may have already called setStateInformation (Ableton often does before the editor).
     restoreSessionUiThemeIfAny();
     colourRamps.addChangeListener (this);
     frequencyResponseComponent.onBandManipulationHighlight = [this] (int bandIndex)
@@ -745,6 +746,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     customLookAndFeel.setThemeColors (&sharedResources);
 
     menu.addComponentListener (this);
+    menu.onCloseRequest = [this] { closeSettingsMenu(); };
     menuToggleButton.onClick = [this] {
         const bool shouldShowMenu = ! menu.isVisible();
         if (shouldShowMenu)
@@ -753,8 +755,9 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
             menuDismissCatcher.setVisible (true);
             menuDismissCatcher.setBounds (getLocalBounds());
             menuDismissCatcher.toFront (false);
-            menu.toFront (false);
+            // Menu above the Settings button (hamburger is covered / unusable under the panel).
             menuToggleButton.toFront (false);
+            menu.toFront (false);
             layoutSettingsMenu();
             resized();
             syncExpandedOscOverlayStack();
@@ -1298,7 +1301,14 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     processor.treeState.addParameterListener ("METER_CHANNEL_MODE_ID", this);
     processor.treeState.addParameterListener ("SPEC_COLOUR_SCHEME_ID", this);
 
-    applyThemeToChildComponents();
+    // Re-apply after full construction (ThemeList / Appearance widgets exist).
+    // Host session, else last_ui_theme.xml on disk (dice prefs already use that folder).
+    if (processor.hasSessionUiTheme() || processor.hasSessionUiState())
+        reapplySessionUiThemeFromProcessor();
+    else if (editor.loadLastUiThemeFromDisk (&sharedResources))
+        reapplySessionUiThemeFromProcessor();
+    else
+        applyThemeToChildComponents();
 }
 
 MainComponent::~MainComponent()
@@ -2118,9 +2128,9 @@ void MainComponent::syncSpec3DPresentation()
         spectrogram3D.setInterceptsMouseClicks (true, true);
         spectrogram3D.toFront (false);
         raiseSpecToolButtons();
+        menuToggleButton.toFront (false);
         if (menu.isVisible())
             menu.toFront (false);
-        menuToggleButton.toFront (false);
         bypassButton.toFront (false);
         undoButton.toFront (false);
         redoButton.toFront (false);
@@ -3268,8 +3278,8 @@ void MainComponent::syncExpandedOscOverlayStack()
         menuDismissCatcher.setBounds (getLocalBounds());
         menuDismissCatcher.setVisible (true);
         menuDismissCatcher.toFront (false);
-        menu.toFront (false);
         menuToggleButton.toFront (false);
+        menu.toFront (false);
     }
 }
 
@@ -4772,18 +4782,39 @@ void MainComponent::disableCustomColourRamps()
 void MainComponent::persistSessionUiTheme()
 {
     processor.storeSessionUiTheme (sharedResources.sharedColors, colourRamps.toValueTree());
+    // Disk write is what actually survives Ableton (ui_prefs dice flags already use this folder).
+    editor.saveLastUiThemeToDisk();
+    colourRamps.save();
+    editor.requestSaveUiPrefs();
 }
 
 void MainComponent::restoreSessionUiThemeIfAny()
 {
     juce::ValueTree rampTree;
     if (! processor.tryRestoreSessionUiTheme (sharedResources.sharedColors, rampTree))
-        return;
+    {
+        // No host UI yet — load last-used palette from disk (same reliability as dice prefs).
+        // Pass our SharedResources: editor.mainComponent is still null during our construction.
+        if (! editor.loadLastUiThemeFromDisk (&sharedResources))
+            return;
+        // Ramps already come from colour_ramps.xml via ColourRampBank::load().
+    }
+    else if (rampTree.isValid())
+    {
+        colourRamps.applyFromValueTree (rampTree, false);
+    }
 
-    colourRamps.applyFromValueTree (rampTree, false);
     sharedResources.makeActive();
 
     // Menu/Appearance were constructed before restore; refresh cached colour widgets.
+    if (auto* appearance = menu.getAppearanceComponent())
+        appearance->refreshAfterRandomize();
+}
+
+void MainComponent::reapplySessionUiThemeFromProcessor()
+{
+    restoreSessionUiThemeIfAny();
+    applyThemeToChildComponents();
     if (auto* appearance = menu.getAppearanceComponent())
         appearance->refreshAfterRandomize();
 }
@@ -4824,6 +4855,8 @@ void MainComponent::showRandomizeDiceMenu()
     menu.addSeparator();
     menu.addItem (8, "Disable custom ramps (use schemes)");
 
+    // JUCE PopupMenu always dismisses on click — re-open after toggles so multi-select
+    // scopes stay convenient (checkmarks update, dismiss with click-away / Esc).
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&uiRandomizeButton),
                         [safe = juce::Component::SafePointer<MainComponent> (this)] (int result)
                         {
@@ -4831,19 +4864,30 @@ void MainComponent::showRandomizeDiceMenu()
                                 return;
 
                             auto& s = safe->sharedResources.sharedColors;
-                            if (result == 1)      s.randomizeFaceplateMod = ! s.randomizeFaceplateMod;
-                            else if (result == 2) s.randomizeGraphModule = ! s.randomizeGraphModule;
-                            else if (result == 3) s.randomizeMenuModule = ! s.randomizeMenuModule;
-                            else if (result == 4) s.randomizeRampFftBars = ! s.randomizeRampFftBars;
-                            else if (result == 5) s.randomizeRampSpectrogram = ! s.randomizeRampSpectrogram;
-                            else if (result == 6) s.randomizeRampSpectrogram3D = ! s.randomizeRampSpectrogram3D;
-                            else if (result == 7) s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill;
+                            bool keepOpen = false;
+
+                            if (result == 1)      { s.randomizeFaceplateMod = ! s.randomizeFaceplateMod; keepOpen = true; }
+                            else if (result == 2) { s.randomizeGraphModule = ! s.randomizeGraphModule; keepOpen = true; }
+                            else if (result == 3) { s.randomizeMenuModule = ! s.randomizeMenuModule; keepOpen = true; }
+                            else if (result == 4) { s.randomizeRampFftBars = ! s.randomizeRampFftBars; keepOpen = true; }
+                            else if (result == 5) { s.randomizeRampSpectrogram = ! s.randomizeRampSpectrogram; keepOpen = true; }
+                            else if (result == 6) { s.randomizeRampSpectrogram3D = ! s.randomizeRampSpectrogram3D; keepOpen = true; }
+                            else if (result == 7) { s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill; keepOpen = true; }
                             else if (result == 8) safe->disableCustomColourRamps();
-                            else if (result == 9)  safe->setOrderedRampGradation (true, true);
-                            else if (result == 10) safe->setOrderedRampGradation (false, true);
+                            else if (result == 9)  { safe->setOrderedRampGradation (true, true); keepOpen = true; }
+                            else if (result == 10) { safe->setOrderedRampGradation (false, true); keepOpen = true; }
 
                             if (result >= 1 && result <= 7)
                                 safe->editor.requestSaveUiPrefs();
+
+                            if (keepOpen)
+                            {
+                                juce::MessageManager::callAsync ([safe]
+                                {
+                                    if (safe != nullptr)
+                                        safe->showRandomizeDiceMenu();
+                                });
+                            }
                         });
 }
 
@@ -5684,7 +5728,11 @@ void MainComponent::layoutScopeModePanes (float scale)
         scopeSplitOverlay.toFront (false);
 
     if (scopeStripLayout)
+    {
         menuToggleButton.toFront (false);
+        if (menu.isVisible())
+            menu.toFront (false);
+    }
 
     verticalGradientMeterL.toFront (false);
     verticalGradientMeterR.toFront (false);
@@ -5846,6 +5894,8 @@ void MainComponent::resized()
         menuToggleButton.setIdleAlpha (0.5f);
         menuToggleButton.setBounds (area2.getRight() - sw, area2.getY(), sw, sh);
         menuToggleButton.toFront (false);
+        if (menu.isVisible())
+            menu.toFront (false);
     }
     else
     {
@@ -6433,9 +6483,9 @@ void MainComponent::relayoutPresetChrome()
 
 void MainComponent::raiseMenuSystemAboveWordmark()
 {
-    // Z-order (bottom â†’ top):
-    //   graph â†’ expanded osc/gon/dimmer â†’ brand wordmark â†’ chrome / meters / zoom
-    //   â†’ OptionBox â†’ Settings menu â†’ Settings button
+    // Z-order (bottom → top):
+    //   graph → expanded osc/gon/dimmer → brand wordmark → chrome / meters / zoom
+    //   → OptionBox → Settings button → Settings menu (panel above hamburger when open)
     const bool oscExp = oscExpanded && oscButton.getToggleState() && oscilloscope.isVisible();
     const bool gonExp = gonExpanded && gonButton.getToggleState() && goniometer.isVisible();
     const bool specExp = specExpanded && specButton.getToggleState() && spectrogram.isVisible();
@@ -6560,17 +6610,20 @@ void MainComponent::raiseMenuSystemAboveWordmark()
 
     const bool menuOpen = menu.isVisible();
     menu.setAlwaysOnTop (menuOpen);
+    // Settings chrome under the floating panel when open (close via panel X).
+    menuToggleButton.toFront (false);
     if (menuOpen)
         menu.toFront (false);
-
-    menuToggleButton.toFront (false);
 
     // Strip overlays must sit above pane modules (same stack as Settings).
     if (scopeModeEnabled && scopeStripLayout)
     {
         uiThemeButton.toFront (false);
         uiRandomizeButton.toFront (false);
-        menuToggleButton.toFront (false);
+        if (menuOpen)
+            menu.toFront (false);
+        else
+            menuToggleButton.toFront (false);
     }
 
     if (rampSampleOverlay.isVisible())

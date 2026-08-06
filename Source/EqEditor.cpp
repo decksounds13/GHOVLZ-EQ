@@ -17,6 +17,7 @@
 #include "FilterSlope.h"
 #include "EqBand.h"
 #include "BandChannel.h"
+#include "Menu/Theme.h"
 
 
 
@@ -508,6 +509,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     addAndMakeVisible (phaseModeCombo);
 
     loadUiPrefs();
+    // Host setState often runs before the editor; if it already stored UiSession, loadUiPrefs
+    // restored it. If setState runs later, EqProcessor will call loadUiPrefs again.
     applyTooltipsEnabled();
 
     // Faceplate bank pager: chevron left of band 1, right of band 8 (no readout).
@@ -1888,6 +1891,100 @@ juce::File EqEditor::getUiPrefsFile()
         .getChildFile ("ui_prefs.xml");
 }
 
+juce::File EqEditor::getLastUiThemeFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+        .getChildFile ("Decksounds")
+        .getChildFile ("ParametricEq")
+        .getChildFile ("last_ui_theme.xml");
+}
+
+void EqEditor::saveLastUiThemeToDisk() const
+{
+    if (mainComponent == nullptr)
+        return;
+
+    // Same reliability path as dice flags in ui_prefs.xml (host chunk has been unreliable).
+    Theme theme (mainComponent->getSharedResources().sharedColors);
+    theme.setModified (juce::Time::getCurrentTime());
+    if (auto xml = std::unique_ptr<juce::XmlElement> (theme.toXml()))
+    {
+        // Colours only — strip any accidental DSP / GlobalUi payload.
+        while (auto* child = xml->getFirstChildElement())
+            xml->removeChildElement (child, true);
+
+        auto file = getLastUiThemeFile();
+        file.getParentDirectory().createDirectory();
+        if (file.getParentDirectory().isDirectory())
+            xml->writeTo (file);
+    }
+}
+
+bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
+{
+    SharedResources* resources = into;
+    if (resources == nullptr && mainComponent != nullptr)
+        resources = &mainComponent->getSharedResources();
+    if (resources == nullptr)
+        return false;
+
+    const auto file = getLastUiThemeFile();
+    if (! file.existsAsFile())
+        return false;
+
+    auto xml = juce::parseXML (file);
+    if (xml == nullptr || ! xml->hasTagName ("Theme"))
+        return false;
+
+    Theme theme;
+    theme.fromXml (*xml);
+
+    auto& live = resources->sharedColors;
+    // Preserve dice / accessibility scopes (loaded from ui_prefs separately).
+    const bool keepFace = live.randomizeFaceplateMod;
+    const bool keepGraph = live.randomizeGraphModule;
+    const bool keepMenu = live.randomizeMenuModule;
+    const bool keepRampFft = live.randomizeRampFftBars;
+    const bool keepRampSpec = live.randomizeRampSpectrogram;
+    const bool keepRampSpec3D = live.randomizeRampSpectrogram3D;
+    const bool keepRampFill = live.randomizeRampSpectrumFill;
+    const bool keepOrdered = live.orderedRampGradation;
+    const bool keepLegible = live.enforceLegibleText;
+    const float keepContrast = live.textContrastAmount;
+    const bool keepH = live.randomizeHue, keepS = live.randomizeSaturation;
+    const bool keepB = live.randomizeBrightness, keepA = live.randomizeAlpha;
+    const float hueL = live.hueLowerLimit, hueU = live.hueUpperLimit;
+    const float satL = live.saturationLowerLimit, satU = live.saturationUpperLimit;
+    const float briL = live.brightnessLowerLimit, briU = live.brightnessUpperLimit;
+
+    live = theme.getColors();
+
+    live.randomizeFaceplateMod = keepFace;
+    live.randomizeGraphModule = keepGraph;
+    live.randomizeMenuModule = keepMenu;
+    live.randomizeRampFftBars = keepRampFft;
+    live.randomizeRampSpectrogram = keepRampSpec;
+    live.randomizeRampSpectrogram3D = keepRampSpec3D;
+    live.randomizeRampSpectrumFill = keepRampFill;
+    live.orderedRampGradation = keepOrdered;
+    live.enforceLegibleText = keepLegible;
+    live.textContrastAmount = keepContrast;
+    live.randomizeHue = keepH;
+    live.randomizeSaturation = keepS;
+    live.randomizeBrightness = keepB;
+    live.randomizeAlpha = keepA;
+    live.hueLowerLimit = hueL;
+    live.hueUpperLimit = hueU;
+    live.saturationLowerLimit = satL;
+    live.saturationUpperLimit = satU;
+    live.brightnessLowerLimit = briL;
+    live.brightnessUpperLimit = briU;
+
+    // Seed processor so host getState / reapply paths also see these colours.
+    audioProcessor.storeSessionUiTheme (live, {});
+    return true;
+}
+
 void EqEditor::syncScopeModeButton()
 {
     const bool scopeOn = mainComponent != nullptr && mainComponent->isScopeMode();
@@ -2329,16 +2426,38 @@ void EqEditor::loadUiPrefs()
     bool oscExpandedOnLoad = false;
     bool gonExpandedOnLoad = false;
     bool specExpandedOnLoad = false;
+    bool scopeModeOnLoad = false;
+    bool uiCompactOnLoad = true; // factory default matches ctor (compact)
+    bool modPanelOnLoad = false;
     bool spec3DCamCustom = false;
     auto spec3DCam = Spectrogram3DComponent::getFactoryCameraState();
+    juce::ValueTree sessionGlobalUi;
+    bool haveSessionTheme = false;
+
+    // Prefer host-session blob (project reopen) over machine-wide ui_prefs.xml.
+    std::unique_ptr<juce::XmlElement> sessionPrefsXml;
+    juce::ValueTree sessionUi;
+    if (audioProcessor.tryGetSessionUiState (sessionUi))
+    {
+        if (auto prefsTree = sessionUi.getChildWithName ("UiPrefs"); prefsTree.isValid())
+            sessionPrefsXml = prefsTree.createXml();
+        sessionGlobalUi = sessionUi.getChildWithName ("GlobalUi");
+        haveSessionTheme = sessionUi.getChildWithName ("Theme").isValid()
+                           || sessionUi.getChildWithName ("GlobalUi").isValid();
+        scopeModeOnLoad = (bool) sessionUi.getProperty ("scopeMode", false);
+        uiCompactOnLoad = (bool) sessionUi.getProperty ("uiCompact", true);
+        modPanelOnLoad = (bool) sessionUi.getProperty ("modPanelOpen", false);
+    }
 
     const auto file = getUiPrefsFile();
-    if (file.existsAsFile())
+    std::unique_ptr<juce::XmlElement> fileXml;
+    if (sessionPrefsXml == nullptr && file.existsAsFile())
+        fileXml = juce::parseXML (file);
+
+    juce::XmlElement* xml = sessionPrefsXml != nullptr ? sessionPrefsXml.get()
+                                                       : fileXml.get();
+    if (xml != nullptr && xml->hasTagName ("UiPrefs"))
     {
-        if (auto xml = juce::parseXML (file))
-        {
-            if (xml->hasTagName ("UiPrefs"))
-            {
                 tooltipsEnabled = xml->getBoolAttribute ("tooltipsEnabled", true);
                 ecoEnabled = xml->getBoolAttribute ("ecoEnabled", false);
                 disableGlow = xml->getBoolAttribute ("disableGlowShadowEffects", false);
@@ -2595,8 +2714,10 @@ void EqEditor::loadUiPrefs()
                     spec3DCam.panY = (float) xml->getDoubleAttribute ("spec3dCamPanY", spec3DCam.panY);
                     spec3DCam.panZ = (float) xml->getDoubleAttribute ("spec3dCamPanZ", spec3DCam.panZ);
                 }
-            }
-        }
+                // Live layout flags may also live on UiPrefs (older host sessions / file prefs).
+                scopeModeOnLoad = xml->getBoolAttribute ("scopeMode", scopeModeOnLoad);
+                uiCompactOnLoad = xml->getBoolAttribute ("uiCompact", uiCompactOnLoad);
+                modPanelOnLoad = xml->getBoolAttribute ("modPanelOpen", modPanelOnLoad);
     }
 
     if (mainComponent != nullptr)
@@ -2611,8 +2732,8 @@ void EqEditor::loadUiPrefs()
         if (scopeFractionsStr.isNotEmpty())
             mainComponent->setScopeStripFractions (
                 ScopeLayoutPresets::decodeFractions (scopeFractionsStr, (int) scopeModules.size()));
-        // Scope itself stays off at load; geometry above is restored when Scope is re-opened.
-        mainComponent->setScopeMode (false, false);
+        // Restore Scope mode as last left (geometry above already applied).
+        mainComponent->setScopeMode (scopeModeOnLoad, false);
         mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (pianoDisplayOnLoad, false);
         mainComponent->setSpec3DMeshQuality (
             spec3DMeshQuality <= 0 ? Spectrogram3DComponent::MeshQuality::low
@@ -2783,13 +2904,25 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DSssMaxThickness (spec3DSssMaxThick, false);
         if (spec3DCamCustom)
             mainComponent->setSpec3DDefaultCamera (spec3DCam, true);
-        // Cube preference only — do not open maximized 3D/overlays on load.
+        // Restore floating 3D / expanded overlays as last left.
         mainComponent->setSpec3DMode (spec3DOnLoad, false);
         if (spec3DFrameCustom && spec3DFrameW > 0 && spec3DFrameH > 0)
             mainComponent->setSpec3DFrameBounds (spec3DFrameX, spec3DFrameY,
                                                  spec3DFrameW, spec3DFrameH);
-        juce::ignoreUnused (oscExpandedOnLoad, gonExpandedOnLoad, specExpandedOnLoad);
+        mainComponent->setOscExpanded (oscExpandedOnLoad, false);
+        mainComponent->setGonExpanded (gonExpandedOnLoad, false);
+        mainComponent->setSpecExpanded (specExpandedOnLoad, false);
 
+        // Theme colours: host session first, else last_ui_theme.xml (disk — same path as dice flags).
+        if (haveSessionTheme || audioProcessor.hasSessionUiTheme())
+            mainComponent->reapplySessionUiThemeFromProcessor();
+        else if (loadLastUiThemeFromDisk())
+            mainComponent->reapplySessionUiThemeFromProcessor();
+
+        if (sessionGlobalUi.isValid() && sessionGlobalUi.hasType ("GlobalUi"))
+            mainComponent->applyGlobalUiModules (sessionGlobalUi);
+
+        // Dice / accessibility scopes from ui_prefs always win after palette restore.
         auto& c = mainComponent->getSharedResources().sharedColors;
         c.randomizeFaceplateMod = randFaceplate;
         c.randomizeGraphModule = randGraph;
@@ -2799,9 +2932,29 @@ void EqEditor::loadUiPrefs()
         c.randomizeRampSpectrogram3D = randRampSpec3D;
         c.randomizeRampSpectrumFill = randRampFill;
         c.orderedRampGradation = orderedRampGradation;
+        mainComponent->getSharedResources().makeActive();
+    }
+
+    // Compact / mod strip as last left (after MainComponent prefs so window height matches).
+    if (modPanelOpen != modPanelOnLoad)
+    {
+        modPanelOpen = modPanelOnLoad;
+        if (mainComponent != nullptr)
+            mainComponent->getFrequencyResponseComponent().syncModButton (modPanelOpen);
+    }
+    if (uiCompact != uiCompactOnLoad)
+    {
+        uiCompact = uiCompactOnLoad;
+        applyCompactUi();
+    }
+    else if (modPanelOnLoad)
+    {
+        applyCompactUi(); // refresh height for mod panel
     }
 
     syncScopeModeButton();
+    syncScopeModeLayout();
+    setFaceplateBank (faceplateBank, false);
 }
 
 void EqEditor::requestSaveUiPrefs() noexcept
@@ -3049,10 +3202,45 @@ void EqEditor::saveUiPrefs() const
         }
     }
 
+    // Live layout as last left (restored on host session reopen).
+    xml->setAttribute ("scopeMode", mainComponent != nullptr && mainComponent->isScopeMode());
+    xml->setAttribute ("uiCompact", uiCompact);
+    xml->setAttribute ("modPanelOpen", modPanelOpen);
+
     auto file = getUiPrefsFile();
     file.getParentDirectory().createDirectory();
     if (file.getParentDirectory().isDirectory())
         xml->writeTo (file);
+
+    // Full palette — same disk folder as dice flags (this is what actually survives Ableton).
+    saveLastUiThemeToDisk();
+
+    // Host project state: same prefs + theme + GlobalUi modules (best-effort for per-project).
+    juce::ValueTree session ("UiSession");
+    if (auto prefsTree = juce::ValueTree::fromXml (*xml); prefsTree.isValid())
+        session.appendChild (std::move (prefsTree), nullptr);
+
+    if (mainComponent != nullptr)
+    {
+        Theme theme (mainComponent->getSharedResources().sharedColors);
+        if (auto themeXml = std::unique_ptr<juce::XmlElement> (theme.toXml()))
+            if (auto themeTree = juce::ValueTree::fromXml (*themeXml); themeTree.isValid())
+                session.appendChild (std::move (themeTree), nullptr);
+
+        auto globalUi = mainComponent->captureGlobalUiModules();
+        if (globalUi.isValid())
+            session.appendChild (std::move (globalUi), nullptr);
+
+        session.setProperty ("scopeMode", mainComponent->isScopeMode(), nullptr);
+    }
+    else
+    {
+        session.setProperty ("scopeMode", false, nullptr);
+    }
+
+    session.setProperty ("uiCompact", uiCompact, nullptr);
+    session.setProperty ("modPanelOpen", modPanelOpen, nullptr);
+    audioProcessor.storeSessionUiState (session);
 }
 
 void EqEditor::wireFaceplateKnobInteraction (juce::Slider& knob)
@@ -3505,6 +3693,7 @@ void EqEditor::toggleCompactUi()
 {
     uiCompact = ! uiCompact;
     applyCompactUi();
+    requestSaveUiPrefs();
 }
 
 const SharedColors& EqEditor::themePalette() const noexcept
@@ -3636,6 +3825,7 @@ void EqEditor::toggleModPanel()
     applyCompactUi();
     if (mainComponent != nullptr)
         mainComponent->getFrequencyResponseComponent().syncModButton (modPanelOpen);
+    requestSaveUiPrefs();
 }
 
 void EqEditor::syncModButton (bool isOpen)
