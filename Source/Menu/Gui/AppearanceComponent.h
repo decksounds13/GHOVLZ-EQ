@@ -69,6 +69,8 @@ public:
 
     void showRandomizeScopeMenu();
     void refreshAfterRandomize();
+    void syncAccessibilityControls();
+    void applyAccessibilityTextContrast();
 
     void setButtonLookAndFeels();
 
@@ -137,6 +139,11 @@ private:
 
     juce::Label uiElementsLabel;
     juce::Label themesLabel;
+
+    juce::Label accessibilityLabel;
+    juce::ToggleButton enforceLegibleTextToggle { "Legible text" };
+    juce::Label textContrastLabel;
+    juce::Slider textContrastSlider;
 
     std::unique_ptr<Eyedropper> eyedropper;
     std::unique_ptr<juce::TextButton> eyedropperButton; // Add this line

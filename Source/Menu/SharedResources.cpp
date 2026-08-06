@@ -1,5 +1,6 @@
 #include "SharedResources.h"
 #include "../KnobThemeHelpers.h"
+#include <cmath>
 
 SharedResources* SharedResources::activeInstance = nullptr;
 
@@ -270,6 +271,133 @@ juce::Colour SharedColors::randomColourInLimits (float alpha) const
                         ? rng.nextFloat() * (brightnessUpperLimit - brightnessLowerLimit) + brightnessLowerLimit
                         : brightnessLowerLimit;
     return juce::Colour::fromHSV (h, s, b, juce::jlimit (0.0f, 1.0f, alpha));
+}
+
+namespace
+{
+float relativeLuminance (juce::Colour c) noexcept
+{
+    auto lin = [] (float channel) noexcept
+    {
+        channel = juce::jlimit (0.0f, 1.0f, channel);
+        return channel <= 0.04045f ? channel / 12.92f
+                                   : std::pow ((channel + 0.055f) / 1.055f, 2.4f);
+    };
+    return 0.2126f * lin (c.getFloatRed())
+         + 0.7152f * lin (c.getFloatGreen())
+         + 0.0722f * lin (c.getFloatBlue());
+}
+
+float contrastRatio (juce::Colour a, juce::Colour b) noexcept
+{
+    const float l1 = relativeLuminance (a);
+    const float l2 = relativeLuminance (b);
+    const float lighter = juce::jmax (l1, l2);
+    const float darker  = juce::jmin (l1, l2);
+    return (lighter + 0.05f) / (darker + 0.05f);
+}
+
+juce::Colour blendBg (juce::Colour a, juce::Colour b) noexcept
+{
+    return a.interpolatedWith (b, 0.5f);
+}
+
+float minRatioFromAmount (float amount01) noexcept
+{
+    const float t = juce::jlimit (0.0f, 1.0f, amount01);
+    return 2.5f + t * 4.5f; // 2.5 … 7.0
+}
+
+/** Adjust text value (V) only — hue and saturation stay fixed. */
+juce::Colour ensureTextOnBackground (juce::Colour text, juce::Colour background,
+                                     float minRatio) noexcept
+{
+    if (contrastRatio (text, background) >= minRatio)
+        return text;
+
+    const float h = text.getHue();
+    const float s = text.getSaturation();
+    const float a = text.getFloatAlpha();
+    const float bgY = relativeLuminance (background);
+    const bool preferLight = bgY < 0.5f;
+
+    auto atV = [&] (float v) noexcept
+    {
+        return juce::Colour::fromHSV (h, s, juce::jlimit (0.0f, 1.0f, v), a);
+    };
+
+    float lo = preferLight ? text.getBrightness() : 0.0f;
+    float hi = preferLight ? 1.0f : text.getBrightness();
+    if (preferLight)
+        lo = juce::jmin (lo, 0.5f);
+    else
+        hi = juce::jmax (hi, 0.5f);
+
+    juce::Colour best = preferLight ? atV (1.0f) : atV (0.0f);
+    for (int i = 0; i < 14; ++i)
+    {
+        const float mid = 0.5f * (lo + hi);
+        const auto cand = atV (mid);
+        if (contrastRatio (cand, background) >= minRatio)
+        {
+            best = cand;
+            if (preferLight)
+                hi = mid;
+            else
+                lo = mid;
+        }
+        else
+        {
+            if (preferLight)
+                lo = mid;
+            else
+                hi = mid;
+        }
+    }
+
+    if (contrastRatio (best, background) < minRatio)
+    {
+        const auto other = preferLight ? atV (0.0f) : atV (1.0f);
+        if (contrastRatio (other, background) > contrastRatio (best, background))
+            best = other;
+    }
+
+    return best;
+}
+} // namespace
+
+void SharedColors::enforceLegibleTextContrast() noexcept
+{
+    if (! enforceLegibleText)
+        return;
+
+    const float minRatio = minRatioFromAmount (textContrastAmount);
+
+    auto fix = [&] (juce::Colour& text, juce::Colour bg)
+    {
+        text = ensureTextOnBackground (text, bg, minRatio);
+    };
+
+    fix (menuButtonTextColor1, blendBg (menuButtonGradientColor1, menuButtonGradientColor2));
+    fix (menuLabelTextColor1, blendBg (menuBackgroundGradientColor1, menuBackgroundGradientColor2));
+    fix (menuListBoxTextColor1, blendBg (menuListBoxBackgroundGradientColor1, menuListBoxBackgroundGradientColor2));
+    fix (menuListBoxTextColor1, menuListBoxSelectionColor1);
+    fix (menuTextBoxTextColor1, blendBg (menuBackgroundGradientColor1, menuBackgroundGradientColor2));
+
+    fix (pluginButtonText, pluginButtonBackground);
+    fix (pluginPresetText, pluginPresetBackground);
+    fix (pluginBrandText, blendBg (pluginBackground, pluginBackground2));
+
+    fix (graphAxisText, blendBg (graphBackground, graphBackground2));
+    fix (graphHandleText, graphBackground);
+
+    fix (optionText, optionBackground);
+    fix (optionComboText, optionComboBackground);
+    fix (modText, modBackground);
+
+    fix (knobPopupText, knobPopupBackground);
+    fix (meterReadoutText, meterBackground);
+    fix (spectrumText, blendBg (spectrumBackground, spectrumBackground2));
 }
 
 void SharedColors::randomizeColors()

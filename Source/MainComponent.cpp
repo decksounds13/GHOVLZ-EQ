@@ -4716,6 +4716,13 @@ void MainComponent::randomizeUiTheme()
 {
     sharedResources.makeActive();
     sharedResources.sharedColors.randomizeColors();
+    // Accessibility: only after colours are randomized (never inside randomizeColors).
+    if (sharedResources.sharedColors.enforceLegibleText)
+    {
+        sharedResources.sharedColors.enforceLegibleTextContrast();
+        if (sharedResources.sharedColors.randomizeFaceplateMod)
+            sharedResources.sharedColors.syncFaceplateModScheme();
+    }
     applyThemeToChildComponents();
 
     if (auto* appearance = menu.getAppearanceComponent())

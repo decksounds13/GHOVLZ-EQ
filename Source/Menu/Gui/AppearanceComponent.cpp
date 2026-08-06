@@ -239,6 +239,40 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 		// Additional logic if needed
 		};
 
+	// Accessibility — legible text after randomize
+	accessibilityLabel.setText ("Accessibility", juce::dontSendNotification);
+	accessibilityLabel.setJustificationType (juce::Justification::centredLeft);
+	accessibilityLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
+	addAndMakeVisible (accessibilityLabel);
+
+	enforceLegibleTextToggle.setClickingTogglesState (true);
+	enforceLegibleTextToggle.setToggleState (sharedResources.sharedColors.enforceLegibleText,
+	                                         juce::dontSendNotification);
+	enforceLegibleTextToggle.setTooltip (
+	    "After randomize, push text value away from its background so labels stay readable. "
+	    "Adjusts text only (value), not backgrounds.");
+	enforceLegibleTextToggle.onClick = [this]
+	{
+		sharedResources.sharedColors.enforceLegibleText = enforceLegibleTextToggle.getToggleState();
+		syncAccessibilityControls();
+		if (sharedResources.sharedColors.enforceLegibleText)
+			applyAccessibilityTextContrast();
+	};
+	addAndMakeVisible (enforceLegibleTextToggle);
+
+	textContrastLabel.setText ("Contrast", juce::dontSendNotification);
+	textContrastLabel.setJustificationType (juce::Justification::centredLeft);
+	addAndMakeVisible (textContrastLabel);
+
+	textContrastSlider.setRange (0.0, 1.0, 0.01);
+	textContrastSlider.setValue (sharedResources.sharedColors.textContrastAmount, juce::dontSendNotification);
+	textContrastSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+	textContrastSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+	textContrastSlider.setTooltip ("How strongly text is separated from background value (text only).");
+	textContrastSlider.addListener (this);
+	addAndMakeVisible (textContrastSlider);
+
+	syncAccessibilityControls();
 
 	randomizeSelectedColorsButton.onClick = [this] {
 		auto selectedIndices = uiElementsList.getSelectedPaletteIndices();
@@ -268,6 +302,12 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 
 		// Randomize the selected colors and get the randomized color
 		juce::Colour randomizedColor = sharedResources.sharedColors.randomizeSelectedColorsWithinRange();
+		if (sharedResources.sharedColors.enforceLegibleText)
+		{
+			sharedResources.sharedColors.enforceLegibleTextContrast();
+			if (sharedResources.sharedColors.randomizeFaceplateMod)
+				sharedResources.sharedColors.syncFaceplateModScheme();
+		}
 
 		std::fill(sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), (uint8_t) 1);
 
@@ -312,6 +352,12 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 		brightnessRangeSlider.setMaxValue(brightnessRangeSlider.getMaxValue());
 
 		sharedResources.sharedColors.randomizeColors();
+		if (sharedResources.sharedColors.enforceLegibleText)
+		{
+			sharedResources.sharedColors.enforceLegibleTextContrast();
+			if (sharedResources.sharedColors.randomizeFaceplateMod)
+				sharedResources.sharedColors.syncFaceplateModScheme();
+		}
 		refreshAfterRandomize();
 		};
 
@@ -545,6 +591,14 @@ void AppearanceComponent::resized()
 	randomizeBrightnessToggleButton.setBounds(randomBrightnessToggleButtonX, randomHueToggleButtonY, randomButtonWidth / 2.5, randomButtonHeight);
 	randomizeAlphaToggleButton.setBounds(randomAlphaToggleButtonX, randomHueToggleButtonY, randomButtonWidth / 2.5, randomButtonHeight);
 
+	// Accessibility row under theme New/Overwrite/Delete
+	const int accessY = buttonY + buttonHeight + 10;
+	const int accessH = 22;
+	accessibilityLabel.setBounds (padding, accessY, 100, accessH);
+	enforceLegibleTextToggle.setBounds (padding + 100, accessY, 120, accessH);
+	textContrastLabel.setBounds (padding + 230, accessY, 60, accessH);
+	textContrastSlider.setBounds (padding + 290, accessY, juce::jmax (80, listBoxWidth - 290), accessH);
+
 	juce::Colour firstItemColor = sharedResources.sharedColors.menuBackgroundGradientColor1;
 	quadPicker.setColor(firstItemColor);
 	hueSelector.setColor(firstItemColor);
@@ -774,8 +828,10 @@ void AppearanceComponent::updateColorSelectors(const juce::Array<juce::Colour>& 
 void AppearanceComponent::onPresetApplied(const Theme& theme)
 {
 	DBG("onPresetApplied Called");
-	// Update shared resources with the new theme colors
-	sharedResources.sharedColors = theme.getColors();
+	// ThemeList already applied palette colours and preserved randomize flags.
+	// Do not re-assign theme.getColors() here — that would restore stale dice
+	// scope flags from the Theme snapshot and kill button/menu randomize.
+	juce::ignoreUnused (theme);
 
 	// Get the currently selected row index
 	int selectedRowIndex = uiElementsList.getSelectedRowIndex();
@@ -890,6 +946,10 @@ void AppearanceComponent::repaintNewPresetButton() {
 
 void AppearanceComponent::setupLabels() {
 	DBG("setupLabels Called");
+	accessibilityLabel.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
+	textContrastLabel.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
+	enforceLegibleTextToggle.setColour (juce::ToggleButton::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
+	enforceLegibleTextToggle.setColour (juce::ToggleButton::tickColourId, sharedResources.sharedColors.menuSliderFillColor);
 	// Set text for the labels
 	uiElementsLabel.setText("UI Elements", juce::dontSendNotification);
 	themesLabel.setText("Themes", juce::dontSendNotification);
@@ -1129,6 +1189,31 @@ void AppearanceComponent::sliderValueChanged(juce::Slider* slider) {
 	
 		//DBG("Brightness Range Slider Value Changed: Min = " << slider->getMinValue() << ", Max = " << slider->getMaxValue());
 	}
+
+	if (slider == &textContrastSlider)
+	{
+		sharedResources.sharedColors.textContrastAmount = (float) textContrastSlider.getValue();
+		if (sharedResources.sharedColors.enforceLegibleText)
+			applyAccessibilityTextContrast();
+	}
+}
+
+void AppearanceComponent::syncAccessibilityControls()
+{
+	const bool on = sharedResources.sharedColors.enforceLegibleText;
+	enforceLegibleTextToggle.setToggleState (on, juce::dontSendNotification);
+	textContrastSlider.setValue (sharedResources.sharedColors.textContrastAmount, juce::dontSendNotification);
+	textContrastSlider.setVisible (on);
+	textContrastLabel.setVisible (on);
+	textContrastSlider.setEnabled (on);
+}
+
+void AppearanceComponent::applyAccessibilityTextContrast()
+{
+	sharedResources.sharedColors.enforceLegibleTextContrast();
+	if (sharedResources.sharedColors.randomizeFaceplateMod)
+		sharedResources.sharedColors.syncFaceplateModScheme();
+	refreshAfterRandomize();
 }
 
 void AppearanceComponent::repaintParentComponent()

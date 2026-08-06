@@ -173,6 +173,14 @@ public:
     */
     bool orderedRampGradation = true;
 
+    /**
+        Accessibility: after randomize, adjust text value (V only) vs its background
+        so labels stay readable. Off by default; enable in Appearance.
+    */
+    bool enforceLegibleText = false;
+    /** 0 = mild separation, 1 = strong. Only used when enforceLegibleText. */
+    float textContrastAmount = 0.55f;
+
     SharedColors();
 
     void setRandomizeHue (bool enabled) { randomizeHue = enabled; }
@@ -221,6 +229,12 @@ public:
     void updateColorsDirectly (juce::Colour newColor, const juce::Array<int>& paletteIndices);
     void randomizeColors();
     juce::Colour randomizeSelectedColorsWithinRange();
+
+    /**
+        Re-apply text legibility against current backgrounds (text V only).
+        No-op when enforceLegibleText is false.
+    */
+    void enforceLegibleTextContrast() noexcept;
 
     /** One HSV colour inside the Appearance H/S/V limit sliders (and H/S/V gates). */
     juce::Colour randomColourInLimits (float alpha = 1.0f) const;

@@ -436,7 +436,49 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
         return;
 
     const auto selectedTheme = presets[index];
-    sharedResources.sharedColors = selectedTheme.getColors();
+
+    // Theme snapshots copy full SharedColors (including dice scope flags).
+    // Applying a theme must restore palette colours only — never disable
+    // Faceplate/Graph/Menu randomize, or plugin buttons/menus stop following the dice.
+    auto& live = sharedResources.sharedColors;
+    const bool keepFace = live.randomizeFaceplateMod;
+    const bool keepGraph = live.randomizeGraphModule;
+    const bool keepMenu = live.randomizeMenuModule;
+    const bool keepRampFft = live.randomizeRampFftBars;
+    const bool keepRampSpec = live.randomizeRampSpectrogram;
+    const bool keepRampSpec3D = live.randomizeRampSpectrogram3D;
+    const bool keepRampFill = live.randomizeRampSpectrumFill;
+    const bool keepOrdered = live.orderedRampGradation;
+    const bool keepLegible = live.enforceLegibleText;
+    const float keepContrast = live.textContrastAmount;
+    const bool keepH = live.randomizeHue, keepS = live.randomizeSaturation;
+    const bool keepB = live.randomizeBrightness, keepA = live.randomizeAlpha;
+    const float hueL = live.hueLowerLimit, hueU = live.hueUpperLimit;
+    const float satL = live.saturationLowerLimit, satU = live.saturationUpperLimit;
+    const float briL = live.brightnessLowerLimit, briU = live.brightnessUpperLimit;
+
+    live = selectedTheme.getColors();
+
+    live.randomizeFaceplateMod = keepFace;
+    live.randomizeGraphModule = keepGraph;
+    live.randomizeMenuModule = keepMenu;
+    live.randomizeRampFftBars = keepRampFft;
+    live.randomizeRampSpectrogram = keepRampSpec;
+    live.randomizeRampSpectrogram3D = keepRampSpec3D;
+    live.randomizeRampSpectrumFill = keepRampFill;
+    live.orderedRampGradation = keepOrdered;
+    live.enforceLegibleText = keepLegible;
+    live.textContrastAmount = keepContrast;
+    live.randomizeHue = keepH;
+    live.randomizeSaturation = keepS;
+    live.randomizeBrightness = keepB;
+    live.randomizeAlpha = keepA;
+    live.hueLowerLimit = hueL;
+    live.hueUpperLimit = hueU;
+    live.saturationLowerLimit = satL;
+    live.saturationUpperLimit = satU;
+    live.brightnessLowerLimit = briL;
+    live.brightnessUpperLimit = briU;
 
     listBox.selectRow (index);
     selectedRow = index;
