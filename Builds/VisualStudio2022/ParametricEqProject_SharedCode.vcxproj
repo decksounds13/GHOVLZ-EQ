@@ -164,7 +164,11 @@
     <ClCompile Include="..\..\Source\ColourRamp\PathSampleOverlay.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\RampColorPickerPanel.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\GradientStripEditor.cpp"/>
-    <ClCompile Include="..\..\Source\ColourRamp\RampPresetStore.cpp"/>
+        <ClCompile Include="..\..\Source\ColourRamp\RampPresetStore.cpp"/>
+    <ClCompile Include="..\..\Source\ColourRamp\Spec3DRampSequence.cpp"/>
+    <ClCompile Include="..\..\Source\ColourRamp\RampPresetPicker.cpp"/>
+    <ClCompile Include="..\..\Source\ColourRamp\Spec3DRampTimelineComponent.cpp"/>
+    <ClCompile Include="..\..\Source\ColourRamp\Spec3DRampTimelineWindow.cpp"/>
     <ClCompile Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.cpp"/>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
@@ -3498,7 +3502,11 @@
     <ClInclude Include="..\..\Source\ColourRamp\ColourSwatchEditor.h"/>
     <ClInclude Include="..\..\Source\Assets\VeniceSunsetHdri.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\GradientStripEditor.h"/>
-    <ClInclude Include="..\..\Source\ColourRamp\RampPresetStore.h"/>
+        <ClInclude Include="..\..\Source\ColourRamp\RampPresetStore.h"/>
+    <ClInclude Include="..\..\Source\ColourRamp\Spec3DRampSequence.h"/>
+    <ClInclude Include="..\..\Source\ColourRamp\RampPresetPicker.h"/>
+    <ClInclude Include="..\..\Source\ColourRamp\Spec3DRampTimelineComponent.h"/>
+    <ClInclude Include="..\..\Source\ColourRamp\Spec3DRampTimelineWindow.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.h"/>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.h"/>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.h"/>

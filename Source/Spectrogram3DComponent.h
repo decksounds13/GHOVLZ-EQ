@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "ColourRamp/Spec3DRampSequence.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 #include <atomic>
 #include <vector>
@@ -9,6 +10,7 @@
 
 class SpectrogramComponent;
 class SharedResources;
+class ColourRampBank;
 
 /**
     OpenGL heightfield for the spectrogram (expanded / Scope).
@@ -497,6 +499,8 @@ public:
     void invalidateMesh() noexcept;
     /** Rebuild vertex colours from the current mesh + 3D colour LUT (ramp edits). */
     void recolourMesh() noexcept;
+    /** Ramp morph only: refresh vertex RGB from meshDb + current 3D LUT (no normals/positions). */
+    void recolourVertexColoursOnly() noexcept;
 
     /** @deprecated Use getMeshHeight() — kept as alias for call sites expecting a constant. */
     static constexpr float kMeshHeight = kDefaultMeshHeight;
@@ -538,6 +542,21 @@ public:
     std::function<void()> onDebugSphereChanged;
     /** If set, double-click invokes this instead of resetCamera(). */
     std::function<void()> onDoubleClick;
+
+    /** Colour ramp bank for ramp-timeline presets (set by MainComponent). */
+    void setColourRampBank (class ColourRampBank* bank) noexcept { colourRampBank = bank; }
+    ColourRampBank* getColourRampBank() const noexcept { return colourRampBank; }
+
+    Spec3DRampSequence& getRampSequence() noexcept { return rampSequence; }
+    const Spec3DRampSequence& getRampSequence() const noexcept { return rampSequence; }
+    void setRampSequence (const Spec3DRampSequence& s) noexcept;
+    float getRampTimelinePlayheadSec() const noexcept { return rampPlayheadSec; }
+    void clearMorphRamp() noexcept;
+
+    /** Persist when timeline model is edited (not per playhead tick). */
+    std::function<void()> onRampSequenceChanged;
+    /** Open expanded floating timeline editor. */
+    std::function<void()> onRequestRampTimelineExpand;
 
     juce::Rectangle<int> getFrameBounds() const noexcept { return getBounds(); }
     int getShadowPad() const noexcept;
@@ -822,6 +841,8 @@ private:
 
         juce::OpenGLTexture labelAtlas;
         juce::OpenGLFrameBuffer softFbo;
+        /** Reused each soft readback — avoid alloc hitch every frame. */
+        std::vector<juce::PixelARGB> softReadbackPixels;
         juce::OpenGLFrameBuffer postFboA;
         juce::OpenGLFrameBuffer postFboB;
         juce::OpenGLFrameBuffer ssgiHalfFbo;
@@ -932,7 +953,8 @@ private:
     void appendMeshColumnsFromHistory (const std::vector<float>& history, int histW, int histH, int numNew);
     void ensureIndexBuffer (int w, int h);
     void rebuildVerticesFromMeshDb (float brightness, float minDb, float maxDb);
-    void updateMeshFromSource();
+    /** @return true if mesh vertices were rebuilt this call. */
+    bool updateMeshFromSource();
     void rebuildFreqLabels (double sampleRate, bool logFreq);
     float worldZForFreq (float hz, double sampleRate, bool logFreq) const noexcept;
     static juce::String formatGridHz (float hz);
@@ -1085,6 +1107,8 @@ private:
     bool labelAtlasDirty = true;
 
     juce::Image softCompositeImage;
+    /** Soft readback write target; swapped with softCompositeImage under lock. */
+    juce::Image softCompositeBack;
     juce::CriticalSection softImageLock;
 
     CameraState camera;
@@ -1099,6 +1123,36 @@ private:
     float zoomOscillateBaseDistance = 3.0f;
     float zoomOscillatePhaseRad = 0.0f;
     double zoomOscillateLastTimeSec = 0.0;
+
+    Spec3DRampSequence rampSequence;
+    ColourRampBank* colourRampBank = nullptr;
+    GradientRamp morphRamp;
+    float rampPlayheadSec = 0.0f;
+    double rampTimelineLastTimeSec = 0.0;
+    bool morphRampActive = false;
+    /** -1 = none; last solid/fade clip index that updated the 3D LUT. */
+    int lastMorphClipIndex = -1;
+    /** -1 = solid; 1 while inside a crossfade (for leave-fade detection). */
+    int lastMorphFadeStep = -1;
+    /** Monotonic revision for morphRamp — lerpRamps always starts at rev 1, which
+        made setCustomColourRamp3D early-out and freeze the LUT mid-crossfade. */
+    uint32_t morphRampSerial = 1;
+    /** Lighting automation changed uniforms; fold into next soft frame (no extra FBO). */
+    bool lightingUniformsDirty = false;
+    double lastLightingSoftRedrawSec = 0.0;
+    /** Reused layout buffer for applyMorph (no heap thrash). */
+    std::vector<Spec3DRampSequence::LaidOutClip> morphLayoutCache;
+    /** Reused by full mesh rebuilds to avoid per-frame Vertex allocations. */
+    std::vector<Vertex> meshBuildVerts;
+    void tickRampTimeline (float dt) noexcept;
+    /** Updates 3D colour LUT + mesh colours for ramp morph/crossfade. */
+    void applyMorphRampIfNeeded() noexcept;
+    /**
+        Lighting envelopes: write shader uniforms only.
+        Does not mark soft dirty — next mesh/soft frame picks them up (avoids DOF thrash).
+    */
+    void applyMorphLightingAutomation() noexcept;
+    void invalidateMorphSchedule() noexcept;
 
     bool audioLevelModEnabled = false;
     AudioLevelTarget audioLevelTarget = AudioLevelTarget::brightness;

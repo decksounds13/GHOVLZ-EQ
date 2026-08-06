@@ -18,6 +18,7 @@
 #include "EqBand.h"
 #include "BandChannel.h"
 #include "Menu/Theme.h"
+#include "ColourRamp/Spec3DRampSequence.h"
 
 
 
@@ -2667,6 +2668,15 @@ void EqEditor::loadUiPrefs()
                     "spec3dZoomOscDepth", Spectrogram3DComponent::kZoomOscillateDepthDefault);
                 spec3DZoomOscPeriod = (float) xml->getDoubleAttribute (
                     "spec3dZoomOscPeriod", Spectrogram3DComponent::kZoomOscillatePeriodDefaultSec);
+                if (mainComponent != nullptr && xml->hasAttribute ("spec3dRampSequence"))
+                {
+                    const auto seqStr = xml->getStringAttribute ("spec3dRampSequence");
+                    if (seqStr.isNotEmpty())
+                        if (auto seqXml = juce::parseXML (seqStr))
+                            if (auto seqTree = juce::ValueTree::fromXml (*seqXml); seqTree.isValid())
+                                mainComponent->setSpec3DRampSequence (
+                                    Spec3DRampSequence::fromValueTree (seqTree), false);
+                }
                 spec3DAudioLevel = xml->getBoolAttribute ("spec3dAudioLevel", false);
                 spec3DAudioTarget = xml->getIntAttribute ("spec3dAudioTarget", 0);
                 spec3DAudioMinPct = (float) xml->getDoubleAttribute (
@@ -3145,6 +3155,11 @@ void EqEditor::saveUiPrefs() const
                            (double) mainComponent->getSpec3DZoomOscillateDepth());
         xml->setAttribute ("spec3dZoomOscPeriod",
                            (double) mainComponent->getSpec3DZoomOscillatePeriodSec());
+        {
+            auto seqTree = mainComponent->getSpec3DRampSequence().toValueTree();
+            if (auto seqXml = seqTree.createXml())
+                xml->setAttribute ("spec3dRampSequence", seqXml->toString());
+        }
         xml->setAttribute ("spec3dAudioLevel", mainComponent->isSpec3DAudioLevelModEnabled());
         xml->setAttribute ("spec3dAudioTarget", (int) mainComponent->getSpec3DAudioLevelTarget());
         xml->setAttribute ("spec3dAudioMinPct",

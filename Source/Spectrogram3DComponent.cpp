@@ -2,6 +2,8 @@
 #include "SpectrogramComponent.h"
 #include "Menu/SharedResources.h"
 #include "ComboBoxLookAndFeel.h"
+#include "ColourRamp/ColourRampBank.h"
+#include "ColourRamp/Spec3DRampTimelineComponent.h"
 #include "Assets/VeniceSunsetHdri.h"
 #include <cmath>
 #include <cstring>
@@ -729,6 +731,7 @@ namespace
     //        15 = SVGF temporal + variance clamp (Modern), 16 = à-trous (Modern),
     //        17 = DOF CoC write (mesh only; sky = 0), 18 = luminance moments (Modern),
     //        19 = DOF CoC dilate (spread mesh CoC into soft-BG void).
+    // Mode 6 uParam = DOF edge spill; mode 19 uParam = CoC dilate.
     // Vendor denoisers (NVIDIA NRD/OptiX, Intel OIDN) are intentionally not used:
     // they need D3D11/12, Vulkan, and/or CUDA/SYCL — incompatible with this JUCE
     // OpenGL soft FBO→Image Spec3D path without a full API rewrite.
@@ -854,8 +857,9 @@ namespace
                 float gatherCoc = centerSky ? max (centerCoc, dilatedCoc) : centerCoc;
                 vec2 texel = 1.0 / max (uResolution, vec2 (1.0));
 
-                // uInvProj[0].y = edgeSpill from CPU tune knob (dilate is baked into uAux).
-                float spillAmt = clamp (uInvProj[0][1], 0.0, 1.0);
+                // uParam = Edge Spill (0–1). Dilate is baked into uAux (mode 19).
+                // (Do not use uInvProj here — mat packing is shared with SSR/SSGI.)
+                float spillAmt = clamp (uParam, 0.0, 1.0);
 
                 if (gatherCoc < 0.4)
                 {
@@ -868,7 +872,10 @@ namespace
                 // Premultiplied accumulation so coverage softens with colour.
                 vec4 acc = vec4 (src.rgb * src.a, src.a);
                 float wSum = 1.0;
-                float spillFloor = mix (0.05, 0.95, spillAmt);
+                // Low spill: almost no mesh→sky bleed. High spill: strong soft silhouette.
+                float spillFloor = mix (0.0, 0.92, spillAmt);
+                float cocGate   = mix (0.55, 0.12, spillAmt);
+                float spillBoost = mix (0.25, 1.0, spillAmt);
 
                 for (int i = 0; i < 24; ++i)
                 {
@@ -883,16 +890,17 @@ namespace
                     vec4 s = texture (uTex, uv2);
 
                     // Down-weight sharper neighbours so in-focus edges don't bleed into bokeh.
-                    // Sky centres only pull in mesh that is itself defocused.
+                    // Sky centres only pull in mesh that is itself defocused (spill-gated).
                     float w = 1.0;
                     if (! centerSky && sampleCoc + 0.5 < gatherCoc)
                         w = clamp (sampleCoc / max (gatherCoc, 1.0e-3), 0.05, 1.0);
                     if (centerSky && ! sampleSky)
                     {
-                        if (sampleCoc < 0.4)
+                        if (sampleCoc < cocGate)
                             w = 0.0;
                         else
-                            w = clamp (sampleCoc / max (gatherCoc, 1.0e-3), spillFloor, 1.0);
+                            w = clamp (sampleCoc / max (gatherCoc, 1.0e-3), spillFloor, 1.0)
+                                * spillBoost;
                     }
 
                     acc += vec4 (s.rgb * s.a, s.a) * w;
@@ -2840,24 +2848,35 @@ void Spectrogram3DComponent::GlHost::readbackSoftImage (int width, int height)
     if (width < 1 || height < 1 || ! softFbo.isValid())
         return;
 
-    std::vector<juce::PixelARGB> pixels ((size_t) width * (size_t) height);
-    if (! softFbo.readPixels (pixels.data(),
+    const size_t n = (size_t) width * (size_t) height;
+    if (softReadbackPixels.size() != n)
+        softReadbackPixels.resize (n);
+
+    if (! softFbo.readPixels (softReadbackPixels.data(),
                               { 0, 0, width, height },
                               juce::OpenGLFrameBuffer::RowOrder::fromTopDown))
         return;
 
-    juce::Image img (juce::Image::ARGB, width, height, true, juce::SoftwareImageType());
+    // Write into the back buffer (never the image paint may still be drawing).
+    if (! owner.softCompositeBack.isValid()
+        || owner.softCompositeBack.getWidth() != width
+        || owner.softCompositeBack.getHeight() != height)
     {
-        juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+        owner.softCompositeBack = juce::Image (juce::Image::ARGB, width, height, true,
+                                               juce::SoftwareImageType());
+    }
+
+    {
+        juce::Image::BitmapData bd (owner.softCompositeBack, juce::Image::BitmapData::writeOnly);
         for (int y = 0; y < height; ++y)
             std::memcpy (bd.getLinePointer (y),
-                         pixels.data() + (size_t) y * (size_t) width,
+                         softReadbackPixels.data() + (size_t) y * (size_t) width,
                          (size_t) width * sizeof (juce::PixelARGB));
     }
 
     {
         const juce::ScopedLock sl (owner.softImageLock);
-        owner.softCompositeImage = std::move (img);
+        std::swap (owner.softCompositeImage, owner.softCompositeBack);
     }
 
     softContentDirty = false;
@@ -2908,8 +2927,9 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     {
         glBindFramebuffer (GL_FRAMEBUFFER, softMsaaFbo);
         glViewport (0, 0, w, h);
-        // Transparent clear only — soft/opaque plate is a single JUCE panel fill
-        // (match FramedFloatingScopeWindow; avoid double-tint vs Osc/Gon).
+        // Transparent clear, then a single soft plate (drawSoftTint) so DOF edge
+        // dilate/spill (modes 17→19→6) can blur OOF mesh into Soft BG void colour.
+        // Paint must not pre-fill a second translucent plate over this image.
         glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
         glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable (GL_MULTISAMPLE);
@@ -2918,12 +2938,15 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     {
         softFbo.makeCurrentAndClear();
         glViewport (0, 0, w, h);
-        glClear (GL_DEPTH_BUFFER_BIT);
+        glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
+        glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
 
     uploadDomeTextureIfNeeded();
-    // Soft tint is NOT drawn into the FBO: Component::paint fills the rounded
-    // panel once (same recipe as Osc/Gon). FBO is scene-only over that plate.
+    // Soft plate in FBO (colour + alpha in the sky void). Required for DOF
+    // silhouette soft into Soft BG; paint skips a second soft fill when Soft BG
+    // is on so Osc/Gon-style double-tint does not return.
+    drawSoftTint();
     // #region agent log
     gLabelDrawCallsThisFrame = 0;
     ++gSoftFrameCounter;
@@ -4423,20 +4446,16 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
             postResolutionUniform->set ((float) vw, (float) vh);
         if (postInvProjUniform != nullptr)
         {
-            // Mode 6 (DoF gather): column0.y = edgeSpill (dilate is a separate pass).
+            // Mode 6 (DoF gather): edge spill is uParam (not mat packing).
             // Mode 7 (SSR): lookdev pack (rough/fresnel/edge/roughInf, intensity/…).
             // SSGI gather: [0][0] = mesh-normals flag.
             float id[16] = {
-                0, 0, 0, 0,
+                1, 0, 0, 0,
                 0, 1, 0, 0,
                 0, 0, 1, 0,
                 0, 0, 0, 1
             };
-            if (mode == 6)
-            {
-                id[1] = owner.dofEdgeSpill;
-            }
-            else if (mode == 7)
+            if (mode == 7)
             {
                 id[0] = owner.roughnessAmount;
                 id[1] = owner.ssrFresnel;
@@ -4451,9 +4470,10 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
                 id[10] = owner.domeSkyColour.getFloatBlue();
                 id[12] = owner.ssrDomeFallback;
             }
-            else
+            else if (mode != 6)
             {
                 id[0] = useMeshNormalsFlag ? 1.0f : 0.0f;
+                id[1] = 0.0f;
             }
             postInvProjUniform->setMatrix4 (id, 1, false);
         }
@@ -4757,8 +4777,9 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
         drawFs (19, &postFboB, (GLuint) postFboA.getTextureID(), softDepthTex, 0,
                 lensPower, 1.0f, qualityF, owner.dofCocDilate,
                 width, height, false);
+        // Mode 6: uParam = edge spill (dilate already in uAux from mode 19).
         drawFs (6, &postFboA, sceneTex, softDepthTex, (GLuint) postFboB.getTextureID(),
-                lensPower, owner.dofFocusDistance, qualityF, 0.0f,
+                lensPower, owner.dofFocusDistance, qualityF, owner.dofEdgeSpill,
                 width, height, false);
         drawFs (0, nullptr, (GLuint) postFboA.getTextureID(), softDepthTex, 0,
                 1.0f, 1.0f, 0.0f, 0.0f, width, height, false);
@@ -6289,6 +6310,74 @@ void Spectrogram3DComponent::recolourMesh() noexcept
         glHost->triggerRedraw();
 }
 
+void Spectrogram3DComponent::recolourVertexColoursOnly() noexcept
+{
+    if (dataSource == nullptr || meshW < 2 || meshH < 2 || meshDb.empty() || lastBrightness < 0.0f)
+        return;
+
+    dataSource->refreshColourLutFor3D();
+
+    const float brightness = lastBrightness;
+    const float minDb = lastMinDb;
+    const float maxDb = lastMaxDb;
+    const float denom = juce::jmax (1.0f, maxDb - minDb);
+    juce::ignoreUnused (denom);
+    const bool closed = closedMeshEnabled;
+    const int topCount = meshW * meshH;
+
+    const juce::ScopedLock sl (meshLock);
+    if ((int) cpuVertices.size() < topCount)
+        return;
+
+    for (int z = 0; z < meshH; ++z)
+    {
+        for (int x = 0; x < meshW; ++x)
+        {
+            const float db = meshDb[(size_t) x * (size_t) meshH + (size_t) z];
+            const auto c = dataSource->colourFromHistoryDb3D (db, brightness, minDb, maxDb);
+            auto& vtx = cpuVertices[(size_t) z * (size_t) meshW + (size_t) x];
+            vtx.r = c.getFloatRed();
+            vtx.g = c.getFloatGreen();
+            vtx.b = c.getFloatBlue();
+
+            if (closed && (int) cpuVertices.size() >= topCount * 2)
+            {
+                auto& bot = cpuVertices[(size_t) topCount + (size_t) z * (size_t) meshW + (size_t) x];
+                bot.r = vtx.r * 0.55f;
+                bot.g = vtx.g * 0.55f;
+                bot.b = vtx.b * 0.55f;
+            }
+        }
+    }
+
+    if (closed && (int) cpuVertices.size() >= topCount * 2 + meshH * 4)
+    {
+        const int phTop = topCount * 2;
+        const int phBot = phTop + meshH;
+        const int endTop = phBot + meshH;
+        const int endBot = endTop + meshH;
+        for (int z = 0; z < meshH; ++z)
+        {
+            const auto& srcPh = cpuVertices[(size_t) z * (size_t) meshW + (size_t) (meshW - 1)];
+            auto& phT = cpuVertices[(size_t) (phTop + z)];
+            phT.r = srcPh.r; phT.g = srcPh.g; phT.b = srcPh.b;
+            auto& phB = cpuVertices[(size_t) (phBot + z)];
+            phB.r = srcPh.r * 0.55f; phB.g = srcPh.g * 0.55f; phB.b = srcPh.b * 0.55f;
+
+            const auto& srcEnd = cpuVertices[(size_t) z * (size_t) meshW];
+            auto& eT = cpuVertices[(size_t) (endTop + z)];
+            eT.r = srcEnd.r; eT.g = srcEnd.g; eT.b = srcEnd.b;
+            auto& eB = cpuVertices[(size_t) (endBot + z)];
+            eB.r = srcEnd.r * 0.55f; eB.g = srcEnd.g * 0.55f; eB.b = srcEnd.b * 0.55f;
+        }
+    }
+
+    meshNeedsUpload = true;
+    markSoftContentDirty();
+    if (glHost != nullptr)
+        glHost->triggerRedraw();
+}
+
 void Spectrogram3DComponent::resetCamera() noexcept
 {
     seedDefaultOrientation();
@@ -6851,7 +6940,9 @@ void Spectrogram3DComponent::resized()
 
 void Spectrogram3DComponent::paint (juce::Graphics& g)
 {
-    // Match FramedFloatingScopeWindow (Osc / Gon / Spec 2D): shadow → panel fill → content → stroke.
+    // Match FramedFloatingScopeWindow (Osc / Gon / Spec 2D): shadow → plate → content → stroke.
+    // Soft BG plate lives in the soft FBO (drawSoftTint) so DOF can spill into it;
+    // do not pre-fill a second translucent plate under a valid soft image.
     const auto inner = getInnerFrameLocal().toFloat();
     const float radius = chromeMode == ChromeMode::docked ? 4.0f : kCornerRadius;
     juce::Path panel;
@@ -6861,11 +6952,12 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
         && (theme == nullptr || ! theme->disableGlowShadowEffects))
         panelShadow.render (g, panel);
 
-    // Soft / opaque plate (same recipe as Osc soft-fill: oscBackground @ ~90/255).
-    g.setColour (getClearColour());
-    g.fillPath (panel);
-
-    if (usesSoftComposite() && active)
+    if (! usesSoftComposite())
+    {
+        g.setColour (getClearColour());
+        g.fillPath (panel);
+    }
+    else if (active)
     {
         juce::Image softImg;
         {
@@ -6873,15 +6965,27 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
             softImg = softCompositeImage;
         }
 
+        // Soft BG + valid FBO: plate already in the image (incl. DOF edge spill).
+        // Soft BG off (opaque docked) or still loading: plate under/without the image.
+        if (! transparentBackground || ! softImg.isValid())
+        {
+            g.setColour (getClearColour());
+            g.fillPath (panel);
+        }
+
         if (softImg.isValid())
         {
             juce::Graphics::ScopedSaveState ss (g);
             g.reduceClipRegion (panel);
             g.setOpacity (1.0f);
-            // Scene-only FBO (transparent clear); soft plate is the panel fill above.
             g.drawImage (softImg, getGlViewLocal().toFloat(),
                          juce::RectanglePlacement::stretchToFit, false);
         }
+    }
+    else
+    {
+        g.setColour (getClearColour());
+        g.fillPath (panel);
     }
 
     g.setColour (juce::Colours::white.withAlpha (chromeMode == ChromeMode::docked ? 0.12f : 0.22f));
@@ -6974,10 +7078,46 @@ void Spectrogram3DComponent::timerCallback()
         markSoftContentDirty();
     }
 
+    // Colour-ramp timeline morph + lighting automation.
+    if (rampSequence.enabled && ! rampSequence.clips.empty())
+    {
+        if (rampTimelineLastTimeSec > 0.0)
+        {
+            const float dt = juce::jlimit (0.0f, 0.1f, (float) (nowSec - rampTimelineLastTimeSec));
+            tickRampTimeline (dt);
+        }
+        rampTimelineLastTimeSec = nowSec;
+    }
+    else
+    {
+        rampTimelineLastTimeSec = 0.0;
+        if (morphRampActive)
+            clearMorphRamp();
+    }
+
     if (cameraMoved)
         markSoftContentDirty();
 
-    updateMeshFromSource();
+    const bool meshRebuilt = updateMeshFromSource();
+
+    // Lighting automation only writes uniforms. Fold into the mesh soft frame when
+    // possible; if the waterfall is idle, throttle light-only soft redraws (~12 Hz)
+    // so DOF/post is not run at full timer rate.
+    if (lightingUniformsDirty)
+    {
+        if (meshRebuilt)
+        {
+            lightingUniformsDirty = false; // uniforms applied on this soft frame
+        }
+        else if (nowSec - lastLightingSoftRedrawSec >= (1.0 / 12.0))
+        {
+            // Waterfall idle: light-only soft redraw at ~12 Hz (not full 30 Hz DOF thrash).
+            lastLightingSoftRedrawSec = nowSec;
+            lightingUniformsDirty = false;
+            markSoftContentDirty();
+        }
+    }
+
     if (glHost != nullptr)
     {
         glHost->triggerRedraw();
@@ -7286,7 +7426,9 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     const int topCount = meshW * meshH;
     // Closed: top + bottom + dedicated playhead + waterfall-end walls (along Z).
     const int vertCount = closed ? (topCount * 2 + meshH * 4) : topCount;
-    std::vector<Vertex> verts ((size_t) vertCount);
+    // Reuse capacity — avoid multi-MB alloc on every scroll column / morph.
+    meshBuildVerts.resize ((size_t) vertCount);
+    auto& verts = meshBuildVerts;
     const float denom = juce::jmax (1.0f, maxDb - minDb);
     const float baseY = closed ? -kClosedMeshFloorBias : 0.0f;
     const float playheadWallX = 1.0f + kClosedPlayheadWallBias;
@@ -7402,9 +7544,14 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
         }
     }
 
-    const juce::ScopedLock sl (meshLock);
-    cpuVertices.swap (verts);
-    meshNeedsUpload = true;
+    {
+        const juce::ScopedLock sl (meshLock);
+        cpuVertices.swap (verts);
+        meshNeedsUpload = true;
+    }
+    // Keep meshBuildVerts capacity after swap (now holds previous cpu verts).
+    if (meshBuildVerts.capacity() < (size_t) vertCount)
+        meshBuildVerts.reserve ((size_t) vertCount);
 }
 
 void Spectrogram3DComponent::setWaterfallFrozen (bool shouldFreeze) noexcept
@@ -7423,17 +7570,24 @@ void Spectrogram3DComponent::setWaterfallFrozen (bool shouldFreeze) noexcept
     repaint();
 }
 
-void Spectrogram3DComponent::updateMeshFromSource()
+bool Spectrogram3DComponent::updateMeshFromSource()
 {
     if (dataSource == nullptr || ! dataSource->isSpectrogramEnabled())
-        return;
+        return false;
+
+    const uint64_t serial = dataSource->getHistoryColumnSerial();
+
+    // Live scroll: skip full history copy when nothing new arrived (was a major hitch).
+    // Frozen still falls through so brightness/range look changes can recolour.
+    if (serial == lastHistorySerial && meshW >= 2 && ! meshDb.empty() && ! waterfallFrozen)
+        return false;
 
     std::vector<float> history;
     int histW = 0, histH = 0;
     float brightness = 1.0f, minDb = -90.0f, maxDb = -6.0f;
     dataSource->getHistorySnapshot (history, histW, histH, brightness, minDb, maxDb);
     if (histW < 2 || histH < 2 || history.empty())
-        return;
+        return false;
 
     int wantW = 0, baseH = 0;
     meshSizeForQuality (wantW, baseH);
@@ -7441,7 +7595,6 @@ void Spectrogram3DComponent::updateMeshFromSource()
     // Base H may exceed histH (oversample); bias then adds HF rows without thinning lows.
     const int wantH = effectiveFreqMeshRows (baseH);
 
-    const uint64_t serial = dataSource->getHistoryColumnSerial();
     const bool sizeChanged = (wantW != meshW || wantH != meshH || meshDb.empty());
     const bool historyReset = (serial < lastHistorySerial);
     const bool lookChanged = (brightness != lastBrightness || minDb != lastMinDb || maxDb != lastMaxDb);
@@ -7457,7 +7610,7 @@ void Spectrogram3DComponent::updateMeshFromSource()
         lastMinDb = minDb;
         lastMaxDb = maxDb;
         rebuildVerticesFromMeshDb (brightness, minDb, maxDb);
-        return;
+        return true;
     }
 
     if (waterfallFrozen)
@@ -7470,18 +7623,18 @@ void Spectrogram3DComponent::updateMeshFromSource()
             lastMinDb = minDb;
             lastMaxDb = maxDb;
             rebuildVerticesFromMeshDb (brightness, minDb, maxDb);
+            return true;
         }
-        return;
+        return false;
     }
 
     if (serial > lastHistorySerial)
     {
         // Spec can write up to kMaxColumnsPerTick per 60 Hz tick (and more when the
-        // UI timer jitters). Consuming the whole serial delta here scrolled several
-        // mesh columns in one frame → visible timebase “bursts”. Always advance
-        // exactly one column per 3D tick; if we were >1 behind, jump to latest so
-        // we don't duplicate the newest column while draining (append always pulls
-        // the rightmost history column).
+        // UI timer jitters). Consuming the whole serial delta scrolled several mesh
+        // columns in one frame → timebase bursts. Always advance exactly one column
+        // per 3D tick at the live tip; if >1 behind, snap to latest-1 then append
+        // the newest history column (stay realtime without multi-column shifts).
         if (serial - lastHistorySerial > 1)
             lastHistorySerial = serial - 1;
 
@@ -7491,7 +7644,7 @@ void Spectrogram3DComponent::updateMeshFromSource()
         lastMinDb = minDb;
         lastMaxDb = maxDb;
         rebuildVerticesFromMeshDb (brightness, minDb, maxDb);
-        return;
+        return true;
     }
 
     if (lookChanged)
@@ -7500,7 +7653,10 @@ void Spectrogram3DComponent::updateMeshFromSource()
         lastMinDb = minDb;
         lastMaxDb = maxDb;
         rebuildVerticesFromMeshDb (brightness, minDb, maxDb);
+        return true;
     }
+
+    return false;
 }
 
 float Spectrogram3DComponent::worldZForFreq (float hz, double sampleRate, bool logFreq) const noexcept
@@ -7755,6 +7911,249 @@ namespace
         juce::Label valueLabel;
         juce::Slider slider;
     };
+
+    class RampTimelineMenuItem final : public juce::PopupMenu::CustomComponent
+    {
+    public:
+        RampTimelineMenuItem (Spectrogram3DComponent& o, SharedResources& res, ColourRampBank& bank)
+            : juce::PopupMenu::CustomComponent (false),
+              owner (o),
+              timeline (res, bank, o.getRampSequence())
+        {
+            timeline.setExpandedLayout (false);
+            timeline.setShowExpandButton (true);
+            timeline.playheadProvider = [this] { return owner.getRampTimelinePlayheadSec(); };
+            timeline.setPlayheadSec (o.getRampTimelinePlayheadSec());
+            timeline.onSequenceChanged = [this]
+            {
+                if (owner.onRampSequenceChanged != nullptr)
+                    owner.onRampSequenceChanged();
+            };
+            timeline.onEnabledChanged = [this]
+            {
+                if (! owner.getRampSequence().enabled)
+                    owner.clearMorphRamp();
+                if (owner.onRampSequenceChanged != nullptr)
+                    owner.onRampSequenceChanged();
+            };
+            timeline.onRequestExpand = [this]
+            {
+                if (owner.onRequestRampTimelineExpand != nullptr)
+                    owner.onRequestRampTimelineExpand();
+            };
+            addAndMakeVisible (timeline);
+        }
+
+        void getIdealSize (int& idealWidth, int& idealHeight) override
+        {
+            idealWidth = 320;
+            idealHeight = timeline.getPreferredHeight() + 8;
+        }
+
+        void resized() override
+        {
+            timeline.setBounds (getLocalBounds().reduced (6, 4));
+        }
+
+        void updatePlayhead()
+        {
+            timeline.setPlayheadSec (owner.getRampTimelinePlayheadSec());
+        }
+
+    private:
+        Spectrogram3DComponent& owner;
+        Spec3DRampTimelineComponent timeline;
+    };
+}
+
+void Spectrogram3DComponent::invalidateMorphSchedule() noexcept
+{
+    lastMorphClipIndex = -1;
+    lastMorphFadeStep = -1;
+}
+
+void Spectrogram3DComponent::setRampSequence (const Spec3DRampSequence& s) noexcept
+{
+    rampSequence = s;
+    rampSequence.clamp();
+    if (colourRampBank != nullptr)
+        rampSequence.hydrateFromStore (colourRampBank->getPresets());
+    invalidateMorphSchedule();
+    if (! rampSequence.enabled)
+        clearMorphRamp();
+}
+
+void Spectrogram3DComponent::clearMorphRamp() noexcept
+{
+    if (! morphRampActive)
+        return;
+    morphRampActive = false;
+    invalidateMorphSchedule();
+    // Restore bank ramp; recolour once so the mesh doesn't keep sequence colours.
+    if (dataSource != nullptr && colourRampBank != nullptr)
+    {
+        const auto& bankRamp = colourRampBank->get (ColourRampBank::Target::spectrogram3D);
+        dataSource->setCustomColourRamp3D (bankRamp.isUsable() ? &bankRamp : nullptr);
+        recolourVertexColoursOnly();
+    }
+}
+
+void Spectrogram3DComponent::applyMorphLightingAutomation() noexcept
+{
+    if (! rampSequence.enabled || rampSequence.autoLanes.empty())
+        return;
+
+    bool anyEnabled = false;
+    for (const auto& lane : rampSequence.autoLanes)
+        if (lane.enabled) { anyEnabled = true; break; }
+    if (! anyEnabled)
+        return;
+
+    // Enable lighting once (normals rebuild once via lastBrightness). Never call
+    // markLookDirty / markSoftContentDirty here — that re-ran the full soft FBO+DOF
+    // stack every envelope sample and was the sequencer stutter.
+    if (! lightingEnabled)
+    {
+        lightingEnabled = true;
+        lastBrightness = -1.0f; // next mesh rebuild includes weighted normals
+        lightingUniformsDirty = true;
+    }
+
+    auto setAmt = [&] (float& field, float v, float lo, float hi)
+    {
+        v = juce::jlimit (lo, hi, v);
+        if (std::abs (field - v) > 1.0e-4f)
+        {
+            field = v;
+            lightingUniformsDirty = true;
+        }
+    };
+    auto setDeg = [&] (float& field, float v)
+    {
+        while (v > 180.0f) v -= 360.0f;
+        while (v < -180.0f) v += 360.0f;
+        if (std::abs (field - v) > 1.0e-3f)
+        {
+            field = v;
+            lightingUniformsDirty = true;
+        }
+    };
+
+    rampSequence.evaluateAutomation (
+        rampPlayheadSec,
+        [&] (Spec3DSeqLaneType type, float v)
+        {
+            switch (type)
+            {
+                case Spec3DSeqLaneType::lightAmount:    setAmt (lightingAmount, v, 0.0f, 1.0f); break;
+                case Spec3DSeqLaneType::lightAzimuth:   setDeg (lightAzimuthDeg, v); break;
+                case Spec3DSeqLaneType::lightElevation:
+                    setAmt (lightElevationDeg, v, 5.0f, 89.0f); break;
+                case Spec3DSeqLaneType::rimAmount:      setAmt (rimAmount, v, 0.0f, 1.0f); break;
+                default: break;
+            }
+        },
+        [&] (Spec3DSeqLaneType type, juce::Colour col)
+        {
+            if (type == Spec3DSeqLaneType::lightColour)
+            {
+                if (lightColour != col) { lightColour = col; lightingUniformsDirty = true; }
+            }
+            else if (type == Spec3DSeqLaneType::rimColour)
+            {
+                if (rimColour != col) { rimColour = col; lightingUniformsDirty = true; }
+            }
+        });
+    // Soft composite reads these uniforms on the next mesh/soft draw — no extra FBO.
+}
+
+void Spectrogram3DComponent::applyMorphRampIfNeeded() noexcept
+{
+    if (! rampSequence.enabled || colourRampBank == nullptr || dataSource == nullptr)
+        return;
+
+    if (! rampSequence.rampLaneEnabled || rampSequence.clips.empty())
+    {
+        if (morphRampActive)
+            clearMorphRamp();
+        return;
+    }
+
+    // evaluate() does solid hold + continuous lerpRamps across crossfadeOutSec.
+    if (! rampSequence.evaluate (rampPlayheadSec, morphRamp))
+    {
+        clearMorphRamp();
+        return;
+    }
+
+    morphRamp.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+    morphRamp.enabled = true;
+
+    // Unique revision every apply. lerpRamps() always yields revision==1 on a fresh
+    // GradientRamp, so without this setCustomColourRamp3D early-outs after the first
+    // fade frame and the 3D LUT freezes (hard preset cuts instead of a crossfade).
+    morphRamp.revision = ++morphRampSerial;
+
+    const float len = juce::jlimit (Spec3DRampSequence::kMinLengthSec,
+                                    Spec3DRampSequence::kMaxLengthSec,
+                                    rampSequence.lengthSec);
+    float t = std::fmod (rampPlayheadSec, len);
+    if (t < 0.0f)
+        t += len;
+
+    rampSequence.buildLayout (morphLayoutCache);
+    const int n = (int) morphLayoutCache.size();
+    int solid = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        if (t >= morphLayoutCache[(size_t) i].startSec
+            && t < morphLayoutCache[(size_t) i].endSec)
+        {
+            solid = i;
+            break;
+        }
+        if (i == n - 1)
+            solid = i;
+    }
+
+    const auto& L = morphLayoutCache[(size_t) juce::jlimit (0, juce::jmax (0, n - 1), solid)];
+    const int clipIdx = L.index;
+    const float fadeStart = L.endSec - L.fadeOutSec;
+    const bool inFade = n > 0 && L.fadeOutSec > 1.0e-5f && t >= fadeStart && t < L.endSec;
+
+    // Always push LUT during crossfade; solid only when clip changes / leave fade.
+    const bool needUpdate = inFade
+                            || lastMorphClipIndex != clipIdx
+                            || lastMorphFadeStep >= 0
+                            || ! morphRampActive;
+
+    if (needUpdate)
+    {
+        dataSource->setCustomColourRamp3D (&morphRamp);
+        morphRampActive = true;
+        lastMorphClipIndex = clipIdx;
+        lastMorphFadeStep = inFade ? 1 : -1;
+        recolourVertexColoursOnly();
+    }
+}
+
+void Spectrogram3DComponent::tickRampTimeline (float dt) noexcept
+{
+    if (! rampSequence.enabled || rampSequence.clips.empty())
+    {
+        rampTimelineLastTimeSec = 0.0;
+        return;
+    }
+
+    rampPlayheadSec += dt;
+    const float len = juce::jmax (Spec3DRampSequence::kMinLengthSec, rampSequence.lengthSec);
+    if (rampPlayheadSec >= len)
+        rampPlayheadSec = std::fmod (rampPlayheadSec, len);
+    if (rampPlayheadSec < 0.0f)
+        rampPlayheadSec += len;
+
+    applyMorphRampIfNeeded();
+    applyMorphLightingAutomation();
 }
 
 void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
@@ -7775,6 +8174,15 @@ void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
         menu.addCustomItem (7, std::make_unique<ZoomOscillateDepthMenuItem> (*this), nullptr, "Zoom depth");
         menu.addCustomItem (8, std::make_unique<ZoomOscillateRateMenuItem> (*this), nullptr, "Zoom rate");
     }
+
+    menu.addSeparator();
+    if (colourRampBank != nullptr && theme != nullptr)
+    {
+        menu.addCustomItem (10,
+                            std::make_unique<RampTimelineMenuItem> (*this, *theme, *colourRampBank),
+                            nullptr, "Ramp timeline");
+    }
+
     if (onAugmentContextMenu != nullptr)
     {
         menu.addSeparator();

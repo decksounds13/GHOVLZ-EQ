@@ -189,6 +189,9 @@ public:
     void setSpec3DAutoRotateEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DAutoRotateEnabled() const noexcept;
     void setSpec3DAutoRotatePeriodSec (float secondsPerRevolution, bool notifyPrefs = true);
+
+    Spec3DRampSequence getSpec3DRampSequence() const noexcept;
+    void setSpec3DRampSequence (const Spec3DRampSequence& seq, bool notifyPrefs = true);
     float getSpec3DAutoRotatePeriodSec() const noexcept;
     void setSpec3DZoomOscillateEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DZoomOscillateEnabled() const noexcept;
@@ -798,6 +801,8 @@ private:
     SpectrogramComponent spectrogram;
     FramedFloatingScopeWindow specFrame;
     Spectrogram3DComponent spectrogram3D;
+    std::unique_ptr<class Spec3DRampTimelineWindow> rampTimelineWindow;
+    void showRampTimelineWindow();
 
     ScopeLevelMeterModule levelMeterIn;
     ScopeLevelMeterModule levelMeterOut;

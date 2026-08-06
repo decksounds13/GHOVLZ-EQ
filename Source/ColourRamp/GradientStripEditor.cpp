@@ -1,5 +1,6 @@
 #include "GradientStripEditor.h"
 #include "RampColorPickerPanel.h"
+#include "RampPresetPicker.h"
 #include "ColourRampBank.h"
 #include "../ComboBoxLookAndFeel.h"
 #include "../MainComponent.h"
@@ -42,157 +43,6 @@ namespace
         return juce::jmax (juce::roundToInt ((float) minW * uiScale),
                            juce::roundToInt (textW + 14.0f * uiScale));
     }
-
-    /** Mini gradient preview row for the preset CallOutBox. */
-    class RampPresetRow final : public juce::Component
-    {
-    public:
-        RampPresetRow (juce::String nameIn,
-                       GradientRamp rampIn,
-                       std::function<void()> onApplyIn,
-                       std::function<void()> onDeleteIn)
-            : name (std::move (nameIn)),
-              ramp (std::move (rampIn)),
-              onApply (std::move (onApplyIn)),
-              onDelete (std::move (onDeleteIn))
-        {
-            setMouseCursor (juce::MouseCursor::PointingHandCursor);
-        }
-
-        void paint (juce::Graphics& g) override
-        {
-            auto bounds = getLocalBounds().toFloat().reduced (4.0f, 3.0f);
-            if (hovered)
-            {
-                g.setColour (juce::Colours::goldenrod.withAlpha (0.18f));
-                g.fillRoundedRectangle (bounds.expanded (2.0f), 3.0f);
-            }
-
-            auto swatch = bounds.removeFromLeft (bounds.getWidth() * 0.55f).reduced (0.0f, 2.0f);
-            g.setColour (juce::Colours::black.withAlpha (0.45f));
-            g.fillRoundedRectangle (swatch, 2.5f);
-
-            if (ramp.stops.size() >= 2)
-            {
-                juce::ColourGradient grad (ramp.colourAt (0.0f), swatch.getX(), swatch.getCentreY(),
-                                           ramp.colourAt (1.0f), swatch.getRight(), swatch.getCentreY(), false);
-                for (size_t i = 1; i + 1 < ramp.stops.size(); ++i)
-                    grad.addColour ((double) ramp.stops[i].position, ramp.stops[i].colour);
-                g.setGradientFill (grad);
-                g.fillRoundedRectangle (swatch.reduced (1.0f), 2.5f);
-            }
-
-            bounds.removeFromLeft (8.0f);
-            g.setColour (juce::Colours::whitesmoke.withAlpha (0.9f));
-            g.setFont (juce::FontOptions (12.5f));
-            g.drawText (name, bounds.toNearestIntEdges(), juce::Justification::centredLeft, true);
-        }
-
-        void mouseEnter (const juce::MouseEvent&) override { hovered = true;  repaint(); }
-        void mouseExit  (const juce::MouseEvent&) override { hovered = false; repaint(); }
-
-        void mouseUp (const juce::MouseEvent& e) override
-        {
-            if (! e.mouseWasClicked())
-                return;
-            if (e.mods.isPopupMenu())
-            {
-                if (onDelete)
-                    onDelete();
-                return;
-            }
-            if (onApply)
-                onApply();
-        }
-
-    private:
-        juce::String name;
-        GradientRamp ramp;
-        std::function<void()> onApply, onDelete;
-        bool hovered = false;
-    };
-
-    class RampPresetPicker final : public juce::Component
-    {
-    public:
-        RampPresetPicker (RampPresetStore& storeIn,
-                          std::function<void (int)> onPickIn,
-                          std::function<void (int)> onDeleteIn)
-            : store (storeIn),
-              onPick (std::move (onPickIn)),
-              onDelete (std::move (onDeleteIn))
-        {
-            viewport.setViewedComponent (&list, false);
-            viewport.setScrollBarsShown (true, false);
-            addAndMakeVisible (viewport);
-
-            constexpr int rowH = 28;
-            const int n = store.size();
-            for (int i = 0; i < n; ++i)
-            {
-                const auto& p = store.getPresets().getReference (i);
-                const bool canDelete = ! p.isFactory;
-                auto* row = rows.add (new RampPresetRow (
-                    p.isFactory ? (p.name + "  (factory)") : p.name,
-                    p.ramp,
-                    [this, i]
-                    {
-                        if (onPick)
-                            onPick (i);
-                    },
-                    [this, i, canDelete]
-                    {
-                        if (canDelete && onDelete)
-                            onDelete (i);
-                    }));
-                list.addAndMakeVisible (row);
-            }
-
-            list.setSize (220, juce::jmax (rowH, n * rowH));
-            for (int i = 0; i < rows.size(); ++i)
-                rows[i]->setBounds (0, i * rowH, 220, rowH);
-
-            const int listH = juce::jmin (8 * rowH, list.getHeight());
-            setSize (236, 8 + (n > 0 ? listH : 36) + 8);
-
-            if (n == 0)
-            {
-                emptyLabel.setText ("No presets", juce::dontSendNotification);
-                emptyLabel.setJustificationType (juce::Justification::centred);
-                emptyLabel.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.55f));
-                addAndMakeVisible (emptyLabel);
-            }
-        }
-
-        ~RampPresetPicker() override
-        {
-            viewport.setViewedComponent (nullptr, false);
-        }
-
-        void paint (juce::Graphics& g) override
-        {
-            g.fillAll (juce::Colour::fromRGB (28, 28, 26));
-            g.setColour (juce::Colours::goldenrod.withAlpha (0.4f));
-            g.drawRect (getLocalBounds().toFloat(), 1.0f);
-        }
-
-        void resized() override
-        {
-            auto area = getLocalBounds().reduced (8);
-            if (rows.isEmpty())
-                emptyLabel.setBounds (area);
-            else
-                viewport.setBounds (area);
-        }
-
-    private:
-        RampPresetStore& store;
-        std::function<void (int)> onPick, onDelete;
-        juce::Viewport viewport;
-        juce::Component list;
-        juce::OwnedArray<RampPresetRow> rows;
-        juce::Label emptyLabel;
-    };
 }
 
 GradientStripEditor::DiceButton::DiceButton()
@@ -278,17 +128,12 @@ void GradientStripEditor::PresetFieldButton::paintButton (juce::Graphics& g, boo
     auto swatch = inner.removeFromLeft (juce::jmin (72.0f, inner.getWidth() * 0.42f));
     inner.removeFromLeft (6.0f);
 
-    g.setColour (juce::Colours::black.withAlpha (0.45f));
-    g.fillRoundedRectangle (swatch, 2.5f);
-
     if (hasRamp)
+        paintRampSwatch (g, swatch, displayRamp, 2.5f);
+    else
     {
-        juce::ColourGradient grad (displayRamp.colourAt (0.0f), swatch.getX(), swatch.getCentreY(),
-                                   displayRamp.colourAt (1.0f), swatch.getRight(), swatch.getCentreY(), false);
-        for (size_t i = 1; i + 1 < displayRamp.stops.size(); ++i)
-            grad.addColour ((double) displayRamp.stops[i].position, displayRamp.stops[i].colour);
-        g.setGradientFill (grad);
-        g.fillRoundedRectangle (swatch.reduced (1.0f), 2.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRoundedRectangle (swatch, 2.5f);
     }
 
     g.setColour (juce::Colours::whitesmoke.withAlpha (0.92f));
@@ -705,11 +550,10 @@ void GradientStripEditor::showPresetMenu()
     if (presets == nullptr)
         return;
 
-    auto pickerBox = std::make_shared<juce::Component::SafePointer<juce::CallOutBox>>();
-
-    auto* picker = new RampPresetPicker (
+    showRampPresetPickerCallOut (
         *presets,
-        [safe = juce::Component::SafePointer<GradientStripEditor> (this), pickerBox] (int index)
+        &presetField,
+        [safe = juce::Component::SafePointer<GradientStripEditor> (this)] (int index)
         {
             if (safe == nullptr || safe->ramp == nullptr || safe->presets == nullptr)
                 return;
@@ -743,25 +587,14 @@ void GradientStripEditor::showPresetMenu()
             safe->syncControlsFromRamp();
             safe->notifyChanged();
             safe->repaint();
-
-            if (*pickerBox != nullptr)
-                (*pickerBox)->dismiss();
         },
-        [safe = juce::Component::SafePointer<GradientStripEditor> (this), pickerBox] (int index)
+        [safe = juce::Component::SafePointer<GradientStripEditor> (this)] (int index)
         {
             if (safe == nullptr || safe->presets == nullptr)
                 return;
             safe->presets->deletePreset (index);
             safe->syncPresetField();
-            if (*pickerBox != nullptr)
-                (*pickerBox)->dismiss();
         });
-
-    auto& box = juce::CallOutBox::launchAsynchronously (std::unique_ptr<juce::Component> (picker),
-                                                        presetField.getScreenBounds(),
-                                                        nullptr);
-    *pickerBox = &box;
-    box.setDismissalMouseClicksAreAlwaysConsumed (true);
 }
 
 juce::Rectangle<float> GradientStripEditor::stripBounds() const

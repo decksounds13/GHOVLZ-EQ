@@ -422,8 +422,12 @@ void SpectrogramComponent::setCustomColourRamp (const GradientRamp* ramp) noexce
 
 void SpectrogramComponent::setCustomColourRamp3D (const GradientRamp* ramp) noexcept
 {
+    // Skip LUT rebuild when the same ramp content is re-bound (timeline solid holds).
+    if (customColourRamp3D == ramp
+        && (ramp == nullptr || customRampRevision3D == ramp->revision))
+        return;
+
     customColourRamp3D = ramp;
-    customRampRevision3D = ramp != nullptr ? ramp->revision : 0;
     rebuildColourLut3D();
 }
 
@@ -450,12 +454,16 @@ void SpectrogramComponent::rebuildColourLut3D()
 {
     if (customColourRamp3D != nullptr && customColourRamp3D->isUsable())
     {
+        // Already filled for this ramp revision (refreshColourLutFor3D runs every mesh rebuild).
+        if (customRampRevision3D == customColourRamp3D->revision)
+            return;
         customRampRevision3D = customColourRamp3D->revision;
         customColourRamp3D->fillLut (colourLut3D.data(), kLutSize);
         return;
     }
 
     // No custom 3D ramp: fall back to the same built-in scheme as 2D Spec.
+    customRampRevision3D = 0;
     const auto scheme = currentScheme();
     for (int i = 0; i < kLutSize; ++i)
     {

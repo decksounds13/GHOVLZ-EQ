@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "ColourRamp/Spec3DRampTimelineWindow.h"
 #include <JuceHeader.h>
 #include "FrequencyResponseComponent.h"
 #include "EqEditor.h"
@@ -1150,6 +1151,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     spectrogram3D.setDataSource (&spectrogram);
     spectrogram3D.setAlwaysOnTop (false);
+    spectrogram3D.setColourRampBank (&colourRamps);
     spectrogram3D.setAudioLevelProvider ([this] { return processor.getSpec3DVisualLevel01(); });
     spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
@@ -1162,6 +1164,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
         return handleModuleLookMenuResult (ModuleLookPresets::Kind::spectrogram3D, result, 1000);
     };
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.requestSaveUiPrefs(); };
+    spectrogram3D.onRampSequenceChanged = [this] { editor.requestSaveUiPrefs(); };
+    spectrogram3D.onRequestRampTimelineExpand = [this] { showRampTimelineWindow(); };
     spectrogram3D.onDofFocusChanged = [this]
     {
         editor.requestSaveUiPrefs();
@@ -2279,6 +2283,47 @@ void MainComponent::setSpec3DAutoRotateEnabled (bool shouldEnable, bool notifyPr
 bool MainComponent::isSpec3DAutoRotateEnabled() const noexcept
 {
     return spectrogram3D.isAutoRotateEnabled();
+}
+
+Spec3DRampSequence MainComponent::getSpec3DRampSequence() const noexcept
+{
+    return spectrogram3D.getRampSequence();
+}
+
+void MainComponent::setSpec3DRampSequence (const Spec3DRampSequence& seq, bool notifyPrefs)
+{
+    spectrogram3D.setColourRampBank (&colourRamps);
+    spectrogram3D.setRampSequence (seq);
+    if (rampTimelineWindow != nullptr)
+        rampTimelineWindow->getTimeline().setPlayheadSec (spectrogram3D.getRampTimelinePlayheadSec());
+    if (notifyPrefs)
+        editor.requestSaveUiPrefs();
+}
+
+void MainComponent::showRampTimelineWindow()
+{
+    if (rampTimelineWindow == nullptr)
+    {
+        rampTimelineWindow = std::make_unique<Spec3DRampTimelineWindow> (
+            sharedResources, colourRamps, spectrogram3D.getRampSequence());
+        rampTimelineWindow->setThemeColors (&sharedResources);
+        rampTimelineWindow->getTimeline().playheadProvider =
+            [this] { return spectrogram3D.getRampTimelinePlayheadSec(); };
+        rampTimelineWindow->onSequenceChanged = [this] { editor.requestSaveUiPrefs(); };
+        rampTimelineWindow->onEnabledChanged = [this]
+        {
+            if (! spectrogram3D.getRampSequence().enabled)
+                spectrogram3D.clearMorphRamp();
+            editor.requestSaveUiPrefs();
+        };
+        rampTimelineWindow->onClose = [this] {};
+        addAndMakeVisible (*rampTimelineWindow);
+        rampTimelineWindow->setBounds ((getWidth() - 560) / 2, (getHeight() - 200) / 2, 560, 190);
+    }
+
+    rampTimelineWindow->setVisible (true);
+    rampTimelineWindow->toFront (true);
+    rampTimelineWindow->setPlayheadSec (spectrogram3D.getRampTimelinePlayheadSec());
 }
 
 void MainComponent::setSpec3DAutoRotatePeriodSec (float secondsPerRevolution, bool notifyPrefs)
