@@ -159,7 +159,7 @@ namespace FilterType
 
     /**
         Band shelf: log-symmetric flat plateau about f0.
-        Higher-order dual high-shelf edges (see FilterBandShelf.h).
+        Dual higher-order high-shelf edges; Q = width only (see FilterBandShelf.h).
     */
     inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
         makeBandShelfStages (double sampleRate, float frequency, float q, float gainDb)

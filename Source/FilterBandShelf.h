@@ -6,24 +6,37 @@
 #include <cmath>
 
 /**
-    Butterworth band-shelf — Falco DSPFilters path (MIT), hardened for EQ use.
+    Band shelf — dual higher-order high-shelf edges (log-symmetric about f0).
 
-    Analog low-shelf (order N) → Constantinides band-pass map → SOS.
-    Digital pole count = 2N → N biquads.
+    Construction:
+      f_lo = f0 / r ,  f_hi = f0 * r     (r = 2^{bwOct/2})
+      H(z) = HS_N(f_lo, +G) · HS_N(f_hi, −G)
 
-    Width: Q maps to bandwidth in octaves (can go ~0.2 oct).
-    High-f safety: clamp band edges away from 0/Nyquist, stabilize poles,
-    reject NaN sections, clamp overall scale so the curve never “explodes”.
+    Each edge is a Butterworth-style analog low-shelf of order N, mapped with
+    Falco's high-pass bilinear transform (DSPFilters HighShelf family).
+    N=8 → 4 SOS per edge → 8 SOS total (= FilterSlope::maxBiquadStages).
 
-    https://github.com/vinniefalco/DSPFilters  (Butterworth.cpp / PoleFilter.cpp)
+    Why dual high shelves (not low-shelf→band-pass)?
+      BP maps are arithmetic in Hz; wide musical bands leave the handle and
+      collapse toward DC. Dual HS edges are log-symmetric about the handle.
+
+    Q maps ONLY to bandwidth in octaves. After design we:
+      1) Normalise |H| out-of-band to 0 dB
+      2) If the plateau is short of the handle (edges overlapping when narrow),
+         redesign with inflated |gainDb| so |H(f0)| matches the handle.
+         Overall b[] scale is NOT used for depth — that would drag the floor.
+
+    Port pieces from Vinnie Falco DSPFilters (MIT):
+      Butterworth.cpp  AnalogLowShelf
+      PoleFilter.cpp   HighPassTransform
 */
 namespace FilterBandShelf
 {
     using Complex = std::complex<double>;
     static constexpr double kPi = 3.141592653589793238462643383279502884;
 
-    /** Analog order 6 → 6 SOS. Steeper edges than order 4 (better narrow flats). */
-    static constexpr int kAnalogOrder = 6;
+    /** Order per edge. Dual → 2*(N/2) = N SOS for even N. N=8 → 8 stages. */
+    static constexpr int kEdgeOrder = 8;
 
     inline Complex addmul (Complex c, double v, Complex c1) noexcept
     {
@@ -35,18 +48,18 @@ namespace FilterBandShelf
         return std::isfinite (z.real()) && std::isfinite (z.imag());
     }
 
+    /** Stabilize poles only (|p|≥1 → pull inside). Never apply to zeros. */
     inline Complex stabilizePole (Complex z) noexcept
     {
         if (! isFiniteC (z))
             return Complex (0.0, 0.0);
         const double m = std::abs (z);
-        // Keep poles strictly inside the unit circle
-        if (m >= 0.998)
-            return z * (0.997 / juce::jmax (m, 1.0e-12));
+        if (m >= 1.0)
+            return z * (0.9995 / juce::jmax (m, 1.0e-12));
         return z;
     }
 
-    // ── Analog low-shelf (Falco AnalogLowShelf::design) ─────────────────────
+    // ── Analog low-shelf prototype (Falco AnalogLowShelf::design) ───────────
 
     struct AnalogPz
     {
@@ -61,15 +74,12 @@ namespace FilterBandShelf
         if (numPoles < 1)
             return out;
 
+        // g = |10^(dB/20)|^(1/(2N));  gp = -1/g;  gz = -g
+        // std::polar with negative rho → LHP roots (Falco relies on this).
         const double n2 = (double) numPoles * 2.0;
-        const double gAbs = std::pow (10.0, std::abs (gainDb) / 20.0);
-        // Match Falco: g from signed dB (cuts use gainDb < 0)
         const double gLin = std::pow (10.0, gainDb / 20.0);
         const double g = std::pow (std::abs (gLin), 1.0 / n2);
-        juce::ignoreUnused (gAbs);
-
-        // Falco: gp = -1/g, gz = -g  (negative radius into std::polar)
-        const double gp = -1.0 / juce::jmax (1.0e-9, g);
+        const double gp = -1.0 / juce::jmax (1.0e-12, g);
         const double gz = -g;
 
         const int pairs = numPoles / 2;
@@ -77,7 +87,6 @@ namespace FilterBandShelf
         {
             const double theta = kPi * (0.5 - (2.0 * (double) i - 1.0) / n2);
             AnalogPz ap;
-            // C++ polar(rho,theta) with rho<0 → opposite half-plane (Falco relies on this)
             ap.pole = std::polar (gp, theta);
             ap.zero = std::polar (gz, theta);
             ap.isReal = false;
@@ -96,129 +105,58 @@ namespace FilterBandShelf
         return out;
     }
 
-    // ── Band-pass transform (Falco BandPassTransform) ───────────────────────
+    // ── High-pass bilinear (Falco HighPassTransform) ────────────────────────
 
-    struct BpCtx
+    inline double highPassPrewarp (double fcNorm) noexcept
     {
-        double a = 0, b = 0, a2 = 0, b2 = 0, ab = 0, ab_2 = 0;
-        bool valid = false;
-    };
-
-    inline BpCtx makeBpCtx (double fcNorm, double fwNorm) noexcept
-    {
-        BpCtx c;
-        // Require a usable band interior away from DC / Nyquist
-        if (fcNorm <= 0.001 || fcNorm >= 0.49 || fwNorm <= 1.0e-6)
-            return c;
-
-        double half = 0.5 * fwNorm;
-        // Shrink width until edges are safe
-        if (fcNorm - half < 0.0015)
-            half = fcNorm - 0.0015;
-        if (fcNorm + half > 0.48)
-            half = 0.48 - fcNorm;
-        if (half < 0.0008)
-            return c;
-
-        const double fw = 2.0 * half;
-        const double ww = 2.0 * kPi * fw;
-
-        double wc2 = 2.0 * kPi * fcNorm - ww * 0.5;
-        double wc  = wc2 + ww;
-        if (wc2 < 1.0e-6) wc2 = 1.0e-6;
-        if (wc  > kPi - 1.0e-6) wc = kPi - 1.0e-6;
-        if (wc <= wc2 + 1.0e-6)
-            return c;
-
-        const double cosHalf = std::cos ((wc - wc2) * 0.5);
-        const double sinHalf = std::sin ((wc - wc2) * 0.5);
-        if (std::abs (cosHalf) < 1.0e-9 || std::abs (sinHalf) < 1.0e-12)
-            return c;
-
-        c.a = std::cos ((wc + wc2) * 0.5) / cosHalf;
-        c.b = 1.0 / std::tan ((wc - wc2) * 0.5);
-        // Guard insane b (near-zero bandwidth in practice)
-        if (! std::isfinite (c.a) || ! std::isfinite (c.b) || std::abs (c.b) > 1.0e6)
-            return c;
-
-        c.a2 = c.a * c.a;
-        c.b2 = c.b * c.b;
-        c.ab = c.a * c.b;
-        c.ab_2 = 2.0 * c.ab;
-        c.valid = true;
-        return c;
+        const double fc = juce::jlimit (1.0e-6, 0.499, fcNorm);
+        const double t = std::tan (kPi * fc);
+        if (t < 1.0e-12)
+            return 1.0e12;
+        return 1.0 / t;
     }
 
-    inline void bpTransformRoot (const BpCtx& bp, Complex s, Complex& o0, Complex& o1) noexcept
+    inline Complex highPassTransformRoot (double prewarp, Complex s, bool isPole) noexcept
     {
         if (! isFiniteC (s))
-        {
-            o0 = Complex (-1.0, 0.0);
-            o1 = Complex (1.0, 0.0);
-            return;
-        }
+            return isPole ? Complex (0.0, 0.0) : Complex (1.0, 0.0);
 
-        // Avoid division by zero in (1-s) when s≈1
-        if (std::abs (Complex (1.0, 0.0) - s) < 1.0e-12)
-        {
-            o0 = Complex (-0.999, 0.0);
-            o1 = Complex (0.999, 0.0);
-            return;
-        }
+        if (std::abs (s) > 1.0e12)
+            return Complex (1.0, 0.0);
 
-        Complex c = (Complex (1.0, 0.0) + s) / (Complex (1.0, 0.0) - s);
-        if (! isFiniteC (c))
-        {
-            o0 = o1 = Complex (0.0, 0.0);
-            return;
-        }
+        Complex c = s * prewarp;
+        const Complex one (1.0, 0.0);
+        if (std::abs (one - c) < 1.0e-14)
+            return Complex (isPole ? 0.0 : 1.0, 0.0);
 
-        Complex v (0.0, 0.0);
-        v = addmul (v, 4.0 * (bp.b2 * (bp.a2 - 1.0) + 1.0), c);
-        v += 8.0 * (bp.b2 * (bp.a2 - 1.0) - 1.0);
-        v *= c;
-        v += 4.0 * (bp.b2 * (bp.a2 - 1.0) + 1.0);
-        v = std::sqrt (v);
+        Complex z = -(one + c) / (one - c);
+        if (! isFiniteC (z))
+            return isPole ? Complex (0.0, 0.0) : Complex (1.0, 0.0);
 
-        Complex u = -v;
-        u = addmul (u, bp.ab_2, c);
-        u += bp.ab_2;
-
-        v = addmul (v, bp.ab_2, c);
-        v += bp.ab_2;
-
-        Complex d (0.0, 0.0);
-        d = addmul (d, 2.0 * (bp.b - 1.0), c);
-        d += 2.0 * (1.0 + bp.b);
-
-        if (std::abs (d) < 1.0e-18 || ! isFiniteC (u) || ! isFiniteC (v))
-        {
-            o0 = o1 = Complex (0.0, 0.0);
-            return;
-        }
-
-        o0 = stabilizePole (u / d);
-        o1 = stabilizePole (v / d);
+        if (isPole)
+            z = stabilizePole (z);
+        // zeros: leave alone — |z| may be > 1 (required for boosts)
+        return z;
     }
 
+    // ── Biquads ─────────────────────────────────────────────────────────────
+
     inline juce::dsp::IIR::Coefficients<float>::Ptr biquadFromConjPair (
-        Complex pole, Complex zero, double scale)
+        Complex pole, Complex zero)
     {
-        if (! isFiniteC (pole) || ! isFiniteC (zero) || ! std::isfinite (scale))
+        if (! isFiniteC (pole) || ! isFiniteC (zero))
             return {};
 
         const double a1 = -2.0 * pole.real();
         const double a2 = std::norm (pole);
-        // Stability: |a2| < 1 for conjugate pair inside unit circle
-        if (a2 >= 0.999 || std::abs (a1) >= 1.0 + a2 + 1.0e-6)
+        if (! (a2 < 1.0) || ! (std::abs (a1) < 1.0 + a2 + 1.0e-9))
             return {};
 
-        const double b0 = scale;
-        const double b1 = scale * (-2.0 * zero.real());
-        const double b2 = scale * std::norm (zero);
+        const double b0 = 1.0;
+        const double b1 = -2.0 * zero.real();
+        const double b2 = std::norm (zero);
 
-        if (! std::isfinite (b0) || ! std::isfinite (b1) || ! std::isfinite (b2)
-            || ! std::isfinite (a1) || ! std::isfinite (a2))
+        if (! std::isfinite (b1) || ! std::isfinite (b2))
             return {};
 
         return new juce::dsp::IIR::Coefficients<float> (
@@ -226,24 +164,114 @@ namespace FilterBandShelf
             1.0f, (float) a1, (float) a2);
     }
 
-    /** Stable log-symmetric dual-edge fallback (never blows up). */
+    inline juce::dsp::IIR::Coefficients<float>::Ptr biquadOnePole (
+        Complex pole, Complex zero)
+    {
+        if (! isFiniteC (pole) || ! isFiniteC (zero))
+            return {};
+        if (std::abs (pole.imag()) > 1.0e-9 || std::abs (zero.imag()) > 1.0e-9)
+            return {};
+
+        const double p = pole.real();
+        const double z = zero.real();
+        if (std::abs (p) >= 1.0)
+            return {};
+
+        return new juce::dsp::IIR::Coefficients<float> (
+            1.0f, (float) (-z), 0.0f,
+            1.0f, (float) (-p), 0.0f);
+    }
+
+    // ── Cascade helpers ─────────────────────────────────────────────────────
+
+    inline double evalCascadeMagAt (
+        const juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>& stages,
+        double freqHz, double sampleRate) noexcept
+    {
+        if (stages.isEmpty() || sampleRate <= 0.0 || freqHz < 0.0)
+            return 1.0;
+
+        const double nyq = 0.5 * sampleRate;
+        const double f = juce::jmin (freqHz, nyq * 0.999999);
+        const double w = 2.0 * kPi * f / sampleRate;
+        const Complex zm1 (std::cos (-w), std::sin (-w));
+        const Complex zm2 = zm1 * zm1;
+        Complex H (1.0, 0.0);
+
+        for (int i = 0; i < stages.size(); ++i)
+        {
+            const juce::dsp::IIR::Coefficients<float>::Ptr sec = stages.getUnchecked (i);
+            if (sec == nullptr)
+                continue;
+            const float* c = sec->getRawCoefficients();
+            const Complex num = (double) c[0] + (double) c[1] * zm1 + (double) c[2] * zm2;
+            const Complex den = (double) c[3] + (double) c[4] * zm1 + (double) c[5] * zm2;
+            if (std::abs (den) > 1.0e-30 && isFiniteC (num) && isFiniteC (den))
+                H *= num / den;
+        }
+
+        const double mag = std::abs (H);
+        return (std::isfinite (mag) && mag > 1.0e-30) ? mag : 1.0;
+    }
+
+    inline void scaleFirstStage (
+        juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>& stages,
+        double linearScale) noexcept
+    {
+        if (stages.isEmpty() || ! std::isfinite (linearScale) || linearScale <= 0.0)
+            return;
+        juce::dsp::IIR::Coefficients<float>::Ptr s0 = stages.getUnchecked (0);
+        if (s0 == nullptr)
+            return;
+        float* c = s0->getRawCoefficients();
+        c[0] = (float) ((double) c[0] * linearScale);
+        c[1] = (float) ((double) c[1] * linearScale);
+        c[2] = (float) ((double) c[2] * linearScale);
+    }
+
+    /** Append one higher-order high shelf at cutoffHz with gainDb. */
+    inline bool appendHighShelf (
+        juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>& stages,
+        double sampleRate, double cutoffHz, double gainDb, int order)
+    {
+        if (std::abs (gainDb) < 1.0e-6 || order < 1)
+            return true;
+
+        const double fs = sampleRate > 1.0 ? sampleRate : 48000.0;
+        const double fc = juce::jlimit (10.0, fs * 0.45, cutoffHz);
+        const double prewarp = highPassPrewarp (fc / fs);
+        const auto analog = designAnalogLowShelf (order, gainDb);
+
+        for (const auto& ap : analog)
+        {
+            if (ap.isReal)
+            {
+                const Complex p = highPassTransformRoot (prewarp, ap.pole, true);
+                const Complex z = highPassTransformRoot (prewarp, ap.zero, false);
+                if (auto s = biquadOnePole (p, z))
+                    stages.add (std::move (s));
+                else
+                    return false;
+            }
+            else
+            {
+                const Complex p = highPassTransformRoot (prewarp, ap.pole, true);
+                const Complex z = highPassTransformRoot (prewarp, ap.zero, false);
+                if (auto s = biquadFromConjPair (p, z))
+                    stages.add (std::move (s));
+                else
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
     inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
-        makeDualEdgeFallback (double sampleRate, double f0, double bwOct, float gainDb)
+        makeSoftDualEdge (double sampleRate, double fLo, double fHi, float gainDb)
     {
         juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> stages;
-        const double fs = sampleRate > 1.0 ? sampleRate : 48000.0;
-        const double fMax = fs * 0.45;
-
-        double r = std::pow (2.0, 0.5 * juce::jmax (0.15, bwOct));
-        double fLo = f0 / r;
-        double fHi = f0 * r;
-        if (fHi > fMax) { fHi = fMax; fLo = (f0 * f0) / fHi; }
-        if (fLo < 20.0) { fLo = 20.0; fHi = juce::jmin (fMax, (f0 * f0) / fLo); }
-        if (fHi <= fLo * 1.05)
-            fHi = juce::jmin (fMax, fLo * 1.08);
-
-        // More stages when narrow (steeper edges)
-        const int nEdge = (bwOct < 0.45) ? 4 : (bwOct < 0.9 ? 3 : 2);
+        const int nEdge = 4;
         const float stageDb = gainDb / (float) nEdge;
         const float gU = juce::Decibels::decibelsToGain (stageDb);
         const float gD = juce::Decibels::decibelsToGain (-stageDb);
@@ -258,6 +286,40 @@ namespace FilterBandShelf
         return stages;
     }
 
+    /** Build dual-edge cascade for a design gain (may differ from handle gain). */
+    inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
+        buildDualEdges (double sampleRate, double fLo, double fHi, double designGainDb)
+    {
+        juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> stages;
+        if (! appendHighShelf (stages, sampleRate, fLo, designGainDb, kEdgeOrder)
+            || ! appendHighShelf (stages, sampleRate, fHi, -designGainDb, kEdgeOrder)
+            || stages.isEmpty())
+        {
+            return {};
+        }
+
+        while (stages.size() > 8)
+            stages.removeLast();
+
+        // Normalise floor (well below lower edge) to 0 dB
+        const double oobHz = juce::jmax (5.0, fLo * 0.15);
+        const double magOob = evalCascadeMagAt (stages, oobHz, sampleRate);
+        if (magOob > 1.0e-12 && std::isfinite (magOob))
+        {
+            const double scale = 1.0 / magOob;
+            if (std::isfinite (scale) && scale > 0.0 && scale < 1.0e5)
+                scaleFirstStage (stages, scale);
+        }
+
+        return stages;
+    }
+
+    // ── Public ──────────────────────────────────────────────────────────────
+
+    /**
+        @param q  Higher → narrower. Maps to ~0.40…3.2 octaves of plateau width.
+                  Does not change plateau depth — only the edge separation.
+    */
     inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
         makeStages (double sampleRate, float frequencyHz, float q, float gainDb)
     {
@@ -267,102 +329,88 @@ namespace FilterBandShelf
         if (std::abs (gainDb) < 1.0e-3f)
             return stages;
 
-        // Don't let f0 sit in the last ~15% of Nyquist for BP map
-        const double f0 = juce::jlimit (30.0, fs * 0.38, (double) frequencyHz);
+        const double fMax = fs * 0.45;
+        const double f0 = juce::jlimit (25.0, fMax * 0.98, (double) frequencyHz);
         const float safeQ = juce::jmax (0.15f, q);
 
-        // Narrower than before: Q 8 → ~0.22 oct, Q 4 → ~0.35, Q 1 → ~0.9, Q 0.4 → ~1.6
-        const double bwOct = (double) juce::jlimit (0.18f, 2.5f, 0.85f / std::sqrt (safeQ));
+        // Q → bandwidth in octaves (WIDTH ONLY).
+        // Floor ~0.40 oct so max-Q still has a short plateau (not a pure peak).
+        // Q 0.15 → ~2.9 oct,  0.5 → ~1.5,  1 → ~1.05,  2 → ~0.72,  5 → ~0.45,  10 → ~0.40
+        const double bwOct = (double) juce::jlimit (
+            0.40f, 3.2f,
+            1.05f / std::pow (safeQ, 0.55f));
 
-        double widthHz = f0 * (std::pow (2.0, 0.5 * bwOct) - std::pow (2.0, -0.5 * bwOct));
-        // Allow quite narrow absolute width
-        widthHz = juce::jlimit (f0 * 0.03, f0 * 2.5, widthHz);
+        double r = std::pow (2.0, 0.5 * bwOct);
+        double fLo = f0 / r;
+        double fHi = f0 * r;
 
-        const double fc = f0 / fs;
-        double fw = widthHz / fs;
-
-        auto bp = makeBpCtx (fc, fw);
-        if (! bp.valid)
+        // Nyquist / DC — re-mirror about f0 so the handle stays log-centre
+        if (fHi > fMax)
         {
-            // Retry with smaller width
-            fw *= 0.5;
-            bp = makeBpCtx (fc, fw);
+            fHi = fMax;
+            fLo = (f0 * f0) / fHi;
         }
-        if (! bp.valid)
-            return makeDualEdgeFallback (sampleRate, f0, bwOct, gainDb);
-
-        const auto analog = designAnalogLowShelf (kAnalogOrder, (double) gainDb);
-
-        for (const auto& ap : analog)
+        if (fLo < 18.0)
         {
-            Complex p0, p1, z0, z1;
-            bpTransformRoot (bp, ap.pole, p0, p1);
-            bpTransformRoot (bp, ap.zero, z0, z1);
-
-            // Falco: transform first of conjugate pair → two digital roots;
-            // each becomes a conjugate biquad via conj(p), conj(z).
-            if (auto s0 = biquadFromConjPair (p0, z0, 1.0))
-                stages.add (std::move (s0));
-            if (auto s1 = biquadFromConjPair (p1, z1, 1.0))
-                stages.add (std::move (s1));
+            fLo = 18.0;
+            fHi = juce::jmin (fMax, (f0 * f0) / fLo);
+        }
+        if (fHi / fLo < 1.23)
+        {
+            const double mid = std::sqrt (fLo * fHi);
+            fLo = juce::jmax (18.0, mid / std::sqrt (1.23));
+            fHi = juce::jmin (fMax, mid * std::sqrt (1.23));
         }
 
-        if (stages.isEmpty())
-            return makeDualEdgeFallback (sampleRate, f0, bwOct, gainDb);
+        const double targetLin = (double) juce::Decibels::decibelsToGain (gainDb);
+        const double targetDb = (double) gainDb;
 
-        // Scale |H(f0)| → target gain; clamp scale so bad layouts can't explode
+        // Iterative design-gain lock: when edges overlap (narrow Q), the cascade
+        // depth is less than |G|. Inflate |designGainDb| until |H(f0)| matches
+        // the handle. OOB stays ~0 dB because each redesign re-normalises the floor.
+        double designDb = targetDb;
+        for (int iter = 0; iter < 4; ++iter)
         {
-            const double w = 2.0 * kPi * f0 / fs;
-            const Complex ejw (std::cos (w), std::sin (w));
-            Complex H (1.0, 0.0);
+            stages = buildDualEdges (fs, fLo, fHi, designDb);
+            if (stages.isEmpty())
+                return makeSoftDualEdge (sampleRate, fLo, fHi, gainDb);
 
-            for (int i = 0; i < stages.size(); ++i)
+            const double magC = evalCascadeMagAt (stages, f0, fs);
+            if (! (magC > 1.0e-15) || ! std::isfinite (magC))
+                return makeSoftDualEdge (sampleRate, fLo, fHi, gainDb);
+
+            const double actualDb = 20.0 * std::log10 (magC);
+            const double errDb = std::abs (actualDb - targetDb);
+            if (errDb < 0.20)
+                break;
+
+            // Avoid division by near-zero depth
+            if (std::abs (actualDb) < 0.15)
             {
-                const juce::dsp::IIR::Coefficients<float>::Ptr sec = stages.getUnchecked (i);
-                if (sec == nullptr)
-                    continue;
-                const Complex z1 = std::conj (ejw);
-                const Complex z2 = z1 * z1;
-                const float* c = sec->getRawCoefficients();
-                const Complex num = (double) c[0] + (double) c[1] * z1 + (double) c[2] * z2;
-                const Complex den = (double) c[3] + (double) c[4] * z1 + (double) c[5] * z2;
-                if (std::abs (den) > 1.0e-30 && isFiniteC (num) && isFiniteC (den))
-                    H *= num / den;
+                designDb = targetDb * (iter == 0 ? 2.0 : designDb / targetDb * 1.5);
+                designDb = juce::jlimit (-48.0, 48.0, designDb);
+                continue;
             }
 
-            if (! isFiniteC (H) || std::abs (H) < 1.0e-9 || std::abs (H) > 1.0e6)
-                return makeDualEdgeFallback (sampleRate, f0, bwOct, gainDb);
-
-            const double target = std::pow (10.0, (double) gainDb / 20.0);
-            double scale = target / std::abs (H);
-            // Prevent insane make-up gain from a near-null at f0
-            scale = juce::jlimit (1.0e-3, 50.0, scale);
-
-            juce::dsp::IIR::Coefficients<float>::Ptr s0 = stages.getUnchecked (0);
-            if (s0 != nullptr)
-            {
-                float* c = s0->getRawCoefficients();
-                c[0] = (float) ((double) c[0] * scale);
-                c[1] = (float) ((double) c[1] * scale);
-                c[2] = (float) ((double) c[2] * scale);
-            }
+            // designDb' so next actual ≈ target (depth scales roughly with design gain)
+            const double ratio = targetDb / actualDb; // same sign → positive
+            designDb *= juce::jlimit (0.5, 3.0, ratio);
+            designDb = juce::jlimit (-48.0, 48.0, designDb);
         }
 
-        // Final sanity: reject cascade if any coeff is non-finite
+        // Final finite-coeff check
         for (int i = 0; i < stages.size(); ++i)
         {
             const auto sec = stages.getUnchecked (i);
             if (sec == nullptr)
-                return makeDualEdgeFallback (sampleRate, f0, bwOct, gainDb);
+                return makeSoftDualEdge (sampleRate, fLo, fHi, gainDb);
             const float* c = sec->getRawCoefficients();
             for (int k = 0; k < 6; ++k)
                 if (! std::isfinite (c[k]))
-                    return makeDualEdgeFallback (sampleRate, f0, bwOct, gainDb);
+                    return makeSoftDualEdge (sampleRate, fLo, fHi, gainDb);
         }
 
-        while (stages.size() > 8)
-            stages.removeLast();
-
+        juce::ignoreUnused (targetLin);
         return stages;
     }
 }
