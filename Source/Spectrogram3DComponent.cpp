@@ -5700,6 +5700,9 @@ void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcep
         mode = ParticleEmitMode::slice;
     if (particleEmitMode == mode) return;
     particleEmitMode = mode;
+    // Drop cross-mode spawn backlog so switching Continuous ↔ Slice takes effect immediately.
+    if (particleSystem != nullptr)
+        particleSystem->resetEmissionAccumulators();
     markSoftContentDirty();
 }
 
@@ -8013,15 +8016,20 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
         const int spawned = getParticleLastSpawnedCount();
         const int culled = getParticleLastCulledCount();
         const bool atCap = alive >= maxA;
+        const bool gpuPath = particleGpuSimEnabled
+                             && isParticleGpuSimAvailable()
+                             && maxA <= Spec3DParticleSystem::kGpuPathMaxAlive;
+        // Single pool; sim path is either CPU integrate or hybrid GPU integrate.
         const juce::String line =
-            "Particles  " + juce::String (alive) + " / " + juce::String (maxA)
+            juce::String (gpuPath ? "GPU particles  " : "CPU particles  ")
+            + juce::String (alive) + " / " + juce::String (maxA)
             + "   pool " + juce::String (pool)
             + "   +sp " + juce::String (spawned)
             + "   -cull " + juce::String (culled)
             + (atCap ? "   BUDGET" : "")
-            + (maxA > Spec3DParticleSystem::kGpuReadbackMaxAlive ? "   CPU-sim" : "");
+            + (gpuPath ? "   [GPU sim]" : "   [CPU sim]");
         g.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
-        const int tw = juce::jmin ((int) inner.getWidth() - 16, 480);
+        const int tw = juce::jmin ((int) inner.getWidth() - 16, 520);
         const juce::Rectangle<int> badge ((int) inner.getX() + 8,
                                           (int) inner.getBottom() - 28,
                                           tw, 20);

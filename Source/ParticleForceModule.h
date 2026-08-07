@@ -69,17 +69,18 @@ inline ParticleForceModule makeDefaultForceModule (ParticleForceType t, uint32_t
     m.type = t;
     m.enabled = true;
     m.uid = uid;
+    // Defaults sit near the middle of the (scaled-down) force sliders.
     switch (t)
     {
-        case ParticleForceType::gravity:    m.p[0] = -2.0f; break;
-        case ParticleForceType::drag:       m.p[0] = 1.0f; break;
-        case ParticleForceType::wind:       m.p[0] = 0.5f; break;
-        case ParticleForceType::curlNoise:  m.p[0] = 1.0f; m.p[1] = 2.0f; m.p[2] = 0.4f; break;
-        case ParticleForceType::turbulence: m.p[0] = 0.5f; break;
+        case ParticleForceType::gravity:    m.p[0] = -0.02f; break;
+        case ParticleForceType::drag:       m.p[0] = 0.01f; break;
+        case ParticleForceType::wind:       m.p[0] = 0.005f; break;
+        case ParticleForceType::curlNoise:  m.p[0] = 0.01f; m.p[1] = 0.25f; m.p[2] = 0.04f; break;
+        case ParticleForceType::turbulence: m.p[0] = 0.005f; break;
         case ParticleForceType::rotation:
-            m.p[0] = 2.0f; // rad/s — moderate tumble
-            m.p[1] = 2.0f;
-            m.p[2] = 2.0f;
+            m.p[0] = 0.25f; // rad/s — gentle tumble
+            m.p[1] = 0.25f;
+            m.p[2] = 0.25f;
             m.axisX = m.axisY = m.axisZ = true;
             m.linkAxes = true;
             m.randomDir = true;

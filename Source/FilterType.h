@@ -16,23 +16,35 @@ namespace FilterType
         bandPass,
         highpass,
         lowpass,
+        // PR1 — Pro-Q parity shapes (append only; keep APVTS indices stable)
+        tiltShelf,
+        flatTilt,
+        allPass,
         numChoices
     };
 
     inline juce::StringArray getChoiceNames()
     {
         // Slightly compact so the OptionBox closed combo can show the full label.
-        return { "Bell", "Lo Shelf", "Hi Shelf", "Notch", "Band Pass", "Highpass", "Lowpass" };
+        return { "Bell", "Lo Shelf", "Hi Shelf", "Notch", "Band Pass", "Highpass", "Lowpass",
+                 "Tilt Shelf", "Flat Tilt", "All Pass" };
     }
 
-    inline bool usesGain (int type)
+    inline bool usesGain (int type) noexcept
     {
-        return type == bell || type == lowShelf || type == highShelf;
+        return type == bell || type == lowShelf || type == highShelf
+            || type == tiltShelf || type == flatTilt;
     }
 
     inline bool isHpLp (int type) noexcept
     {
         return type == highpass || type == lowpass;
+    }
+
+    /** Types that need 2+ biquad stages (not HP/LP slope cascades). */
+    inline bool isMultiStage (int type) noexcept
+    {
+        return type == tiltShelf || type == flatTilt;
     }
 
     /** Ableton-style proportional Q for peaking (bell) bands only. */
@@ -44,7 +56,30 @@ namespace FilterType
         return baseQ * (1.0f + std::abs (gainDb) / 24.0f);
     }
 
-    /** Single-biquad types (not cascaded HP/LP slopes). */
+    /**
+        Tilt shelf: complementary low + high shelves at the same frequency.
+        Positive gain → lows up / highs down; negative reverses.
+        Q controls transition sharpness (flatTilt uses a fixed gentle Q).
+    */
+    inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
+        makeTiltStages (double sampleRate, float frequency, float q, float gainDb, bool flat)
+    {
+        juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> stages;
+        const float f = juce::jlimit (20.0f, 20000.0f, frequency);
+        const float halfDb = 0.5f * gainDb;
+        const float gUp = juce::Decibels::decibelsToGain (halfDb);
+        const float gDn = juce::Decibels::decibelsToGain (-halfDb);
+        // Flat tilt: very wide shelves (gentle, near-constant slope through the pivot).
+        // Tilt shelf: user Q, still soft enough to stay musical.
+        const float shelfQ = flat ? 0.35f
+                                  : juce::jlimit (0.15f, 2.0f, q);
+
+        stages.add (juce::dsp::IIR::Coefficients<float>::makeLowShelf (sampleRate, f, shelfQ, gUp));
+        stages.add (juce::dsp::IIR::Coefficients<float>::makeHighShelf (sampleRate, f, shelfQ, gDn));
+        return stages;
+    }
+
+    /** Single-biquad types (not cascaded HP/LP slopes or multi-stage tilts). */
     inline juce::dsp::IIR::Coefficients<float>::Ptr makeCoefficients (int type,
                                                                       double sampleRate,
                                                                       float frequency,
@@ -70,10 +105,39 @@ namespace FilterType
                 return juce::dsp::IIR::Coefficients<float>::makeHighPass (sampleRate, f, safeQ);
             case lowpass:
                 return juce::dsp::IIR::Coefficients<float>::makeLowPass (sampleRate, f, safeQ);
+            case allPass:
+                return juce::dsp::IIR::Coefficients<float>::makeAllPass (sampleRate, f, safeQ);
+            case tiltShelf:
+            case flatTilt:
+            {
+                // Fallback single stage if a caller only supports one biquad:
+                // approximate with a low shelf of half gain (prefer makeStages).
+                return juce::dsp::IIR::Coefficients<float>::makeLowShelf (
+                    sampleRate, f, type == flatTilt ? 0.35f : juce::jlimit (0.15f, 2.0f, safeQ),
+                    juce::Decibels::decibelsToGain (0.5f * gainDb));
+            }
             case bell:
             default:
                 return juce::dsp::IIR::Coefficients<float>::makePeakFilter (sampleRate, f, safeQ, gainLin);
         }
+    }
+
+    /**
+        Full stage list for any non-slope type (single or multi-stage).
+        HP/LP with slopes still use FilterSlope::make*Coeffs.
+    */
+    inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
+        makeStages (int type, double sampleRate, float frequency, float q, float gainDb)
+    {
+        if (type == tiltShelf)
+            return makeTiltStages (sampleRate, frequency, q, gainDb, false);
+        if (type == flatTilt)
+            return makeTiltStages (sampleRate, frequency, q, gainDb, true);
+
+        juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> stages;
+        if (auto c = makeCoefficients (type, sampleRate, frequency, q, gainDb))
+            stages.add (c);
+        return stages;
     }
 
     inline juce::String paramIDForBandIndex (int bandIndex)

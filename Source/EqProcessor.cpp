@@ -2294,6 +2294,25 @@ void EqProcessor::processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock
                     slot.cascade[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
             });
         }
+        else if (FilterType::isMultiStage (type))
+        {
+            const int cacheKey = type + 5000;
+            if (coeffsNeedUpdate (slot.lastCoeffs, freq, effQ, gainDb, cacheKey))
+            {
+                auto coeffs = FilterType::makeStages (type, sr, freq, effQ, gainDb);
+                slot.activeStages = juce::jmin ((int) coeffs.size(), FilterSlope::maxBiquadStages);
+                for (int i = 0; i < slot.activeStages; ++i)
+                    *slot.cascade[(size_t) i].state = *coeffs.getUnchecked (i);
+                slot.useCascade = true;
+                storeCoeffs (slot.lastCoeffs, freq, effQ, gainDb, cacheKey);
+            }
+
+            BandChannel::process (audioBlock, channel, [&] (juce::dsp::AudioBlock<float>& block)
+            {
+                for (int i = 0; i < slot.activeStages; ++i)
+                    slot.cascade[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
+            });
+        }
         else
         {
             const int cacheKey = type + 1000;
@@ -3618,6 +3637,24 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                         highpassStages[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
                 });
             }
+            else if (FilterType::isMultiStage (hpType) && sr > 0.0)
+            {
+                const int cacheKey = hpType + 5000;
+                if (coeffsNeedUpdate (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, hpGain, cacheKey))
+                {
+                    auto stages = FilterType::makeStages (
+                        hpType, sr, smoothedHighpassCutoff, smoothedHighpassQ, hpGain);
+                    highpassActiveStages = juce::jmin ((int) stages.size(), FilterSlope::maxBiquadStages);
+                    for (int i = 0; i < highpassActiveStages; ++i)
+                        *highpassStages[(size_t) i].state = *stages.getUnchecked (i);
+                    storeCoeffs (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, hpGain, cacheKey);
+                }
+                BandChannel::process (audioBlock, hpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+                {
+                    for (int i = 0; i < highpassActiveStages; ++i)
+                        highpassStages[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
+                });
+            }
             else if (sr > 0.0 && highpassBandFilter.state != nullptr)
             {
                 const int cacheKey = hpType + 1000;
@@ -3652,6 +3689,24 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                 {
                     updateSlotHpLpCascade (false, smoothedLowpassCutoff, smoothedLowpassQ, lpSlope, lpType);
                     storeCoeffs (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, 0.0f, cacheKey);
+                }
+                BandChannel::process (audioBlock, lpChannel, [this] (juce::dsp::AudioBlock<float>& block)
+                {
+                    for (int i = 0; i < lowpassActiveStages; ++i)
+                        lowpassStages[(size_t) i].process (juce::dsp::ProcessContextReplacing<float> (block));
+                });
+            }
+            else if (FilterType::isMultiStage (lpType) && sr > 0.0)
+            {
+                const int cacheKey = lpType + 5000;
+                if (coeffsNeedUpdate (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, lpGain, cacheKey))
+                {
+                    auto stages = FilterType::makeStages (
+                        lpType, sr, smoothedLowpassCutoff, smoothedLowpassQ, lpGain);
+                    lowpassActiveStages = juce::jmin ((int) stages.size(), FilterSlope::maxBiquadStages);
+                    for (int i = 0; i < lowpassActiveStages; ++i)
+                        *lowpassStages[(size_t) i].state = *stages.getUnchecked (i);
+                    storeCoeffs (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, lpGain, cacheKey);
                 }
                 BandChannel::process (audioBlock, lpChannel, [this] (juce::dsp::AudioBlock<float>& block)
                 {
@@ -3758,6 +3813,56 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                     for (int i = 0; i < active; ++i)
                         flexibleHpLpStages[(size_t) flexIndex][(size_t) i]
                             .process (juce::dsp::ProcessContextReplacing<float> (block));
+                });
+                applySplitDeltaIfArmed (splitBandIndex, type);
+                return;
+            }
+
+            // Tilt shelf / flat tilt: two complementary shelves in the flexible cascade bank.
+            if (FilterType::isMultiStage (type))
+            {
+                const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
+                const int cacheKey = type + 5000;
+                if (sr > 0.0 && coeffsNeedUpdate (last, freq, q, gain, cacheKey))
+                {
+                    auto stages = FilterType::makeStages (type, sr, freq, q, gain);
+                    const int n = juce::jmin ((int) stages.size(), FilterSlope::maxBiquadStages);
+                    flexibleHpLpActiveStages[(size_t) flexIndex] = n;
+                    for (int i = 0; i < n; ++i)
+                        *flexibleHpLpStages[(size_t) flexIndex][(size_t) i].state = *stages.getUnchecked (i);
+                    storeCoeffs (last, freq, q, gain, cacheKey);
+                }
+                const int active = flexibleHpLpActiveStages[(size_t) flexIndex];
+                const bool satOn = FilterType::usesGain (type) && rawBool (satId) && gain > 0.05f;
+                const bool satPost = rawBool (satPostId);
+                const int satModel = rawSatModel (satModelId);
+                const float satDriveDb = rawFloat (satDriveId, BandSaturation::kDefaultSatDriveDb);
+                auto& sat = satEngineForBandIndex (satEngineIndex);
+                BandChannel::process (audioBlock, channelMode, [&] (juce::dsp::AudioBlock<float>& block)
+                {
+                    if (! satOn)
+                    {
+                        for (int i = 0; i < active; ++i)
+                            flexibleHpLpStages[(size_t) flexIndex][(size_t) i]
+                                .process (juce::dsp::ProcessContextReplacing<float> (block));
+                        return;
+                    }
+                    sat.setModel (satModel);
+                    if (satPost)
+                    {
+                        sat.captureDry (block);
+                        for (int i = 0; i < active; ++i)
+                            flexibleHpLpStages[(size_t) flexIndex][(size_t) i]
+                                .process (juce::dsp::ProcessContextReplacing<float> (block));
+                        sat.processPost (block, satDriveDb);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < active; ++i)
+                            flexibleHpLpStages[(size_t) flexIndex][(size_t) i]
+                                .process (juce::dsp::ProcessContextReplacing<float> (block));
+                        sat.processPre (block);
+                    }
                 });
                 applySplitDeltaIfArmed (splitBandIndex, type);
                 return;

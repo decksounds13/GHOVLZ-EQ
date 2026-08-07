@@ -1,8 +1,8 @@
 # GPU Particle Simulation Plan (Spec3D)
 
-**Status:** Phase 1 hybrid implemented (toggle, CPU default).  
-**Date:** 2026-08-06  
-**Depends on:** Current hybrid system (CPU sim + GPU instanced draw). OpenGL 4.3 required for compute; falls back to CPU if unavailable.
+**Status:** Phase 1.5 hybrid complete (GPU integrate + compact draw, CPU default).  
+**Date:** 2026-08-07  
+**Depends on:** Hybrid system (CPU spawn/matrix + GPU integrate/compact/draw). OpenGL 4.3 required for compute; falls back to CPU if unavailable.
 
 ---
 
@@ -10,12 +10,14 @@
 
 | Stage | Location | Notes |
 |-------|----------|--------|
-| Spawn / lifetime / forces / matrix | CPU (`Spec3DParticleSystem::update`) | Caps spawns/frame to avoid melt |
-| Instance pack | CPU → `GpuInstance` VBO stream | Per-frame upload |
-| Draw | GPU `glDrawElementsInstanced` | Sphere / cube meshes, GGX + emissive |
+| Spawn / colour matrix | CPU (`Spec3DParticleSystem::update`) | Free-list alloc; colour throttled at high counts |
+| Force / age integrate | GPU compute (toggle) or CPU | Dense alive pack → SSBO; sparse writeback by `poolIndex` |
+| Compact alive → instances | GPU compute | Atomic counter + `instanceSsbo` (64 B `GpuInstance`) |
+| Draw (GPU path) | `instanceSsbo` as ARRAY_BUFFER | No CPU instance pack when compact valid |
+| Draw (CPU path) | CPU → `instanceVbo` stream | Fallback / toggle off |
 | Billboard path | CPU verts + draw | Soft sprites |
 
-**Bottleneck:** CPU spawn + force integration + matrix + buffer upload at high emission. Draw path is already GPU.
+**Bottleneck (remaining):** CPU spawn + matrix at extreme rates; dense-alive writeback (~96 B × N) still needed for free-list until GPU spawn (Phase 2).
 
 ---
 
@@ -74,13 +76,20 @@ Unblocks high particle counts while preserving Spec3D’s audio-driven matrix co
 
 ### Phase 1 — GPU integrate (hybrid) ✅
 
-- [x] Particle SSBO layout (`GpuSimParticle` 80 B std430) + force SSBO  
+- [x] Particle SSBO layout (`GpuSimParticle` 96 B std430) + force SSBO  
 - [x] Compute pass: age/kill, gravity/drag/wind/curl/turbulence/rotation, settle, free OOB  
 - [x] CPU still owns: emit, matrix colour/size, init vel/rot, trail XZ sample  
-- [x] Draw: existing instanced mesh / billboard (readback pos after integrate)  
+- [x] Sparse writeback of dense alive pack (not full pool) for free-list  
 - [x] **Fallback:** CPU integrate if toggle off or compute unavailable  
 - [x] Settings toggle **GPU particle integrate** (default off) + UI prefs `spec3dParticleGpuSim`  
 - [x] OpenGL context required version **4.3** (soft; compute entry points gated)
+
+### Phase 1.5 — Compact + GPU draw ✅
+
+- [x] Compact compute: alive → `InstanceGpu` / `GpuInstance` (64 B, matches mesh VS attrs)  
+- [x] Draw instanced meshes from `instanceSsbo` (no CPU instance pack when valid)  
+- [x] Cap: `kGpuPathMaxAlive` = 262144 (above → CPU integrate)  
+- [x] Counter SSBO + atomic compact count for draw instance count  
 
 ### Phase 2 — GPU spawn
 
@@ -161,4 +170,4 @@ Heightfield: already have height map path on waterfall — can bind as texture f
 
 ---
 
-*When ready to implement: start Phase 0 profiling + Phase 1 hybrid integrate.*
+*Phase 1.5 complete: hybrid GPU integrate + compact draw. Next: Phase 2 GPU spawn / free-list.*

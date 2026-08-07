@@ -1132,6 +1132,11 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
                 : FilterSlope::makeLowpassCoeffs (sampleRate, f, q, slope);
             FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
         }
+        else if (FilterType::isMultiStage (type))
+        {
+            auto stages = FilterType::makeStages (type, sampleRate, f, q, gain);
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
+        }
         else
         {
             auto coeffs = FilterType::makeCoefficients (type, sampleRate, f, q, gain);

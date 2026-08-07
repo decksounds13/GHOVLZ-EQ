@@ -1,4 +1,5 @@
 #include "ParticleForceStackComponent.h"
+#include <cmath>
 
 namespace
 {
@@ -8,6 +9,49 @@ namespace
     constexpr int kHeaderH = 26;
     constexpr int kAddH = 28;
     constexpr int kGripW = 14;
+
+    /** Property key: typed values may exceed drag range (same idea as particle Look sliders). */
+    const juce::Identifier kForceSliderActual ("forceSliderActual");
+
+    double getForceSliderActual (const juce::Slider& s)
+    {
+        if (s.getProperties().contains (kForceSliderActual))
+            return (double) s.getProperties()[kForceSliderActual];
+        return s.getValue();
+    }
+
+    void setForceSliderActual (juce::Slider& s, double actual)
+    {
+        if (! std::isfinite (actual))
+            actual = s.getValue();
+        s.getProperties().set (kForceSliderActual, actual);
+        const double thumb = juce::jlimit (s.getMinimum(), s.getMaximum(), actual);
+        s.setValue (thumb, juce::dontSendNotification);
+        s.updateText();
+    }
+
+    /** Drag stays in setRange; typed text can set any finite value (applied via actual prop). */
+    void wireUncappedForceSlider (juce::Slider& s)
+    {
+        s.setTextBoxIsEditable (true);
+        s.setNumDecimalPlacesToDisplay (3);
+        s.valueFromTextFunction = [&s] (const juce::String& text)
+        {
+            const double typed = text.getDoubleValue();
+            if (std::isfinite (typed))
+                s.getProperties().set (kForceSliderActual, typed);
+            return juce::jlimit (s.getMinimum(), s.getMaximum(), typed);
+        };
+        s.textFromValueFunction = [&s] (double v)
+        {
+            const double shown = s.getProperties().contains (kForceSliderActual)
+                                     ? (double) s.getProperties()[kForceSliderActual]
+                                     : v;
+            if (std::abs (shown) >= 100.0 && std::abs (shown - std::round (shown)) < 1.0e-6)
+                return juce::String ((int) std::round (shown));
+            return juce::String (shown, 3);
+        };
+    }
 
     void styleForceSlider (juce::Slider& s, double minV, double maxV, double step)
     {
@@ -22,6 +66,7 @@ namespace
         s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::black.withAlpha (0.40f));
         s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         s.setColour (juce::Slider::textBoxHighlightColourId, juce::Colours::goldenrod.withAlpha (0.35f));
+        wireUncappedForceSlider (s);
     }
 
     void styleAxisToggle (juce::ToggleButton& t)
@@ -32,6 +77,10 @@ namespace
         t.setColour (juce::ToggleButton::tickDisabledColourId, juce::Colours::grey);
     }
 
+    /**
+        Force sliders were ~100× too hot for world-unit particle sim.
+        Ranges are ~1% of the old ±20 / 0–20 spans; defaults match in ParticleForceModule.h.
+    */
     void configureParamsForType (ParticleForceType type,
                                  juce::Slider& p0, juce::Slider& p1, juce::Slider& p2,
                                  bool linkAxes)
@@ -45,50 +94,54 @@ namespace
         switch (type)
         {
             case ParticleForceType::gravity:
-                styleForceSlider (p0, -20.0, 20.0, 0.01);
-                p0.setTooltip ("Gravity accel Y (negative pulls down)");
+                styleForceSlider (p0, -0.20, 0.20, 0.001);
+                p0.setTooltip ("Gravity accel Y (world units/s²). Negative pulls down.\n"
+                               "Drag range is gentle; type any value for stronger pull.");
                 break;
             case ParticleForceType::drag:
-                styleForceSlider (p0, 0.0, 20.0, 0.01);
-                p0.setTooltip ("Linear drag coefficient");
+                styleForceSlider (p0, 0.0, 0.20, 0.001);
+                p0.setTooltip ("Linear drag (vel *= exp(-k·dt)).\n"
+                               "Drag range is gentle; type any value for stronger drag.");
                 break;
             case ParticleForceType::wind:
-                styleForceSlider (p0, -20.0, 20.0, 0.01);
-                styleForceSlider (p1, -20.0, 20.0, 0.01);
-                styleForceSlider (p2, -20.0, 20.0, 0.01);
-                p0.setTooltip ("Wind accel X");
-                p1.setTooltip ("Wind accel Y");
-                p2.setTooltip ("Wind accel Z");
+                styleForceSlider (p0, -0.20, 0.20, 0.001);
+                styleForceSlider (p1, -0.20, 0.20, 0.001);
+                styleForceSlider (p2, -0.20, 0.20, 0.001);
+                p0.setTooltip ("Wind accel X (type beyond drag range if needed)");
+                p1.setTooltip ("Wind accel Y (type beyond drag range if needed)");
+                p2.setTooltip ("Wind accel Z (type beyond drag range if needed)");
                 break;
             case ParticleForceType::curlNoise:
-                styleForceSlider (p0, 0.0, 20.0, 0.01);
-                styleForceSlider (p1, 0.05, 20.0, 0.01);
-                styleForceSlider (p2, 0.0, 5.0, 0.01);
-                p0.setTooltip ("Curl strength");
-                p1.setTooltip ("Spatial scale");
-                p2.setTooltip ("Scroll speed");
+                styleForceSlider (p0, 0.0, 0.20, 0.001);
+                styleForceSlider (p1, 0.01, 2.0, 0.01);
+                styleForceSlider (p2, 0.0, 0.50, 0.001);
+                p0.setTooltip ("Curl strength (type any value beyond the drag range)");
+                p1.setTooltip ("Spatial scale (type beyond drag range if needed)");
+                p2.setTooltip ("Scroll speed (type beyond drag range if needed)");
                 break;
             case ParticleForceType::turbulence:
-                styleForceSlider (p0, 0.0, 20.0, 0.01);
-                p0.setTooltip ("Random turbulence strength");
+                styleForceSlider (p0, 0.0, 0.20, 0.001);
+                p0.setTooltip ("Random turbulence strength.\n"
+                               "Drag range is gentle (0–0.2); type any value for more.");
                 break;
             case ParticleForceType::rotation:
-                styleForceSlider (p0, -20.0, 20.0, 0.01);
-                styleForceSlider (p1, -20.0, 20.0, 0.01);
-                styleForceSlider (p2, -20.0, 20.0, 0.01);
+                // rad/s: drag ±2; type higher for extreme spin.
+                styleForceSlider (p0, -2.0, 2.0, 0.01);
+                styleForceSlider (p1, -2.0, 2.0, 0.01);
+                styleForceSlider (p2, -2.0, 2.0, 0.01);
                 if (linkAxes)
                 {
-                    p0.setTooltip ("Spin rate (rad/s) on all enabled axes - higher = faster");
+                    p0.setTooltip ("Spin rate (rad/s) on all enabled axes. Type beyond ±2 if needed.");
                 }
                 else
                 {
-                    p0.setTooltip ("Spin rate X (rad/s)");
-                    p1.setTooltip ("Spin rate Y (rad/s)");
-                    p2.setTooltip ("Spin rate Z (rad/s)");
+                    p0.setTooltip ("Spin rate X (rad/s). Type beyond ±2 if needed.");
+                    p1.setTooltip ("Spin rate Y (rad/s). Type beyond ±2 if needed.");
+                    p2.setTooltip ("Spin rate Z (rad/s). Type beyond ±2 if needed.");
                 }
                 break;
             default:
-                styleForceSlider (p0, -50.0, 50.0, 0.01);
+                styleForceSlider (p0, -0.5, 0.5, 0.001);
                 break;
         }
     }
@@ -145,14 +198,37 @@ void ParticleForceStackComponent::addForceOfType (ParticleForceType type)
     const uint32_t uid = onRequestUid ? onRequestUid() : (uint32_t) (modules.size() + 1);
     modules.push_back (makeDefaultForceModule (type, uid));
     rebuildRows();
-    notifyChanged();
+    notifyChanged (true);
 }
 
 void ParticleForceStackComponent::setModules (const std::vector<ParticleForceModule>& mods)
 {
-    modules = mods;
-    if (modules.size() > (size_t) kParticleForceStackMax)
-        modules.resize ((size_t) kParticleForceStackMax);
+    auto next = mods;
+    if (next.size() > (size_t) kParticleForceStackMax)
+        next.resize ((size_t) kParticleForceStackMax);
+
+    // In-place value update when structure matches — never destroy rows mid-drag
+    // (Menu sync + force slider onValueChange used to rebuild and crash).
+    const bool structureSame = next.size() == modules.size()
+                               && next.size() == (size_t) rows.size()
+                               && [&]
+    {
+        for (size_t i = 0; i < next.size(); ++i)
+            if (next[i].type != modules[i].type || next[i].uid != modules[i].uid)
+                return false;
+        return true;
+    }();
+
+    if (structureSame)
+    {
+        modules = std::move (next);
+        for (int i = 0; i < rows.size(); ++i)
+            if (rows[i] != nullptr)
+                rows[i]->setModule (modules[(size_t) i]);
+        return;
+    }
+
+    modules = std::move (next);
     rebuildRows();
 }
 
@@ -191,13 +267,17 @@ void ParticleForceStackComponent::rebuildRows()
     resized();
 }
 
-void ParticleForceStackComponent::notifyChanged()
+void ParticleForceStackComponent::notifyChanged (bool structureChanged)
 {
     modules = getModules();
     if (onChanged)
-        onChanged();
-    if (auto* p = getParentComponent())
-        p->resized();
+        onChanged (structureChanged);
+    // Only reflow when row count / height may have changed — not on every param scrub.
+    if (structureChanged)
+    {
+        if (auto* p = getParentComponent())
+            p->resized();
+    }
 }
 
 void ParticleForceStackComponent::beginDrag (int index)
@@ -239,7 +319,7 @@ void ParticleForceStackComponent::endDrag()
     if (dragFrom >= 0)
     {
         dragFrom = -1;
-        notifyChanged();
+        notifyChanged (true);
     }
 }
 
@@ -279,7 +359,7 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
 {
     enable.setClickingTogglesState (true);
     enable.setTooltip ("Enable / disable this force module");
-    enable.onClick = [this] { ownerRef.notifyChanged(); };
+    enable.onClick = [this] { ownerRef.notifyChanged (false); };
     addAndMakeVisible (enable);
 
     typeLabel.setFont (juce::FontOptions().withName ("Lato").withHeight (12.5f));
@@ -290,8 +370,17 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
 
     auto wireSlider = [this] (juce::Slider& s)
     {
-        s.onValueChange = [this] { ownerRef.notifyChanged(); };
-        s.setNumDecimalPlacesToDisplay (2);
+        // Param scrub only — do not rebuild rows or request Menu relayout (that crashed).
+        // Drag updates actual = thumb; typed out-of-range keeps actual from valueFromTextFunction.
+        s.onValueChange = [this, &s]
+        {
+            if (s.isMouseButtonDown())
+                s.getProperties().set (kForceSliderActual, s.getValue());
+            else if (! s.getProperties().contains (kForceSliderActual))
+                s.getProperties().set (kForceSliderActual, s.getValue());
+            ownerRef.notifyChanged (false);
+        };
+        s.setNumDecimalPlacesToDisplay (3);
         addAndMakeVisible (s);
     };
     wireSlider (p0); wireSlider (p1); wireSlider (p2);
@@ -303,7 +392,8 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
         t.onClick = [this]
         {
             refreshRotationChrome();
-            ownerRef.notifyChanged();
+            // Link axes can show/hide p1/p2 — height may change for rotation rows.
+            ownerRef.notifyChanged (true);
             ownerRef.resized();
             if (auto* p = ownerRef.getParentComponent())
                 p->resized();
@@ -329,7 +419,7 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
         {
             mods.erase (mods.begin() + rowIndex);
             ownerRef.setModules (mods);
-            ownerRef.notifyChanged();
+            ownerRef.notifyChanged (true);
         }
     };
     addAndMakeVisible (remove);
@@ -364,9 +454,10 @@ void ParticleForceStackComponent::ForceRow::setModule (const ParticleForceModule
     linkAxes.setToggleState (m.linkAxes, juce::dontSendNotification);
     randomDir.setToggleState (m.randomDir, juce::dontSendNotification);
     configureParamsForType (m.type, p0, p1, p2, m.linkAxes);
-    p0.setValue (m.p[0], juce::dontSendNotification);
-    p1.setValue (m.p[1], juce::dontSendNotification);
-    p2.setValue (m.p[2], juce::dontSendNotification);
+    // Preserve values outside drag range (typed / prefs).
+    setForceSliderActual (p0, (double) m.p[0]);
+    setForceSliderActual (p1, (double) m.p[1]);
+    setForceSliderActual (p2, (double) m.p[2]);
     refreshRotationChrome();
     setAlpha (m.enabled ? 1.0f : 0.55f);
     resized();
@@ -378,9 +469,9 @@ ParticleForceModule ParticleForceStackComponent::ForceRow::getModule() const
     m.type = moduleType;
     m.uid = moduleUid;
     m.enabled = enable.getToggleState();
-    m.p[0] = (float) p0.getValue();
-    m.p[1] = (float) p1.getValue();
-    m.p[2] = (float) p2.getValue();
+    m.p[0] = (float) getForceSliderActual (p0);
+    m.p[1] = (float) getForceSliderActual (p1);
+    m.p[2] = (float) getForceSliderActual (p2);
     m.axisX = axisX.getToggleState();
     m.axisY = axisY.getToggleState();
     m.axisZ = axisZ.getToggleState();

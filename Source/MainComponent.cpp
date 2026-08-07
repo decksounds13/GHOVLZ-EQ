@@ -3631,9 +3631,10 @@ bool MainComponent::isSpec3DParticleModeEnabled() const noexcept
 }
 void MainComponent::setSpec3DParticleEmitMode (int mode, bool notifyPrefs)
 {
-    spectrogram3D.setParticleEmitMode (
-        mode == 1 ? Spectrogram3DComponent::ParticleEmitMode::continuous
-                  : Spectrogram3DComponent::ParticleEmitMode::slice);
+    // Explicit clamp: only 1 is continuous; anything else (incl. 0 / bad id) is slice.
+    const auto m = (mode == 1) ? Spectrogram3DComponent::ParticleEmitMode::continuous
+                               : Spectrogram3DComponent::ParticleEmitMode::slice;
+    spectrogram3D.setParticleEmitMode (m);
     if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 int MainComponent::getSpec3DParticleEmitMode() const noexcept

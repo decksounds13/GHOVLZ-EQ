@@ -115,7 +115,8 @@ void LinearPhaseEqEngine::cacheBandCoefficients()
             continue;
         }
 
-        bandCoeffs[(size_t) b].add (FilterType::makeCoefficients (band.type, sr, band.frequency, band.q, band.gainDb));
+        // Multi-stage (tilt / flat tilt) or single biquad (bell, shelves, all-pass, …).
+        bandCoeffs[(size_t) b] = FilterType::makeStages (band.type, sr, band.frequency, band.q, band.gainDb);
     }
 }
 

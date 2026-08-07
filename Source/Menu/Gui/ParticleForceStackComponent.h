@@ -18,10 +18,15 @@ public:
     ParticleForceStackComponent (SharedResources& resources);
     ~ParticleForceStackComponent() override = default;
 
+    /**
+        Replace stack. If structure (count / type / uid) matches, updates slider
+        values in place without destroying rows (safe during drag / Menu sync).
+    */
     void setModules (const std::vector<ParticleForceModule>& mods);
     std::vector<ParticleForceModule> getModules() const;
 
-    std::function<void()> onChanged;
+    /** structureChanged=true when rows were added/removed/reordered (needs parent relayout). */
+    std::function<void (bool structureChanged)> onChanged;
     std::function<uint32_t()> onRequestUid;
 
     int getPreferredHeight() const;
@@ -70,7 +75,7 @@ private:
     void showAddForceMenu();
     void addForceOfType (ParticleForceType type);
     void rebuildRows();
-    void notifyChanged();
+    void notifyChanged (bool structureChanged = false);
     void beginDrag (int index);
     void updateDrag (int mouseY);
     void endDrag();

@@ -659,10 +659,11 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                      "Replace the mesh with a playhead particle field. Off by default "
                      "(no cost when disabled).");
     setupLookToggle (particleGpuSimToggle,
-                     "Run force / age integration on the GPU (OpenGL 4.3 compute). "
-                     "CPU is the default and always works. GPU needs a 4.3+ context; "
-                     "if compute fails to start, motion falls back to CPU automatically. "
-                     "Spawn and colour matrix stay on the CPU either way.");
+                     "Hybrid GPU path: force/age integrate + compact to instance buffer on the GPU "
+                     "(OpenGL 4.3 compute). CPU is the default and always works. GPU needs a 4.3+ "
+                     "context; if compute fails, motion falls back to CPU automatically. "
+                     "Spawn and colour matrix stay on the CPU. Dense alive pack is written back "
+                     "for free-list (not the full pool). Prefer budgets up to ~262k on GPU.");
     particleGpuSimToggle.setToggleState (false, juce::dontSendNotification);
     particleMaxAliveLabel.setText ("Max particles", juce::dontSendNotification);
     // Drag range to 100k; type up to 1M for stress tests (absolute hard cap).
@@ -670,8 +671,9 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                          "Live particle budget. Default 8192. Drag up to 100k; type up to 1,000,000 "
                          "for stress tests (~200MB RAM at 1M — can hitch or OOM the host).\n"
                          "This is the total ceiling. Emission only controls how fast you fill it.\n"
-                         "At 100k+: free-list spawn, heavy colour throttling; hybrid GPU integrate "
-                         "auto-falls back to CPU (readback can't scale). Full GPU sim still TODO.");
+                         "At 100k+: free-list spawn + colour throttling. GPU integrate (toggle) "
+                         "scales to ~262k via dense pack + compact draw; above that or without "
+                         "compute, integration stays on CPU.");
     setSliderActual (particleMaxAliveSlider, 8192.0);
     setupLookToggle (particleDebugOverlayToggle,
                      "Show live particle stats on the 3D view (alive / budget / pool / "
@@ -711,11 +713,13 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
         "Continuous (default): energy-weighted random samples along the playhead with "
         "sub-bin positions - particles don't stack on exact grid points.\n"
         "Slice: each frequency bin emits on its own clock (more grid-like columns), "
-        "still with within-band scatter + spawn jitter.");
+        "still with within-band scatter + spawn jitter.\n"
+        "Both modes still sample the live waterfall playhead — this only changes how "
+        "spawn rate is distributed.");
     particleEmitModeCombo.onChange = [this]
     {
+        // No parent relayout (height unchanged). Relayout → Menu sync was racing UI.
         applyLookControlsToMain();
-        requestParentRelayout();
     };
     addAndMakeVisible (particleEmitModeLabel);
     addAndMakeVisible (particleEmitModeCombo);
@@ -834,10 +838,13 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     particleWaterfallLockToggle.setToggleState (true, juce::dontSendNotification);
     particleForceStack = std::make_unique<ParticleForceStackComponent> (sharedResources);
     particleForceStack->onRequestUid = [] { return (uint32_t) juce::Random::getSystemRandom().nextInt(); };
-    particleForceStack->onChanged = [this]
+    particleForceStack->onChanged = [this] (bool structureChanged)
     {
         applyLookControlsToMain();
-        requestParentRelayout();
+        // Param scrub only: never sync/rebuild (Menu::resized → syncFromMain destroyed
+        // force rows mid-drag and crashed when adjusting turbulence etc.).
+        if (structureChanged)
+            requestParentRelayout();
     };
     addAndMakeVisible (*particleForceStack);
 
@@ -1976,10 +1983,10 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
         const bool gpuOk = main->isSpec3DParticleGpuSimAvailable();
         particleGpuSimToggle.setTooltip (
             juce::String (
-                "Run force / age integration on the GPU (OpenGL 4.3 compute). "
-                "CPU is the default and always works. GPU needs a 4.3+ context; "
-                "if compute fails to start, motion falls back to CPU automatically. "
-                "Spawn and colour matrix stay on the CPU either way.")
+                "Hybrid GPU path: force/age integrate + compact to instance buffer "
+                "(OpenGL 4.3 compute). CPU is the default and always works. "
+                "Spawn and colour matrix stay on the CPU. Dense alive pack is written "
+                "back for free-list (not the full pool).")
             + (gpuOk ? "\n\nCompute is ready on this GPU."
                      : "\n\nCompute not ready yet (needs particle draw once, or GL 4.3 unavailable)."));
     }
@@ -2269,7 +2276,12 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DParticleMaxAlive ((int) std::lround (getSliderActual (particleMaxAliveSlider)), kSave);
     main->setSpec3DParticleDebugOverlayEnabled (particleDebugOverlayToggle.getToggleState(), kSave);
     main->setSpec3DParticleBindingMode (juce::jmax (0, particleBindingCombo.getSelectedId() - 1), kSave);
-    main->setSpec3DParticleEmitMode (juce::jmax (0, particleEmitModeCombo.getSelectedId() - 1), kSave);
+    {
+        // Combo ids: 1 = slice, 2 = continuous. Never treat 0 (no selection) as continuous.
+        const int emitId = particleEmitModeCombo.getSelectedId();
+        const int emitMode = (emitId == 2) ? 1 : 0; // 0 slice, 1 continuous
+        main->setSpec3DParticleEmitMode (emitMode, kSave);
+    }
     main->setSpec3DParticleEmission ((float) getSliderActual (particleEmissionSlider), kSave);
     main->setSpec3DParticleSpawnJitter ((float) getSliderActual (particleSpawnJitterSlider), kSave);
     main->setSpec3DParticleInitVelX ((float) getSliderActual (particleInitVelXSlider), kSave);

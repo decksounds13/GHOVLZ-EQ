@@ -1686,7 +1686,7 @@ void OptionBoxMenu::setupFilterModelMenu (int bandIndex)
     filterModelAttachment.reset();
     customComboBox.clear (juce::dontSendNotification);
 
-    // All bands share the same type menu (Bell / shelves / notch / BP / HP / LP).
+    // All bands share the same type menu (core + tilt / flat tilt / all-pass).
     const auto names = FilterType::getChoiceNames();
     for (int i = 0; i < names.size(); ++i)
         customComboBox.addItem (names[i], i + 1);
@@ -1747,13 +1747,14 @@ void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
     if (undoManager != nullptr)
         undoManager->beginNewTransaction ("Filter type");
 
-    // HP / LP / notch / band-pass: Freq + Q only. Gain types: Freq + Gain + Q.
+    // HP / LP / notch / band-pass / all-pass: no gain. Flat tilt: no Q (fixed gentle shelves).
     const int type = customComboBox.getSelectedItemIndex();
     const bool showGain = FilterType::usesGain (type);
+    const bool showQ = (type != FilterType::flatTilt);
     rotaryImageKnobForOptionBox2.setVisible (showGain);
     gainLabel.setVisible (showGain);
-    rotaryImageKnobForOptionBox3.setVisible (true);
-    qLabel.setVisible (true);
+    rotaryImageKnobForOptionBox3.setVisible (showQ);
+    qLabel.setVisible (showQ);
     updateFilterSlopeVisibility();
     updateDynamicControlsVisibility();
     resized();

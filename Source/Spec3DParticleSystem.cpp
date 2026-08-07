@@ -265,6 +265,14 @@ void Spec3DParticleSystem::clear()
         for (int c = 0; c < 3; ++c)
             randomSmoothV[i][c] = 0.0f;
     std::fill (emitAccum.begin(), emitAccum.end(), 0.0f);
+    pendingIntegrateDt = 0.0f;
+    gpuInstancesValid = false;
+}
+
+void Spec3DParticleSystem::resetEmissionAccumulators() noexcept
+{
+    emitGlobal = 0.0f;
+    std::fill (emitAccum.begin(), emitAccum.end(), 0.0f);
 }
 
 void Spec3DParticleSystem::scrollHistory (int numCols)
@@ -945,47 +953,59 @@ void Spec3DParticleSystem::integrateForceStack (Particle& p, const ForceModScale
     if (! owner.particleForcesEnabled)
         return;
 
+    // Snapshot stack so UI/GL can update forces without racing this loop.
+    const auto stackCopy = owner.particleForceStack;
+
     // Evaluate ordered stack (module order = evaluation order).
-    for (const auto& mod : owner.particleForceStack)
+    for (const auto& mod : stackCopy)
     {
         if (! mod.enabled)
             continue;
+
+        auto p0 = std::isfinite (mod.p[0]) ? mod.p[0] : 0.0f;
+        auto p1 = std::isfinite (mod.p[1]) ? mod.p[1] : 0.0f;
+        auto p2 = std::isfinite (mod.p[2]) ? mod.p[2] : 0.0f;
 
         switch (mod.type)
         {
             case ParticleForceType::gravity:
             {
-                const float g = mod.p[0] * scales.gravity + scales.gravityAdd;
+                const float g = p0 * scales.gravity + scales.gravityAdd;
                 p.velY += g * dt;
                 break;
             }
             case ParticleForceType::drag:
             {
-                const float d = mod.p[0] * scales.drag + scales.dragAdd;
+                const float d = p0 * scales.drag + scales.dragAdd;
                 if (std::abs (d) > 1.0e-8f)
                 {
-                    const float damp = std::exp (-std::abs (d) * dt);
+                    // Cap to avoid exp overflow / denorm thrash at extreme typed values.
+                    const float damp = std::exp (-juce::jmin (40.0f, std::abs (d) * dt));
                     p.velX *= damp; p.velY *= damp; p.velZ *= damp;
                 }
                 break;
             }
             case ParticleForceType::wind:
             {
-                p.velX += (mod.p[0] * scales.windX + scales.windAddX) * dt;
-                p.velY += (mod.p[1] * scales.windY + scales.windAddY) * dt;
-                p.velZ += (mod.p[2] * scales.windZ + scales.windAddZ) * dt;
+                p.velX += (p0 * scales.windX + scales.windAddX) * dt;
+                p.velY += (p1 * scales.windY + scales.windAddY) * dt;
+                p.velZ += (p2 * scales.windZ + scales.windAddZ) * dt;
                 break;
             }
             case ParticleForceType::curlNoise:
             {
-                float str = mod.p[0] * scales.curlStrength + scales.curlStrAdd;
-                float sc = mod.p[1] * scales.curlScale + scales.curlScaleAdd;
-                float spd = mod.p[2] * scales.curlSpeed + scales.curlSpeedAdd;
+                float str = p0 * scales.curlStrength + scales.curlStrAdd;
+                float sc = p1 * scales.curlScale + scales.curlScaleAdd;
+                float spd = p2 * scales.curlSpeed + scales.curlSpeedAdd;
                 if (std::abs (str) > 1.0e-8f)
                 {
-                    if (sc == 0.0f) sc = 1.0e-4f;
+                    sc = juce::jlimit (1.0e-4f, 8.0f, std::abs (sc) < 1.0e-6f ? 1.0e-4f : sc);
                     const float t = simTime * spd;
-                    const auto c = curlNoise (p.x * sc + t, p.y * sc, p.z * sc + t * 0.7f);
+                    // Bound sample domain so hashNoise int coords stay sane.
+                    const float sx = juce::jlimit (-50.0f, 50.0f, p.x * sc + t);
+                    const float sy = juce::jlimit (-50.0f, 50.0f, p.y * sc);
+                    const float sz = juce::jlimit (-50.0f, 50.0f, p.z * sc + t * 0.7f);
+                    const auto c = curlNoise (sx, sy, sz);
                     p.velX += c.x * str * dt;
                     p.velY += c.y * str * dt;
                     p.velZ += c.z * str * dt;
@@ -994,7 +1014,7 @@ void Spec3DParticleSystem::integrateForceStack (Particle& p, const ForceModScale
             }
             case ParticleForceType::turbulence:
             {
-                const float str = mod.p[0] * scales.turbulence + scales.turbAdd;
+                const float str = p0 * scales.turbulence + scales.turbAdd;
                 if (std::abs (str) > 1.0e-8f)
                 {
                     p.velX += (rng.nextFloat() * 2.0f - 1.0f) * str * dt;
@@ -1009,9 +1029,9 @@ void Spec3DParticleSystem::integrateForceStack (Particle& p, const ForceModScale
                 // linkAxes: p[0] shared; else p[0]/p[1]/p[2] independent.
                 // randomDir: multiply by per-particle spinScale (−1…1) so each
                 // particle has its own direction and relative speed.
-                const float rateX = mod.linkAxes ? mod.p[0] : mod.p[0];
-                const float rateY = mod.linkAxes ? mod.p[0] : mod.p[1];
-                const float rateZ = mod.linkAxes ? mod.p[0] : mod.p[2];
+                const float rateX = p0;
+                const float rateY = mod.linkAxes ? p0 : p1;
+                const float rateZ = mod.linkAxes ? p0 : p2;
                 const float sx = mod.randomDir ? p.spinScaleX : 1.0f;
                 const float sy = mod.randomDir ? p.spinScaleY : 1.0f;
                 const float sz = mod.randomDir ? p.spinScaleZ : 1.0f;
@@ -1023,6 +1043,12 @@ void Spec3DParticleSystem::integrateForceStack (Particle& p, const ForceModScale
             default: break;
         }
     }
+
+    // Soft clamp velocity so runaway forces can't NaN positions.
+    constexpr float kMaxVel = 50.0f;
+    p.velX = juce::jlimit (-kMaxVel, kMaxVel, p.velX);
+    p.velY = juce::jlimit (-kMaxVel, kMaxVel, p.velY);
+    p.velZ = juce::jlimit (-kMaxVel, kMaxVel, p.velZ);
 
     p.x += p.velX * dt;
     p.y += p.velY * dt;
@@ -1453,19 +1479,17 @@ void Spec3DParticleSystem::update (float dtSeconds)
     }
 
     // ── Integrate ──────────────────────────────────────────────────────────
-    // GPU path must run on the OpenGL thread (compute/SSBO). Prefer GPU when the
-    // user toggle is on: defer dt + scales for integrateOnGlThread(). CPU path
-    // integrates immediately so non-GL hosts and CPU-default stay correct.
-    // GPU hybrid path does full SSBO upload+readback — fine ≤~24k, deadly at 100k+.
+    // GPU path (toggle on + compute ready): defer to GL thread — dense pack,
+    // integrate, compact to instance SSBO, draw without full-pool readback.
     const bool useGpuIntegrate = owner.particleGpuSimEnabled
-                                 && maxAliveBudget <= kGpuReadbackMaxAlive
-                                 && (int) pool.size() <= kGpuReadbackMaxAlive;
+                                 && maxAliveBudget <= kGpuPathMaxAlive;
 
     if (useGpuIntegrate)
     {
         pendingIntegrateDt = juce::jmin (0.1f, pendingIntegrateDt + dtSeconds);
         pendingForceScales = forceScales;
         pendingFreeMode = freeMode;
+        gpuInstancesValid = false; // rebuild on next GL pass
     }
     else
     {
@@ -1473,6 +1497,7 @@ void Spec3DParticleSystem::update (float dtSeconds)
         pendingIntegrateDt = 0.0f;
         cpuIntegrateAll (dt, forceScales, freeMode);
         enforceAliveBudget();
+        gpuInstancesValid = false;
     }
 }
 
@@ -1555,14 +1580,15 @@ void Spec3DParticleSystem::integrateOnGlThread()
     const auto scales = pendingForceScales;
     const bool freeMode = pendingFreeMode;
 
-    // Prefer compute when ready and budget is small enough for readback.
     const bool useGpu = owner.particleGpuSimEnabled && gpuComputeReady && glReady
-                        && maxAliveBudget <= kGpuReadbackMaxAlive
-                        && (int) pool.size() <= kGpuReadbackMaxAlive;
+                        && maxAliveBudget <= kGpuPathMaxAlive;
     if (useGpu)
-        gpuIntegrateAndReadback (dt, scales, freeMode);
+        gpuIntegrateAndCompact (dt, scales, freeMode);
     else
+    {
         cpuIntegrateAll (dt, scales, freeMode);
+        gpuInstancesValid = false;
+    }
 
     enforceAliveBudget();
 }
@@ -1861,12 +1887,19 @@ void Spec3DParticleSystem::drawInstancedMeshes (const juce::Matrix3D<float>& pro
     using namespace juce::gl;
     if (meshProgram == nullptr || meshVbo == 0 || instanceVbo == 0) return;
 
+    // Prefer GPU-compacted instance buffer (no CPU pack).
+    if (gpuInstancesValid && gpuDrawnInstances > 0 && instanceSsbo != 0
+        && owner.particleGpuSimEnabled && gpuComputeReady)
+    {
+        drawInstancedMeshesFromGpu (projection, view);
+        return;
+    }
+
     instances.clear();
     instances.reserve ((size_t) juce::jmin (aliveCount, maxAliveBudget));
     for (const auto& p : pool)
     {
         if (! p.alive) continue;
-        // Hard draw clamp — never submit more than the live budget.
         if ((int) instances.size() >= maxAliveBudget)
             break;
         GpuInstance inst;
@@ -2059,7 +2092,6 @@ bool Spec3DParticleSystem::createComputeProgram()
     using namespace juce::gl;
     releaseComputeProgram();
 
-    // Require compute entry points (GL 4.3 or ARB_compute_shader).
     if (glDispatchCompute == nullptr || glBindBufferBase == nullptr
         || glMemoryBarrier == nullptr)
         return false;
@@ -2073,7 +2105,8 @@ struct ParticleGpu {
     float vx, vy, vz, maxLife;
     float spinX, spinY, spinZ, flags;
     float targetY, spawnOffY, rotX, rotY;
-    float rotZ, pad0, pad1, pad2;
+    float rotZ, sizeScale, em, alpha;
+    float r, g, b, poolIndex;
 };
 
 struct ForceGpu {
@@ -2227,12 +2260,19 @@ void main()
             }
         }
 
-        p.px += p.vx * dt;
-        p.py += p.vy * dt;
-        p.pz += p.vz * dt;
-
+        // Trail lock: keep packed world X (column + spawn offset from CPU); only integrate YZ.
         if (! freeMode && lockX)
+        {
             p.vx = 0.0;
+            p.py += p.vy * dt;
+            p.pz += p.vz * dt;
+        }
+        else
+        {
+            p.px += p.vx * dt;
+            p.py += p.vy * dt;
+            p.pz += p.vz * dt;
+        }
 
         if (! freeMode && ! settled)
         {
@@ -2325,10 +2365,120 @@ void main()
 
     glGenBuffers (1, &particleSsbo);
     glGenBuffers (1, &forceSsbo);
-    gpuComputeReady = (particleSsbo != 0 && forceSsbo != 0 && computeProgram != 0);
+    glGenBuffers (1, &instanceSsbo);
+    glGenBuffers (1, &counterSsbo);
+    gpuComputeReady = (particleSsbo != 0 && forceSsbo != 0 && computeProgram != 0
+                       && instanceSsbo != 0 && counterSsbo != 0);
     if (! gpuComputeReady)
+    {
         releaseComputeProgram();
+        return false;
+    }
+
+    createCompactProgram();
     return gpuComputeReady;
+}
+
+bool Spec3DParticleSystem::createCompactProgram()
+{
+    using namespace juce::gl;
+    gpuCompactReady = false;
+    if (compactProgram) { glDeleteProgram (compactProgram); compactProgram = 0; }
+
+    static constexpr const char* kCompactSrc = R"(
+#version 430
+layout(local_size_x = 64) in;
+
+struct ParticleGpu {
+    float px, py, pz, age;
+    float vx, vy, vz, maxLife;
+    float spinX, spinY, spinZ, flags;
+    float targetY, spawnOffY, rotX, rotY;
+    float rotZ, sizeScale, em, alpha;
+    float r, g, b, poolIndex;
+};
+
+struct InstanceGpu {
+    float px, py, pz, sx;
+    float qx, qy, qz, qw;
+    float r, g, b, a;
+    float em, pad0, pad1, pad2;
+};
+
+layout(std430, binding = 0) readonly buffer ParticleBuf { ParticleGpu particles[]; };
+layout(std430, binding = 2) writeonly buffer InstanceBuf { InstanceGpu instances[]; };
+layout(std430, binding = 3) buffer CounterBuf { uint count; };
+
+uniform int uCount;
+uniform float uBaseSize;
+
+void eulerToQuat(float rx, float ry, float rz, out float qx, out float qy, out float qz, out float qw)
+{
+    float cx = cos(rx * 0.5), sx = sin(rx * 0.5);
+    float cy = cos(ry * 0.5), sy = sin(ry * 0.5);
+    float cz = cos(rz * 0.5), sz = sin(rz * 0.5);
+    qw = cx * cy * cz + sx * sy * sz;
+    qx = sx * cy * cz - cx * sy * sz;
+    qy = cx * sy * cz + sx * cy * sz;
+    qz = cx * cy * sz - sx * sy * cz;
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (int(i) >= uCount) return;
+    ParticleGpu p = particles[i];
+    int fl = int(p.flags + 0.5);
+    if ((fl & 1) == 0) return;
+
+    uint slot = atomicAdd(count, 1u);
+    InstanceGpu o;
+    o.px = p.px; o.py = p.py; o.pz = p.pz;
+    o.sx = max(p.sizeScale, 1.0e-4) * max(uBaseSize, 1.0e-4) * 2.0;
+    eulerToQuat(p.rotX, p.rotY, p.rotZ, o.qx, o.qy, o.qz, o.qw);
+    o.r = p.r; o.g = p.g; o.b = p.b; o.a = p.alpha;
+    o.em = p.em;
+    o.pad0 = o.pad1 = o.pad2 = 0.0;
+    instances[slot] = o;
+}
+)";
+
+    GLuint cs = glCreateShader (GL_COMPUTE_SHADER);
+    const char* src = kCompactSrc;
+    glShaderSource (cs, 1, &src, nullptr);
+    glCompileShader (cs);
+    GLint ok = GL_FALSE;
+    glGetShaderiv (cs, GL_COMPILE_STATUS, &ok);
+    if (ok != GL_TRUE)
+    {
+        char log[1024];
+        GLsizei len = 0;
+        glGetShaderInfoLog (cs, 1024, &len, log);
+        DBG ("Particle compact compile: " + juce::String (log, (size_t) len));
+        glDeleteShader (cs);
+        return false;
+    }
+
+    compactProgram = glCreateProgram();
+    glAttachShader (compactProgram, cs);
+    glLinkProgram (compactProgram);
+    glDeleteShader (cs);
+    glGetProgramiv (compactProgram, GL_LINK_STATUS, &ok);
+    if (ok != GL_TRUE)
+    {
+        char log[1024];
+        GLsizei len = 0;
+        glGetProgramInfoLog (compactProgram, 1024, &len, log);
+        DBG ("Particle compact link: " + juce::String (log, (size_t) len));
+        glDeleteProgram (compactProgram);
+        compactProgram = 0;
+        return false;
+    }
+
+    compactUCount = glGetUniformLocation (compactProgram, "uCount");
+    // uBaseSize may be -1 if optimized out — set each dispatch
+    gpuCompactReady = (compactProgram != 0);
+    return gpuCompactReady;
 }
 
 void Spec3DParticleSystem::releaseComputeProgram()
@@ -2336,47 +2486,29 @@ void Spec3DParticleSystem::releaseComputeProgram()
     using namespace juce::gl;
     if (particleSsbo) { glDeleteBuffers (1, &particleSsbo); particleSsbo = 0; }
     if (forceSsbo) { glDeleteBuffers (1, &forceSsbo); forceSsbo = 0; }
+    if (instanceSsbo) { glDeleteBuffers (1, &instanceSsbo); instanceSsbo = 0; }
+    if (counterSsbo) { glDeleteBuffers (1, &counterSsbo); counterSsbo = 0; }
     if (computeProgram) { glDeleteProgram (computeProgram); computeProgram = 0; }
+    if (compactProgram) { glDeleteProgram (compactProgram); compactProgram = 0; }
     computeUCount = computeUForceCount = computeUDt = computeUSimTime = -1;
+    compactUCount = -1;
     gpuComputeReady = false;
+    gpuCompactReady = false;
     gpuSimPack.clear();
     gpuForcePack.clear();
+    gpuPackedAlive = 0;
+    gpuDrawnInstances = 0;
+    gpuInstancesValid = false;
 }
 
-void Spec3DParticleSystem::gpuIntegrateAndReadback (float dt, const ForceModScales& scales, bool freeMode)
+void Spec3DParticleSystem::bakeForcePack (const ForceModScales& scales)
 {
-    using namespace juce::gl;
-    if (! gpuComputeReady || computeProgram == 0 || particleSsbo == 0)
-        return;
-
-    const int n = (int) pool.size();
-    if (n <= 0)
-        return;
-
-    gpuSimPack.resize ((size_t) n);
-    for (int i = 0; i < n; ++i)
-    {
-        const auto& p = pool[(size_t) i];
-        auto& g = gpuSimPack[(size_t) i];
-        g.px = p.x; g.py = p.y; g.pz = p.z; g.age = p.age;
-        g.vx = p.velX; g.vy = p.velY; g.vz = p.velZ; g.maxLife = p.maxLife;
-        g.spinX = p.spinScaleX; g.spinY = p.spinScaleY; g.spinZ = p.spinScaleZ;
-        int fl = 0;
-        if (p.alive) fl |= 1;
-        if (p.settled) fl |= 2;
-        if (freeMode) fl |= 4;
-        if (! freeMode && owner.particleWaterfallLock) fl |= 8;
-        g.flags = (float) fl;
-        g.targetY = p.targetY; g.spawnOffY = p.spawnOffY;
-        g.rotX = p.rotX; g.rotY = p.rotY; g.rotZ = p.rotZ;
-        g.pad0 = g.pad1 = g.pad2 = 0.0f;
-    }
-
-    // Bake force stack + matrix scales into GPU force list.
     gpuForcePack.clear();
     if (owner.particleForcesEnabled)
     {
-        for (const auto& mod : owner.particleForceStack)
+        // Copy so UI can replace the vector while GL bakes/integrates.
+        const auto stackCopy = owner.particleForceStack;
+        for (const auto& mod : stackCopy)
         {
             if (! mod.enabled)
                 continue;
@@ -2385,83 +2517,166 @@ void Spec3DParticleSystem::gpuIntegrateAndReadback (float dt, const ForceModScal
             f.enabled = 1;
             f.axisMask = (mod.axisX ? 1 : 0) | (mod.axisY ? 2 : 0) | (mod.axisZ ? 4 : 0);
             f.flags = (mod.linkAxes ? 1 : 0) | (mod.randomDir ? 2 : 0);
+            const float p0 = std::isfinite (mod.p[0]) ? mod.p[0] : 0.0f;
+            const float p1 = std::isfinite (mod.p[1]) ? mod.p[1] : 0.0f;
+            const float p2 = std::isfinite (mod.p[2]) ? mod.p[2] : 0.0f;
             switch (mod.type)
             {
                 case ParticleForceType::gravity:
-                    f.p0 = mod.p[0] * scales.gravity + scales.gravityAdd; break;
+                    f.p0 = p0 * scales.gravity + scales.gravityAdd; break;
                 case ParticleForceType::drag:
-                    f.p0 = mod.p[0] * scales.drag + scales.dragAdd; break;
+                    f.p0 = p0 * scales.drag + scales.dragAdd; break;
                 case ParticleForceType::wind:
-                    f.p0 = mod.p[0] * scales.windX + scales.windAddX;
-                    f.p1 = mod.p[1] * scales.windY + scales.windAddY;
-                    f.p2 = mod.p[2] * scales.windZ + scales.windAddZ;
+                    f.p0 = p0 * scales.windX + scales.windAddX;
+                    f.p1 = p1 * scales.windY + scales.windAddY;
+                    f.p2 = p2 * scales.windZ + scales.windAddZ;
                     break;
                 case ParticleForceType::curlNoise:
-                    f.p0 = mod.p[0] * scales.curlStrength + scales.curlStrAdd;
-                    f.p1 = mod.p[1] * scales.curlScale + scales.curlScaleAdd;
-                    f.p2 = mod.p[2] * scales.curlSpeed + scales.curlSpeedAdd;
+                    f.p0 = p0 * scales.curlStrength + scales.curlStrAdd;
+                    f.p1 = p1 * scales.curlScale + scales.curlScaleAdd;
+                    f.p2 = p2 * scales.curlSpeed + scales.curlSpeedAdd;
                     break;
                 case ParticleForceType::turbulence:
-                    f.p0 = mod.p[0] * scales.turbulence + scales.turbAdd; break;
+                    f.p0 = p0 * scales.turbulence + scales.turbAdd; break;
                 case ParticleForceType::rotation:
-                    f.p0 = mod.p[0]; f.p1 = mod.p[1]; f.p2 = mod.p[2]; break;
+                    f.p0 = p0; f.p1 = p1; f.p2 = p2; break;
                 default: break;
             }
             gpuForcePack.push_back (f);
         }
     }
-
-    // Real force count for the shader (before dummy pad). Empty = simple Y-rise path.
-    const int realForceCount = (int) gpuForcePack.size();
-
-    // At least one dummy force entry so buffer is non-empty for binding.
     if (gpuForcePack.empty())
     {
         GpuForceMod dummy {};
         dummy.enabled = 0;
         gpuForcePack.push_back (dummy);
     }
+}
 
+void Spec3DParticleSystem::packAliveToGpuSim (bool freeMode)
+{
+    gpuSimPack.clear();
+    gpuSimPack.reserve ((size_t) juce::jmin (aliveCount, maxAliveBudget));
+    for (int i = 0; i < (int) pool.size(); ++i)
+    {
+        const auto& p = pool[(size_t) i];
+        if (! p.alive)
+            continue;
+        if ((int) gpuSimPack.size() >= maxAliveBudget)
+            break;
+        GpuSimParticle g;
+        g.px = p.x; g.py = p.y; g.pz = p.z; g.age = p.age;
+        g.vx = p.velX; g.vy = p.velY; g.vz = p.velZ; g.maxLife = p.maxLife;
+        g.spinX = p.spinScaleX; g.spinY = p.spinScaleY; g.spinZ = p.spinScaleZ;
+        int fl = 1;
+        if (p.settled) fl |= 2;
+        if (freeMode) fl |= 4;
+        if (! freeMode && owner.particleWaterfallLock) fl |= 8;
+        g.flags = (float) fl;
+        g.targetY = p.targetY; g.spawnOffY = p.spawnOffY;
+        g.rotX = p.rotX; g.rotY = p.rotY; g.rotZ = p.rotZ;
+        g.sizeScale = p.sizeScale;
+        g.em = p.emissiveScale;
+        g.alpha = p.alpha;
+        g.r = p.r; g.g = p.g; g.b = p.b;
+        g.poolIndex = (float) i;
+        gpuSimPack.push_back (g);
+    }
+    gpuPackedAlive = (int) gpuSimPack.size();
+}
+
+void Spec3DParticleSystem::gpuIntegrateAndCompact (float dt, const ForceModScales& scales, bool freeMode)
+{
+    using namespace juce::gl;
+    gpuInstancesValid = false;
+    gpuDrawnInstances = 0;
+    if (! gpuComputeReady || computeProgram == 0 || particleSsbo == 0)
+        return;
+
+    packAliveToGpuSim (freeMode);
+    if (gpuPackedAlive <= 0)
+        return;
+
+    bakeForcePack (scales);
+    // Force count excludes dummy when empty stack was padded.
+    int realForceCount = 0;
+    for (const auto& f : gpuForcePack)
+        if (f.enabled)
+            ++realForceCount;
+
+    const int n = gpuPackedAlive;
     const GLsizeiptr particleBytes = (GLsizeiptr) (gpuSimPack.size() * sizeof (GpuSimParticle));
     const GLsizeiptr forceBytes = (GLsizeiptr) (gpuForcePack.size() * sizeof (GpuForceMod));
+    const GLsizeiptr instanceBytes = (GLsizeiptr) ((size_t) n * sizeof (GpuInstance));
 
     glBindBuffer (GL_SHADER_STORAGE_BUFFER, particleSsbo);
     glBufferData (GL_SHADER_STORAGE_BUFFER, particleBytes, gpuSimPack.data(), GL_DYNAMIC_COPY);
     glBindBuffer (GL_SHADER_STORAGE_BUFFER, forceSsbo);
     glBufferData (GL_SHADER_STORAGE_BUFFER, forceBytes, gpuForcePack.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer (GL_SHADER_STORAGE_BUFFER, instanceSsbo);
+    glBufferData (GL_SHADER_STORAGE_BUFFER, instanceBytes, nullptr, GL_DYNAMIC_COPY);
+    uint32_t zero = 0;
+    glBindBuffer (GL_SHADER_STORAGE_BUFFER, counterSsbo);
+    glBufferData (GL_SHADER_STORAGE_BUFFER, sizeof (uint32_t), &zero, GL_DYNAMIC_COPY);
 
     glUseProgram (computeProgram);
     if (computeUCount >= 0) glUniform1i (computeUCount, n);
-    if (computeUForceCount >= 0)
-        glUniform1i (computeUForceCount, realForceCount);
+    if (computeUForceCount >= 0) glUniform1i (computeUForceCount, realForceCount);
     if (computeUDt >= 0) glUniform1f (computeUDt, dt);
     if (computeUSimTime >= 0) glUniform1f (computeUSimTime, simTime);
-
     glBindBufferBase (GL_SHADER_STORAGE_BUFFER, 0, particleSsbo);
     glBindBufferBase (GL_SHADER_STORAGE_BUFFER, 1, forceSsbo);
+    glDispatchCompute ((GLuint) ((n + 63) / 64), 1, 1);
+    glMemoryBarrier (GL_SHADER_STORAGE_BARRIER_BIT);
 
-    const GLuint groups = (GLuint) ((n + 63) / 64);
-    glDispatchCompute (groups, 1, 1);
-    glMemoryBarrier (GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+    // Compact alive → instance SSBO (GPU draw path).
+    if (gpuCompactReady && compactProgram != 0)
+    {
+        glUseProgram (compactProgram);
+        if (compactUCount >= 0) glUniform1i (compactUCount, n);
+        const int uBase = glGetUniformLocation (compactProgram, "uBaseSize");
+        if (uBase >= 0) glUniform1f (uBase, owner.particleSize);
+        glBindBufferBase (GL_SHADER_STORAGE_BUFFER, 0, particleSsbo);
+        glBindBufferBase (GL_SHADER_STORAGE_BUFFER, 2, instanceSsbo);
+        glBindBufferBase (GL_SHADER_STORAGE_BUFFER, 3, counterSsbo);
+        glDispatchCompute ((GLuint) ((n + 63) / 64), 1, 1);
+        glMemoryBarrier ((GLbitfield) GL_SHADER_STORAGE_BARRIER_BIT
+                         | (GLbitfield) GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
 
+        uint32_t drawn = 0;
+        glBindBuffer (GL_SHADER_STORAGE_BUFFER, counterSsbo);
+        glGetBufferSubData (GL_SHADER_STORAGE_BUFFER, 0, sizeof (uint32_t), &drawn);
+        gpuDrawnInstances = (int) juce::jmin (drawn, (uint32_t) n);
+        gpuInstancesValid = gpuDrawnInstances > 0;
+    }
+
+    // Sparse writeback: dense alive pack only (not full pool) for free-list + trail CPU state.
     glBindBuffer (GL_SHADER_STORAGE_BUFFER, particleSsbo);
     glGetBufferSubData (GL_SHADER_STORAGE_BUFFER, 0, particleBytes, gpuSimPack.data());
     glBindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
     glUseProgram (0);
 
+    // Mark all previously packed as candidates; apply GPU result by poolIndex.
     for (int i = 0; i < n; ++i)
     {
-        auto& p = pool[(size_t) i];
         const auto& g = gpuSimPack[(size_t) i];
+        const int pi = (int) (g.poolIndex + 0.5f);
+        if (pi < 0 || pi >= (int) pool.size())
+            continue;
+        auto& p = pool[(size_t) pi];
         const int fl = (int) (g.flags + 0.5f);
         const bool nowAlive = (fl & 1) != 0;
         if (! nowAlive)
         {
             if (p.alive)
-                markDead (i);
+                markDead (pi);
             continue;
         }
-        p.alive = true;
+        if (! p.alive)
+        {
+            p.alive = true;
+            ++aliveCount;
+        }
         p.x = g.px; p.y = g.py; p.z = g.pz;
         p.velX = g.vx; p.velY = g.vy; p.velZ = g.vz;
         p.age = g.age;
@@ -2474,6 +2689,112 @@ void Spec3DParticleSystem::gpuIntegrateAndReadback (float dt, const ForceModScal
             p.velX = 0.0f;
         }
     }
+}
+
+void Spec3DParticleSystem::gpuIntegrateAndReadback (float dt, const ForceModScales& scales, bool freeMode)
+{
+    // Back-compat entry: use dense compact path.
+    gpuIntegrateAndCompact (dt, scales, freeMode);
+}
+
+void Spec3DParticleSystem::drawInstancedMeshesFromGpu (const juce::Matrix3D<float>& projection,
+                                                       const juce::Matrix3D<float>& view)
+{
+    using namespace juce::gl;
+    if (meshProgram == nullptr || meshVbo == 0 || instanceSsbo == 0 || gpuDrawnInstances <= 0)
+        return;
+
+    const bool useCube = owner.particleMeshShape == ParticleMeshShape::cube;
+    const int indexCount = useCube ? cubeIndexCount : sphereIndexCount;
+    const int indexOff = useCube ? cubeIndexOffset : sphereIndexOffset;
+    if (indexCount <= 0) return;
+
+    const float az = juce::degreesToRadians (owner.lightAzimuthDeg);
+    const float el = juce::degreesToRadians (juce::jlimit (5.0f, 89.0f, owner.lightElevationDeg));
+    juce::Vector3D<float> lightWorld { std::cos (el) * std::sin (az), std::sin (el), std::cos (el) * std::cos (az) };
+    juce::Vector3D<float> right, up, forward;
+    owner.cameraBasis (right, up, forward);
+    const float lx = lightWorld.x * right.x + lightWorld.y * right.y + lightWorld.z * right.z;
+    const float ly = lightWorld.x * up.x + lightWorld.y * up.y + lightWorld.z * up.z;
+    const float lz = -(lightWorld.x * forward.x + lightWorld.y * forward.y + lightWorld.z * forward.z);
+    const float llen = juce::jmax (1.0e-5f, std::sqrt (lx * lx + ly * ly + lz * lz));
+
+    meshProgram->use();
+    if (uMeshProj) uMeshProj->setMatrix4 (projection.mat, 1, false);
+    if (uMeshView) uMeshView->setMatrix4 (view.mat, 1, false);
+    if (uMeshEmissiveMode) uMeshEmissiveMode->set (owner.particleEmissiveEnabled ? 1.0f : 0.0f);
+    if (uMeshEmissiveStr) uMeshEmissiveStr->set (owner.particleEmissiveStrength);
+    if (uMeshRough) uMeshRough->set (owner.particleRoughness);
+    if (uMeshMetal) uMeshMetal->set (owner.particleMetalness);
+    if (uMeshSpec) uMeshSpec->set (owner.particleSpecular);
+    if (uMeshEnergyConserve) uMeshEnergyConserve->set (owner.energyConservingEnabled ? 1.0f : 0.0f);
+    if (uMeshLightAmt) uMeshLightAmt->set (owner.lightingEnabled ? owner.lightingAmount : 0.0f);
+    if (uMeshLightDir) uMeshLightDir->set (lx / llen, ly / llen, lz / llen);
+    if (uMeshLightCol) uMeshLightCol->set (owner.lightColour.getFloatRed(),
+                                           owner.lightColour.getFloatGreen(),
+                                           owner.lightColour.getFloatBlue());
+
+    glBindBuffer (GL_ARRAY_BUFFER, meshVbo);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, meshIbo);
+    const GLsizei meshStride = (GLsizei) sizeof (MeshVert);
+    if (aMeshPos && aMeshPos->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) aMeshPos->attributeID);
+        glVertexAttribPointer ((GLuint) aMeshPos->attributeID, 3, GL_FLOAT, GL_FALSE, meshStride,
+                               (void*) offsetof (MeshVert, px));
+        glVertexAttribDivisor ((GLuint) aMeshPos->attributeID, 0);
+    }
+    if (aMeshNrm && aMeshNrm->attributeID >= 0)
+    {
+        glEnableVertexAttribArray ((GLuint) aMeshNrm->attributeID);
+        glVertexAttribPointer ((GLuint) aMeshNrm->attributeID, 3, GL_FLOAT, GL_FALSE, meshStride,
+                               (void*) offsetof (MeshVert, nx));
+        glVertexAttribDivisor ((GLuint) aMeshNrm->attributeID, 0);
+    }
+
+    // Instance attributes from GPU compact SSBO (same layout as GpuInstance).
+    glBindBuffer (GL_ARRAY_BUFFER, instanceSsbo);
+    const GLsizei iStride = (GLsizei) sizeof (GpuInstance);
+    auto enableInst = [&] (auto& attr, int comps, size_t off)
+    {
+        if (attr && attr->attributeID >= 0)
+        {
+            glEnableVertexAttribArray ((GLuint) attr->attributeID);
+            glVertexAttribPointer ((GLuint) attr->attributeID, comps, GL_FLOAT, GL_FALSE, iStride, (void*) off);
+            glVertexAttribDivisor ((GLuint) attr->attributeID, 1);
+        }
+    };
+    enableInst (aInstPos, 3, offsetof (GpuInstance, px));
+    enableInst (aInstScale, 1, offsetof (GpuInstance, sx));
+    enableInst (aInstQuat, 4, offsetof (GpuInstance, qx));
+    enableInst (aInstCol, 4, offsetof (GpuInstance, r));
+    enableInst (aInstEm, 1, offsetof (GpuInstance, em));
+
+    glEnable (GL_DEPTH_TEST);
+    glDepthMask (GL_TRUE);
+    glEnable (GL_BLEND);
+    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable (GL_CULL_FACE);
+    glCullFace (GL_BACK);
+
+    glDrawElementsInstanced (GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT,
+                             (void*) (sizeof (uint16_t) * (size_t) indexOff),
+                             (GLsizei) gpuDrawnInstances);
+
+    auto disable = [&] (auto& attr)
+    {
+        if (attr && attr->attributeID >= 0)
+        {
+            glVertexAttribDivisor ((GLuint) attr->attributeID, 0);
+            glDisableVertexAttribArray ((GLuint) attr->attributeID);
+        }
+    };
+    disable (aMeshPos); disable (aMeshNrm);
+    disable (aInstPos); disable (aInstScale); disable (aInstQuat); disable (aInstCol); disable (aInstEm);
+    glBindBuffer (GL_ARRAY_BUFFER, 0);
+    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+    glDisable (GL_CULL_FACE);
+    glDisable (GL_BLEND);
 }
 
 void Spec3DParticleSystem::draw (const juce::Matrix3D<float>& projection,

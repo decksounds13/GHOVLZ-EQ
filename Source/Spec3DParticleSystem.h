@@ -274,6 +274,8 @@ public:
     void update (float dtSeconds);
     void scrollHistory (int numCols);
     void clear();
+    /** Zero continuous/slice spawn accumulators (call when emit mode changes). */
+    void resetEmissionAccumulators() noexcept;
 
     void ensureGl (juce::OpenGLContext& context);
     void releaseGl();
@@ -300,8 +302,8 @@ public:
     /** Default live budget (everyday safe). Not the hard ceiling. */
     static constexpr int kDefaultMaxAlive = 8192;
     static constexpr int kMinMaxAlive = 256;
-    /** Hybrid GPU integrate+full-readback is counterproductive above this. */
-    static constexpr int kGpuReadbackMaxAlive = 24576;
+    /** Dense GPU path (no full-pool readback) is preferred up to this live count. */
+    static constexpr int kGpuPathMaxAlive = 262144;
 
     int getAliveCount() const noexcept { return aliveCount; }
     int getPoolCapacity() const noexcept { return (int) pool.size(); }
@@ -349,15 +351,21 @@ private:
         bool settled = false;
     };
 
-    /** Per-instance GPU payload for mesh instancing. */
-    struct GpuInstance
+    /**
+        Per-instance GPU payload for mesh instancing.
+        Must match compact compute InstanceGpu (std430): 4×vec4 = 64 bytes.
+        Trailing pads keep em at offset 48 and stride 64 for SSBO → ARRAY_BUFFER draw.
+    */
+    struct alignas (16) GpuInstance
     {
         float px, py, pz;
         float sx; // uniform scale
         float qx, qy, qz, qw; // rotation quaternion
         float r, g, b, a;     // albedo + alpha
         float em;             // per-particle emissive scale (matrix dest)
+        float pad0 = 0.0f, pad1 = 0.0f, pad2 = 0.0f;
     };
+    static_assert (sizeof (GpuInstance) == 64, "GpuInstance must match compact InstanceGpu std430");
 
     /** Billboard fallback vertex. */
     struct GpuBillboardVert
@@ -473,25 +481,37 @@ private:
     bool createMeshProgram (juce::OpenGLContext& context);
     bool createBillboardProgram (juce::OpenGLContext& context);
     bool createComputeProgram();
+    bool createCompactProgram();
     void releaseComputeProgram();
-    /** Pack pool → SSBO, dispatch integrate, readback pos/vel/age/flags. Must be GL thread. */
+    void bakeForcePack (const ForceModScales& scales);
+    void packAliveToGpuSim (bool freeMode);
+    /** Dense pack → integrate → compact to instances (no full-pool readback). GL thread. */
+    void gpuIntegrateAndCompact (float dt, const ForceModScales& scales, bool freeMode);
+    /** Legacy: full pack + integrate + full readback (fallback). */
     void gpuIntegrateAndReadback (float dt, const ForceModScales& scales, bool freeMode);
     void drawInstancedMeshes (const juce::Matrix3D<float>& projection,
                               const juce::Matrix3D<float>& view);
+    void drawInstancedMeshesFromGpu (const juce::Matrix3D<float>& projection,
+                                     const juce::Matrix3D<float>& view);
     void drawBillboards (const juce::Matrix3D<float>& projection,
                          const juce::Matrix3D<float>& view,
                          juce::Vector3D<float> camRight,
                          juce::Vector3D<float> camUp);
 
-    /** GPU sim particle (std430, 5×vec4 = 80 bytes). */
+    /**
+        GPU sim particle (std430, 6×vec4 = 96 bytes).
+        Dense-packed alive only; poolIndex maps back to CPU free-list.
+    */
     struct alignas (16) GpuSimParticle
     {
         float px, py, pz, age;
         float vx, vy, vz, maxLife;
-        float spinX, spinY, spinZ, flags; // flags bits: 1 alive, 2 settled, 4 free, 8 lockX
+        float spinX, spinY, spinZ, flags; // bits: 1 alive, 2 settled, 4 free, 8 lockX
         float targetY, spawnOffY, rotX, rotY;
-        float rotZ, pad0, pad1, pad2;
+        float rotZ, sizeScale, em, alpha;
+        float r, g, b, poolIndex; // poolIndex as float for std430 simplicity
     };
+    static_assert (sizeof (GpuSimParticle) == 96, "GpuSimParticle must match compute ParticleGpu std430");
 
     /** Force module for compute (scales baked on CPU). */
     struct alignas (16) GpuForceMod
@@ -505,12 +525,20 @@ private:
 
     bool glReady = false;
     bool gpuComputeReady = false;
+    bool gpuCompactReady = false;
     unsigned int computeProgram = 0;
+    unsigned int compactProgram = 0;
     unsigned int particleSsbo = 0;
     unsigned int forceSsbo = 0;
+    unsigned int instanceSsbo = 0; // compact output (also ARRAY_BUFFER for draw)
+    unsigned int counterSsbo = 0;  // uint count
     int computeUCount = -1, computeUForceCount = -1, computeUDt = -1, computeUSimTime = -1;
+    int compactUCount = -1;
     std::vector<GpuSimParticle> gpuSimPack;
     std::vector<GpuForceMod> gpuForcePack;
+    int gpuPackedAlive = 0;
+    int gpuDrawnInstances = 0;
+    bool gpuInstancesValid = false;
     /** Deferred integrate (GPU must run on GL thread; update() may be message-thread). */
     float pendingIntegrateDt = 0.0f;
     ForceModScales pendingForceScales {};
