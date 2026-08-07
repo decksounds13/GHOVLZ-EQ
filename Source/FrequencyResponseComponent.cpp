@@ -1124,10 +1124,16 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     {
         const float q = FilterType::effectiveBellQ (type, clampQ (qBase), gain, proportionalQOn);
         const float f = clampFreq (freq);
-        if (FilterType::isHpLp (type))
+        if (FilterType::isBrickwall (type))
+        {
+            auto stages = FilterType::makeBrickwallStages (
+                sampleRate, f, q, FilterType::isHighpassFamily (type));
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
+        }
+        else if (FilterType::isHpLp (type))
         {
             const int slope = BandChannel::readChoiceIndex (parameters, slopeId);
-            auto stages = (type == FilterType::highpass)
+            auto stages = FilterType::isHighpassFamily (type)
                 ? FilterSlope::makeHighpassCoeffs (sampleRate, f, q, slope)
                 : FilterSlope::makeLowpassCoeffs (sampleRate, f, q, slope);
             FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
@@ -5344,7 +5350,7 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
             needsUpdateFlag = true;
             needsUpdateCombined = true;
 
-            if (FilterType::isHpLp (type))
+            if (FilterType::showsFilterSlope (type))
             {
                 const auto slopeId = FilterSlope::paramIDForBandIndex (bandIndex);
                 if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
@@ -5396,7 +5402,7 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
             needsUpdateExtended = true;
             needsUpdateCombined = true;
 
-            if (FilterType::isHpLp (type))
+            if (FilterType::showsFilterSlope (type))
             {
                 const auto slopeId = FilterSlope::paramIDForGlobal (global);
                 if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (

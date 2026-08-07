@@ -1328,7 +1328,8 @@ void OptionBoxMenu::clearAttachments()
 
 bool OptionBoxMenu::currentBandShowsFilterSlope() const
 {
-    return FilterType::isHpLp (customComboBox.getSelectedItemIndex());
+    // Brickwall is always max steepness — no slope menu.
+    return FilterType::showsFilterSlope (customComboBox.getSelectedItemIndex());
 }
 
 bool OptionBoxMenu::currentBandSupportsDynamic() const

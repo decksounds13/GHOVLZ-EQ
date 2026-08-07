@@ -3731,7 +3731,7 @@ bool EqEditor::cycleFilterSlopeForBand (int bandIndex, int delta)
         return false;
 
     const int type = BandChannel::readChoiceIndex (audioProcessor.treeState, typeID, fallbackType);
-    if (! FilterType::isHpLp (type))
+    if (! FilterType::showsFilterSlope (type))
         return false;
 
     if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (

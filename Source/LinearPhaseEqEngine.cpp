@@ -103,6 +103,13 @@ void LinearPhaseEqEngine::cacheBandCoefficients()
 
         bandActive[(size_t) b] = true;
 
+        if (FilterType::isBrickwall (band.type))
+        {
+            bandCoeffs[(size_t) b] = FilterType::makeBrickwallStages (
+                sr, band.frequency, band.q, FilterType::isHighpassFamily (band.type));
+            continue;
+        }
+
         if (band.isHighpass)
         {
             bandCoeffs[(size_t) b] = FilterSlope::makeHighpassCoeffs (sr, band.frequency, band.q, band.slope);
@@ -115,7 +122,7 @@ void LinearPhaseEqEngine::cacheBandCoefficients()
             continue;
         }
 
-        // Multi-stage (tilt / flat tilt) or single biquad (bell, shelves, all-pass, …).
+        // Multi-stage (tilt / band shelf / vintage) or single biquad (bell, shelves, all-pass, …).
         bandCoeffs[(size_t) b] = FilterType::makeStages (band.type, sr, band.frequency, band.q, band.gainDb);
     }
 }

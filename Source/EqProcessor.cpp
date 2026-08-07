@@ -2198,8 +2198,8 @@ void EqProcessor::appendExtendedLinearPhaseSpecs (LinearPhaseEqEngine::BandSpec*
         s.gainDb = smoothExtGain[(size_t) ei].getCurrentValue();
         s.type = p.type != nullptr ? (int) std::lround (p.type->load()) : FilterType::bell;
         s.slope = p.slope != nullptr ? (int) std::lround (p.slope->load()) : FilterSlope::db12;
-        s.isHighpass = (s.type == FilterType::highpass);
-        s.isLowpass = (s.type == FilterType::lowpass);
+        s.isHighpass = FilterType::isHighpassFamily (s.type);
+        s.isLowpass = FilterType::isLowpassFamily (s.type);
     }
 }
 
@@ -2275,12 +2275,15 @@ void EqProcessor::processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock
 
         if (FilterType::isHpLp (type))
         {
-            const int cacheKey = slope + (type == FilterType::highpass ? 0 : 100);
+            const bool isHp = FilterType::isHighpassFamily (type);
+            const int cacheKey = (FilterType::isBrickwall (type) ? 9000 : slope)
+                                 + (isHp ? 0 : 100);
             if (coeffsNeedUpdate (slot.lastCoeffs, freq, effQ, 0.0f, cacheKey))
             {
-                auto coeffs = (type == FilterType::highpass)
-                    ? FilterSlope::makeHighpassCoeffs (sr, freq, effQ, slope)
-                    : FilterSlope::makeLowpassCoeffs (sr, freq, effQ, slope);
+                auto coeffs = FilterType::isBrickwall (type)
+                    ? FilterType::makeBrickwallStages (sr, freq, effQ, isHp)
+                    : (isHp ? FilterSlope::makeHighpassCoeffs (sr, freq, effQ, slope)
+                            : FilterSlope::makeLowpassCoeffs (sr, freq, effQ, slope));
                 slot.activeStages = juce::jmin ((int) coeffs.size(), FilterSlope::maxBiquadStages);
                 for (int i = 0; i < slot.activeStages; ++i)
                     *slot.cascade[(size_t) i].state = *coeffs.getUnchecked (i);
@@ -3539,13 +3542,13 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         LinearPhaseEqEngine::BandSpec specs[LinearPhaseEqEngine::maxBands] {};
         int specCount = 0;
 
-        // Cascade whenever a slot is typed HP/LP (any band).
+        // Cascade whenever a slot is typed HP/LP / brickwall (any band).
         auto fillHpLpFlags = [] (LinearPhaseEqEngine::BandSpec& s, int type, int slope)
         {
             s.type = type;
             s.slope = slope;
-            s.isHighpass = (type == FilterType::highpass);
-            s.isLowpass = (type == FilterType::lowpass);
+            s.isHighpass = FilterType::isHighpassFamily (type);
+            s.isLowpass = FilterType::isLowpassFamily (type);
         };
 
         specs[0].enabled = isHighpassOn;
@@ -3625,7 +3628,9 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 
             if (FilterType::isHpLp (hpType))
             {
-                const int cacheKey = hpSlope + (hpType == FilterType::highpass ? 0 : 100);
+                const bool isHp = FilterType::isHighpassFamily (hpType);
+                const int cacheKey = (FilterType::isBrickwall (hpType) ? 9000 : hpSlope)
+                                     + (isHp ? 0 : 100);
                 if (coeffsNeedUpdate (lastHighpass, smoothedHighpassCutoff, smoothedHighpassQ, 0.0f, cacheKey))
                 {
                     updateSlotHpLpCascade (true, smoothedHighpassCutoff, smoothedHighpassQ, hpSlope, hpType);
@@ -3684,7 +3689,9 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 
             if (FilterType::isHpLp (lpType))
             {
-                const int cacheKey = lpSlope + (lpType == FilterType::highpass ? 0 : 100);
+                const bool isHp = FilterType::isHighpassFamily (lpType);
+                const int cacheKey = (FilterType::isBrickwall (lpType) ? 9000 : lpSlope)
+                                     + (isHp ? 0 : 100);
                 if (coeffsNeedUpdate (lastLowpass, smoothedLowpassCutoff, smoothedLowpassQ, 0.0f, cacheKey))
                 {
                     updateSlotHpLpCascade (false, smoothedLowpassCutoff, smoothedLowpassQ, lpSlope, lpType);
@@ -3801,7 +3808,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             if (FilterType::isHpLp (type))
             {
                 const int slope = BandChannel::readChoiceIndex (treeState, slopeId);
-                const int cacheKey = type + 2000 + slope * 10;
+                const int cacheKey = type + 2000
+                                     + (FilterType::isBrickwall (type) ? 90 : slope) * 10;
                 if (coeffsNeedUpdate (last, freq, q, 0.0f, cacheKey))
                 {
                     updateFlexibleHpLpCascade (flexIndex, freq, q, slope, type);
@@ -4455,12 +4463,15 @@ void EqProcessor::updateLowpass(float cutoff, float q, int slopeChoice)
 void EqProcessor::updateSlotHpLpCascade (bool isHighpassSlot, float cutoff, float q,
                                          int slopeChoice, int filterType)
 {
-    const bool wantHp = (filterType == FilterType::highpass);
-    auto stages = wantHp ? FilterSlope::makeHighpassCoeffs (getSampleRate(), cutoff, q, slopeChoice)
-                         : FilterSlope::makeLowpassCoeffs (getSampleRate(), cutoff, q, slopeChoice);
+    const bool wantHp = FilterType::isHighpassFamily (filterType);
+    auto stages = FilterType::isBrickwall (filterType)
+        ? FilterType::makeBrickwallStages (getSampleRate(), cutoff, q, wantHp)
+        : (wantHp ? FilterSlope::makeHighpassCoeffs (getSampleRate(), cutoff, q, slopeChoice)
+                  : FilterSlope::makeLowpassCoeffs (getSampleRate(), cutoff, q, slopeChoice));
     const int newStages = juce::jlimit (1, FilterSlope::maxBiquadStages, juce::jmax (1, stages.size()));
     // Encode type in cache key so HP↔LP swaps reset state.
-    const int cacheKey = slopeChoice + (wantHp ? 0 : 100);
+    const int cacheKey = (FilterType::isBrickwall (filterType) ? 9000 : slopeChoice)
+                         + (wantHp ? 0 : 100);
 
     auto& bank = isHighpassSlot ? highpassStages : lowpassStages;
     auto& active = isHighpassSlot ? highpassActiveStages : lowpassActiveStages;
@@ -4494,9 +4505,11 @@ void EqProcessor::updateFlexibleHpLpCascade (int flexIndex, float cutoff, float 
     if (flexIndex < 0 || flexIndex >= kFlexibleCascadeSlots)
         return;
 
-    const bool wantHp = (filterType == FilterType::highpass);
-    auto stages = wantHp ? FilterSlope::makeHighpassCoeffs (getSampleRate(), cutoff, q, slopeChoice)
-                         : FilterSlope::makeLowpassCoeffs (getSampleRate(), cutoff, q, slopeChoice);
+    const bool wantHp = FilterType::isHighpassFamily (filterType);
+    auto stages = FilterType::isBrickwall (filterType)
+        ? FilterType::makeBrickwallStages (getSampleRate(), cutoff, q, wantHp)
+        : (wantHp ? FilterSlope::makeHighpassCoeffs (getSampleRate(), cutoff, q, slopeChoice)
+                  : FilterSlope::makeLowpassCoeffs (getSampleRate(), cutoff, q, slopeChoice));
     const int newStages = juce::jlimit (1, FilterSlope::maxBiquadStages, juce::jmax (1, stages.size()));
     // Must match processMidOrShelf cacheKey encoding.
     const int cacheKey = filterType + 2000 + slopeChoice * 10;

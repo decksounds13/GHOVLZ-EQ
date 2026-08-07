@@ -24,7 +24,7 @@ The signature feature is **SideCheck™**: when the Side gets louder than the Mi
 
 ## Equalizer
 
-Eight bands. Each one can be a bell, low or high shelf, notch, band-pass, high-pass, low-pass, tilt shelf, flat tilt, all-pass, band shelf, or Baxandall bass/treble — you’re not locked into a fixed layout.
+Eight bands. Each one can be a bell, low or high shelf, notch, band-pass, high-pass, low-pass, tilt shelf, flat tilt, all-pass, band shelf, Baxandall, brickwall cut, or vintage (Pultec-style) shelf — you’re not locked into a fixed layout.
 
 Out of the box it’s set up like a practical channel strip: high-pass, low shelf, four bells, high shelf, low-pass. Change any of them as you like.
 
@@ -127,7 +127,7 @@ Meant to replace a pile of separate analyzer plugins:
 
 ## Quick list for a store page
 
-- 8-band parametric EQ; any filter type on any band (tilt, flat tilt, all-pass, band shelf, Baxandall…); slopes up to 96 dB/oct
+- 8-band parametric EQ; full shape menu (tilt, all-pass, band shelf, Baxandall, brickwall, vintage…); slopes up to 96 dB/oct
 - Minimum and linear phase; proportional Q; per-band stereo / mid / side / L / R
 - Dynamic EQ, spectral dynamics, and SideCheck™
 - Band and spectral saturation with up to 8× oversampling
