@@ -540,6 +540,8 @@ public:
     float getParticleEmission() const noexcept { return particleEmission; }
     void setParticleSpawnJitter (float amount) noexcept;
     float getParticleSpawnJitter() const noexcept { return particleSpawnJitter; }
+    /** Default world-space spawn scatter (particles don't stack when jitter is unset). */
+    static constexpr float kDefaultParticleSpawnJitter = 0.0025f;
 
     static constexpr int getParticleModSlotCount() noexcept { return kParticleModSlotCount; }
     ParticleModSlot getParticleModSlot (int index) const noexcept;
@@ -565,6 +567,11 @@ public:
     float getParticleLifespanRandom() const noexcept { return particleLifespanRandom; }
     void setParticleSize (float worldSize) noexcept;
     float getParticleSize() const noexcept { return particleSize; }
+    /** Per-particle size scale range at spawn (multiplies base size). Dual-slider min/max. */
+    void setParticleSizeRandomMin (float scale) noexcept;
+    void setParticleSizeRandomMax (float scale) noexcept;
+    float getParticleSizeRandomMin() const noexcept { return particleSizeRandomMin; }
+    float getParticleSizeRandomMax() const noexcept { return particleSizeRandomMax; }
     void setParticleEmissiveEnabled (bool shouldEnable) noexcept;
     bool isParticleEmissiveEnabled() const noexcept { return particleEmissiveEnabled; }
     void setParticleEmissiveStrength (float amount) noexcept;
@@ -610,11 +617,17 @@ public:
     int getParticlePoolCapacity() const noexcept;
     int getParticleLastSpawnedCount() const noexcept;
     int getParticleLastCulledCount() const noexcept;
+    float getParticleLastUpdateMs() const noexcept;
+    int getParticleLoadLevel() const noexcept;
+    /** Rolling display FPS (timer/redraw cadence), updated ~2×/sec. */
+    float getParticleDebugFps() const noexcept { return particleDebugFps; }
     /** Kill all live particles (escape hatch when the field is overloaded). */
     void clearParticles() noexcept;
-    /** On-viewport stats: alive / budget / pool / spawned / culled. */
+    /** On-viewport stats: alive / budget / pool / spawn / cull / FPS / load. */
     void setParticleDebugOverlayEnabled (bool shouldShow) noexcept;
     bool isParticleDebugOverlayEnabled() const noexcept { return particleDebugOverlayEnabled; }
+    /** Keep Spec3D timer at 60 Hz when particles (or freecam) need it; else 30 Hz. */
+    void syncSpec3DTimerRate() noexcept;
 
     void setParticleInitRotX (float deg) noexcept;
     float getParticleInitRotX() const noexcept { return particleInitRotX; }
@@ -1200,9 +1213,9 @@ private:
     ParticleEmitMode particleEmitMode = ParticleEmitMode::continuous;
     ParticleBindingMode particleBindingMode = ParticleBindingMode::spectrogramTrail;
     /** Particles spawned per second (field total). Not a 0–1 scale. */
-    float particleEmission = 200.0f;
+    float particleEmission = 1000.0f;
     /** World-space spawn scatter. Default > 0 so particles don't stack on exact mesh points. */
-    float particleSpawnJitter = 0.035f;
+    float particleSpawnJitter = kDefaultParticleSpawnJitter;
     float particleInitVelX = 0.0f;
     float particleInitVelY = 1.0f; // was "rise speed"
     float particleInitVelZ = 0.0f;
@@ -1210,6 +1223,9 @@ private:
     float particleLifespan = 0.0f;
     float particleLifespanRandom = 0.0f;
     float particleSize = 0.008f;
+    /** Spawn size scale range (× base particle size). Default 1…1 = no random. */
+    float particleSizeRandomMin = 1.0f;
+    float particleSizeRandomMax = 1.0f;
     /** When true: unlit emissive-only (skip PBR). When false: lit PBR + additive emissive. */
     bool particleEmissiveEnabled = false;
     float particleEmissiveStrength = 0.0f;
@@ -1231,6 +1247,10 @@ private:
     std::array<ParticleRandomSource, kParticleRandomSourceCount> particleRandomSources {};
     std::unique_ptr<Spec3DParticleSystem> particleSystem;
     double particleLastUpdateSec = 0.0;
+    /** Rolling FPS for particle debug HUD (timer ticks). */
+    float particleDebugFps = 0.0f;
+    double particleFpsWindowStartSec = 0.0;
+    int particleFpsFrameCount = 0;
     void ensureParticleSystem();
     void initDefaultParticleModSlots() noexcept;
     void initDefaultParticleForceStack() noexcept;

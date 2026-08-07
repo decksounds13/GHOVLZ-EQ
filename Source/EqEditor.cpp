@@ -2429,10 +2429,10 @@ void EqEditor::loadUiPrefs()
     float spec3DSssThickScale = 0.50f;
     float spec3DSssMaxThick = 0.70f;
     bool spec3DParticle = false;
-    int spec3DParticleEmitMode = 1; // 0 = slice, 1 = continuous (default)
+    int spec3DParticleEmitMode = 1; // 0 = slice, 1 = continuous (must stay default)
     int spec3DParticleBinding = 0;  // 0 = trail, 1 = free
-    float spec3DParticleEmission = 200.0f; // particles/sec
-    float spec3DParticleSpawnJitter = 0.0f;
+    float spec3DParticleEmission = 1000.0f; // particles/sec
+    float spec3DParticleSpawnJitter = 0.0025f; // must match Spectrogram3DComponent::kDefaultParticleSpawnJitter
     float spec3DParticleSpeed = 1.0f; // legacy → Init vel Y
     float spec3DParticleInitVelX = 0.0f;
     float spec3DParticleInitVelZ = 0.0f;
@@ -2440,6 +2440,8 @@ void EqEditor::loadUiPrefs()
     float spec3DParticleLifespan = 0.0f;
     float spec3DParticleLifespanRandom = 0.0f;
     float spec3DParticleSize = 0.008f;
+    float spec3DParticleSizeRndMin = 1.0f;
+    float spec3DParticleSizeRndMax = 1.0f;
     bool spec3DParticleEmissive = false; // unlit emissive-only off by default
     float spec3DParticleEmissiveStr = 0.0f; // additive emissive amount
     float spec3DParticleRough = 0.45f;
@@ -2750,16 +2752,23 @@ void EqEditor::loadUiPrefs()
                 spec3DSssThickScale = (float) xml->getDoubleAttribute ("spec3dSssThickScale", 0.50);
                 spec3DSssMaxThick = (float) xml->getDoubleAttribute ("spec3dSssMaxThick", 0.70);
                 spec3DParticle = xml->getBoolAttribute ("spec3dParticleMode", false);
+                // Default continuous (1). Clamp junk prefs; never leave an invalid mode.
                 spec3DParticleEmitMode = xml->getIntAttribute ("spec3dParticleEmitMode", 1);
+                if (spec3DParticleEmitMode != 0 && spec3DParticleEmitMode != 1)
+                    spec3DParticleEmitMode = 1;
                 spec3DParticleBinding = xml->getIntAttribute ("spec3dParticleBinding", 0);
-                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 200.0);
+                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 1000.0);
                 // V3: particles/sec. Pre-V3 was a unitless ~0–5 scale (plus older 0–1).
                 if (! xml->hasAttribute ("spec3dParticleEmissionV3"))
                 {
                     if (spec3DParticleEmission > 0.0f && spec3DParticleEmission <= 20.0f)
                         spec3DParticleEmission = juce::jmax (50.0f, spec3DParticleEmission * 400.0f);
                 }
-                spec3DParticleSpawnJitter = (float) xml->getDoubleAttribute ("spec3dParticleSpawnJitter", 0.035);
+                // Default matches Spectrogram3DComponent::kDefaultParticleSpawnJitter.
+                spec3DParticleSpawnJitter = (float) xml->getDoubleAttribute ("spec3dParticleSpawnJitter", 0.0025);
+                // Older prefs saved 0 by mistake; restore default scatter so particles don't stack.
+                if (spec3DParticleSpawnJitter <= 0.0f)
+                    spec3DParticleSpawnJitter = 0.0025f;
                 spec3DParticleSpeed = (float) xml->getDoubleAttribute ("spec3dParticleSpeed", 1.0);
                 spec3DParticleInitVelX = (float) xml->getDoubleAttribute ("spec3dParticleInitVelX", 0.0);
                 // Y prefers new key; fall back to legacy speed
@@ -2770,6 +2779,8 @@ void EqEditor::loadUiPrefs()
                 spec3DParticleLifespan = (float) xml->getDoubleAttribute ("spec3dParticleLifespan", 0.0);
                 spec3DParticleLifespanRandom = (float) xml->getDoubleAttribute ("spec3dParticleLifespanRandom", 0.0);
                 spec3DParticleSize = (float) xml->getDoubleAttribute ("spec3dParticleSize", 0.008);
+                spec3DParticleSizeRndMin = (float) xml->getDoubleAttribute ("spec3dParticleSizeRndMin", 1.0);
+                spec3DParticleSizeRndMax = (float) xml->getDoubleAttribute ("spec3dParticleSizeRndMax", 1.0);
                 spec3DParticleEmissive = xml->getBoolAttribute ("spec3dParticleEmissive", false);
                 spec3DParticleEmissiveStr = (float) xml->getDoubleAttribute ("spec3dParticleEmissiveStr", 0.0);
                 spec3DParticleRough = (float) xml->getDoubleAttribute ("spec3dParticleRough", 0.45);
@@ -3087,6 +3098,8 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DParticleLifespan (spec3DParticleLifespan, false);
         mainComponent->setSpec3DParticleLifespanRandom (spec3DParticleLifespanRandom, false);
         mainComponent->setSpec3DParticleSize (spec3DParticleSize, false);
+        mainComponent->setSpec3DParticleSizeRandomMin (spec3DParticleSizeRndMin, false);
+        mainComponent->setSpec3DParticleSizeRandomMax (spec3DParticleSizeRndMax, false);
         mainComponent->setSpec3DParticleEmissiveEnabled (spec3DParticleEmissive, false);
         mainComponent->setSpec3DParticleEmissiveStrength (spec3DParticleEmissiveStr, false);
         mainComponent->setSpec3DParticleRoughness (spec3DParticleRough, false);
@@ -3414,6 +3427,8 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dParticleLifespan", (double) mainComponent->getSpec3DParticleLifespan());
         xml->setAttribute ("spec3dParticleLifespanRandom", (double) mainComponent->getSpec3DParticleLifespanRandom());
         xml->setAttribute ("spec3dParticleSize", (double) mainComponent->getSpec3DParticleSize());
+        xml->setAttribute ("spec3dParticleSizeRndMin", (double) mainComponent->getSpec3DParticleSizeRandomMin());
+        xml->setAttribute ("spec3dParticleSizeRndMax", (double) mainComponent->getSpec3DParticleSizeRandomMax());
         xml->setAttribute ("spec3dParticleEmissive", mainComponent->isSpec3DParticleEmissiveEnabled());
         xml->setAttribute ("spec3dParticleEmissiveStr", (double) mainComponent->getSpec3DParticleEmissiveStrength());
         xml->setAttribute ("spec3dParticleRough", (double) mainComponent->getSpec3DParticleRoughness());

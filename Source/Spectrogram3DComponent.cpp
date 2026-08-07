@@ -5600,7 +5600,7 @@ void Spectrogram3DComponent::setActive (bool shouldBeActive) noexcept
     {
         clampCamera();
         markSoftContentDirty();
-        startTimerHz (30);
+        syncSpec3DTimerRate();
         updateMeshFromSource();
     }
     else
@@ -5689,6 +5689,7 @@ void Spectrogram3DComponent::setParticleModeEnabled (bool shouldEnable) noexcept
 {
     if (particleModeEnabled == shouldEnable) return;
     particleModeEnabled = shouldEnable;
+    syncSpec3DTimerRate();
     if (particleModeEnabled)
         ensureParticleSystem();
     markLookDirty();
@@ -5700,7 +5701,8 @@ void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcep
         mode = ParticleEmitMode::slice;
     if (particleEmitMode == mode) return;
     particleEmitMode = mode;
-    // Drop cross-mode spawn backlog so switching Continuous ↔ Slice takes effect immediately.
+    // Drop cross-mode spawn backlog so the new mode takes effect immediately.
+    // Do not clear live particles — that made Continuous feel "broken" on CPU.
     if (particleSystem != nullptr)
         particleSystem->resetEmissionAccumulators();
     markSoftContentDirty();
@@ -5954,6 +5956,22 @@ void Spectrogram3DComponent::setParticleSize (float worldSize) noexcept
     markSoftContentDirty();
 }
 
+void Spectrogram3DComponent::setParticleSizeRandomMin (float scale) noexcept
+{
+    if (! std::isfinite (scale)) return;
+    scale = juce::jlimit (0.05f, 4.0f, scale);
+    if (std::abs (particleSizeRandomMin - scale) < 1.0e-6f) return;
+    particleSizeRandomMin = scale;
+}
+
+void Spectrogram3DComponent::setParticleSizeRandomMax (float scale) noexcept
+{
+    if (! std::isfinite (scale)) return;
+    scale = juce::jlimit (0.05f, 4.0f, scale);
+    if (std::abs (particleSizeRandomMax - scale) < 1.0e-6f) return;
+    particleSizeRandomMax = scale;
+}
+
 void Spectrogram3DComponent::setParticleEmissiveEnabled (bool shouldEnable) noexcept
 {
     if (particleEmissiveEnabled == shouldEnable) return;
@@ -6011,14 +6029,17 @@ bool Spectrogram3DComponent::isParticleGpuSimAvailable() const noexcept
 
 void Spectrogram3DComponent::setParticleMaxAlive (int maxAlive) noexcept
 {
-    // Allow typed values up to hard cap (1M). Large values allocate a big pool — can hitch once.
+    // Budget only — must not pre-allocate 70k particles on the UI thread (host crash).
     maxAlive = juce::jlimit (Spec3DParticleSystem::kMinMaxAlive,
                              Spec3DParticleSystem::kHardCap,
                              maxAlive);
     if (particleMaxAlive == maxAlive)
         return;
     particleMaxAlive = maxAlive;
-    ensureParticleSystem();
+    // Only touch the system if it already exists (particle mode on). Creating it just to
+    // store a budget is fine, but setMaxAliveBudget must stay allocation-free on raise.
+    if (particleModeEnabled)
+        ensureParticleSystem();
     if (particleSystem != nullptr)
         particleSystem->setMaxAliveBudget (particleMaxAlive);
     markSoftContentDirty();
@@ -6049,11 +6070,34 @@ int Spectrogram3DComponent::getParticleLastCulledCount() const noexcept
     return particleSystem != nullptr ? particleSystem->getLastCulledCount() : 0;
 }
 
+float Spectrogram3DComponent::getParticleLastUpdateMs() const noexcept
+{
+    return particleSystem != nullptr ? particleSystem->getLastUpdateMs() : 0.0f;
+}
+
+int Spectrogram3DComponent::getParticleLoadLevel() const noexcept
+{
+    return particleSystem != nullptr ? particleSystem->getLoadLevel() : 0;
+}
+
 void Spectrogram3DComponent::clearParticles() noexcept
 {
     if (particleSystem != nullptr)
         particleSystem->clear();
     markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::syncSpec3DTimerRate() noexcept
+{
+    if (! active)
+    {
+        stopTimer();
+        return;
+    }
+    // Particles / freecam: 60 Hz target. Idle waterfall mesh: 30 Hz is enough.
+    const int hz = (particleModeEnabled || freecamActive || freecamRmbHeld) ? 60 : 30;
+    if (! isTimerRunning() || getTimerInterval() != (1000 / hz))
+        startTimerHz (hz);
 }
 
 void Spectrogram3DComponent::setParticleDebugOverlayEnabled (bool shouldShow) noexcept
@@ -7660,6 +7704,7 @@ void Spectrogram3DComponent::enterFreecamFromTurntable() noexcept
     freecamPitchDeg = juce::jlimit (-kMaxPitchDeg, kMaxPitchDeg, -camera.pitchDeg);
     freecamActive = true;
     flyVel = { 0, 0, 0 };
+    syncSpec3DTimerRate();
 }
 
 void Spectrogram3DComponent::exitFreecamToTurntable() noexcept
@@ -7692,6 +7737,7 @@ void Spectrogram3DComponent::exitFreecamToTurntable() noexcept
 
     freecamActive = false;
     flyVel = { 0, 0, 0 };
+    syncSpec3DTimerRate();
 }
 
 void Spectrogram3DComponent::applyFreecamLookDelta (float dxPixels, float dyPixels) noexcept
@@ -8015,31 +8061,43 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
         const int pool = getParticlePoolCapacity();
         const int spawned = getParticleLastSpawnedCount();
         const int culled = getParticleLastCulledCount();
+        const float simMs = getParticleLastUpdateMs();
+        const int load = getParticleLoadLevel();
+        const float fps = getParticleDebugFps();
         const bool atCap = alive >= maxA;
+        const bool freeVis = particleBindingMode == ParticleBindingMode::freeVisualizer;
         const bool gpuPath = particleGpuSimEnabled
-                             && isParticleGpuSimAvailable()
-                             && maxA <= Spec3DParticleSystem::kGpuPathMaxAlive;
-        // Single pool; sim path is either CPU integrate or hybrid GPU integrate.
+                             && isParticleGpuSimAvailable();
+        const char* emitLabel = (particleEmitMode == ParticleEmitMode::continuous)
+                                    ? "cont" : "slice";
+        const char* bindLabel = freeVis ? "free" : "trail";
+        // +sp = births this sim tick; load 0–3 = hitch recovery tier; fps = timer redraw rate.
         const juce::String line =
-            juce::String (gpuPath ? "GPU particles  " : "CPU particles  ")
-            + juce::String (alive) + " / " + juce::String (maxA)
-            + "   pool " + juce::String (pool)
-            + "   +sp " + juce::String (spawned)
-            + "   -cull " + juce::String (culled)
-            + (atCap ? "   BUDGET" : "")
-            + (gpuPath ? "   [GPU sim]" : "   [CPU sim]");
+            juce::String (gpuPath ? "GPU  " : "CPU  ")
+            + juce::String (alive) + "/" + juce::String (maxA)
+            + "  pool " + juce::String (pool)
+            + "  +sp " + juce::String (spawned)
+            + "  -cull " + juce::String (culled)
+            + "  " + juce::String (fps, 0) + " fps"
+            + "  sim " + juce::String (simMs, 1) + "ms"
+            + "  L" + juce::String (load)
+            + "  " + emitLabel
+            + "  " + bindLabel
+            + (atCap ? "  BUDGET" : "")
+            + (gpuPath ? "  [GPU]" : "  [CPU]");
         g.setFont (juce::Font (juce::FontOptions (11.0f)).boldened());
-        const int tw = juce::jmin ((int) inner.getWidth() - 16, 520);
+        const int tw = juce::jmin ((int) inner.getWidth() - 16, 640);
         const juce::Rectangle<int> badge ((int) inner.getX() + 8,
                                           (int) inner.getBottom() - 28,
                                           tw, 20);
         g.setColour (juce::Colours::black.withAlpha (0.55f));
         g.fillRoundedRectangle (badge.toFloat(), 4.0f);
-        g.setColour (atCap ? juce::Colours::orange.withAlpha (0.95f)
-                           : juce::Colours::white.withAlpha (0.9f));
+        const auto ink = atCap ? juce::Colours::orange
+                         : (load >= 2 ? juce::Colours::yellow
+                                      : juce::Colours::white);
+        g.setColour (ink.withAlpha (0.95f));
         g.drawFittedText (line, badge.reduced (6, 0), juce::Justification::centredLeft, 1);
-        // Keep stats live while overlay is on.
-        repaint (badge);
+        // Timer already repaints soft content; no extra repaint(badge) cascade.
     }
 }
 
@@ -8049,6 +8107,22 @@ void Spectrogram3DComponent::timerCallback()
         return;
 
     const double nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
+
+    // Rolling display FPS (this timer's cadence — never need > 60 Hz).
+    if (particleFpsWindowStartSec <= 0.0)
+        particleFpsWindowStartSec = nowSec;
+    ++particleFpsFrameCount;
+    const double fpsWin = nowSec - particleFpsWindowStartSec;
+    if (fpsWin >= 0.5)
+    {
+        particleDebugFps = (float) ((double) particleFpsFrameCount / fpsWin);
+        particleFpsFrameCount = 0;
+        particleFpsWindowStartSec = nowSec;
+    }
+
+    // Keep rate in sync if freecam / particle mode toggled mid-session.
+    syncSpec3DTimerRate();
+
     bool cameraMoved = false;
 
     // Freecam fly + coast (independent of orbit). Same in OS fullscreen.
@@ -8149,9 +8223,10 @@ void Spectrogram3DComponent::timerCallback()
         ensureParticleSystem();
         if (particleSystem != nullptr)
         {
-            float pdt = 1.0f / 30.0f;
+            // Cap to 60 Hz sim steps; never accumulate more than 30 Hz of debt.
+            float pdt = 1.0f / 60.0f;
             if (particleLastUpdateSec > 0.0)
-                pdt = juce::jlimit (0.0f, 0.1f, (float) (nowSec - particleLastUpdateSec));
+                pdt = juce::jlimit (0.0f, 1.0f / 30.0f, (float) (nowSec - particleLastUpdateSec));
             particleLastUpdateSec = nowSec;
             particleSystem->update (pdt);
             markSoftContentDirty();

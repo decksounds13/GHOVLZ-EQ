@@ -1339,10 +1339,24 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onAugmentContextMenu = [this] (juce::PopupMenu& menu)
     {
+        menu.addSeparator();
+        menu.addItem (30,
+                      isBypassOtherAnalyzers()
+                          ? "Resume Other Analyzers"
+                          : "Bypass Other Analyzers",
+                      true,
+                      isBypassOtherAnalyzers());
+        // Checked item = currently bypassing. Freezes EQ spectrum + scopes; keeps Spec3D + meters.
+        menu.addSeparator();
         appendModuleLookMenuItems (menu, ModuleLookPresets::Kind::spectrogram3D, 1000);
     };
     spectrogram3D.onContextMenuResult = [this] (int result)
     {
+        if (result == 30)
+        {
+            setBypassOtherAnalyzers (! isBypassOtherAnalyzers());
+            return true;
+        }
         return handleModuleLookMenuResult (ModuleLookPresets::Kind::spectrogram3D, result, 1000);
     };
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.requestSaveUiPrefs(); };
@@ -2421,6 +2435,32 @@ void MainComponent::requestUiPrefsSave() noexcept
     editor.requestSaveUiPrefs();
 }
 
+void MainComponent::setBypassOtherAnalyzers (bool shouldBypass) noexcept
+{
+    processor.setBypassOtherAnalyzers (shouldBypass);
+    // Freeze UI timers via public API (scopes inherit Timer privately).
+    // Last painted frame stays on screen until audio push resumes.
+    const bool run = ! shouldBypass;
+    oscilloscope.setUiTimerRunning (run && oscilloscope.isScopeEnabled());
+    goniometer.setUiTimerRunning (run && goniometer.isGoniometerEnabled());
+    loudnessMeter.setUiTimerRunning (run);
+    stereogram.setUiTimerRunning (run);
+    histogram.setUiTimerRunning (run);
+    if (! shouldBypass)
+    {
+        syncOscToolButtons();
+        syncGonToolButtons();
+        syncSpecToolButtons();
+        m_visualizer.repaint();
+    }
+    repaint();
+}
+
+bool MainComponent::isBypassOtherAnalyzers() const noexcept
+{
+    return processor.isBypassOtherAnalyzers();
+}
+
 void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
 {
     if (scopeModeEnabled)
@@ -2443,6 +2483,10 @@ void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
 
     if (! shouldEnable && spec3DFullscreen)
         spec3DFullscreen = false;
+
+    // Closing Spec3D always restores other analyzers.
+    if (! shouldEnable && isBypassOtherAnalyzers())
+        setBypassOtherAnalyzers (false);
 
     syncSpecToolButtons();
     resized();
@@ -3631,7 +3675,9 @@ bool MainComponent::isSpec3DParticleModeEnabled() const noexcept
 }
 void MainComponent::setSpec3DParticleEmitMode (int mode, bool notifyPrefs)
 {
-    // Explicit clamp: only 1 is continuous; anything else (incl. 0 / bad id) is slice.
+    // 0 = slice, 1 = continuous. Unknown values keep the current mode (do not force slice).
+    if (mode != 0 && mode != 1)
+        return;
     const auto m = (mode == 1) ? Spectrogram3DComponent::ParticleEmitMode::continuous
                                : Spectrogram3DComponent::ParticleEmitMode::slice;
     spectrogram3D.setParticleEmitMode (m);
@@ -3808,6 +3854,24 @@ void MainComponent::setSpec3DParticleSize (float worldSize, bool notifyPrefs)
 float MainComponent::getSpec3DParticleSize() const noexcept
 {
     return spectrogram3D.getParticleSize();
+}
+void MainComponent::setSpec3DParticleSizeRandomMin (float scale, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSizeRandomMin (scale);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+void MainComponent::setSpec3DParticleSizeRandomMax (float scale, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSizeRandomMax (scale);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSizeRandomMin() const noexcept
+{
+    return spectrogram3D.getParticleSizeRandomMin();
+}
+float MainComponent::getSpec3DParticleSizeRandomMax() const noexcept
+{
+    return spectrogram3D.getParticleSizeRandomMax();
 }
 void MainComponent::setSpec3DParticleEmissiveEnabled (bool shouldEnable, bool notifyPrefs)
 {

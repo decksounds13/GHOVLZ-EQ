@@ -310,6 +310,10 @@ private:
         juce::Slider particleLifespanRandomSlider;
         juce::Label particleSizeLabel;
         juce::Slider particleSizeSlider;
+        /** Dual-thumb size scale range at spawn (min / max arrows). */
+        juce::Label particleSizeRandomLabel;
+        juce::Slider particleSizeRandomSlider;
+        juce::Label particleSizeRandomMinReadout, particleSizeRandomMaxReadout;
         juce::ToggleButton particleEmissiveToggle { "Unlit emissive only" };
         juce::Label particleEmissiveStrLabel;
         juce::Slider particleEmissiveStrSlider;

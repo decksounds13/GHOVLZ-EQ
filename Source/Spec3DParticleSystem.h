@@ -295,15 +295,18 @@ public:
     bool isGpuSimAvailable() const noexcept { return gpuComputeReady; }
 
     /**
-        Absolute pool ceiling (1M for stress tests). ~200B/particle → ~200MB at 1M.
+        Absolute pool ceiling (CPU). ~200B/particle → large at 1M — grow lazily.
         Raise Max particles in settings to exercise 100k+; default budget stays modest.
     */
+    /** Absolute allocator ceiling (settings Max is clamped here). Pool/SSBO grow lazily. */
     static constexpr int kHardCap = 1'048'576;
-    /** Default live budget (everyday safe). Not the hard ceiling. */
+    /** Default live budget (everyday). Not a runtime throttle. */
     static constexpr int kDefaultMaxAlive = 8192;
     static constexpr int kMinMaxAlive = 256;
-    /** Dense GPU path (no full-pool readback) is preferred up to this live count. */
-    static constexpr int kGpuPathMaxAlive = 262144;
+    /** @deprecated alias — GPU path uses the same hard cap as CPU; settings Max is the real limit. */
+    static constexpr int kGpuPathMaxAlive = kHardCap;
+    /** @deprecated alias — draw uses maxAliveBudget, not a separate soft cap. */
+    static constexpr int kSafeDrawAlive = kHardCap;
 
     int getAliveCount() const noexcept { return aliveCount; }
     int getPoolCapacity() const noexcept { return (int) pool.size(); }
@@ -311,14 +314,25 @@ public:
     void setMaxAliveBudget (int maxAlive) noexcept;
     int getLastSpawnedCount() const noexcept { return lastSpawnedCount; }
     int getLastCulledCount() const noexcept { return lastCulledCount; }
-    /** True when at budget — spawn is blocked / throttled. */
+    /** True when at settings Max — spawn is blocked. */
     bool isAtParticleBudget() const noexcept { return aliveCount >= maxAliveBudget; }
+    /** Wall time of last update() (ms). Used for hitch recovery + debug HUD. */
+    float getLastUpdateMs() const noexcept { return lastUpdateMs; }
+    /**
+        Adaptive load tier (0 = full quality … 3 = survival).
+        Raised when the previous frame blew the frame budget; lowered as we recover.
+    */
+    int getLoadLevel() const noexcept { return loadLevel; }
 
 private:
     struct Particle
     {
         float x = 0, y = 0, z = 0;
         float velX = 0, velY = 0, velZ = 0;
+        /**
+            Absolute mesh height baked at spawn (world Y). Never re-derived from the
+            live mesh min/max range — that re-norm is what caused history Y jiggle.
+        */
         float targetY = 0;
         float r = 1, g = 1, b = 1;
         float baseR = 1, baseG = 1, baseB = 1;
@@ -347,6 +361,8 @@ private:
         float randV[kParticleRandomSourceCount][3] = {};
         int bin = 0;
         int col = 0;
+        /** Index into aliveList for O(1) swap-remove (−1 if dead). */
+        int aliveListSlot = -1;
         bool alive = false;
         bool settled = false;
     };
@@ -375,6 +391,43 @@ private:
         float cx, cy;
         float size;
         float em; // per-particle emissive scale (matrix dest)
+    };
+
+    /**
+        GPU sim particle (std430, 6×vec4 = 96 bytes).
+        Dense-packed alive only; poolIndex maps back to CPU free-list.
+        Declared early so method prototypes can take GpuSimParticle&.
+    */
+    struct alignas (16) GpuSimParticle
+    {
+        float px, py, pz, age;
+        float vx, vy, vz, maxLife;
+        float spinX, spinY, spinZ, flags; // bits: 1 alive, 2 settled, 4 free, 8 lockX
+        float targetY, spawnOffY, rotX, rotY;
+        float rotZ, sizeScale, em, alpha;
+        float r, g, b, poolIndex; // poolIndex as float for std430 simplicity
+    };
+    static_assert (sizeof (GpuSimParticle) == 96, "GpuSimParticle must match compute ParticleGpu std430");
+
+    /** Force module for compute (scales baked on CPU). */
+    struct alignas (16) GpuForceMod
+    {
+        int type = 0;
+        int enabled = 0;
+        int axisMask = 7; // bit0 X, bit1 Y, bit2 Z
+        int flags = 0;    // bit0 linkAxes, bit1 randomDir
+        float p0 = 0, p1 = 0, p2 = 0, p3 = 0;
+    };
+
+    /**
+        Sparse mesh-field upload for trail binding.
+        Includes py: spectrogram-trail particles are mesh-attached (CPU + GPU must match).
+        Free-visualizer mode still uses birth slots for full physics state.
+    */
+    struct GpuFieldPatch
+    {
+        int index = 0;
+        float px = 0, py = 0, pz = 0, targetY = 0, spawnOffY = 0;
     };
 
     struct MeshVert
@@ -407,20 +460,41 @@ private:
 
     Spectrogram3DComponent& owner;
 
+    /**
+        Message-thread update/scroll vs OpenGL-thread integrate/draw.
+        Without this, sparse GPU patches and pool.y race → flat sheet + Y jiggle.
+    */
+    juce::CriticalSection simLock;
+
     std::vector<Particle> pool;
     /** O(1) spawn alloc — required at 100k+ (linear free-slot scan is unusable). */
     std::vector<int> freeList;
+    /** Dense list of alive pool indices — sample/integrate/pack O(alive), not O(pool). */
+    std::vector<int> aliveList;
     std::vector<float> emitAccum;
+    /** Reused by pickPlayheadBinF — never allocate per spawn (70k continuous was thrashing). */
+    std::vector<float> playheadWeights;
     float emitGlobal = 0.0f;
     float amplitudeSmooth = 0.0f;
     float simTime = 0.0f;
+    /** Cached mesh norm range — when this changes, all trail heights need a refresh. */
+    float cachedHeightMinDb = 0.0f, cachedHeightMaxDb = 0.0f, cachedMeshHeight = 0.0f;
     int nextWrite = 0;
     int maxAliveBudget = kDefaultMaxAlive;
     int aliveCount = 0;
     int lastSpawnedCount = 0;
     int lastCulledCount = 0;
-    /** Round-robin for throttled colour updates under load. */
+    float lastUpdateMs = 0.0f;
+    /** 0 full … 3 critical — drives spawn / sample cutbacks. */
+    int loadLevel = 0;
+    int loadLevelGoodFrames = 0;
+    /** Round-robin for throttled colour / mesh-sample updates under load. */
     int colourPassCursor = 0;
+    /** GPU SSBO capacities (bytes) — grow only; avoid per-frame glBufferData realloc hitches. */
+    size_t gpuParticleSsboCap = 0;
+    size_t gpuForceSsboCap = 0;
+    size_t gpuInstanceSsboCap = 0;
+    size_t gpuDeathSsboCap = 0;
     juce::Random rng { 0x53c33dU };
     /** Monotonic birth counter for ParticleModSource::particleId. */
     uint32_t nextParticleId = 1;
@@ -433,7 +507,9 @@ private:
     void ensurePool();
     void recountAlive() noexcept;
     void rebuildFreeList() noexcept;
+    void rebuildAliveList() noexcept;
     void markDead (int index) noexcept;
+    void registerAlive (int index) noexcept;
     /** Kill excess alive particles (settled / oldest first) down to maxAliveBudget. */
     void enforceAliveBudget() noexcept;
     /** Spawn on the playhead. binF is continuous in [0, meshH-1] (interpolated). */
@@ -442,7 +518,8 @@ private:
     float pickPlayheadBinF() noexcept;
     float sampleColumn (int bin, int col,
                         float& outR, float& outG, float& outB, float& outZ,
-                        float& outDb01, float& outFreq01) const;
+                        float& outDb01, float& outFreq01,
+                        bool wantColour = true) const;
     float columnToWorldX (int col) const noexcept;
     int allocSlot();
     float playheadAmplitude01() const;
@@ -485,7 +562,15 @@ private:
     void releaseComputeProgram();
     void bakeForcePack (const ForceModScales& scales);
     void packAliveToGpuSim (bool freeMode);
-    /** Dense pack → integrate → compact to instances (no full-pool readback). GL thread. */
+    /** Queue full-slot upload (birth). */
+    void queueGpuSlotPatch (int poolIndex, bool freeMode) noexcept;
+    /** Queue mesh field (trail: px/py/pz + targetY). */
+    void queueGpuFieldPatch (int poolIndex) noexcept;
+    /** Clear alive flag on resident GPU slot (CPU cull / history scroll). */
+    void queueGpuKill (int poolIndex) noexcept;
+    /** Fill GpuSimParticle from CPU pool slot. */
+    void fillGpuParticleFromPool (int poolIndex, bool freeMode, GpuSimParticle& g) const noexcept;
+    /** Resident pool SSBO: sparse patches + integrate + compact; death-list free-list sync. */
     void gpuIntegrateAndCompact (float dt, const ForceModScales& scales, bool freeMode);
     /** Legacy: full pack + integrate + full readback (fallback). */
     void gpuIntegrateAndReadback (float dt, const ForceModScales& scales, bool freeMode);
@@ -498,31 +583,6 @@ private:
                          juce::Vector3D<float> camRight,
                          juce::Vector3D<float> camUp);
 
-    /**
-        GPU sim particle (std430, 6×vec4 = 96 bytes).
-        Dense-packed alive only; poolIndex maps back to CPU free-list.
-    */
-    struct alignas (16) GpuSimParticle
-    {
-        float px, py, pz, age;
-        float vx, vy, vz, maxLife;
-        float spinX, spinY, spinZ, flags; // bits: 1 alive, 2 settled, 4 free, 8 lockX
-        float targetY, spawnOffY, rotX, rotY;
-        float rotZ, sizeScale, em, alpha;
-        float r, g, b, poolIndex; // poolIndex as float for std430 simplicity
-    };
-    static_assert (sizeof (GpuSimParticle) == 96, "GpuSimParticle must match compute ParticleGpu std430");
-
-    /** Force module for compute (scales baked on CPU). */
-    struct alignas (16) GpuForceMod
-    {
-        int type = 0;
-        int enabled = 0;
-        int axisMask = 7; // bit0 X, bit1 Y, bit2 Z
-        int flags = 0;    // bit0 linkAxes, bit1 randomDir
-        float p0 = 0, p1 = 0, p2 = 0, p3 = 0;
-    };
-
     bool glReady = false;
     bool gpuComputeReady = false;
     bool gpuCompactReady = false;
@@ -532,13 +592,30 @@ private:
     unsigned int forceSsbo = 0;
     unsigned int instanceSsbo = 0; // compact output (also ARRAY_BUFFER for draw)
     unsigned int counterSsbo = 0;  // uint count
+    unsigned int deathSsbo = 0;    // int deathIndices[cap]
+    unsigned int deathCountSsbo = 0;
     int computeUCount = -1, computeUForceCount = -1, computeUDt = -1, computeUSimTime = -1;
+    int computeUDeathCap = -1, computeUHistoryScrollX = -1;
     int compactUCount = -1;
     std::vector<GpuSimParticle> gpuSimPack;
     std::vector<GpuForceMod> gpuForcePack;
+    /** Sparse full-slot uploads (births). */
+    std::vector<std::pair<int, GpuSimParticle>> gpuSpawnPatches;
+    std::vector<GpuFieldPatch> gpuFieldPatches;
+    /**
+        Accumulated world-X shift for trail particles since last GPU integrate.
+        Applied once as a uniform (O(1)) instead of N glBufferSubData calls — was the ~10k crawl.
+    */
+    float pendingHistoryScrollX = 0.0f;
+    std::vector<int> gpuDeathScratch;
     int gpuPackedAlive = 0;
     int gpuDrawnInstances = 0;
     bool gpuInstancesValid = false;
+    /** Counter SSBOs sized once per GL context (not process-static — survives context rebuild). */
+    bool gpuCounterBufsSized = false;
+    /** True when particleSsbo holds a full-pool resident sim (no full re-pack each frame). */
+    bool gpuPoolResident = false;
+    int gpuResidentCapacity = 0;
     /** Deferred integrate (GPU must run on GL thread; update() may be message-thread). */
     float pendingIntegrateDt = 0.0f;
     ForceModScales pendingForceScales {};

@@ -156,6 +156,12 @@ public:
     void setSpec3DMode (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DMode() const noexcept { return spec3DEnabled; }
     /**
+        Spec3D menu: freeze EQ spectrum + all scopes except Spec3D mesh feed and level meters.
+        Cleared when Spec3D is closed or the menu item is toggled off.
+    */
+    void setBypassOtherAnalyzers (bool shouldBypass) noexcept;
+    bool isBypassOtherAnalyzers() const noexcept;
+    /**
         True OS fullscreen for Spec3D (F11 / right-click): borderless top-level window
         covering the monitor — not just the plugin editor.
     */
@@ -470,6 +476,10 @@ public:
     float getSpec3DParticleLifespanRandom() const noexcept;
     void setSpec3DParticleSize (float worldSize, bool notifyPrefs = true);
     float getSpec3DParticleSize() const noexcept;
+    void setSpec3DParticleSizeRandomMin (float scale, bool notifyPrefs = true);
+    void setSpec3DParticleSizeRandomMax (float scale, bool notifyPrefs = true);
+    float getSpec3DParticleSizeRandomMin() const noexcept;
+    float getSpec3DParticleSizeRandomMax() const noexcept;
     void setSpec3DParticleEmissiveEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DParticleEmissiveEnabled() const noexcept;
     void setSpec3DParticleEmissiveStrength (float amount, bool notifyPrefs = true);

@@ -91,7 +91,22 @@ Unblocks high particle counts while preserving Spec3D’s audio-driven matrix co
 - [x] Cap: `kGpuPathMaxAlive` = 262144 (above → CPU integrate)  
 - [x] Counter SSBO + atomic compact count for draw instance count  
 
-### Phase 2 — GPU spawn
+### Phase 2 — resident GPU (current)
+
+Earlier hybrid re-uploaded **and downloaded** every live particle each frame (~3 MB×2 at 30k) — that is *not* true GPU and caused **30 s Ableton crashes** and **Y jiggle**.
+
+Current design:
+
+- [x] **Pool-index resident SSBO** (`SSBO[i] ↔ pool[i]`), sized to **allocated pool** (lazy growth)  
+- [x] **Sparse birth uploads** + **field patches** (`targetY`, trail XZ) that never clobber GPU `py`/vel  
+- [x] **Death-list readback only** (free-list sync) — no full particle download  
+- [x] **Counter buffers SubData** (no per-frame `glBufferData` fragmentation)  
+- [x] Height sample for **rising** particles (stops vertical pop) without colour LUT every frame  
+- [x] Cap `kGpuPathMaxAlive = 131072` as a soft ceiling; GPU should scale far better than the old hybrid  
+- [ ] GPU free-list + spawn compute (no CPU alloc)  
+- [ ] Heightfield texture on GPU for trail lock  
+
+### Phase 2b — GPU spawn compute (next)
 
 - Atomic free-list of dead indices  
 - Spawn parameters buffer (binF, colour, vel…) from CPU playhead sampler  

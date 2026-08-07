@@ -662,18 +662,18 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                      "Hybrid GPU path: force/age integrate + compact to instance buffer on the GPU "
                      "(OpenGL 4.3 compute). CPU is the default and always works. GPU needs a 4.3+ "
                      "context; if compute fails, motion falls back to CPU automatically. "
-                     "Spawn and colour matrix stay on the CPU. Dense alive pack is written back "
-                     "for free-list (not the full pool). Prefer budgets up to ~262k on GPU.");
+                     "Resident GPU sim: positions stay on GPU (no multi-MB readback). "
+                     "CPU handles spawn attrs + free-list; integrate/draw on GPU. "
+                     "Works well into 100k+ live when compute is healthy.");
     particleGpuSimToggle.setToggleState (false, juce::dontSendNotification);
     particleMaxAliveLabel.setText ("Max particles", juce::dontSendNotification);
-    // Drag range to 100k; type up to 1M for stress tests (absolute hard cap).
-    setupParticleSlider (particleMaxAliveLabel, particleMaxAliveSlider, 256.0, 100000.0, 256.0,
-                         "Live particle budget. Default 8192. Drag up to 100k; type up to 1,000,000 "
-                         "for stress tests (~200MB RAM at 1M — can hitch or OOM the host).\n"
-                         "This is the total ceiling. Emission only controls how fast you fill it.\n"
-                         "At 100k+: free-list spawn + colour throttling. GPU integrate (toggle) "
-                         "scales to ~262k via dense pack + compact draw; above that or without "
-                         "compute, integration stays on CPU.");
+    // Drag range to 250k; type higher if needed (absolute safety hard cap is 1M in engine).
+    setupParticleSlider (particleMaxAliveLabel, particleMaxAliveSlider, 256.0, 250000.0, 256.0,
+                         "Live particle budget (default 8192). Drag up to 250k; type higher if needed.\n"
+                         "This is the only particle count limit — no hidden GPU/CPU soft caps.\n"
+                         "Raising Max does not allocate immediately; pool grows as particles spawn.\n"
+                         "At Max: spawn stops and oldest are culled — should not crash.\n"
+                         "Emission controls fill rate toward Max.");
     setSliderActual (particleMaxAliveSlider, 8192.0);
     setupLookToggle (particleDebugOverlayToggle,
                      "Show live particle stats on the 3D view (alive / budget / pool / "
@@ -724,18 +724,20 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (particleEmitModeLabel);
     addAndMakeVisible (particleEmitModeCombo);
     particleEmissionLabel.setText ("Emission rate (particles/s)", juce::dontSendNotification);
-    setupParticleSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 5000.0, 1.0,
+    setupParticleSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 100000.0, 1.0,
                          "Particles spawned per second (total across the field). "
-                         "Drag 0–5000; type higher for denser tests. "
+                         "Default 1000; drag 0–100k; type higher if needed. "
                          "Live count ≈ rate × lifespan (until Max particles). "
                          "Continuous and slice modes share this same particles/s budget.");
-    setSliderActual (particleEmissionSlider, 200.0);
+    setSliderActual (particleEmissionSlider, 1000.0);
     particleSpawnJitterLabel.setText ("Spawn jitter", juce::dontSendNotification);
     setupParticleSlider (particleSpawnJitterLabel, particleSpawnJitterSlider, 0.0, 0.5, 0.001,
                          "Randomize each particle's spawn offset (world units). "
-                         "0 = exact surface sample; default scatters so particles don't stack. "
+                         "Default is a small scatter so particles don't stack on one point. "
+                         "Set to 0 only if you want exact grid samples. "
                          "Offsets are kept under waterfall lock.");
-    setSliderActual (particleSpawnJitterSlider, 0.035);
+    setSliderActual (particleSpawnJitterSlider,
+                     (double) Spectrogram3DComponent::kDefaultParticleSpawnJitter);
     particleInitVelXLabel.setText ("Init vel X", juce::dontSendNotification);
     setupParticleSlider (particleInitVelXLabel, particleInitVelXSlider, -10.0, 10.0, 0.01,
                          "Initial velocity X (world units / second).");
@@ -778,6 +780,45 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     setupParticleSlider (particleSizeLabel, particleSizeSlider, 0.001, 0.08, 0.0005,
                          "Particle radius / mesh scale in world units.");
     setSliderActual (particleSizeSlider, 0.008);
+    particleSizeRandomLabel.setText ("Size random (min / max scale)", juce::dontSendNotification);
+    styleLabel (particleSizeRandomLabel);
+    particleSizeRandomSlider.setSliderStyle (juce::Slider::TwoValueHorizontal);
+    particleSizeRandomSlider.setLookAndFeel (&particleRangeLnF);
+    particleSizeRandomSlider.setRange (0.05, 3.0, 0.01);
+    particleSizeRandomSlider.setMinValue (1.0, juce::dontSendNotification);
+    particleSizeRandomSlider.setMaxValue (1.0, juce::dontSendNotification);
+    particleSizeRandomSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    particleSizeRandomSlider.setSliderSnapsToMousePosition (false);
+    particleSizeRandomSlider.setTooltip (
+        "Per-particle size scale range at spawn (multiplies Particle size). "
+        "Drag the two arrows: left = min scale, right = max scale. "
+        "1…1 = all particles the same size; e.g. 0.5…1.5 = half to 1.5× base size.");
+    particleSizeRandomSlider.onValueChange = [this]
+    {
+        particleSizeRandomMinReadout.setText (
+            juce::String (particleSizeRandomSlider.getMinValue(), 2), juce::dontSendNotification);
+        particleSizeRandomMaxReadout.setText (
+            juce::String (particleSizeRandomSlider.getMaxValue(), 2), juce::dontSendNotification);
+        applyLookControlsToMain();
+    };
+    addAndMakeVisible (particleSizeRandomLabel);
+    addAndMakeVisible (particleSizeRandomSlider);
+    {
+        auto styleReadout = [this] (juce::Label& lab)
+        {
+            lab.setFont (juce::FontOptions().withName ("Lato").withHeight (12.0f));
+            lab.setJustificationType (juce::Justification::centred);
+            lab.setMinimumHorizontalScale (0.55f);
+            lab.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.88f));
+            lab.setColour (juce::Label::backgroundColourId, juce::Colours::black.withAlpha (0.30f));
+            lab.setInterceptsMouseClicks (false, false);
+            addAndMakeVisible (lab);
+        };
+        styleReadout (particleSizeRandomMinReadout);
+        styleReadout (particleSizeRandomMaxReadout);
+        particleSizeRandomMinReadout.setText ("1.00", juce::dontSendNotification);
+        particleSizeRandomMaxReadout.setText ("1.00", juce::dontSendNotification);
+    }
     setupLookToggle (particleEmissiveToggle,
                      "Unlit mode: particles are pure self-lit colour x emissive strength "
                      "(skips lighting / PBR). Off = same GGX material as the waterfall mesh, "
@@ -1431,6 +1472,10 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (particleLifespanRandomSlider, lifeOn);
     setLookChildVisible (particleSizeLabel, particleOn);
     setLookChildVisible (particleSizeSlider, particleOn);
+    setLookChildVisible (particleSizeRandomLabel, particleOn);
+    setLookChildVisible (particleSizeRandomSlider, particleOn);
+    setLookChildVisible (particleSizeRandomMinReadout, particleOn);
+    setLookChildVisible (particleSizeRandomMaxReadout, particleOn);
     // Material: always show PBR + emissive together (waterfall parity). Unlit is optional.
     setLookChildVisible (particleEmissiveToggle, particleOn);
     setLookChildVisible (particleRoughLabel, particleOn);
@@ -1983,10 +2028,8 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
         const bool gpuOk = main->isSpec3DParticleGpuSimAvailable();
         particleGpuSimToggle.setTooltip (
             juce::String (
-                "Hybrid GPU path: force/age integrate + compact to instance buffer "
-                "(OpenGL 4.3 compute). CPU is the default and always works. "
-                "Spawn and colour matrix stay on the CPU. Dense alive pack is written "
-                "back for free-list (not the full pool).")
+                "Resident GPU integrate + compact draw (OpenGL 4.3). Positions stay on the GPU; "
+                "CPU only uploads births and height/trail field patches. No multi-MB readback.")
             + (gpuOk ? "\n\nCompute is ready on this GPU."
                      : "\n\nCompute not ready yet (needs particle draw once, or GL 4.3 unavailable)."));
     }
@@ -2001,6 +2044,16 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     setSliderActual (particleLifespanSlider, main->getSpec3DParticleLifespan());
     setSliderActual (particleLifespanRandomSlider, main->getSpec3DParticleLifespanRandom());
     setSliderActual (particleSizeSlider, main->getSpec3DParticleSize());
+    {
+        const double lo = (double) main->getSpec3DParticleSizeRandomMin();
+        const double hi = (double) main->getSpec3DParticleSizeRandomMax();
+        particleSizeRandomSlider.setMinValue (juce::jmin (lo, hi), juce::dontSendNotification);
+        particleSizeRandomSlider.setMaxValue (juce::jmax (lo, hi), juce::dontSendNotification);
+        particleSizeRandomMinReadout.setText (juce::String (particleSizeRandomSlider.getMinValue(), 2),
+                                              juce::dontSendNotification);
+        particleSizeRandomMaxReadout.setText (juce::String (particleSizeRandomSlider.getMaxValue(), 2),
+                                              juce::dontSendNotification);
+    }
     particleEmissiveToggle.setToggleState (main->isSpec3DParticleEmissiveEnabled(), juce::dontSendNotification);
     setSliderActual (particleEmissiveStrSlider, main->getSpec3DParticleEmissiveStrength());
     setSliderActual (particleRoughSlider, main->getSpec3DParticleRoughness());
@@ -2277,10 +2330,15 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DParticleDebugOverlayEnabled (particleDebugOverlayToggle.getToggleState(), kSave);
     main->setSpec3DParticleBindingMode (juce::jmax (0, particleBindingCombo.getSelectedId() - 1), kSave);
     {
-        // Combo ids: 1 = slice, 2 = continuous. Never treat 0 (no selection) as continuous.
+        // Combo ids: 1 = Slice, 2 = Continuous (default).
+        // Never treat id 0 / no selection as Slice — that silently forced Slice on every
+        // applyLook pass while the combo was hidden or mid-refresh.
         const int emitId = particleEmitModeCombo.getSelectedId();
-        const int emitMode = (emitId == 2) ? 1 : 0; // 0 slice, 1 continuous
-        main->setSpec3DParticleEmitMode (emitMode, kSave);
+        if (emitId == 2)
+            main->setSpec3DParticleEmitMode (1, kSave); // continuous
+        else if (emitId == 1)
+            main->setSpec3DParticleEmitMode (0, kSave); // slice
+        // else: leave engine mode unchanged
     }
     main->setSpec3DParticleEmission ((float) getSliderActual (particleEmissionSlider), kSave);
     main->setSpec3DParticleSpawnJitter ((float) getSliderActual (particleSpawnJitterSlider), kSave);
@@ -2291,6 +2349,8 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DParticleLifespan ((float) getSliderActual (particleLifespanSlider), kSave);
     main->setSpec3DParticleLifespanRandom ((float) getSliderActual (particleLifespanRandomSlider), kSave);
     main->setSpec3DParticleSize ((float) getSliderActual (particleSizeSlider), kSave);
+    main->setSpec3DParticleSizeRandomMin ((float) particleSizeRandomSlider.getMinValue(), kSave);
+    main->setSpec3DParticleSizeRandomMax ((float) particleSizeRandomSlider.getMaxValue(), kSave);
     main->setSpec3DParticleEmissiveEnabled (particleEmissiveToggle.getToggleState(), kSave);
     main->setSpec3DParticleEmissiveStrength ((float) getSliderActual (particleEmissiveStrSlider), kSave);
     main->setSpec3DParticleRoughness ((float) getSliderActual (particleRoughSlider), kSave);
@@ -2424,7 +2484,7 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
         lookRows += 7; // emission, jitter, init vel XYZ, vel random, lifespan
         if (particleLifespanSlider.getValue() > 1.0e-4)
             lookRows += 1;
-        lookRows += 1; // size
+        lookRows += 2; // size + size random dual-thumb
         lookRows += 4; // roughness, metalness, specular, emissive (always)
         // unlit toggle counted above when particleToggle is on
         lookRows += 1; // mesh shape
@@ -2683,6 +2743,21 @@ void Spectrogram3DSettingsComponent::Content::resized()
         if (particleLifespanSlider.getValue() > 1.0e-4)
             layoutSliderRow (area, particleLifespanRandomLabel, particleLifespanRandomSlider);
         layoutSliderRow (area, particleSizeLabel, particleSizeSlider);
+        particleSizeRandomLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        {
+            auto rr = area.removeFromTop (26);
+            constexpr int kReadoutW = 48;
+            particleSizeRandomMinReadout.setBounds (
+                rr.removeFromLeft (kReadoutW).withSizeKeepingCentre (kReadoutW, 18));
+            rr.removeFromLeft (4);
+            particleSizeRandomMaxReadout.setBounds (
+                rr.removeFromRight (kReadoutW).withSizeKeepingCentre (kReadoutW, 18));
+            rr.removeFromRight (4);
+            particleSizeRandomSlider.setBounds (
+                rr.withSizeKeepingCentre (juce::jmin (420, rr.getWidth()), 22));
+        }
+        area.removeFromTop (kRowGap);
         // Material (waterfall-matching PBR + additive emissive)
         layoutSliderRow (area, particleRoughLabel, particleRoughSlider);
         layoutSliderRow (area, particleMetalLabel, particleMetalSlider);
