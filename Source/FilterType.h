@@ -208,18 +208,102 @@ namespace FilterType
     }
 
     /**
-        Brickwall cut: steepest stable cascade (16th-order Butterworth = 96 dB/oct).
-        Fixed “wall” slope — Q only adds knee resonance (same as steep HP/LP).
-        Distinct from regular Highpass/Lowpass, which expose 6–96 dB slope choices.
+        One elliptic-style SOS via bilinear transform.
+        lowpass:  H(s) = (ωp²/ωz²)·(s²+ωz²)/(s²+(ωp/Q)s+ωp²)  with ωz > ωp  (stopband zero)
+        highpass: H(s) = (s²+ωz²)/(s²+(ωp/Q)s+ωp²)            with ωz < ωp  (stopband zero)
+        Much steeper near the cutoff than Butterworth of the same order.
+    */
+    inline juce::dsp::IIR::Coefficients<float>::Ptr makeEllipticStyleSection (
+        double sampleRate, float poleHz, float zeroHz, float qPole, bool highpass)
+    {
+        const double fs = sampleRate > 1.0 ? sampleRate : 48000.0;
+        const double nyq = fs * 0.49;
+        const double fp = juce::jlimit (20.0, nyq, (double) poleHz);
+        const double fz = juce::jlimit (20.0, nyq, (double) zeroHz);
+        const double Q  = juce::jlimit (0.05, 20.0, (double) qPole);
+        const double pi = juce::MathConstants<double>::pi;
+        // Pre-warp
+        const double wp = 2.0 * fs * std::tan (pi * fp / fs);
+        const double wz = 2.0 * fs * std::tan (pi * fz / fs);
+        const double K  = 2.0 * fs;
+
+        // Analog B(s)/A(s)
+        double B0, B1, B2, A0, A1, A2;
+        if (! highpass)
+        {
+            // Unity at DC: g = wp²/wz²
+            const double g = (wp * wp) / juce::jmax (1.0e-30, wz * wz);
+            B2 = g;
+            B1 = 0.0;
+            B0 = g * wz * wz;
+            A2 = 1.0;
+            A1 = wp / Q;
+            A0 = wp * wp;
+        }
+        else
+        {
+            // Unity at ∞, attenuate DC: zeros in stopband below pole
+            B2 = 1.0;
+            B1 = 0.0;
+            B0 = wz * wz;
+            A2 = 1.0;
+            A1 = wp / Q;
+            A0 = wp * wp;
+        }
+
+        // Bilinear s = K (1 − z⁻¹) / (1 + z⁻¹)
+        const double K2 = K * K;
+        double n0 = B0 + B1 * K + B2 * K2;
+        double n1 = 2.0 * B0 - 2.0 * B2 * K2;
+        double n2 = B0 - B1 * K + B2 * K2;
+        double d0 = A0 + A1 * K + A2 * K2;
+        double d1 = 2.0 * A0 - 2.0 * A2 * K2;
+        double d2 = A0 - A1 * K + A2 * K2;
+        const double inv = 1.0 / juce::jmax (1.0e-30, d0);
+
+        return new juce::dsp::IIR::Coefficients<float> (
+            (float) (n0 * inv),
+            (float) (n1 * inv),
+            (float) (n2 * inv),
+            1.0f,
+            (float) (d1 * inv),
+            (float) (d2 * inv));
+    }
+
+    /**
+        Brickwall cut: 8th-order elliptic-style cascade (8 SOS with stopband zeros).
+        Visibly steeper knee than 96 dB/oct Butterworth — not the same curve.
+        User Q scales resonance of the final (highest-Q) section.
     */
     inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
         makeBrickwallStages (double sampleRate, float frequency, float q, bool highpass)
     {
+        juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> stages;
         const float f = juce::jlimit (20.0f, 20000.0f, frequency);
-        const float safeQ = juce::jmax (0.15f, q);
-        return highpass
-            ? FilterSlope::makeHighpassCoeffs (sampleRate, f, safeQ, FilterSlope::db96)
-            : FilterSlope::makeLowpassCoeffs (sampleRate, f, safeQ, FilterSlope::db96);
+        const float userQ = juce::jmax (0.15f, q);
+
+        // Zero/pole spacing chosen for a sharp “wall” near f (not Butterworth).
+        // LP: zeros above f; HP: zeros below f (reciprocal ratios).
+        static constexpr float kZeroRatio[8] = {
+            1.025f, 1.06f, 1.12f, 1.22f, 1.40f, 1.75f, 2.40f, 3.80f
+        };
+        // Pole Qs — higher than Butterworth-16 for a sharper transition.
+        static constexpr float kPoleQ[8] = {
+            0.54f, 0.68f, 0.95f, 1.35f, 2.0f, 3.2f, 5.5f, 9.5f
+        };
+
+        for (int i = 0; i < 8; ++i)
+        {
+            float zHz = highpass ? (f / kZeroRatio[i]) : (f * kZeroRatio[i]);
+            float poleQ = kPoleQ[i];
+            // Resonance control on the last (sharpest) section, same idea as FilterSlope.
+            if (i == 7)
+                poleQ *= juce::jlimit (0.25f, 4.0f, userQ / 0.70710678f);
+
+            zHz = juce::jlimit (20.0f, 20000.0f, zHz);
+            stages.add (makeEllipticStyleSection (sampleRate, f, zHz, poleQ, highpass));
+        }
+        return stages;
     }
 
     /** Single-biquad types (not cascaded HP/LP slopes or multi-stage shapes). */
