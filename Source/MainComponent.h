@@ -372,6 +372,14 @@ public:
     float getSpec3DBloomStrength() const noexcept;
     void setSpec3DBloomThreshold (float amount01, bool notifyPrefs = true);
     float getSpec3DBloomThreshold() const noexcept;
+    void setSpec3DMotionBlurEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DMotionBlurEnabled() const noexcept;
+    void setSpec3DMotionBlurAmount (float amount01, bool notifyPrefs = true);
+    float getSpec3DMotionBlurAmount() const noexcept;
+    void setSpec3DMotionBlurMax (float maxPixels, bool notifyPrefs = true);
+    float getSpec3DMotionBlurMax() const noexcept;
+    void setSpec3DMotionBlurQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs = true);
+    Spectrogram3DComponent::ShadowQuality getSpec3DMotionBlurQuality() const noexcept;
     void setSpec3DDofEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DDofEnabled() const noexcept;
     void setSpec3DDofFocusDistance (float distance, bool notifyPrefs = true);
@@ -472,6 +480,17 @@ public:
     float getSpec3DParticleMetalness() const noexcept;
     void setSpec3DParticleSpecular (float amount01, bool notifyPrefs = true);
     float getSpec3DParticleSpecular() const noexcept;
+    /** GPU force/age integrate (compute). Default false = CPU. Needs GL 4.3+. */
+    void setSpec3DParticleGpuSimEnabled (bool shouldEnable, bool notifyPrefs = true);
+    bool isSpec3DParticleGpuSimEnabled() const noexcept;
+    /** True once compute program linked successfully on this GL context. */
+    bool isSpec3DParticleGpuSimAvailable() const noexcept;
+    void setSpec3DParticleMaxAlive (int maxAlive, bool notifyPrefs = true);
+    int getSpec3DParticleMaxAlive() const noexcept;
+    int getSpec3DParticleAliveCount() const noexcept;
+    void clearSpec3DParticles (bool notifyPrefs = false);
+    void setSpec3DParticleDebugOverlayEnabled (bool shouldShow, bool notifyPrefs = true);
+    bool isSpec3DParticleDebugOverlayEnabled() const noexcept;
 
     void resetSpec3DCamera() noexcept { spectrogram3D.resetCamera(); }
     void setSpec3DDefaultCamera (const Spectrogram3DComponent::CameraState& state, bool applyNow = true) noexcept;
@@ -492,6 +511,8 @@ public:
     /** Restore a maximized overlay after editor reopen (enables the module if needed). */
     void restoreExpandedScope (bool osc, bool gon, bool spec);
     void closeSettingsMenu();
+    /** Open Settings while Spec3D is OS-fullscreen (desktop chrome button for lookdev). */
+    void openSettingsMenuFromFullscreen();
     /** True when a Settings dismiss-catcher point lies over an expanded analyser window / its tools. */
     bool isPointOverSettingsDismissExempt (int catcherX, int catcherY,
                                            const juce::Component& catcher) const noexcept;

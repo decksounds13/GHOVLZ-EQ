@@ -111,16 +111,29 @@ struct MainComponent::Spec3DOsFullscreenHost final : public juce::Component
     }
 };
 
-/** Always-on-top exit control (separate peer so native GL HWND cannot bury it). */
+/**
+    Always-on-top fullscreen chrome (separate peer so native GL HWND cannot bury it).
+    Settings (hamburger) + Exit — lookdev without leaving F11.
+*/
 struct MainComponent::Spec3DFsExitChrome final : public juce::Component
 {
     MainComponent& owner;
+    juce::TextButton settingsButton { "Settings" };
     MainComponent::OscToolButton exitButton { MainComponent::OscToolButton::Glyph::Collapse };
 
     explicit Spec3DFsExitChrome (MainComponent& o) : owner (o)
     {
         setOpaque (false);
         setAlwaysOnTop (true);
+
+        settingsButton.setTooltip ("Open Settings / Look (lookdev while fullscreen)");
+        settingsButton.setColour (juce::TextButton::buttonColourId, juce::Colours::black.withAlpha (0.55f));
+        settingsButton.setColour (juce::TextButton::buttonOnColourId, juce::Colours::goldenrod.withAlpha (0.75f));
+        settingsButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.95f));
+        settingsButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        settingsButton.onClick = [this] { owner.openSettingsMenuFromFullscreen(); };
+        addAndMakeVisible (settingsButton);
+
         exitButton.setTooltip ("Exit fullscreen (F11 / Esc)");
         exitButton.onClick = [this] { owner.setSpec3DFullscreen (false, true); };
         addAndMakeVisible (exitButton);
@@ -128,11 +141,15 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
 
     void placeOnDisplay (juce::Rectangle<int> displayTotalArea)
     {
-        constexpr int kSize = 36;
+        constexpr int kH = 36;
+        constexpr int kSettingsW = 88;
+        constexpr int kExitW = 36;
+        constexpr int kGap = 8;
         constexpr int kMargin = 14;
+        const int totalW = kSettingsW + kGap + kExitW;
         const auto b = juce::Rectangle<int> (displayTotalArea.getX() + kMargin,
                                              displayTotalArea.getY() + kMargin,
-                                             kSize, kSize);
+                                             totalW, kH);
         if (! isOnDesktop())
             addToDesktop (juce::ComponentPeer::windowIsTemporary
                           | juce::ComponentPeer::windowIgnoresKeyPresses);
@@ -142,7 +159,8 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
         toFront (true);
         if (auto* peer = getPeer())
             peer->setAlwaysOnTop (true);
-        exitButton.setBounds (getLocalBounds());
+        settingsButton.setBounds (0, 0, kSettingsW, kH);
+        exitButton.setBounds (kSettingsW + kGap, 0, kExitW, kH);
     }
 
     void dismiss()
@@ -154,7 +172,12 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
 
     void resized() override
     {
-        exitButton.setBounds (getLocalBounds());
+        constexpr int kH = 36;
+        constexpr int kSettingsW = 88;
+        constexpr int kExitW = 36;
+        constexpr int kGap = 8;
+        settingsButton.setBounds (0, 0, kSettingsW, kH);
+        exitButton.setBounds (kSettingsW + kGap, 0, kExitW, kH);
     }
 
     void paint (juce::Graphics& g) override
@@ -1765,9 +1788,61 @@ void MainComponent::closeSettingsMenu()
         return;
     menu.setVisible (false);
     menuDismissCatcher.setVisible (false);
+    // Restore parenting if Settings was floated for Spec3D OS fullscreen.
+    if (menu.isOnDesktop())
+    {
+        menu.removeFromDesktop();
+        addChildComponent (menu);
+        menu.setAlwaysOnTop (false);
+    }
     resized();
     syncExpandedOscOverlayStack();
     frequencyResponseComponent.setInterceptsMouseClicks (true, true);
+}
+
+void MainComponent::openSettingsMenuFromFullscreen()
+{
+    // Keep Spec3D fullscreen; float Settings as its own always-on-top desktop peer
+    // so lookdev remains available over the OS F11 surface.
+    if (! menu.isVisible())
+    {
+        menu.setVisible (true);
+        menuDismissCatcher.setVisible (false); // FS has no editor-local catcher
+        menu.setInterceptsMouseClicks (true, true);
+    }
+
+    if (! menu.isOnDesktop())
+        menu.addToDesktop (juce::ComponentPeer::windowIsTemporary
+                           | juce::ComponentPeer::windowIsResizable
+                           | juce::ComponentPeer::windowHasDropShadow);
+
+    menu.setAlwaysOnTop (true);
+    menu.toFront (true);
+    if (auto* peer = menu.getPeer())
+        peer->setAlwaysOnTop (true);
+
+    // Place beside the FS chrome (top-left of the display that hosts Spec3D).
+    juce::Rectangle<int> displayArea;
+    if (spec3DOsFullscreenHost != nullptr)
+        displayArea = spec3DOsFullscreenHost->getBounds();
+    else
+    {
+        const auto& d = juce::Desktop::getInstance().getDisplays().getMainDisplay();
+        displayArea = d.totalArea;
+    }
+
+    constexpr int kMargin = 14;
+    constexpr int kChromeH = 36 + kMargin; // below Settings/Exit strip
+    const int w = juce::jlimit (280, displayArea.getWidth() - kMargin * 2, Menu::kContentWidth + 40);
+    const int h = juce::jlimit (320, displayArea.getHeight() - kChromeH - kMargin,
+                                displayArea.getHeight() - kChromeH - kMargin);
+    menu.setBounds (displayArea.getX() + kMargin,
+                    displayArea.getY() + kChromeH,
+                    w, h);
+    menu.setVisible (true);
+    menu.toFront (true);
+    if (spec3DFsExitChrome != nullptr)
+        spec3DFsExitChrome->toFront (true);
 }
 
 bool MainComponent::isPointOverSettingsDismissExempt (int catcherX, int catcherY,
@@ -2468,6 +2543,15 @@ void MainComponent::enterSpec3DOsFullscreen()
 
 void MainComponent::exitSpec3DOsFullscreen()
 {
+    // Bring Settings back into the editor if it was floated for lookdev.
+    if (menu.isOnDesktop())
+    {
+        menu.setVisible (false);
+        menu.removeFromDesktop();
+        addChildComponent (menu);
+        menu.setAlwaysOnTop (false);
+    }
+
     if (spec3DFsExitChrome != nullptr)
     {
         spec3DFsExitChrome->dismiss();
@@ -3420,6 +3504,37 @@ void MainComponent::setSpec3DBloomThreshold (float amount01, bool notifyPrefs)
 }
 float MainComponent::getSpec3DBloomThreshold() const noexcept { return spectrogram3D.getBloomThreshold(); }
 
+void MainComponent::setSpec3DMotionBlurEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setMotionBlurEnabled (shouldEnable);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DMotionBlurEnabled() const noexcept { return spectrogram3D.isMotionBlurEnabled(); }
+
+void MainComponent::setSpec3DMotionBlurAmount (float amount01, bool notifyPrefs)
+{
+    spectrogram3D.setMotionBlurAmount (amount01);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DMotionBlurAmount() const noexcept { return spectrogram3D.getMotionBlurAmount(); }
+
+void MainComponent::setSpec3DMotionBlurMax (float maxPixels, bool notifyPrefs)
+{
+    spectrogram3D.setMotionBlurMax (maxPixels);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DMotionBlurMax() const noexcept { return spectrogram3D.getMotionBlurMax(); }
+
+void MainComponent::setSpec3DMotionBlurQuality (Spectrogram3DComponent::ShadowQuality q, bool notifyPrefs)
+{
+    spectrogram3D.setMotionBlurQuality (q);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+Spectrogram3DComponent::ShadowQuality MainComponent::getSpec3DMotionBlurQuality() const noexcept
+{
+    return spectrogram3D.getMotionBlurQuality();
+}
+
 void MainComponent::setSpec3DDofEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setDofEnabled (shouldEnable);
@@ -3737,6 +3852,45 @@ void MainComponent::setSpec3DParticleSpecular (float amount01, bool notifyPrefs)
 float MainComponent::getSpec3DParticleSpecular() const noexcept
 {
     return spectrogram3D.getParticleSpecular();
+}
+void MainComponent::setSpec3DParticleGpuSimEnabled (bool shouldEnable, bool notifyPrefs)
+{
+    spectrogram3D.setParticleGpuSimEnabled (shouldEnable);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DParticleGpuSimEnabled() const noexcept
+{
+    return spectrogram3D.isParticleGpuSimEnabled();
+}
+bool MainComponent::isSpec3DParticleGpuSimAvailable() const noexcept
+{
+    return spectrogram3D.isParticleGpuSimAvailable();
+}
+void MainComponent::setSpec3DParticleMaxAlive (int maxAlive, bool notifyPrefs)
+{
+    spectrogram3D.setParticleMaxAlive (maxAlive);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+int MainComponent::getSpec3DParticleMaxAlive() const noexcept
+{
+    return spectrogram3D.getParticleMaxAlive();
+}
+int MainComponent::getSpec3DParticleAliveCount() const noexcept
+{
+    return spectrogram3D.getParticleAliveCount();
+}
+void MainComponent::clearSpec3DParticles (bool /*notifyPrefs*/)
+{
+    spectrogram3D.clearParticles();
+}
+void MainComponent::setSpec3DParticleDebugOverlayEnabled (bool shouldShow, bool notifyPrefs)
+{
+    spectrogram3D.setParticleDebugOverlayEnabled (shouldShow);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DParticleDebugOverlayEnabled() const noexcept
+{
+    return spectrogram3D.isParticleDebugOverlayEnabled();
 }
 
 void MainComponent::setSpec3DSssStrength (float amount01, bool notifyPrefs)

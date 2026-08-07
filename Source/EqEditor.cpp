@@ -2388,6 +2388,10 @@ void EqEditor::loadUiPrefs()
     bool spec3DBloom = false;
     float spec3DBloomStr = 0.45f;
     float spec3DBloomThr = 0.62f;
+    bool spec3DMotionBlur = false;
+    float spec3DMotionBlurAmt = Spectrogram3DComponent::kMotionBlurAmountDefault;
+    float spec3DMotionBlurMax = Spectrogram3DComponent::kMotionBlurMaxDefault;
+    int spec3DMotionBlurQuality = 1; // medium
     bool spec3DDof = false;
     float spec3DDofFocus = Spectrogram3DComponent::kDofFocusDefault;
     float spec3DDofFStop = Spectrogram3DComponent::kDofFStopDefault;
@@ -2427,7 +2431,7 @@ void EqEditor::loadUiPrefs()
     bool spec3DParticle = false;
     int spec3DParticleEmitMode = 1; // 0 = slice, 1 = continuous (default)
     int spec3DParticleBinding = 0;  // 0 = trail, 1 = free
-    float spec3DParticleEmission = 0.5f;
+    float spec3DParticleEmission = 200.0f; // particles/sec
     float spec3DParticleSpawnJitter = 0.0f;
     float spec3DParticleSpeed = 1.0f; // legacy → Init vel Y
     float spec3DParticleInitVelX = 0.0f;
@@ -2441,6 +2445,9 @@ void EqEditor::loadUiPrefs()
     float spec3DParticleRough = 0.45f;
     float spec3DParticleMetal = 0.0f;
     float spec3DParticleSpec = 0.35f;
+    bool spec3DParticleGpuSim = false; // CPU integrate default
+    int spec3DParticleMaxAlive = 8192;
+    bool spec3DParticleDebugOverlay = false;
     bool spec3DParticleForces = false;
     bool spec3DParticleWaterfallLock = true;
     int spec3DParticleMesh = 0; // sphere
@@ -2645,6 +2652,12 @@ void EqEditor::loadUiPrefs()
                 spec3DBloom = xml->getBoolAttribute ("spec3dBloom", false);
                 spec3DBloomStr = (float) xml->getDoubleAttribute ("spec3dBloomStr", 0.45);
                 spec3DBloomThr = (float) xml->getDoubleAttribute ("spec3dBloomThr", 0.62);
+                spec3DMotionBlur = xml->getBoolAttribute ("spec3dMotionBlur", false);
+                spec3DMotionBlurAmt = (float) xml->getDoubleAttribute (
+                    "spec3dMotionBlurAmt", Spectrogram3DComponent::kMotionBlurAmountDefault);
+                spec3DMotionBlurMax = (float) xml->getDoubleAttribute (
+                    "spec3dMotionBlurMax", Spectrogram3DComponent::kMotionBlurMaxDefault);
+                spec3DMotionBlurQuality = xml->getIntAttribute ("spec3dMotionBlurQuality", 1);
                 spec3DDof = xml->getBoolAttribute ("spec3dDof", false);
                 spec3DDofFocus = (float) xml->getDoubleAttribute (
                     "spec3dDofFocus", Spectrogram3DComponent::kDofFocusDefault);
@@ -2739,11 +2752,13 @@ void EqEditor::loadUiPrefs()
                 spec3DParticle = xml->getBoolAttribute ("spec3dParticleMode", false);
                 spec3DParticleEmitMode = xml->getIntAttribute ("spec3dParticleEmitMode", 1);
                 spec3DParticleBinding = xml->getIntAttribute ("spec3dParticleBinding", 0);
-                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 0.5);
-                // Migrate old 0..1 emission into 0..5 range (v1 max felt sparse).
-                if (spec3DParticleEmission > 0.0f && spec3DParticleEmission <= 1.0f
-                    && ! xml->hasAttribute ("spec3dParticleEmissionV2"))
-                    spec3DParticleEmission = juce::jmin (5.0f, spec3DParticleEmission * 1.5f);
+                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 200.0);
+                // V3: particles/sec. Pre-V3 was a unitless ~0–5 scale (plus older 0–1).
+                if (! xml->hasAttribute ("spec3dParticleEmissionV3"))
+                {
+                    if (spec3DParticleEmission > 0.0f && spec3DParticleEmission <= 20.0f)
+                        spec3DParticleEmission = juce::jmax (50.0f, spec3DParticleEmission * 400.0f);
+                }
                 spec3DParticleSpawnJitter = (float) xml->getDoubleAttribute ("spec3dParticleSpawnJitter", 0.035);
                 spec3DParticleSpeed = (float) xml->getDoubleAttribute ("spec3dParticleSpeed", 1.0);
                 spec3DParticleInitVelX = (float) xml->getDoubleAttribute ("spec3dParticleInitVelX", 0.0);
@@ -2760,6 +2775,9 @@ void EqEditor::loadUiPrefs()
                 spec3DParticleRough = (float) xml->getDoubleAttribute ("spec3dParticleRough", 0.45);
                 spec3DParticleMetal = (float) xml->getDoubleAttribute ("spec3dParticleMetal", 0.0);
                 spec3DParticleSpec = (float) xml->getDoubleAttribute ("spec3dParticleSpec", 0.35);
+                spec3DParticleGpuSim = xml->getBoolAttribute ("spec3dParticleGpuSim", false);
+                spec3DParticleMaxAlive = xml->getIntAttribute ("spec3dParticleMaxAlive", 8192);
+                spec3DParticleDebugOverlay = xml->getBoolAttribute ("spec3dParticleDebugOverlay", false);
                 spec3DParticleForces = xml->getBoolAttribute ("spec3dParticleForces", false);
                 spec3DParticleWaterfallLock = xml->getBoolAttribute ("spec3dParticleWaterfallLock", true);
                 spec3DParticleMesh = xml->getIntAttribute ("spec3dParticleMesh", 0);
@@ -2996,6 +3014,14 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DBloomEnabled (spec3DBloom, false);
         mainComponent->setSpec3DBloomStrength (spec3DBloomStr, false);
         mainComponent->setSpec3DBloomThreshold (spec3DBloomThr, false);
+        mainComponent->setSpec3DMotionBlurEnabled (spec3DMotionBlur, false);
+        mainComponent->setSpec3DMotionBlurAmount (spec3DMotionBlurAmt, false);
+        mainComponent->setSpec3DMotionBlurMax (spec3DMotionBlurMax, false);
+        mainComponent->setSpec3DMotionBlurQuality (
+            spec3DMotionBlurQuality == 0 ? Spectrogram3DComponent::ShadowQuality::low
+                : (spec3DMotionBlurQuality == 2 ? Spectrogram3DComponent::ShadowQuality::high
+                                                : Spectrogram3DComponent::ShadowQuality::medium),
+            false);
         mainComponent->setSpec3DDofEnabled (spec3DDof, false);
         mainComponent->setSpec3DDofFocusDistance (spec3DDofFocus, false);
         mainComponent->setSpec3DDofFStop (spec3DDofFStop, false);
@@ -3066,6 +3092,9 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DParticleRoughness (spec3DParticleRough, false);
         mainComponent->setSpec3DParticleMetalness (spec3DParticleMetal, false);
         mainComponent->setSpec3DParticleSpecular (spec3DParticleSpec, false);
+        mainComponent->setSpec3DParticleGpuSimEnabled (spec3DParticleGpuSim, false);
+        mainComponent->setSpec3DParticleMaxAlive (spec3DParticleMaxAlive, false);
+        mainComponent->setSpec3DParticleDebugOverlayEnabled (spec3DParticleDebugOverlay, false);
         mainComponent->setSpec3DParticleMeshShape (spec3DParticleMesh, false);
         mainComponent->setSpec3DParticleInitRotX (spec3DParticleInitRotX, false);
         mainComponent->setSpec3DParticleInitRotY (spec3DParticleInitRotY, false);
@@ -3297,6 +3326,15 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dBloom", mainComponent->isSpec3DBloomEnabled());
         xml->setAttribute ("spec3dBloomStr", (double) mainComponent->getSpec3DBloomStrength());
         xml->setAttribute ("spec3dBloomThr", (double) mainComponent->getSpec3DBloomThreshold());
+        xml->setAttribute ("spec3dMotionBlur", mainComponent->isSpec3DMotionBlurEnabled());
+        xml->setAttribute ("spec3dMotionBlurAmt", (double) mainComponent->getSpec3DMotionBlurAmount());
+        xml->setAttribute ("spec3dMotionBlurMax", (double) mainComponent->getSpec3DMotionBlurMax());
+        {
+            const auto q = mainComponent->getSpec3DMotionBlurQuality();
+            xml->setAttribute ("spec3dMotionBlurQuality",
+                               q == Spectrogram3DComponent::ShadowQuality::low ? 0
+                                   : (q == Spectrogram3DComponent::ShadowQuality::high ? 2 : 1));
+        }
         xml->setAttribute ("spec3dDof", mainComponent->isSpec3DDofEnabled());
         xml->setAttribute ("spec3dDofFocus", (double) mainComponent->getSpec3DDofFocusDistance());
         xml->setAttribute ("spec3dDofFStop", (double) mainComponent->getSpec3DDofFStop());
@@ -3366,6 +3404,7 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dParticleBinding", mainComponent->getSpec3DParticleBindingMode());
         xml->setAttribute ("spec3dParticleEmission", (double) mainComponent->getSpec3DParticleEmission());
         xml->setAttribute ("spec3dParticleEmissionV2", 1);
+        xml->setAttribute ("spec3dParticleEmissionV3", 1); // particles/sec
         xml->setAttribute ("spec3dParticleSpawnJitter", (double) mainComponent->getSpec3DParticleSpawnJitter());
         xml->setAttribute ("spec3dParticleSpeed", (double) mainComponent->getSpec3DParticleInitVelY()); // legacy
         xml->setAttribute ("spec3dParticleInitVelX", (double) mainComponent->getSpec3DParticleInitVelX());
@@ -3380,6 +3419,9 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dParticleRough", (double) mainComponent->getSpec3DParticleRoughness());
         xml->setAttribute ("spec3dParticleMetal", (double) mainComponent->getSpec3DParticleMetalness());
         xml->setAttribute ("spec3dParticleSpec", (double) mainComponent->getSpec3DParticleSpecular());
+        xml->setAttribute ("spec3dParticleGpuSim", mainComponent->isSpec3DParticleGpuSimEnabled());
+        xml->setAttribute ("spec3dParticleMaxAlive", mainComponent->getSpec3DParticleMaxAlive());
+        xml->setAttribute ("spec3dParticleDebugOverlay", mainComponent->isSpec3DParticleDebugOverlayEnabled());
         xml->setAttribute ("spec3dParticleForces", mainComponent->isSpec3DParticleForcesEnabled());
         xml->setAttribute ("spec3dParticleWaterfallLock", mainComponent->isSpec3DParticleWaterfallLock());
         xml->setAttribute ("spec3dParticleMesh", mainComponent->getSpec3DParticleMeshShape());

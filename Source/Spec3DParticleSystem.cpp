@@ -128,18 +128,123 @@ Spec3DParticleSystem::~Spec3DParticleSystem()
 {
 }
 
+void Spec3DParticleSystem::setMaxAliveBudget (int maxAlive) noexcept
+{
+    maxAliveBudget = juce::jlimit (kMinMaxAlive, kHardCap, maxAlive);
+    // Grow the slot array immediately so Max particles is not blocked by a small pool.
+    ensurePool();
+    enforceAliveBudget();
+}
+
 void Spec3DParticleSystem::ensurePool()
 {
     const int bins = juce::jmax (1, owner.meshH);
     if ((int) emitAccum.size() != bins)
         emitAccum.assign ((size_t) bins, 0.0f);
 
-    const int cols = juce::jmax (2, owner.meshW);
-    const int cap = juce::jmin (kHardCap, juce::jmax (1024, bins * juce::jmin (96, cols)));
-    if ((int) pool.size() != cap)
+    // Pool size == live budget (capped). Mesh density no longer limits capacity.
+    const int cap = juce::jmin (kHardCap, juce::jmax (kMinMaxAlive, maxAliveBudget));
+
+    if ((int) pool.size() < cap)
     {
-        pool.assign ((size_t) cap, {});
-        nextWrite = 0;
+        const int old = (int) pool.size();
+        pool.resize ((size_t) cap);
+        freeList.reserve ((size_t) cap);
+        for (int i = old; i < cap; ++i)
+            freeList.push_back (i);
+    }
+    else if ((int) pool.size() > cap)
+    {
+        pool.resize ((size_t) cap);
+        if (nextWrite >= cap)
+            nextWrite = 0;
+        rebuildFreeList();
+        recountAlive();
+    }
+}
+
+void Spec3DParticleSystem::recountAlive() noexcept
+{
+    int n = 0;
+    for (const auto& p : pool)
+        if (p.alive)
+            ++n;
+    aliveCount = n;
+}
+
+void Spec3DParticleSystem::rebuildFreeList() noexcept
+{
+    freeList.clear();
+    freeList.reserve (pool.size());
+    for (int i = 0; i < (int) pool.size(); ++i)
+        if (! pool[(size_t) i].alive)
+            freeList.push_back (i);
+}
+
+void Spec3DParticleSystem::markDead (int index) noexcept
+{
+    if (index < 0 || index >= (int) pool.size())
+        return;
+    auto& p = pool[(size_t) index];
+    if (! p.alive)
+        return;
+    p.alive = false;
+    --aliveCount;
+    freeList.push_back (index);
+}
+
+void Spec3DParticleSystem::enforceAliveBudget() noexcept
+{
+    lastCulledCount = 0;
+    if (pool.empty())
+    {
+        aliveCount = 0;
+        return;
+    }
+
+    recountAlive();
+    int need = aliveCount - maxAliveBudget;
+    if (need <= 0)
+        return;
+
+    // Prefer killing settled / low history-col first (trail fade), then oldest age.
+    // Cap cull work per call so a spike never freezes the UI thread.
+    constexpr int kMaxCullPerCall = 512;
+    const int toKill = juce::jmin (need, kMaxCullPerCall);
+
+    for (int k = 0; k < toKill; ++k)
+    {
+        int best = -1;
+        int bestCol = 0x7fffffff;
+        float bestAge = -1.0f;
+        bool bestSettled = false;
+
+        for (int i = 0; i < (int) pool.size(); ++i)
+        {
+            const auto& p = pool[(size_t) i];
+            if (! p.alive)
+                continue;
+
+            // Priority: settled before un-settled; then older history (low col); then age.
+            const bool better =
+                (p.settled && ! bestSettled)
+                || (p.settled == bestSettled
+                    && (p.col < bestCol || (p.col == bestCol && p.age > bestAge)));
+
+            if (best < 0 || better)
+            {
+                best = i;
+                bestCol = p.col;
+                bestAge = p.age;
+                bestSettled = p.settled;
+            }
+        }
+
+        if (best < 0)
+            break;
+
+        markDead (best);
+        ++lastCulledCount;
     }
 }
 
@@ -151,6 +256,10 @@ void Spec3DParticleSystem::clear()
     emitGlobal = 0.0f;
     amplitudeSmooth = 0.0f;
     simTime = 0.0f;
+    aliveCount = 0;
+    lastSpawnedCount = 0;
+    lastCulledCount = 0;
+    rebuildFreeList();
     slotEnv.fill (0.0f);
     for (int i = 0; i < kParticleRandomSourceCount; ++i)
         for (int c = 0; c < 3; ++c)
@@ -167,14 +276,15 @@ void Spec3DParticleSystem::scrollHistory (int numCols)
     if (owner.particleBindingMode == ParticleBindingMode::freeVisualizer)
         return;
 
-    for (auto& p : pool)
+    for (int i = 0; i < (int) pool.size(); ++i)
     {
+        auto& p = pool[(size_t) i];
         if (! p.alive)
             continue;
         p.col -= numCols;
         if (p.col < 0)
         {
-            p.alive = false;
+            markDead (i);
             continue;
         }
         p.x = columnToWorldX (p.col);
@@ -191,38 +301,59 @@ float Spec3DParticleSystem::columnToWorldX (int col) const noexcept
 
 int Spec3DParticleSystem::allocSlot()
 {
-    if (pool.empty())
+    if (aliveCount >= maxAliveBudget)
         return -1;
 
-    for (int n = 0; n < (int) pool.size(); ++n)
+    // O(1) free-list path (required for 100k+).
+    while (! freeList.empty())
     {
-        const int i = (nextWrite + n) % (int) pool.size();
-        if (! pool[(size_t) i].alive)
+        const int i = freeList.back();
+        freeList.pop_back();
+        if (i >= 0 && i < (int) pool.size() && ! pool[(size_t) i].alive)
+            return i;
+    }
+
+    // Grow toward budget if free-list empty but slots missing.
+    if ((int) pool.size() < maxAliveBudget)
+    {
+        ensurePool();
+        while (! freeList.empty())
         {
-            nextWrite = (i + 1) % (int) pool.size();
+            const int i = freeList.back();
+            freeList.pop_back();
+            if (i >= 0 && i < (int) pool.size() && ! pool[(size_t) i].alive)
+                return i;
+        }
+    }
+
+    // Consistency repair (should be rare).
+    if (aliveCount < (int) pool.size())
+    {
+        rebuildFreeList();
+        if (! freeList.empty())
+        {
+            const int i = freeList.back();
+            freeList.pop_back();
             return i;
         }
     }
 
+    // Full at budget: recycle oldest / lowest history column.
     int best = -1, bestCol = 0x7fffffff;
+    float bestAge = -1.0f;
     for (int i = 0; i < (int) pool.size(); ++i)
     {
         const auto& p = pool[(size_t) i];
-        if (p.settled && p.col < bestCol)
+        if (! p.alive)
+            continue;
+        if (p.col < bestCol || (p.col == bestCol && p.age > bestAge))
         {
             bestCol = p.col;
+            bestAge = p.age;
             best = i;
         }
     }
-    if (best >= 0)
-    {
-        nextWrite = (best + 1) % (int) pool.size();
-        return best;
-    }
-
-    const int i = nextWrite;
-    nextWrite = (nextWrite + 1) % (int) pool.size();
-    return i;
+    return best; // may be -1
 }
 
 float Spec3DParticleSystem::sampleColumn (int bin, int col,
@@ -967,9 +1098,9 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     float r1, g1, b1c, z1, db1, f1;
     const float y0 = sampleColumn (b0, col, r0, g0, b0c, z0, db0, f0);
     const float y1 = sampleColumn (b1, col, r1, g1, b1c, z1, db1, f1);
-    const float targetY = y0 * (1.0f - fr) + y1 * fr;
-    if (targetY < 1.0e-4f && owner.particleBindingMode == ParticleBindingMode::spectrogramTrail)
-        return;
+    // Still spawn on near-silent bins (tiny floor height) so continuous mode does not
+    // burn the whole frame's spawn budget when energy-weighted picks hit quiet areas.
+    const float targetY = juce::jmax (1.0e-4f, y0 * (1.0f - fr) + y1 * fr);
 
     const float r = r0 * (1.0f - fr) + r1 * fr;
     const float g = g0 * (1.0f - fr) + g1 * fr;
@@ -977,6 +1108,9 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     const float z = z0 * (1.0f - fr) + z1 * fr;
     const float db01 = db0 * (1.0f - fr) + db1 * fr;
     const float freq01 = f0 * (1.0f - fr) + f1 * fr;
+
+    if (aliveCount >= maxAliveBudget)
+        return;
 
     const int slot = allocSlot();
     if (slot < 0)
@@ -996,7 +1130,7 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
 
     float maxLife = -1.0f;
     float lifeSec = lifespanBase;
-    // Free visualizer: default lifespan if indefinite to avoid infinite pool fill
+    // Free visualizer: default lifespan if indefinite to avoid infinite pool fill.
     if (lifeSec <= 1.0e-4f && owner.particleBindingMode == ParticleBindingMode::freeVisualizer)
         lifeSec = 4.0f;
     if (lifeSec > 1.0e-4f)
@@ -1008,7 +1142,10 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     }
 
     auto& p = pool[(size_t) slot];
+    const bool wasAlive = p.alive;
     p.alive = true;
+    if (! wasAlive)
+        ++aliveCount;
     p.settled = false;
     p.id = nextParticleId++;
     if (nextParticleId == 0) // skip 0 so hash never collapses on unset particles
@@ -1158,62 +1295,130 @@ void Spec3DParticleSystem::update (float dtSeconds)
     float spawnJitter = 1.0f;
     applySystemMods (emission, spawnJitter, forceScales, frame);
 
+    // Emission is particles-per-second (UI: "Emission rate"). Soft clamp for safety;
+    // typed values can go high to fill Max particles quickly.
+    const int kMaxSpawnsPerFrame = juce::jlimit (512, 32768, maxAliveBudget / 4);
+    constexpr float kMaxEmissionPerSec = 1.0e6f;
+    constexpr float kMaxAccumPerBin = 64.0f;
+    // owner.particleEmission is particles/sec (not a unitless 0–5 scale).
+    const float emissionPerSec = juce::jlimit (0.0f, kMaxEmissionPerSec,
+                                               juce::jmax (0.0f, emission));
+
+    if (freeList.empty() && aliveCount < (int) pool.size())
+        rebuildFreeList();
+
+    enforceAliveBudget();
+
+    // Soft pressure only in the last 10% of the live budget.
+    const float pressure = (float) aliveCount / (float) juce::jmax (1, maxAliveBudget);
+    float spawnScale = 1.0f;
+    if (pressure > 0.90f)
+        spawnScale = juce::jlimit (0.0f, 1.0f, (1.0f - pressure) / 0.10f);
+    if (aliveCount >= maxAliveBudget)
+        spawnScale = 0.0f;
+
+    const int maxSpawns = juce::jmax (0, (int) std::floor ((float) kMaxSpawnsPerFrame * spawnScale));
+
     const int bins = owner.meshH;
-    const float totalRate = emission * (float) bins * 12.0f;
+    // Continuous + slice share the same total particles/sec budget.
+    const float totalRate = emissionPerSec * spawnScale;
     float lifeBase = owner.particleLifespan;
     const float sizeBase = 1.0f;
     const bool freeMode = owner.particleBindingMode == ParticleBindingMode::freeVisualizer;
+    lastSpawnedCount = 0;
 
-    if (owner.particleEmitMode == Spectrogram3DComponent::ParticleEmitMode::continuous)
+    if (maxSpawns > 0 && totalRate > 1.0e-8f)
     {
-        // Random playhead samples (energy-weighted continuous binF + scatter).
-        emitGlobal += totalRate * dtSeconds;
-        int spawned = 0;
-        while (emitGlobal >= 1.0f && spawned < 1024)
+        if (owner.particleEmitMode == Spectrogram3DComponent::ParticleEmitMode::continuous)
         {
-            emitGlobal -= 1.0f;
-            spawnAtPlayhead (pickPlayheadBinF(), lifeBase, sizeBase, spawnJitter);
-            ++spawned;
-        }
-        if (emitGlobal > 16.0f) emitGlobal = 16.0f;
-    }
-    else
-    {
-        // Slice mode: each bin emits on its own clock, but still with continuous
-        // sub-bin offset + scatter so particles aren't identical grid clones.
-        const float perBin = totalRate / (float) juce::jmax (1, bins);
-        for (int bin = 0; bin < bins; ++bin)
-        {
-            emitAccum[(size_t) bin] += perBin * dtSeconds;
-            while (emitAccum[(size_t) bin] >= 1.0f)
+            emitGlobal += totalRate * dtSeconds;
+            int failStreak = 0;
+            while (emitGlobal >= 1.0f && lastSpawnedCount < maxSpawns
+                   && aliveCount < maxAliveBudget)
             {
-                emitAccum[(size_t) bin] -= 1.0f;
-                const float binF = (float) bin + rng.nextFloat() * 0.999f;
-                spawnAtPlayhead (binF, lifeBase, sizeBase, spawnJitter);
+                emitGlobal -= 1.0f;
+                const int before = aliveCount;
+                spawnAtPlayhead (pickPlayheadBinF(), lifeBase, sizeBase, spawnJitter);
+                if (aliveCount > before)
+                {
+                    ++lastSpawnedCount;
+                    failStreak = 0;
+                }
+                else
+                {
+                    // Alloc full / no slot — stop. Do NOT stop the whole frame on a
+                    // single no-op (old continuous bug: one miss aborted all remaining spawns).
+                    ++failStreak;
+                    if (failStreak >= 8 || aliveCount >= maxAliveBudget
+                        || (int) freeList.size() == 0 && aliveCount >= (int) pool.size())
+                        break;
+                }
+            }
+            // Cap backlog so a hitch does not dump millions next frame.
+            if (emitGlobal > (float) kMaxSpawnsPerFrame * 4.0f)
+                emitGlobal = (float) kMaxSpawnsPerFrame * 4.0f;
+        }
+        else
+        {
+            // Slice: split the same particles/sec evenly across bins.
+            const float perBin = totalRate / (float) juce::jmax (1, bins);
+            for (int bin = 0; bin < bins && lastSpawnedCount < maxSpawns
+                              && aliveCount < maxAliveBudget; ++bin)
+            {
+                emitAccum[(size_t) bin] += perBin * dtSeconds;
+                if (emitAccum[(size_t) bin] > kMaxAccumPerBin)
+                    emitAccum[(size_t) bin] = kMaxAccumPerBin;
+                int failStreak = 0;
+                while (emitAccum[(size_t) bin] >= 1.0f && lastSpawnedCount < maxSpawns
+                       && aliveCount < maxAliveBudget)
+                {
+                    emitAccum[(size_t) bin] -= 1.0f;
+                    const float binF = (float) bin + rng.nextFloat() * 0.999f;
+                    const int before = aliveCount;
+                    spawnAtPlayhead (binF, lifeBase, sizeBase, spawnJitter);
+                    if (aliveCount > before)
+                    {
+                        ++lastSpawnedCount;
+                        failStreak = 0;
+                    }
+                    else
+                    {
+                        ++failStreak;
+                        if (failStreak >= 4)
+                            break; // this bin only — continue other bins
+                    }
+                }
             }
         }
     }
+    else if (aliveCount >= maxAliveBudget)
+    {
+        emitGlobal = juce::jmin (emitGlobal, 1.0f);
+        for (auto& a : emitAccum)
+            a = juce::jmin (a, 1.0f);
+    }
+
+    // Colour / trail sample pass (CPU). Heavy throttling at 100k+ so randomize ramp
+    // / dense fields don't freeze the host; trail XZ still full-rate.
+    const int colourStride = aliveCount > 50000 ? 16
+                           : aliveCount > 20000 ? 8
+                           : aliveCount > 8000  ? 4
+                           : aliveCount > 3000  ? 2 : 1;
+    colourPassCursor = (colourPassCursor + 1) % colourStride;
+    int colourIdx = 0;
 
     for (auto& p : pool)
     {
         if (! p.alive)
             continue;
 
-        if (p.maxLife >= 0.0f)
-        {
-            p.age += dtSeconds;
-            if (p.age >= p.maxLife)
-            {
-                p.alive = false;
-                continue;
-            }
-        }
+        const bool doColour = (colourIdx % colourStride) == colourPassCursor;
+        ++colourIdx;
 
-        // Re-sample playhead using continuous binF (interp), not integer bin only.
-        const int bins = owner.meshH;
-        const float binF = juce::jlimit (0.0f, (float) juce::jmax (0, bins - 1), p.binF);
-        const int b0 = juce::jlimit (0, juce::jmax (0, bins - 1), (int) std::floor (binF));
-        const int b1 = juce::jmin (bins - 1, b0 + 1);
+        const int binsLocal = owner.meshH;
+        const float binF = juce::jlimit (0.0f, (float) juce::jmax (0, binsLocal - 1), p.binF);
+        const int b0 = juce::jlimit (0, juce::jmax (0, binsLocal - 1), (int) std::floor (binF));
+        const int b1 = juce::jmin (binsLocal - 1, b0 + 1);
         const float fr = binF - (float) b0;
         float r0, g0, bb0, z0, db0, f0;
         float r1, g1, bb1, z1, db1, f1;
@@ -1222,24 +1427,76 @@ void Spec3DParticleSystem::update (float dtSeconds)
         p.bin = b0;
         p.binDb01 = db0 * (1.0f - fr) + db1 * fr;
         p.binFreq01 = f0 * (1.0f - fr) + f1 * fr;
-        p.baseR = r0 * (1.0f - fr) + r1 * fr;
-        p.baseG = g0 * (1.0f - fr) + g1 * fr;
-        p.baseB = bb0 * (1.0f - fr) + bb1 * fr;
+        if (doColour)
+        {
+            p.baseR = r0 * (1.0f - fr) + r1 * fr;
+            p.baseG = g0 * (1.0f - fr) + g1 * fr;
+            p.baseB = bb0 * (1.0f - fr) + bb1 * fr;
+        }
         const float z = z0 * (1.0f - fr) + z1 * fr;
         p.targetY = juce::jmax (y0 * (1.0f - fr) + y1 * fr, 0.01f);
 
         if (! freeMode)
         {
-            // Trail: follow history column + continuous frequency, keep spawn scatter.
             p.x = columnToWorldX (p.col) + p.spawnOffX;
             p.z = z + p.spawnOffZ;
         }
 
-        applyUpdateMods (p, frame);
+        if (doColour)
+            applyUpdateMods (p, frame);
+
+        if (! freeMode)
+        {
+            p.x = columnToWorldX (p.col) + p.spawnOffX;
+            p.z = z + p.spawnOffZ;
+        }
+    }
+
+    // ── Integrate ──────────────────────────────────────────────────────────
+    // GPU path must run on the OpenGL thread (compute/SSBO). Prefer GPU when the
+    // user toggle is on: defer dt + scales for integrateOnGlThread(). CPU path
+    // integrates immediately so non-GL hosts and CPU-default stay correct.
+    // GPU hybrid path does full SSBO upload+readback — fine ≤~24k, deadly at 100k+.
+    const bool useGpuIntegrate = owner.particleGpuSimEnabled
+                                 && maxAliveBudget <= kGpuReadbackMaxAlive
+                                 && (int) pool.size() <= kGpuReadbackMaxAlive;
+
+    if (useGpuIntegrate)
+    {
+        pendingIntegrateDt = juce::jmin (0.1f, pendingIntegrateDt + dtSeconds);
+        pendingForceScales = forceScales;
+        pendingFreeMode = freeMode;
+    }
+    else
+    {
+        const float dt = juce::jmin (0.1f, dtSeconds + pendingIntegrateDt);
+        pendingIntegrateDt = 0.0f;
+        cpuIntegrateAll (dt, forceScales, freeMode);
+        enforceAliveBudget();
+    }
+}
+
+void Spec3DParticleSystem::cpuIntegrateAll (float dt, const ForceModScales& scales, bool freeMode) noexcept
+{
+    for (int i = 0; i < (int) pool.size(); ++i)
+    {
+        auto& p = pool[(size_t) i];
+        if (! p.alive)
+            continue;
+
+        if (p.maxLife >= 0.0f)
+        {
+            p.age += dt;
+            if (p.age >= p.maxLife)
+            {
+                markDead (i);
+                continue;
+            }
+        }
 
         if (owner.particleForcesEnabled)
         {
-            integrateForceStack (p, forceScales, dtSeconds);
+            integrateForceStack (p, scales, dt);
             if (! freeMode && owner.particleWaterfallLock)
             {
                 p.x = columnToWorldX (p.col) + p.spawnOffX;
@@ -1261,7 +1518,6 @@ void Spec3DParticleSystem::update (float dtSeconds)
             if (! freeMode)
             {
                 p.x = columnToWorldX (p.col) + p.spawnOffX;
-                p.z = z + p.spawnOffZ;
             }
             if (p.settled)
             {
@@ -1270,7 +1526,7 @@ void Spec3DParticleSystem::update (float dtSeconds)
             }
             else
             {
-                p.y += p.velY * dtSeconds;
+                p.y += p.velY * dt;
                 const float capY = p.targetY + p.spawnOffY;
                 if (p.y >= capY)
                 {
@@ -1281,13 +1537,34 @@ void Spec3DParticleSystem::update (float dtSeconds)
             }
         }
 
-        // Kill particles that leave a reasonable volume in free mode
         if (freeMode)
         {
             if (p.y < -0.5f || p.y > 4.0f || std::abs (p.x) > 3.0f || std::abs (p.z) > 3.0f)
-                p.alive = false;
+                markDead (i);
         }
     }
+}
+
+void Spec3DParticleSystem::integrateOnGlThread()
+{
+    if (pendingIntegrateDt <= 1.0e-8f || pool.empty())
+        return;
+
+    const float dt = juce::jlimit (0.0f, 0.1f, pendingIntegrateDt);
+    pendingIntegrateDt = 0.0f;
+    const auto scales = pendingForceScales;
+    const bool freeMode = pendingFreeMode;
+
+    // Prefer compute when ready and budget is small enough for readback.
+    const bool useGpu = owner.particleGpuSimEnabled && gpuComputeReady && glReady
+                        && maxAliveBudget <= kGpuReadbackMaxAlive
+                        && (int) pool.size() <= kGpuReadbackMaxAlive;
+    if (useGpu)
+        gpuIntegrateAndReadback (dt, scales, freeMode);
+    else
+        cpuIntegrateAll (dt, scales, freeMode);
+
+    enforceAliveBudget();
 }
 
 
@@ -1551,11 +1828,15 @@ void Spec3DParticleSystem::ensureGl (juce::OpenGLContext& context)
     glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
 
     glReady = (meshVbo != 0 && meshIbo != 0 && instanceVbo != 0 && billboardVbo != 0);
+    // Optional compute path — failure leaves CPU sim fully working.
+    if (glReady)
+        createComputeProgram();
 }
 
 void Spec3DParticleSystem::releaseGl()
 {
     using namespace juce::gl;
+    releaseComputeProgram();
     if (meshVbo) { glDeleteBuffers (1, &meshVbo); meshVbo = 0; }
     if (meshIbo) { glDeleteBuffers (1, &meshIbo); meshIbo = 0; }
     if (instanceVbo) { glDeleteBuffers (1, &instanceVbo); instanceVbo = 0; }
@@ -1581,9 +1862,13 @@ void Spec3DParticleSystem::drawInstancedMeshes (const juce::Matrix3D<float>& pro
     if (meshProgram == nullptr || meshVbo == 0 || instanceVbo == 0) return;
 
     instances.clear();
+    instances.reserve ((size_t) juce::jmin (aliveCount, maxAliveBudget));
     for (const auto& p : pool)
     {
         if (! p.alive) continue;
+        // Hard draw clamp — never submit more than the live budget.
+        if ((int) instances.size() >= maxAliveBudget)
+            break;
         GpuInstance inst;
         inst.px = p.x; inst.py = p.y; inst.pz = p.z;
         inst.sx = p.sizeScale * juce::jmax (1.0e-4f, owner.particleSize) * 2.0f;
@@ -1694,12 +1979,20 @@ void Spec3DParticleSystem::drawBillboards (const juce::Matrix3D<float>& projecti
     if (billboardProgram == nullptr || billboardVbo == 0) return;
 
     gpuVerts.clear();
+    // Billboard expands 6 verts/particle — hard-cap draw so 100k+ doesn't allocate 600k verts.
+    constexpr int kBillboardDrawCap = 32768;
+    const int drawCap = juce::jmin (aliveCount, juce::jmin (maxAliveBudget, kBillboardDrawCap));
+    gpuVerts.reserve ((size_t) juce::jmax (0, drawCap) * 6u);
     const float corners[6][2] = {
         { -1,-1 },{ 1,-1 },{ 1,1 },{ -1,-1 },{ 1,1 },{ -1,1 }
     };
+    int drawn = 0;
     for (const auto& p : pool)
     {
         if (! p.alive) continue;
+        if (drawn >= drawCap)
+            break;
+        ++drawn;
         for (const auto& c : corners)
         {
             GpuBillboardVert v;
@@ -1759,6 +2052,428 @@ void Spec3DParticleSystem::drawBillboards (const juce::Matrix3D<float>& projecti
     auto dis = [&](auto& a) { if (a && a->attributeID >= 0) glDisableVertexAttribArray ((GLuint)a->attributeID); };
     dis (aPos); dis (aCol); dis (aCorner); dis (aSize); dis (aEm);
     glBindBuffer (GL_ARRAY_BUFFER, 0); glDisable (GL_BLEND);
+}
+
+bool Spec3DParticleSystem::createComputeProgram()
+{
+    using namespace juce::gl;
+    releaseComputeProgram();
+
+    // Require compute entry points (GL 4.3 or ARB_compute_shader).
+    if (glDispatchCompute == nullptr || glBindBufferBase == nullptr
+        || glMemoryBarrier == nullptr)
+        return false;
+
+    static constexpr const char* kComputeSrc = R"(
+#version 430
+layout(local_size_x = 64) in;
+
+struct ParticleGpu {
+    float px, py, pz, age;
+    float vx, vy, vz, maxLife;
+    float spinX, spinY, spinZ, flags;
+    float targetY, spawnOffY, rotX, rotY;
+    float rotZ, pad0, pad1, pad2;
+};
+
+struct ForceGpu {
+    int type;
+    int enabled;
+    int axisMask;
+    int flags;
+    float p0, p1, p2, p3;
+};
+
+layout(std430, binding = 0) buffer ParticleBuf { ParticleGpu particles[]; };
+layout(std430, binding = 1) readonly buffer ForceBuf { ForceGpu forces[]; };
+
+uniform int uCount;
+uniform int uForceCount;
+uniform float uDt;
+uniform float uSimTime;
+
+float hashNoise(int x, int y, int z)
+{
+    int n = x * 374761393 + y * 668265263 + z * 2147483647;
+    n = (n ^ (n >> 13)) * 1274126177;
+    n = n ^ (n >> 16);
+    return float(n & 0x7fffffff) / 2147483647.0;
+}
+
+float valueNoise(float x, float y, float z)
+{
+    int x0 = int(floor(x)), y0 = int(floor(y)), z0 = int(floor(z));
+    float fx = x - float(x0), fy = y - float(y0), fz = z - float(z0);
+    float u = fx * fx * (3.0 - 2.0 * fx);
+    float v = fy * fy * (3.0 - 2.0 * fy);
+    float w = fz * fz * (3.0 - 2.0 * fz);
+    float n000 = hashNoise(x0, y0, z0), n100 = hashNoise(x0+1, y0, z0);
+    float n010 = hashNoise(x0, y0+1, z0), n110 = hashNoise(x0+1, y0+1, z0);
+    float n001 = hashNoise(x0, y0, z0+1), n101 = hashNoise(x0+1, y0, z0+1);
+    float n011 = hashNoise(x0, y0+1, z0+1), n111 = hashNoise(x0+1, y0+1, z0+1);
+    float x00 = mix(n000, n100, u), x10 = mix(n010, n110, u);
+    float x01 = mix(n001, n101, u), x11 = mix(n011, n111, u);
+    return mix(mix(x00, x10, v), mix(x01, x11, v), w) * 2.0 - 1.0;
+}
+
+vec3 curlNoise(float x, float y, float z)
+{
+    float e = 0.08;
+    float cx = (valueNoise(x, y+e, z) - valueNoise(x, y-e, z)
+              - (valueNoise(x, y, z+e) - valueNoise(x, y, z-e))) / (2.0 * e);
+    float cy = (valueNoise(x, y, z+e) - valueNoise(x, y, z-e)
+              - (valueNoise(x+e, y, z) - valueNoise(x-e, y, z))) / (2.0 * e);
+    float cz = (valueNoise(x+e, y, z) - valueNoise(x-e, y, z)
+              - (valueNoise(x, y+e, z) - valueNoise(x, y-e, z))) / (2.0 * e);
+    return vec3(cx, cy, cz);
+}
+
+// Deterministic turbulence from particle index + time (no RNG on GPU).
+float turbHash(uint n)
+{
+    n ^= n >> 16u;
+    n *= 0x7feb352du;
+    n ^= n >> 15u;
+    n *= 0x846ca68bu;
+    n ^= n >> 16u;
+    return float(n & 0x00ffffffu) * (1.0 / 16777215.0) * 2.0 - 1.0;
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (int(i) >= uCount) return;
+
+    ParticleGpu p = particles[i];
+    int fl = int(p.flags + 0.5);
+    if ((fl & 1) == 0) return; // dead
+
+    bool freeMode = (fl & 4) != 0;
+    bool settled  = (fl & 2) != 0;
+    bool lockX    = (fl & 8) != 0;
+    float dt = uDt;
+
+    // Age / kill
+    if (p.maxLife >= 0.0)
+    {
+        p.age += dt;
+        if (p.age >= p.maxLife)
+        {
+            p.flags = 0.0;
+            particles[i] = p;
+            return;
+        }
+    }
+
+    bool forcesOn = uForceCount > 0;
+    if (forcesOn)
+    {
+        for (int f = 0; f < uForceCount; ++f)
+        {
+            ForceGpu m = forces[f];
+            if (m.enabled == 0) continue;
+            if (m.type == 0) // gravity
+                p.vy += m.p0 * dt;
+            else if (m.type == 1) // drag
+            {
+                float d = abs(m.p0);
+                if (d > 1.0e-8)
+                {
+                    float damp = exp(-d * dt);
+                    p.vx *= damp; p.vy *= damp; p.vz *= damp;
+                }
+            }
+            else if (m.type == 2) // wind
+            {
+                p.vx += m.p0 * dt;
+                p.vy += m.p1 * dt;
+                p.vz += m.p2 * dt;
+            }
+            else if (m.type == 3) // curl
+            {
+                float str = m.p0, sc = m.p1, spd = m.p2;
+                if (abs(str) > 1.0e-8)
+                {
+                    if (abs(sc) < 1.0e-6) sc = 1.0e-4;
+                    float t = uSimTime * spd;
+                    vec3 c = curlNoise(p.px * sc + t, p.py * sc, p.pz * sc + t * 0.7);
+                    p.vx += c.x * str * dt;
+                    p.vy += c.y * str * dt;
+                    p.vz += c.z * str * dt;
+                }
+            }
+            else if (m.type == 4) // turbulence
+            {
+                float str = m.p0;
+                if (abs(str) > 1.0e-8)
+                {
+                    uint seed = i * 747796405u + uint(uSimTime * 1000.0);
+                    p.vx += turbHash(seed + 11u) * str * dt;
+                    p.vy += turbHash(seed + 29u) * str * dt;
+                    p.vz += turbHash(seed + 47u) * str * dt;
+                }
+            }
+            else if (m.type == 5) // rotation
+            {
+                float rateX = m.p0;
+                float rateY = ((m.flags & 1) != 0) ? m.p0 : m.p1;
+                float rateZ = ((m.flags & 1) != 0) ? m.p0 : m.p2;
+                float sx = ((m.flags & 2) != 0) ? p.spinX : 1.0;
+                float sy = ((m.flags & 2) != 0) ? p.spinY : 1.0;
+                float sz = ((m.flags & 2) != 0) ? p.spinZ : 1.0;
+                if ((m.axisMask & 1) != 0) p.rotX += rateX * sx * dt;
+                if ((m.axisMask & 2) != 0) p.rotY += rateY * sy * dt;
+                if ((m.axisMask & 4) != 0) p.rotZ += rateZ * sz * dt;
+            }
+        }
+
+        p.px += p.vx * dt;
+        p.py += p.vy * dt;
+        p.pz += p.vz * dt;
+
+        if (! freeMode && lockX)
+            p.vx = 0.0;
+
+        if (! freeMode && ! settled)
+        {
+            float capY = p.targetY + p.spawnOffY;
+            if (p.py >= capY)
+            {
+                p.py = capY;
+                if (p.vy > 0.0) p.vy = 0.0;
+                settled = true;
+            }
+        }
+    }
+    else
+    {
+        // No force stack: simple rise-to-height (trail) or free drift on vel.
+        if (settled)
+        {
+            float capY = p.targetY + p.spawnOffY;
+            if (p.py > capY) p.py = capY;
+        }
+        else
+        {
+            p.py += p.vy * dt;
+            float capY = p.targetY + p.spawnOffY;
+            if (p.py >= capY)
+            {
+                p.py = capY;
+                p.vy = 0.0;
+                settled = true;
+            }
+        }
+        // Match CPU: free mode without force stack only rises on Y (init vel XZ unused).
+    }
+
+    if (freeMode)
+    {
+        if (p.py < -0.5 || p.py > 4.0 || abs(p.px) > 3.0 || abs(p.pz) > 3.0)
+        {
+            p.flags = 0.0;
+            particles[i] = p;
+            return;
+        }
+    }
+
+    fl = 1; // alive
+    if (settled) fl |= 2;
+    if (freeMode) fl |= 4;
+    if (lockX) fl |= 8;
+    p.flags = float(fl);
+    particles[i] = p;
+}
+)";
+
+    GLuint cs = glCreateShader (GL_COMPUTE_SHADER);
+    const char* src = kComputeSrc;
+    glShaderSource (cs, 1, &src, nullptr);
+    glCompileShader (cs);
+    GLint ok = GL_FALSE;
+    glGetShaderiv (cs, GL_COMPILE_STATUS, &ok);
+    if (ok != GL_TRUE)
+    {
+        char log[1024];
+        GLsizei len = 0;
+        glGetShaderInfoLog (cs, 1024, &len, log);
+        DBG ("Particle compute compile: " + juce::String (log, (size_t) len));
+        glDeleteShader (cs);
+        return false;
+    }
+
+    computeProgram = glCreateProgram();
+    glAttachShader (computeProgram, cs);
+    glLinkProgram (computeProgram);
+    glDeleteShader (cs);
+    glGetProgramiv (computeProgram, GL_LINK_STATUS, &ok);
+    if (ok != GL_TRUE)
+    {
+        char log[1024];
+        GLsizei len = 0;
+        glGetProgramInfoLog (computeProgram, 1024, &len, log);
+        DBG ("Particle compute link: " + juce::String (log, (size_t) len));
+        glDeleteProgram (computeProgram);
+        computeProgram = 0;
+        return false;
+    }
+
+    computeUCount = glGetUniformLocation (computeProgram, "uCount");
+    computeUForceCount = glGetUniformLocation (computeProgram, "uForceCount");
+    computeUDt = glGetUniformLocation (computeProgram, "uDt");
+    computeUSimTime = glGetUniformLocation (computeProgram, "uSimTime");
+
+    glGenBuffers (1, &particleSsbo);
+    glGenBuffers (1, &forceSsbo);
+    gpuComputeReady = (particleSsbo != 0 && forceSsbo != 0 && computeProgram != 0);
+    if (! gpuComputeReady)
+        releaseComputeProgram();
+    return gpuComputeReady;
+}
+
+void Spec3DParticleSystem::releaseComputeProgram()
+{
+    using namespace juce::gl;
+    if (particleSsbo) { glDeleteBuffers (1, &particleSsbo); particleSsbo = 0; }
+    if (forceSsbo) { glDeleteBuffers (1, &forceSsbo); forceSsbo = 0; }
+    if (computeProgram) { glDeleteProgram (computeProgram); computeProgram = 0; }
+    computeUCount = computeUForceCount = computeUDt = computeUSimTime = -1;
+    gpuComputeReady = false;
+    gpuSimPack.clear();
+    gpuForcePack.clear();
+}
+
+void Spec3DParticleSystem::gpuIntegrateAndReadback (float dt, const ForceModScales& scales, bool freeMode)
+{
+    using namespace juce::gl;
+    if (! gpuComputeReady || computeProgram == 0 || particleSsbo == 0)
+        return;
+
+    const int n = (int) pool.size();
+    if (n <= 0)
+        return;
+
+    gpuSimPack.resize ((size_t) n);
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& p = pool[(size_t) i];
+        auto& g = gpuSimPack[(size_t) i];
+        g.px = p.x; g.py = p.y; g.pz = p.z; g.age = p.age;
+        g.vx = p.velX; g.vy = p.velY; g.vz = p.velZ; g.maxLife = p.maxLife;
+        g.spinX = p.spinScaleX; g.spinY = p.spinScaleY; g.spinZ = p.spinScaleZ;
+        int fl = 0;
+        if (p.alive) fl |= 1;
+        if (p.settled) fl |= 2;
+        if (freeMode) fl |= 4;
+        if (! freeMode && owner.particleWaterfallLock) fl |= 8;
+        g.flags = (float) fl;
+        g.targetY = p.targetY; g.spawnOffY = p.spawnOffY;
+        g.rotX = p.rotX; g.rotY = p.rotY; g.rotZ = p.rotZ;
+        g.pad0 = g.pad1 = g.pad2 = 0.0f;
+    }
+
+    // Bake force stack + matrix scales into GPU force list.
+    gpuForcePack.clear();
+    if (owner.particleForcesEnabled)
+    {
+        for (const auto& mod : owner.particleForceStack)
+        {
+            if (! mod.enabled)
+                continue;
+            GpuForceMod f;
+            f.type = (int) mod.type;
+            f.enabled = 1;
+            f.axisMask = (mod.axisX ? 1 : 0) | (mod.axisY ? 2 : 0) | (mod.axisZ ? 4 : 0);
+            f.flags = (mod.linkAxes ? 1 : 0) | (mod.randomDir ? 2 : 0);
+            switch (mod.type)
+            {
+                case ParticleForceType::gravity:
+                    f.p0 = mod.p[0] * scales.gravity + scales.gravityAdd; break;
+                case ParticleForceType::drag:
+                    f.p0 = mod.p[0] * scales.drag + scales.dragAdd; break;
+                case ParticleForceType::wind:
+                    f.p0 = mod.p[0] * scales.windX + scales.windAddX;
+                    f.p1 = mod.p[1] * scales.windY + scales.windAddY;
+                    f.p2 = mod.p[2] * scales.windZ + scales.windAddZ;
+                    break;
+                case ParticleForceType::curlNoise:
+                    f.p0 = mod.p[0] * scales.curlStrength + scales.curlStrAdd;
+                    f.p1 = mod.p[1] * scales.curlScale + scales.curlScaleAdd;
+                    f.p2 = mod.p[2] * scales.curlSpeed + scales.curlSpeedAdd;
+                    break;
+                case ParticleForceType::turbulence:
+                    f.p0 = mod.p[0] * scales.turbulence + scales.turbAdd; break;
+                case ParticleForceType::rotation:
+                    f.p0 = mod.p[0]; f.p1 = mod.p[1]; f.p2 = mod.p[2]; break;
+                default: break;
+            }
+            gpuForcePack.push_back (f);
+        }
+    }
+
+    // Real force count for the shader (before dummy pad). Empty = simple Y-rise path.
+    const int realForceCount = (int) gpuForcePack.size();
+
+    // At least one dummy force entry so buffer is non-empty for binding.
+    if (gpuForcePack.empty())
+    {
+        GpuForceMod dummy {};
+        dummy.enabled = 0;
+        gpuForcePack.push_back (dummy);
+    }
+
+    const GLsizeiptr particleBytes = (GLsizeiptr) (gpuSimPack.size() * sizeof (GpuSimParticle));
+    const GLsizeiptr forceBytes = (GLsizeiptr) (gpuForcePack.size() * sizeof (GpuForceMod));
+
+    glBindBuffer (GL_SHADER_STORAGE_BUFFER, particleSsbo);
+    glBufferData (GL_SHADER_STORAGE_BUFFER, particleBytes, gpuSimPack.data(), GL_DYNAMIC_COPY);
+    glBindBuffer (GL_SHADER_STORAGE_BUFFER, forceSsbo);
+    glBufferData (GL_SHADER_STORAGE_BUFFER, forceBytes, gpuForcePack.data(), GL_DYNAMIC_DRAW);
+
+    glUseProgram (computeProgram);
+    if (computeUCount >= 0) glUniform1i (computeUCount, n);
+    if (computeUForceCount >= 0)
+        glUniform1i (computeUForceCount, realForceCount);
+    if (computeUDt >= 0) glUniform1f (computeUDt, dt);
+    if (computeUSimTime >= 0) glUniform1f (computeUSimTime, simTime);
+
+    glBindBufferBase (GL_SHADER_STORAGE_BUFFER, 0, particleSsbo);
+    glBindBufferBase (GL_SHADER_STORAGE_BUFFER, 1, forceSsbo);
+
+    const GLuint groups = (GLuint) ((n + 63) / 64);
+    glDispatchCompute (groups, 1, 1);
+    glMemoryBarrier (GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+
+    glBindBuffer (GL_SHADER_STORAGE_BUFFER, particleSsbo);
+    glGetBufferSubData (GL_SHADER_STORAGE_BUFFER, 0, particleBytes, gpuSimPack.data());
+    glBindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
+    glUseProgram (0);
+
+    for (int i = 0; i < n; ++i)
+    {
+        auto& p = pool[(size_t) i];
+        const auto& g = gpuSimPack[(size_t) i];
+        const int fl = (int) (g.flags + 0.5f);
+        const bool nowAlive = (fl & 1) != 0;
+        if (! nowAlive)
+        {
+            if (p.alive)
+                markDead (i);
+            continue;
+        }
+        p.alive = true;
+        p.x = g.px; p.y = g.py; p.z = g.pz;
+        p.velX = g.vx; p.velY = g.vy; p.velZ = g.vz;
+        p.age = g.age;
+        p.maxLife = g.maxLife;
+        p.settled = (fl & 2) != 0;
+        p.rotX = g.rotX; p.rotY = g.rotY; p.rotZ = g.rotZ;
+        if (! freeMode && owner.particleWaterfallLock)
+        {
+            p.x = columnToWorldX (p.col) + p.spawnOffX;
+            p.velX = 0.0f;
+        }
+    }
 }
 
 void Spec3DParticleSystem::draw (const juce::Matrix3D<float>& projection,

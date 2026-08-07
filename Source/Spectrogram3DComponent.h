@@ -378,8 +378,9 @@ public:
     static constexpr float kDofAmountDefault = kDofApertureDefault;
     /** @deprecated Blur scale removed; kept for prefs XML defaults only. */
     static constexpr float kDofBlurScaleDefault = 1.0f;
-    static constexpr float kDofCocDilateDefault = 0.85f;
-    static constexpr float kDofEdgeSpillDefault = 0.55f;
+    /** Lower default — high dilate + spill was stacking into bright silhouette rings. */
+    static constexpr float kDofCocDilateDefault = 0.35f;
+    static constexpr float kDofEdgeSpillDefault = 0.30f;
 
     /**
         SSS Look toggle. Thickness path follows Closed Mesh:
@@ -592,6 +593,29 @@ public:
 
     void setParticleMeshShape (ParticleMeshShape s) noexcept;
     ParticleMeshShape getParticleMeshShape() const noexcept { return particleMeshShape; }
+    /**
+        Hybrid GPU particle integrate (compute). Default off = full CPU sim.
+        When on and compute is available: CPU spawn/matrix, GPU force/age integrate.
+        Falls back to CPU if the GL context has no compute support.
+    */
+    void setParticleGpuSimEnabled (bool shouldEnable) noexcept;
+    bool isParticleGpuSimEnabled() const noexcept { return particleGpuSimEnabled; }
+    /** True after GL init if a compute program linked successfully. */
+    bool isParticleGpuSimAvailable() const noexcept;
+
+    /** Live-particle budget — spawn freezes / culls at this (hard cap 16k). */
+    void setParticleMaxAlive (int maxAlive) noexcept;
+    int getParticleMaxAlive() const noexcept;
+    int getParticleAliveCount() const noexcept;
+    int getParticlePoolCapacity() const noexcept;
+    int getParticleLastSpawnedCount() const noexcept;
+    int getParticleLastCulledCount() const noexcept;
+    /** Kill all live particles (escape hatch when the field is overloaded). */
+    void clearParticles() noexcept;
+    /** On-viewport stats: alive / budget / pool / spawned / culled. */
+    void setParticleDebugOverlayEnabled (bool shouldShow) noexcept;
+    bool isParticleDebugOverlayEnabled() const noexcept { return particleDebugOverlayEnabled; }
+
     void setParticleInitRotX (float deg) noexcept;
     float getParticleInitRotX() const noexcept { return particleInitRotX; }
     void setParticleInitRotY (float deg) noexcept;
@@ -624,6 +648,28 @@ public:
     static CameraState getFactoryCameraState() noexcept;
     /** Vertical drag from the magnifying-glass control (wheel-equivalent zoom). */
     void applyUiZoomDrag (float deltaY) noexcept;
+
+    /**
+        UE freecam is 100% separate from the turntable/orbit camera while active
+        (own eye + FPS yaw/pitch + view matrix). Settings below apply only to freecam.
+    */
+    /** Fly speed scale. 1.0 = full (max); lower = slower. Range [kFreecamSpeedMin, 1]. */
+    void setFreecamSpeedScale (float scale01to1) noexcept;
+    float getFreecamSpeedScale() const noexcept { return freecamSpeedScale; }
+    /** UE viewport-style level 1 (slowest) … 8 (full). */
+    void setFreecamSpeedLevel (float level1to8) noexcept;
+    float getFreecamSpeedLevel() const noexcept;
+    /** Mouse-look sensitivity (deg per pixel). Default ~0.22. */
+    void setFreecamLookSensitivity (float degPerPixel) noexcept;
+    float getFreecamLookSensitivity() const noexcept { return freecamLookSensitivity; }
+    /** Invert vertical look (UE-style option). Off by default. */
+    void setFreecamInvertY (bool shouldInvert) noexcept;
+    bool isFreecamInvertY() const noexcept { return freecamInvertY; }
+    bool isFreecamActive() const noexcept { return freecamActive; }
+    static constexpr float kFreecamSpeedMin = 0.01f;
+    static constexpr float kFreecamSpeedMax = 1.0f;
+    /** Fired when freecam speed / look prefs change so UI prefs can persist. */
+    std::function<void()> onFreecamSpeedChanged;
 
     std::function<void()> onEscape;
     std::function<void()> onUserResized;
@@ -688,6 +734,7 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress& key) override;
+    bool keyStateChanged (bool isKeyDown) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
@@ -732,6 +779,8 @@ private:
             ssgiHistoryValid = false;
             ssgiMomentsValid = false;
         }
+        /** Drop previous-frame VP so motion blur does not smear a stale camera. */
+        void invalidateMotionHistory() noexcept { motionPrevVpValid = false; }
         /**
             Force soft composite at exact pixel size and copy into outImage (ARGB).
             Must be called on the OpenGL thread (or via executeOnGLThread).
@@ -752,6 +801,7 @@ private:
         void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
         void mouseDoubleClick (const juce::MouseEvent& e) override;
         bool keyPressed (const juce::KeyPress& key) override;
+        bool keyStateChanged (bool isKeyDown) override;
 
     private:
         void attachNow();
@@ -1040,6 +1090,7 @@ private:
         void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
         void mouseDoubleClick (const juce::MouseEvent& e) override;
         bool keyPressed (const juce::KeyPress& key) override;
+        bool keyStateChanged (bool isKeyDown) override;
 
     private:
         Spectrogram3DComponent& owner;
@@ -1051,9 +1102,21 @@ private:
     void clampCamera() noexcept;
     /** Orbit pivot height — centre of the heightfield volume. */
     float lookAtY() const noexcept { return meshHeight * 0.5f; }
-    /** Y-up turntable: orbit around (panX, panY, panZ). */
+    /** Y-up turntable: orbit around (panX, panY, panZ). Orbit/LMB only. */
     juce::Matrix3D<float> getTurntableViewMatrix() const noexcept;
-    /** Camera basis for the current yaw/pitch (for pivot-preserving pan). */
+    /** FPS freecam view from freecam eye + freecam yaw/pitch (never uses orbit pan). */
+    juce::Matrix3D<float> getFreecamViewMatrix() const noexcept;
+    /** Active view: freecam matrix while freecamActive, else turntable. */
+    juce::Matrix3D<float> getActiveViewMatrix() const noexcept;
+    /** World-space eye (freecam eye when active, else turntable-derived). */
+    juce::Vector3D<float> getCameraEyePosition() const noexcept;
+    void enterFreecamFromTurntable() noexcept;
+    void exitFreecamToTurntable() noexcept;
+    void applyFreecamLookDelta (float dxPixels, float dyPixels) noexcept;
+    void freecamBasis (juce::Vector3D<float>& outRight,
+                       juce::Vector3D<float>& outUp,
+                       juce::Vector3D<float>& outForward) const noexcept;
+    /** Camera basis: freecam axes when active, else turntable. */
     void cameraBasis (juce::Vector3D<float>& outRight,
                       juce::Vector3D<float>& outUp,
                       juce::Vector3D<float>& outForward) const noexcept;
@@ -1136,7 +1199,8 @@ private:
     bool particleModeEnabled = false;
     ParticleEmitMode particleEmitMode = ParticleEmitMode::continuous;
     ParticleBindingMode particleBindingMode = ParticleBindingMode::spectrogramTrail;
-    float particleEmission = 0.5f; // 0..5
+    /** Particles spawned per second (field total). Not a 0–1 scale. */
+    float particleEmission = 200.0f;
     /** World-space spawn scatter. Default > 0 so particles don't stack on exact mesh points. */
     float particleSpawnJitter = 0.035f;
     float particleInitVelX = 0.0f;
@@ -1154,6 +1218,10 @@ private:
     float particleSpecular = 0.35f;
     bool particleForcesEnabled = false;
     bool particleWaterfallLock = true;
+    /** CPU default; GPU hybrid integrate when true and compute available. */
+    bool particleGpuSimEnabled = false;
+    int particleMaxAlive = Spec3DParticleSystem::kDefaultMaxAlive;
+    bool particleDebugOverlayEnabled = false;
     std::vector<ParticleForceModule> particleForceStack;
     uint32_t particleForceUidSerial = 1;
     ParticleMeshShape particleMeshShape = ParticleMeshShape::sphere;
@@ -1360,7 +1428,28 @@ private:
     juce::Point<float> rightClickStart {};
     bool rightClickCandidate = false;
     bool rightClickDragged = false;
-    enum class DragMode { none, orbit, pan, screenPan, dolly, gizmoX, gizmoY, gizmoZ };
+    /**
+        Freecam is a separate camera (not the orbit/turntable rig):
+          freecamEye + freecamYawDeg + freecamPitchDeg (FPS: 0=horizon, + = look up).
+        Active while RMB held or coasting. Wheel = speed. Settings: speed / look / invert Y.
+    */
+    bool freecamActive = false;
+    bool freecamRmbHeld = false;
+    juce::Vector3D<float> freecamEye { 0, 0.5f, 3.0f };
+    float freecamYawDeg = 0.0f;
+    float freecamPitchDeg = 0.0f; // FPS pitch: + look up, − look down
+    juce::Vector3D<float> flyVel { 0, 0, 0 };
+    double freecamLastTimeSec = 0.0;
+    float freecamSpeedScale = kFreecamSpeedMax;
+    float freecamLookSensitivity = 0.22f;
+    bool freecamInvertY = false;
+    void tickFreecam (float dt) noexcept;
+    void nudgeFreecamSpeedFromWheel (float wheelDeltaY) noexcept;
+    void notifyFreecamSpeedChanged() noexcept;
+    static bool freecamKeyDown (juce::juce_wchar c) noexcept;
+    static float freecamLevelToScale (float level1to8) noexcept;
+    static float freecamScaleToLevel (float scale) noexcept;
+    enum class DragMode { none, orbit, pan, screenPan, freecamLook, dolly, gizmoX, gizmoY, gizmoZ };
     DragMode dragMode = DragMode::none;
     DragMode gizmoHoverAxis = DragMode::none;
     DragMode hitTestDebugGizmo (juce::Point<float> localPos) const noexcept;
@@ -1380,6 +1469,8 @@ private:
 
     std::unique_ptr<juce::ResizableCornerComponent> resizer;
     std::unique_ptr<juce::Component> zoomHandle;
+    /** UE-style camera speed chip (top-right); click opens speed slider. */
+    std::unique_ptr<juce::Component> freecamSpeedHandle;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Spectrogram3DComponent)
 };

@@ -542,6 +542,35 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     setupLookSlider (bloomThresholdLabel, bloomThresholdSlider, 0.0, 1.0, 0.01, "Luminance gate before glow.");
     bloomThresholdSlider.setValue (0.62, juce::dontSendNotification);
 
+    setupLookToggle (motionBlurToggle,
+                     "UE-style camera motion blur (soft path): depth reproject with previous "
+                     "view-projection → screen velocity → reconstruction gather. "
+                     "Blurs orbit / freecam / zoom motion. Off by default.");
+    motionBlurAmountLabel.setText ("Motion blur amount", juce::dontSendNotification);
+    setupLookSlider (motionBlurAmountLabel, motionBlurAmountSlider, 0.0, 1.0, 0.01,
+                     "Shutter / exposure fraction (0 = none, 1 = full frame velocity). "
+                     "Like Unreal motion blur amount.");
+    motionBlurAmountSlider.setValue (Spectrogram3DComponent::kMotionBlurAmountDefault,
+                                     juce::dontSendNotification);
+    motionBlurMaxLabel.setText ("Motion blur max (px)", juce::dontSendNotification);
+    setupLookSlider (motionBlurMaxLabel, motionBlurMaxSlider,
+                     (double) Spectrogram3DComponent::kMotionBlurMaxMin,
+                     (double) Spectrogram3DComponent::kMotionBlurMaxMax,
+                     1.0,
+                     "Clamp maximum streak length in screen pixels (UE max velocity clamp).");
+    motionBlurMaxSlider.setValue (Spectrogram3DComponent::kMotionBlurMaxDefault,
+                                  juce::dontSendNotification);
+    motionBlurQualityLabel.setText ("Motion blur quality", juce::dontSendNotification);
+    styleCombo (motionBlurQualityCombo);
+    motionBlurQualityCombo.addItem ("Low (8 samples)", 1);
+    motionBlurQualityCombo.addItem ("Medium (16 samples)", 2);
+    motionBlurQualityCombo.addItem ("High (24 samples)", 3);
+    motionBlurQualityCombo.setSelectedId (2, juce::dontSendNotification);
+    motionBlurQualityCombo.setTooltip ("Samples along the velocity vector (more = smoother streaks, costlier).");
+    motionBlurQualityCombo.onChange = [this] { applyLookControlsToMain(); };
+    addAndMakeVisible (motionBlurQualityLabel);
+    addAndMakeVisible (motionBlurQualityCombo);
+
     setupLookToggle (dofToggle,
                      "Realtime post DOF (EEVEE / Marmoset Post Effect style): thin-lens "
                      "CoC + disc gather. Soft FBO path. Off by default.");
@@ -594,13 +623,15 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (dofQualityCombo);
     dofCocDilateLabel.setText ("DOF Edge Dilate", juce::dontSendNotification);
     setupLookSlider (dofCocDilateLabel, dofCocDilateSlider, 0.0, 1.0, 0.01,
-                     "Soft BG edge tune: pulls neighbour CoC into silhouette pixels so thin "
-                     "far edges still gather against the background.");
+                     "How far defocus CoC spreads into Soft BG void (radius only). "
+                     "0 = no spread. Does not brighten edges by itself — pairs with Edge Spill "
+                     "for mesh colour bleed onto sky. Keep moderate to avoid halos.");
     dofCocDilateSlider.setValue (Spectrogram3DComponent::kDofCocDilateDefault, juce::dontSendNotification);
     dofEdgeSpillLabel.setText ("DOF Edge Spill", juce::dontSendNotification);
     setupLookSlider (dofEdgeSpillLabel, dofEdgeSpillSlider, 0.0, 1.0, 0.01,
-                     "Soft BG edge tune: how strongly out-of-focus mesh bleeds onto sky / "
-                     "background (silhouette soften). Use with Edge Dilate.");
+                     "How strongly out-of-focus mesh colour bleeds onto Soft BG at silhouettes "
+                     "(weight only, 0–1). Independent of Dilate — do not crank both to max "
+                     "or you get a bright outline.");
     dofEdgeSpillSlider.setValue (Spectrogram3DComponent::kDofEdgeSpillDefault, juce::dontSendNotification);
 
     setupLookToggle (tonemapToggle,
@@ -627,6 +658,34 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     setupLookToggle (particleToggle,
                      "Replace the mesh with a playhead particle field. Off by default "
                      "(no cost when disabled).");
+    setupLookToggle (particleGpuSimToggle,
+                     "Run force / age integration on the GPU (OpenGL 4.3 compute). "
+                     "CPU is the default and always works. GPU needs a 4.3+ context; "
+                     "if compute fails to start, motion falls back to CPU automatically. "
+                     "Spawn and colour matrix stay on the CPU either way.");
+    particleGpuSimToggle.setToggleState (false, juce::dontSendNotification);
+    particleMaxAliveLabel.setText ("Max particles", juce::dontSendNotification);
+    // Drag range to 100k; type up to 1M for stress tests (absolute hard cap).
+    setupParticleSlider (particleMaxAliveLabel, particleMaxAliveSlider, 256.0, 100000.0, 256.0,
+                         "Live particle budget. Default 8192. Drag up to 100k; type up to 1,000,000 "
+                         "for stress tests (~200MB RAM at 1M — can hitch or OOM the host).\n"
+                         "This is the total ceiling. Emission only controls how fast you fill it.\n"
+                         "At 100k+: free-list spawn, heavy colour throttling; hybrid GPU integrate "
+                         "auto-falls back to CPU (readback can't scale). Full GPU sim still TODO.");
+    setSliderActual (particleMaxAliveSlider, 8192.0);
+    setupLookToggle (particleDebugOverlayToggle,
+                     "Show live particle stats on the 3D view (alive / budget / pool / "
+                     "spawned / culled). Useful when tuning emission without crashing.");
+    particleDebugOverlayToggle.setToggleState (false, juce::dontSendNotification);
+    styleSaveDefaultButton (particleClearButton);
+    particleClearButton.setButtonText ("Clear particles");
+    particleClearButton.setTooltip ("Kill all live particles immediately (escape hatch).");
+    particleClearButton.onClick = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->clearSpec3DParticles();
+    };
+    addAndMakeVisible (particleClearButton);
     styleLabel (particleBindingLabel);
     particleBindingLabel.setText ("Binding", juce::dontSendNotification);
     styleCombo (particleBindingCombo);
@@ -660,10 +719,13 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     };
     addAndMakeVisible (particleEmitModeLabel);
     addAndMakeVisible (particleEmitModeCombo);
-    particleEmissionLabel.setText ("Emission", juce::dontSendNotification);
-    setupParticleSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 5.0, 0.01,
-                         "Spawn rate scale. Drag range 0-5; type higher for denser emission.");
-    setSliderActual (particleEmissionSlider, 0.5);
+    particleEmissionLabel.setText ("Emission rate (particles/s)", juce::dontSendNotification);
+    setupParticleSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 5000.0, 1.0,
+                         "Particles spawned per second (total across the field). "
+                         "Drag 0–5000; type higher for denser tests. "
+                         "Live count ≈ rate × lifespan (until Max particles). "
+                         "Continuous and slice modes share this same particles/s budget.");
+    setSliderActual (particleEmissionSlider, 200.0);
     particleSpawnJitterLabel.setText ("Spawn jitter", juce::dontSendNotification);
     setupParticleSlider (particleSpawnJitterLabel, particleSpawnJitterSlider, 0.0, 0.5, 0.001,
                          "Randomize each particle's spawn offset (world units). "
@@ -1305,6 +1367,14 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (bloomThresholdLabel, bloom);
     setLookChildVisible (bloomThresholdSlider, bloom);
 
+    const bool motionBlur = motionBlurToggle.getToggleState();
+    setLookChildVisible (motionBlurAmountLabel, motionBlur);
+    setLookChildVisible (motionBlurAmountSlider, motionBlur);
+    setLookChildVisible (motionBlurMaxLabel, motionBlur);
+    setLookChildVisible (motionBlurMaxSlider, motionBlur);
+    setLookChildVisible (motionBlurQualityLabel, motionBlur);
+    setLookChildVisible (motionBlurQualityCombo, motionBlur);
+
     const bool dof = dofToggle.getToggleState();
     setLookChildVisible (dofFocusLabel, dof);
     setLookChildVisible (dofFocusSlider, dof);
@@ -1326,6 +1396,11 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (gradeCombo, tonemap);
 
     const bool particleOn = particleToggle.getToggleState();
+    setLookChildVisible (particleGpuSimToggle, particleOn);
+    setLookChildVisible (particleMaxAliveLabel, particleOn);
+    setLookChildVisible (particleMaxAliveSlider, particleOn);
+    setLookChildVisible (particleDebugOverlayToggle, particleOn);
+    setLookChildVisible (particleClearButton, particleOn);
     setLookChildVisible (particleBindingLabel, particleOn);
     setLookChildVisible (particleBindingCombo, particleOn);
     setLookChildVisible (particleEmitModeLabel, particleOn);
@@ -1508,18 +1583,29 @@ void Spectrogram3DSettingsComponent::Content::wireUncappedTextEntry (juce::Slide
     };
     slider.textFromValueFunction = [&slider] (double v)
     {
-        // Fixed 3 d.p. - short enough for the text box, never "...".
         const double shown = slider.getProperties().contains (kParticleSliderActual)
                                  ? (double) slider.getProperties()[kParticleSliderActual]
                                  : v;
+        // Integers for large rates (emission) stay readable; else 3 d.p.
+        if (std::abs (shown) >= 100.0 && std::abs (shown - std::round (shown)) < 1.0e-6)
+            return juce::String ((int) std::round (shown));
         return juce::String (shown, 3);
     };
-    // When dragging, keep actual in sync with the thumb.
+    // Always sync actual on any value change (drag or text). valueFromTextFunction
+    // already stored typed out-of-range values before this runs.
     const auto prev = slider.onValueChange;
     slider.onValueChange = [&slider, prev]
     {
         if (slider.isMouseButtonDown())
+        {
+            // Drag: thumb value is the actual.
             slider.getProperties().set (kParticleSliderActual, slider.getValue());
+        }
+        else if (! slider.getProperties().contains (kParticleSliderActual))
+        {
+            slider.getProperties().set (kParticleSliderActual, slider.getValue());
+        }
+        // else: keep typed actual from valueFromTextFunction
         if (prev)
             prev();
     };
@@ -1834,6 +1920,16 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     bloomToggle.setToggleState (main->isSpec3DBloomEnabled(), juce::dontSendNotification);
     bloomStrengthSlider.setValue (main->getSpec3DBloomStrength(), juce::dontSendNotification);
     bloomThresholdSlider.setValue (main->getSpec3DBloomThreshold(), juce::dontSendNotification);
+    motionBlurToggle.setToggleState (main->isSpec3DMotionBlurEnabled(), juce::dontSendNotification);
+    motionBlurAmountSlider.setValue (main->getSpec3DMotionBlurAmount(), juce::dontSendNotification);
+    motionBlurMaxSlider.setValue (main->getSpec3DMotionBlurMax(), juce::dontSendNotification);
+    {
+        const auto mq = main->getSpec3DMotionBlurQuality();
+        motionBlurQualityCombo.setSelectedId (
+            mq == Spectrogram3DComponent::ShadowQuality::low ? 1
+                : (mq == Spectrogram3DComponent::ShadowQuality::high ? 3 : 2),
+            juce::dontSendNotification);
+    }
     dofToggle.setToggleState (main->isSpec3DDofEnabled(), juce::dontSendNotification);
     dofFocusSlider.setValue (main->getSpec3DDofFocusDistance(), juce::dontSendNotification);
     dofFStopSlider.setValue (main->getSpec3DDofFStop(), juce::dontSendNotification);
@@ -1872,6 +1968,21 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     sssThickScaleSlider.setValue (main->getSpec3DSssThicknessScale(), juce::dontSendNotification);
     sssMaxThickSlider.setValue (main->getSpec3DSssMaxThickness(), juce::dontSendNotification);
     particleToggle.setToggleState (main->isSpec3DParticleModeEnabled(), juce::dontSendNotification);
+    particleGpuSimToggle.setToggleState (main->isSpec3DParticleGpuSimEnabled(), juce::dontSendNotification);
+    setSliderActual (particleMaxAliveSlider, (double) main->getSpec3DParticleMaxAlive());
+    particleDebugOverlayToggle.setToggleState (main->isSpec3DParticleDebugOverlayEnabled(),
+                                               juce::dontSendNotification);
+    {
+        const bool gpuOk = main->isSpec3DParticleGpuSimAvailable();
+        particleGpuSimToggle.setTooltip (
+            juce::String (
+                "Run force / age integration on the GPU (OpenGL 4.3 compute). "
+                "CPU is the default and always works. GPU needs a 4.3+ context; "
+                "if compute fails to start, motion falls back to CPU automatically. "
+                "Spawn and colour matrix stay on the CPU either way.")
+            + (gpuOk ? "\n\nCompute is ready on this GPU."
+                     : "\n\nCompute not ready yet (needs particle draw once, or GL 4.3 unavailable)."));
+    }
     particleBindingCombo.setSelectedId (main->getSpec3DParticleBindingMode() + 1, juce::dontSendNotification);
     particleEmitModeCombo.setSelectedId (main->getSpec3DParticleEmitMode() + 1, juce::dontSendNotification);
     setSliderActual (particleEmissionSlider, main->getSpec3DParticleEmission());
@@ -2100,6 +2211,17 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DBloomEnabled (bloomToggle.getToggleState(), kSave);
     main->setSpec3DBloomStrength ((float) bloomStrengthSlider.getValue(), kSave);
     main->setSpec3DBloomThreshold ((float) bloomThresholdSlider.getValue(), kSave);
+    main->setSpec3DMotionBlurEnabled (motionBlurToggle.getToggleState(), kSave);
+    main->setSpec3DMotionBlurAmount ((float) motionBlurAmountSlider.getValue(), kSave);
+    main->setSpec3DMotionBlurMax ((float) motionBlurMaxSlider.getValue(), kSave);
+    {
+        const int id = motionBlurQualityCombo.getSelectedId();
+        main->setSpec3DMotionBlurQuality (
+            id == 1 ? Spectrogram3DComponent::ShadowQuality::low
+                    : (id == 3 ? Spectrogram3DComponent::ShadowQuality::high
+                               : Spectrogram3DComponent::ShadowQuality::medium),
+            kSave);
+    }
     main->setSpec3DDofEnabled (dofToggle.getToggleState(), kSave);
     // Focus distance: only via dofFocusSlider.onValueChange / Ctrl+click - never stomp here.
     main->setSpec3DDofFStop ((float) dofFStopSlider.getValue(), kSave);
@@ -2143,6 +2265,9 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DSssThicknessScale ((float) sssThickScaleSlider.getValue(), kSave);
     main->setSpec3DSssMaxThickness ((float) sssMaxThickSlider.getValue(), kSave);
     main->setSpec3DParticleModeEnabled (particleToggle.getToggleState(), kSave);
+    main->setSpec3DParticleGpuSimEnabled (particleGpuSimToggle.getToggleState(), kSave);
+    main->setSpec3DParticleMaxAlive ((int) std::lround (getSliderActual (particleMaxAliveSlider)), kSave);
+    main->setSpec3DParticleDebugOverlayEnabled (particleDebugOverlayToggle.getToggleState(), kSave);
     main->setSpec3DParticleBindingMode (juce::jmax (0, particleBindingCombo.getSelectedId() - 1), kSave);
     main->setSpec3DParticleEmitMode (juce::jmax (0, particleEmitModeCombo.getSelectedId() - 1), kSave);
     main->setSpec3DParticleEmission ((float) getSliderActual (particleEmissionSlider), kSave);
@@ -2265,6 +2390,7 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     }
     if (ssaoToggle.getToggleState()) lookRows += 2;
     if (bloomToggle.getToggleState()) lookRows += 2;
+    if (motionBlurToggle.getToggleState()) lookRows += 3; // amount, max px, quality
     if (dofToggle.getToggleState()) lookRows += 6; // focus, f-stop, focal mm, quality, dilate, spill
     if (tonemapToggle.getToggleState()) lookRows += 2; // exposure, grade
     if (sssToggle.getToggleState())
@@ -2278,6 +2404,10 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     int particleModExtra = 0;
     if (particleToggle.getToggleState())
     {
+        toggles += 1; // GPU particle integrate
+        lookRows += 1; // max particles
+        toggles += 1; // debug overlay
+        lookRows += 1; // clear button (approx one row)
         lookRows += 2; // binding + emit mode
         lookRows += 7; // emission, jitter, init vel XYZ, vel random, lifespan
         if (particleLifespanSlider.getValue() > 1.0e-4)
@@ -2477,6 +2607,13 @@ void Spectrogram3DSettingsComponent::Content::resized()
         layoutSliderRow (area, bloomStrengthLabel, bloomStrengthSlider);
         layoutSliderRow (area, bloomThresholdLabel, bloomThresholdSlider);
     }
+    layoutToggle (area, motionBlurToggle);
+    if (motionBlurToggle.getToggleState())
+    {
+        layoutSliderRow (area, motionBlurAmountLabel, motionBlurAmountSlider);
+        layoutSliderRow (area, motionBlurMaxLabel, motionBlurMaxSlider);
+        layoutComboRow (area, motionBlurQualityLabel, motionBlurQualityCombo);
+    }
     layoutToggle (area, dofToggle);
     if (dofToggle.getToggleState())
     {
@@ -2517,6 +2654,11 @@ void Spectrogram3DSettingsComponent::Content::resized()
     layoutToggle (area, particleToggle);
     if (particleToggle.getToggleState())
     {
+        layoutToggle (area, particleGpuSimToggle);
+        layoutSliderRow (area, particleMaxAliveLabel, particleMaxAliveSlider);
+        layoutToggle (area, particleDebugOverlayToggle);
+        particleClearButton.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (160, area.getWidth())));
+        area.removeFromTop (8);
         layoutComboRow (area, particleBindingLabel, particleBindingCombo);
         layoutComboRow (area, particleEmitModeLabel, particleEmitModeCombo);
         layoutSliderRow (area, particleEmissionLabel, particleEmissionSlider);

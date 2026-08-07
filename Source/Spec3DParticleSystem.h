@@ -277,14 +277,40 @@ public:
 
     void ensureGl (juce::OpenGLContext& context);
     void releaseGl();
+    /**
+        Run deferred force/age integrate on the OpenGL thread.
+        When GPU sim is preferred and compute is ready, dispatches the compute path;
+        otherwise falls back to CPU integrate. Safe no-op if nothing is pending.
+    */
+    void integrateOnGlThread();
     void draw (const juce::Matrix3D<float>& projection,
                const juce::Matrix3D<float>& view,
                juce::Vector3D<float> camRight,
                juce::Vector3D<float> camUp);
 
     bool hasGlResources() const noexcept { return glReady; }
+    /** True if compute integrate program is ready (GL 4.3 / ARB_compute_shader). */
+    bool isGpuSimAvailable() const noexcept { return gpuComputeReady; }
 
-    static constexpr int kHardCap = 24576;
+    /**
+        Absolute pool ceiling (1M for stress tests). ~200B/particle → ~200MB at 1M.
+        Raise Max particles in settings to exercise 100k+; default budget stays modest.
+    */
+    static constexpr int kHardCap = 1'048'576;
+    /** Default live budget (everyday safe). Not the hard ceiling. */
+    static constexpr int kDefaultMaxAlive = 8192;
+    static constexpr int kMinMaxAlive = 256;
+    /** Hybrid GPU integrate+full-readback is counterproductive above this. */
+    static constexpr int kGpuReadbackMaxAlive = 24576;
+
+    int getAliveCount() const noexcept { return aliveCount; }
+    int getPoolCapacity() const noexcept { return (int) pool.size(); }
+    int getMaxAliveBudget() const noexcept { return maxAliveBudget; }
+    void setMaxAliveBudget (int maxAlive) noexcept;
+    int getLastSpawnedCount() const noexcept { return lastSpawnedCount; }
+    int getLastCulledCount() const noexcept { return lastCulledCount; }
+    /** True when at budget — spawn is blocked / throttled. */
+    bool isAtParticleBudget() const noexcept { return aliveCount >= maxAliveBudget; }
 
 private:
     struct Particle
@@ -374,11 +400,19 @@ private:
     Spectrogram3DComponent& owner;
 
     std::vector<Particle> pool;
+    /** O(1) spawn alloc — required at 100k+ (linear free-slot scan is unusable). */
+    std::vector<int> freeList;
     std::vector<float> emitAccum;
     float emitGlobal = 0.0f;
     float amplitudeSmooth = 0.0f;
     float simTime = 0.0f;
     int nextWrite = 0;
+    int maxAliveBudget = kDefaultMaxAlive;
+    int aliveCount = 0;
+    int lastSpawnedCount = 0;
+    int lastCulledCount = 0;
+    /** Round-robin for throttled colour updates under load. */
+    int colourPassCursor = 0;
     juce::Random rng { 0x53c33dU };
     /** Monotonic birth counter for ParticleModSource::particleId. */
     uint32_t nextParticleId = 1;
@@ -389,6 +423,11 @@ private:
     float randomSmoothV[kParticleRandomSourceCount][3] = {};
 
     void ensurePool();
+    void recountAlive() noexcept;
+    void rebuildFreeList() noexcept;
+    void markDead (int index) noexcept;
+    /** Kill excess alive particles (settled / oldest first) down to maxAliveBudget. */
+    void enforceAliveBudget() noexcept;
     /** Spawn on the playhead. binF is continuous in [0, meshH-1] (interpolated). */
     void spawnAtPlayhead (float binF, float lifespanBase, float sizeBase, float spawnJitterScale);
     /** Energy-weighted random binF on the playhead (louder bands emit more). */
@@ -423,6 +462,8 @@ private:
     void applyColourMods (Particle& p, ParticleModDest dest, float src, ParticleModOp op, float amount) const;
     static void setHue (float& r, float& g, float& b, float hue01) noexcept;
     void integrateForceStack (Particle& p, const ForceModScales& scales, float dt) noexcept;
+    /** CPU age + force integrate for the whole pool (message or GL thread). */
+    void cpuIntegrateAll (float dt, const ForceModScales& scales, bool freeMode) noexcept;
     static juce::Vector3D<float> curlNoise (float x, float y, float z) noexcept;
     static float hashNoise (int x, int y, int z) noexcept;
     static float valueNoise (float x, float y, float z) noexcept;
@@ -431,6 +472,10 @@ private:
     void buildUnitMeshes();
     bool createMeshProgram (juce::OpenGLContext& context);
     bool createBillboardProgram (juce::OpenGLContext& context);
+    bool createComputeProgram();
+    void releaseComputeProgram();
+    /** Pack pool → SSBO, dispatch integrate, readback pos/vel/age/flags. Must be GL thread. */
+    void gpuIntegrateAndReadback (float dt, const ForceModScales& scales, bool freeMode);
     void drawInstancedMeshes (const juce::Matrix3D<float>& projection,
                               const juce::Matrix3D<float>& view);
     void drawBillboards (const juce::Matrix3D<float>& projection,
@@ -438,7 +483,38 @@ private:
                          juce::Vector3D<float> camRight,
                          juce::Vector3D<float> camUp);
 
+    /** GPU sim particle (std430, 5×vec4 = 80 bytes). */
+    struct alignas (16) GpuSimParticle
+    {
+        float px, py, pz, age;
+        float vx, vy, vz, maxLife;
+        float spinX, spinY, spinZ, flags; // flags bits: 1 alive, 2 settled, 4 free, 8 lockX
+        float targetY, spawnOffY, rotX, rotY;
+        float rotZ, pad0, pad1, pad2;
+    };
+
+    /** Force module for compute (scales baked on CPU). */
+    struct alignas (16) GpuForceMod
+    {
+        int type = 0;
+        int enabled = 0;
+        int axisMask = 7; // bit0 X, bit1 Y, bit2 Z
+        int flags = 0;    // bit0 linkAxes, bit1 randomDir
+        float p0 = 0, p1 = 0, p2 = 0, p3 = 0;
+    };
+
     bool glReady = false;
+    bool gpuComputeReady = false;
+    unsigned int computeProgram = 0;
+    unsigned int particleSsbo = 0;
+    unsigned int forceSsbo = 0;
+    int computeUCount = -1, computeUForceCount = -1, computeUDt = -1, computeUSimTime = -1;
+    std::vector<GpuSimParticle> gpuSimPack;
+    std::vector<GpuForceMod> gpuForcePack;
+    /** Deferred integrate (GPU must run on GL thread; update() may be message-thread). */
+    float pendingIntegrateDt = 0.0f;
+    ForceModScales pendingForceScales {};
+    bool pendingFreeMode = false;
     // Shared lighting uniforms used by both programs
     std::unique_ptr<juce::OpenGLShaderProgram> meshProgram;
     std::unique_ptr<juce::OpenGLShaderProgram> billboardProgram;

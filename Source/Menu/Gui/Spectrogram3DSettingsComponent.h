@@ -230,6 +230,14 @@ private:
         juce::Label bloomThresholdLabel;
         juce::Slider bloomThresholdSlider;
 
+        juce::ToggleButton motionBlurToggle { "Motion blur" };
+        juce::Label motionBlurAmountLabel;
+        juce::Slider motionBlurAmountSlider;
+        juce::Label motionBlurMaxLabel;
+        juce::Slider motionBlurMaxSlider;
+        juce::Label motionBlurQualityLabel;
+        juce::ComboBox motionBlurQualityCombo;
+
         juce::ToggleButton dofToggle { "Depth of field" };
         juce::Label dofFocusLabel;
         juce::Slider dofFocusSlider;
@@ -275,6 +283,11 @@ private:
         juce::Slider sssMaxThickSlider;
 
         juce::ToggleButton particleToggle { "Particle mode" };
+        juce::ToggleButton particleGpuSimToggle { "GPU particle integrate" };
+        juce::Label particleMaxAliveLabel;
+        juce::Slider particleMaxAliveSlider;
+        juce::ToggleButton particleDebugOverlayToggle { "Show particle count (debug)" };
+        juce::TextButton particleClearButton { "Clear particles" };
         juce::Label particleBindingLabel;
         juce::ComboBox particleBindingCombo;
         juce::Label particleEmitModeLabel;
