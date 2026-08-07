@@ -346,9 +346,23 @@ namespace FilterBandShelf
         while (stages.size() > 8)
             stages.removeLast();
 
-        // Normalise floor (well below lower edge) to 0 dB
-        const double oobHz = juce::jmax (5.0, fLo * 0.15);
-        const double magOob = evalCascadeMagAt (stages, oobHz, sampleRate);
+        // Normalise asymptotes toward 0 dB. Use the geometric mean of a low and
+        // high probe so one incomplete edge near Nyquist/DC doesn't yank the
+        // whole curve (which painted as edge "pops" on the fixed 20–20k graph).
+        const double fs = sampleRate > 1.0 ? sampleRate : 48000.0;
+        const double oobLoHz = juce::jmax (5.0, fLo * 0.12);
+        const double oobHiHz = juce::jmin (fs * 0.499, fHi * 6.0);
+        const double magLo = evalCascadeMagAt (stages, oobLoHz, fs);
+        const double magHi = evalCascadeMagAt (stages, oobHiHz, fs);
+        double magOob = 1.0;
+        if (magLo > 1.0e-12 && magHi > 1.0e-12
+            && std::isfinite (magLo) && std::isfinite (magHi))
+            magOob = std::sqrt (magLo * magHi);
+        else if (magLo > 1.0e-12 && std::isfinite (magLo))
+            magOob = magLo;
+        else if (magHi > 1.0e-12 && std::isfinite (magHi))
+            magOob = magHi;
+
         if (magOob > 1.0e-12 && std::isfinite (magOob))
         {
             const double scale = 1.0 / magOob;
@@ -374,8 +388,10 @@ namespace FilterBandShelf
         if (std::abs (gainDb) < 1.0e-3f)
             return stages;
 
-        const double fMax = fs * 0.45;
-        const double f0 = juce::jlimit (25.0, fMax * 0.98, (double) frequencyHz);
+        // Keep edges clear of Nyquist so the return-to-0dB can finish inside the
+        // graph (20 Hz…20 kHz). Order-8 shelves need ~0.35 oct of settle room.
+        const double fMax = fs * 0.42;
+        const double f0 = juce::jlimit (30.0, fMax * 0.96, (double) frequencyHz);
         const float safeQ = juce::jmax (0.15f, q);
 
         // Q → bandwidth in octaves (WIDTH ONLY).
@@ -389,22 +405,27 @@ namespace FilterBandShelf
         double fLo = f0 / r;
         double fHi = f0 * r;
 
+        // Settle margin outside the plateau so asymptotes hit ~0 dB on the plot.
+        const double settle = std::pow (2.0, 0.35);
+        const double fLoMin = 22.0 * settle;          // leave room below graph 20 Hz edge
+        const double fHiMax = fMax / settle;
+
         // Nyquist / DC — re-mirror about f0 so the handle stays log-centre
-        if (fHi > fMax)
+        if (fHi > fHiMax)
         {
-            fHi = fMax;
+            fHi = fHiMax;
             fLo = (f0 * f0) / fHi;
         }
-        if (fLo < 18.0)
+        if (fLo < fLoMin)
         {
-            fLo = 18.0;
-            fHi = juce::jmin (fMax, (f0 * f0) / fLo);
+            fLo = fLoMin;
+            fHi = juce::jmin (fHiMax, (f0 * f0) / fLo);
         }
         if (fHi / fLo < 1.23)
         {
             const double mid = std::sqrt (fLo * fHi);
-            fLo = juce::jmax (18.0, mid / std::sqrt (1.23));
-            fHi = juce::jmin (fMax, mid * std::sqrt (1.23));
+            fLo = juce::jmax (fLoMin, mid / std::sqrt (1.23));
+            fHi = juce::jmin (fHiMax, mid * std::sqrt (1.23));
         }
 
         const double targetLin = (double) juce::Decibels::decibelsToGain (gainDb);
@@ -443,14 +464,15 @@ namespace FilterBandShelf
             designDb = juce::jlimit (-48.0, 48.0, designDb);
         }
 
-        // Final finite-coeff check
+        // Final finite-coeff check (JUCE stores 2*order+1 floats after dropping a0)
         for (int i = 0; i < stages.size(); ++i)
         {
             const auto sec = stages.getUnchecked (i);
             if (sec == nullptr)
                 return makeSoftDualEdge (sampleRate, fLo, fHi, gainDb);
             const float* c = sec->getRawCoefficients();
-            for (int k = 0; k < 6; ++k)
+            const int n = sec->coefficients.size();
+            for (int k = 0; k < n; ++k)
                 if (! std::isfinite (c[k]))
                     return makeSoftDualEdge (sampleRate, fLo, fHi, gainDb);
         }

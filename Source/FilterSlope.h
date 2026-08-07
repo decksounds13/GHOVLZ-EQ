@@ -226,12 +226,19 @@ namespace FilterSlope
 
         const int stride = juce::jmax (1, step);
 
+        // Graph log grid is fixed 20 Hz…20 kHz; clamp into the valid IIR range so
+        // pixels past Nyquist (or f≈0) don't throw a wild edge sample / "pop".
+        const double fMinEval = 2.0;
+        const double fMaxEval = (sampleRate > 0.0)
+            ? sampleRate * 0.499
+            : 20000.0;
+
         auto evalDb = [&] (int i) -> float
         {
             // Double product — matches DSP cascade; float product of 6–8 stages
             // can underflow and paint a vanished band on the graph.
             double mag = 1.0;
-            const double freq = (double) frequencies[(size_t) i];
+            const double freq = juce::jlimit (fMinEval, fMaxEval, (double) frequencies[(size_t) i]);
 
             for (auto* coeffs : stages)
                 if (coeffs != nullptr)

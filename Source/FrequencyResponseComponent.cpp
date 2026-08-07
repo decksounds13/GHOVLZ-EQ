@@ -883,9 +883,15 @@ void FrequencyResponseComponent::fillMagnitudeResponse (const juce::dsp::IIR::Co
 
     const int stride = juce::jmax (1, step);
 
+    const double fMinEval = 2.0;
+    const double fMaxEval = (sr > 0.0) ? sr * 0.499 : 20000.0;
+
     auto evalDb = [&] (int i) -> float
     {
-        const float mag = (float) coeffs->getMagnitudeForFrequency ((double) frequencies[(size_t) i], sr);
+        const double freq = juce::jlimit (fMinEval, fMaxEval, (double) frequencies[(size_t) i]);
+        const float mag = (float) coeffs->getMagnitudeForFrequency (freq, sr);
+        if (! std::isfinite (mag) || mag <= 0.0f)
+            return -100.0f;
         return juce::Decibels::gainToDecibels (mag, -100.0f);
     };
 
@@ -6666,15 +6672,20 @@ juce::Path FrequencyResponseComponent::intelligentDownsample(
     float movingAverageY = dbToY (compositeResponse[0], (float) h);
     constexpr float adaptiveThreshold = 0.2f;
 
+    // Dense vertices in the outer ~8% so band-shelf asymptotes / residual
+    // return don't get adaptive-skipped into a diagonal "pop" at the plot edges.
+    const int edgeDense = juce::jmax (4, numPoints / 12);
+
     for (int i = 1; i < numPoints; ++i)
     {
         const float newY = dbToY (compositeResponse[(size_t) i], (float) h);
         movingAverageY = 0.8f * movingAverageY + 0.2f * newY;
         const float error = std::abs (movingAverageY - newY);
 
+        const bool nearEdge = (i < edgeDense) || (i >= numPoints - edgeDense);
         // Keep occasional flat-region samples so shelf asymptotes stay attached
         // to the graph edges instead of being optimized away.
-        if (error > adaptiveThreshold || (i % 24) == 0)
+        if (nearEdge || error > adaptiveThreshold || (i % 24) == 0)
         {
             simplifiedPath.lineTo ((float) i, newY);
             movingAverageY = newY;
@@ -6858,10 +6869,14 @@ juce::Path FrequencyResponseComponent::closeShelfFillPath (const juce::Path& cur
     if (curvePath.isEmpty())
         return {};
 
+    // Close to the 0 dB centreline with vertical drops at both ends.
+    // (Previously only the right end dropped vertically; a non-zero left
+    // asymptote then closed with a diagonal that read as an edge "pop".)
     juce::Path fillPath (curvePath);
     const auto end = fillPath.getCurrentPosition();
     const float midY = height * 0.5f;
-    fillPath.lineTo (end.x, midY);
+    const float endX = end.x;
+    fillPath.lineTo (endX, midY);
     fillPath.lineTo (0.0f, midY);
     fillPath.closeSubPath();
     return fillPath;
