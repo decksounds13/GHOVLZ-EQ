@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "FilterSlope.h"
 #include "EqBand.h"
+#include "FilterBandShelf.h"
 #include <cmath>
 
 /** Filter models for all eight Band 1–8 slots (HP/LP inclusive). */
@@ -157,44 +158,15 @@ namespace FilterType
     }
 
     /**
-        Band shelf (flat-top plateau): dual high shelves at f_lo (+G) and f_hi (−G).
-
-        Q → bandwidth mapping is musical (not 1/Q extreme):
-          Q ≈ 0.5 → ~2.5 oct  |  Q ≈ 1 → ~1.4 oct  |  Q ≈ 3 → ~0.75 oct
-
-        Each edge is two cascaded half-gain shelves so transitions stay steep enough
-        that moderate widths keep a flat top (single soft shelves looked like bells
-        when Q was high / width narrow).
+        Band shelf (Holters–Zölzer Tier C): higher-order Butterworth low-shelf
+        prototype → LP→BP spectral transform → bilinear → SOS cascade.
+        Independent centre / bandwidth (Q) / gain with a true flat plateau.
+        See FilterBandShelf.h.
     */
     inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
         makeBandShelfStages (double sampleRate, float frequency, float q, float gainDb)
     {
-        juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> stages;
-        const float f = juce::jlimit (20.0f, 20000.0f, frequency);
-        const float safeQ = juce::jmax (0.15f, q);
-
-        // Logarithmic-ish map: low Q = wider, high Q = narrower, but never "bell-narrow"
-        // without enough separation for a flat top (~0.65 oct minimum).
-        // bwOct ≈ 1.25 / sqrt(Q)  →  Q0.3≈2.3, Q1≈1.25, Q4≈0.63, Q10≈0.40→clamped
-        const float bwOct = juce::jlimit (0.65f, 3.5f, 1.25f / std::sqrt (safeQ));
-        const float halfRatio = std::pow (2.0f, 0.5f * bwOct);
-        const float fLo = juce::jlimit (20.0f, 20000.0f, f / halfRatio);
-        const float fHi = juce::jlimit (20.0f, 20000.0f, f * halfRatio);
-
-        // Steeper edges when the plateau is narrower (keep flat top usable).
-        // Shelf-section Q: higher → tighter corner (still musical).
-        const float edgeQ = juce::jmap (bwOct, 0.65f, 3.5f, 1.05f, 0.55f);
-
-        // Split ±gain across two stages per edge → ~2× steeper transition, same total gain.
-        const float halfDb = 0.5f * gainDb;
-        const float gHalf = juce::Decibels::decibelsToGain (halfDb);
-        const float gHalfInv = juce::Decibels::decibelsToGain (-halfDb);
-
-        stages.add (juce::dsp::IIR::Coefficients<float>::makeHighShelf (sampleRate, fLo, edgeQ, gHalf));
-        stages.add (juce::dsp::IIR::Coefficients<float>::makeHighShelf (sampleRate, fLo, edgeQ, gHalf));
-        stages.add (juce::dsp::IIR::Coefficients<float>::makeHighShelf (sampleRate, fHi, edgeQ, gHalfInv));
-        stages.add (juce::dsp::IIR::Coefficients<float>::makeHighShelf (sampleRate, fHi, edgeQ, gHalfInv));
-        return stages;
+        return FilterBandShelf::makeStages (sampleRate, frequency, q, gainDb);
     }
 
     /**
