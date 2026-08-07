@@ -1747,10 +1747,11 @@ void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
     if (undoManager != nullptr)
         undoManager->beginNewTransaction ("Filter type");
 
-    // HP / LP / notch / band-pass / all-pass: no gain. Flat tilt: no Q (fixed gentle shelves).
+    // HP / LP / notch / band-pass / all-pass: no gain.
+    // Flat tilt / Baxandall: fixed gentle Q (knob hidden). Band shelf Q = plateau width.
     const int type = customComboBox.getSelectedItemIndex();
     const bool showGain = FilterType::usesGain (type);
-    const bool showQ = (type != FilterType::flatTilt);
+    const bool showQ = ! FilterType::hidesQ (type);
     rotaryImageKnobForOptionBox2.setVisible (showGain);
     gainLabel.setVisible (showGain);
     rotaryImageKnobForOptionBox3.setVisible (showQ);
