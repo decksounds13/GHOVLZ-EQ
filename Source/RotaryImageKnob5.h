@@ -1,10 +1,11 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "ControlReset.h"
 #include "RotaryImageKnobLookAndFeel5.h"
 #include "Menu/SharedResources.h"
 
-class RotaryImageKnob5 : public juce::Slider
+class RotaryImageKnob5 : public ResettableSlider
 {
 public:
     RotaryImageKnob5();

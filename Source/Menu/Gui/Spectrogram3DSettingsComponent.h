@@ -10,6 +10,8 @@
 #include "../../Spectrogram3DComponent.h"
 #include "../../RotaryImageKnob1.h"
 #include "ParticleModCurveEditor.h"
+#include "ParticleForceStackComponent.h"
+#include "CustomTwoValueSliderLookAndFeel.h"
 #include "../SharedResources.h"
 
 class Spectrogram3DSettingsComponent : public juce::Component,
@@ -25,7 +27,7 @@ public:
     void resized() override;
 
     int getPreferredContentHeight() const { return content.getPreferredHeight(); }
-    /** Wider when particle mod matrix is open (Menu grows to fit). */
+    /** Content lays out into the Settings panel width — does not force the frame wider. */
     int getPreferredContentWidth() const { return content.getPreferredWidth(); }
     /** Sync Look toggles from Main before Menu measures scroll height. */
     void syncFromMain() { content.syncControlsFromMain(); }
@@ -54,6 +56,10 @@ private:
 
     private:
         void styleSlider (juce::Slider& slider);
+        /** Drag stays within setRange; typed text can set values outside range (stored as actual). */
+        void wireUncappedTextEntry (juce::Slider& slider);
+        static double getSliderActual (const juce::Slider& slider);
+        static void setSliderActual (juce::Slider& slider, double actual);
         void styleLabel (juce::Label& label);
         void styleToggle (juce::ToggleButton& toggle);
         void styleCombo (juce::ComboBox& combo);
@@ -81,6 +87,8 @@ private:
         juce::AudioProcessorValueTreeState& treeState;
         ColourRampBank& colourRamps;
         ComboBoxLookAndFeel comboLookAndFeel;
+        /** Two-thumb range slider chrome (particle mod matrix). */
+        CustomTwoValueSliderLookAndFeel particleRangeLnF;
 
         juce::Label titleLabel;
 
@@ -267,12 +275,20 @@ private:
         juce::Slider sssMaxThickSlider;
 
         juce::ToggleButton particleToggle { "Particle mode" };
+        juce::Label particleBindingLabel;
+        juce::ComboBox particleBindingCombo;
         juce::Label particleEmitModeLabel;
         juce::ComboBox particleEmitModeCombo;
         juce::Label particleEmissionLabel;
         juce::Slider particleEmissionSlider;
-        juce::Label particleSpeedLabel;
-        juce::Slider particleSpeedSlider;
+        juce::Label particleSpawnJitterLabel;
+        juce::Slider particleSpawnJitterSlider;
+        juce::Label particleInitVelXLabel;
+        juce::Slider particleInitVelXSlider;
+        juce::Label particleInitVelYLabel;
+        juce::Slider particleInitVelYSlider;
+        juce::Label particleInitVelZLabel;
+        juce::Slider particleInitVelZSlider;
         juce::Label particleVelRandomLabel;
         juce::Slider particleVelRandomSlider;
         juce::Label particleLifespanLabel;
@@ -281,7 +297,7 @@ private:
         juce::Slider particleLifespanRandomSlider;
         juce::Label particleSizeLabel;
         juce::Slider particleSizeSlider;
-        juce::ToggleButton particleEmissiveToggle { "Emissive particles" };
+        juce::ToggleButton particleEmissiveToggle { "Unlit emissive only" };
         juce::Label particleEmissiveStrLabel;
         juce::Slider particleEmissiveStrSlider;
         juce::Label particleRoughLabel;
@@ -291,23 +307,62 @@ private:
         juce::Label particleSpecLabel;
         juce::Slider particleSpecSlider;
 
+        juce::Label particleMeshLabel;
+        juce::ComboBox particleMeshCombo;
+        juce::Label particleInitRotXLabel;
+        juce::Slider particleInitRotXSlider;
+        juce::Label particleInitRotYLabel;
+        juce::Slider particleInitRotYSlider;
+        juce::Label particleInitRotZLabel;
+        juce::Slider particleInitRotZSlider;
+        juce::Label particleInitRotRndLabel;
+        juce::Slider particleInitRotRndSlider;
+
+        juce::ToggleButton particleForcesToggle { "Enable forces" };
+        juce::ToggleButton particleWaterfallLockToggle { "Waterfall lock X" };
+        std::unique_ptr<ParticleForceStackComponent> particleForceStack;
+
         juce::Label particleModLabel;
         juce::Label particleModHintLabel;
+        juce::Label particleModHdrOn, particleModHdrSrc, particleModHdrThr;
+        juce::Label particleModHdrDst, particleModHdrOp, particleModHdrCurve;
+        juce::Label particleModHdrRange, particleModHdrInv, particleModHdrAmt;
         struct ParticleModRow
         {
             juce::ToggleButton enable { "On" };
             juce::ComboBox source;
             juce::ToggleButton thresholdToggle { "Thr" };
-            juce::Slider thresholdSlider;       // vertical
+            juce::Slider thresholdSlider;
             RotaryImageKnob1 attackKnob;
             RotaryImageKnob1 releaseKnob;
             juce::ComboBox dest;
             juce::ComboBox op;
             ParticleModCurveEditor curve;
+            /** Single dual-thumb range (min←→max arrows), not two separate sliders. */
+            juce::Slider rangeSlider;
+            juce::Label rangeMinReadout, rangeMaxReadout; // 3 d.p. labels beside the bar
+            juce::ToggleButton invertToggle { "Inv" };
             juce::Slider amount;
             juce::Slider constant;
         };
         std::array<ParticleModRow, kParticleModSlotCount> particleModRows;
+
+        juce::Label particleSourcesLabel;
+        struct RandomSourceRow
+        {
+            juce::Label title;
+            juce::Label dimLabel;
+            juce::ComboBox dimCombo;
+            juce::Label modeLabel;
+            juce::ComboBox modeCombo;
+            juce::Label minLabel;
+            juce::Slider minSlider;
+            juce::Label maxLabel;
+            juce::Slider maxSlider;
+            juce::Label smoothLabel;
+            juce::Slider smoothSlider;
+        };
+        std::array<RandomSourceRow, kParticleRandomSourceCount> particleRandomRows;
 
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;

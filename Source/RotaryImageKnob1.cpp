@@ -19,6 +19,7 @@ RotaryImageKnob1::RotaryImageKnob1()
     setTextBoxStyle(Slider::TextBoxBelow, false, 45, 20);
     setTextBoxIsEditable(true);
     setRange(0.36, 0.80, .01);
+    setControlDefault (0.36); // low end of factory range
 
     float startAngleDegrees = 40.0;
     float endAngleDegrees = 320.0;

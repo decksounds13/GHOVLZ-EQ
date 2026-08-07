@@ -63,6 +63,12 @@ public:
     /** Call when an active tab's preferred height/width changes (look toggles, gradients, …). */
     void notifyContentHeightChanged();
 
+    /**
+        Keep border-resize inside the parent so left-edge drags cannot shove the
+        right edge off-screen (and vice versa). Call after the panel is parented / laid out.
+    */
+    void setResizeLimitsWithinParent (juce::Rectangle<int> parentLocalBounds) noexcept;
+
     /** Invoked by the title-bar close (X) control. Host should hide the Settings panel. */
     std::function<void()> onCloseRequest;
 

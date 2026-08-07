@@ -4,6 +4,7 @@
 #include "ColourRamp/Spec3DRampSequence.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 #include "Spec3DParticleSystem.h"
+#include "ParticleForceModule.h"
 #include <atomic>
 #include <vector>
 #include <cstdint>
@@ -279,6 +280,25 @@ public:
     float getBloomThreshold() const noexcept { return bloomThreshold; }
 
     /**
+        Soft-path camera motion blur (UE5-style): reproject depth with previous
+        view-projection → screen velocity → reconstruction gather along the vector.
+        Amount ≈ shutter / exposure fraction; max blur clamps streak length in px.
+    */
+    void setMotionBlurEnabled (bool shouldEnable) noexcept;
+    bool isMotionBlurEnabled() const noexcept { return motionBlurEnabled; }
+    void setMotionBlurAmount (float amount01) noexcept;
+    float getMotionBlurAmount() const noexcept { return motionBlurAmount; }
+    void setMotionBlurMax (float maxPixels) noexcept;
+    float getMotionBlurMax() const noexcept { return motionBlurMax; }
+    void setMotionBlurQuality (ShadowQuality q) noexcept;
+    ShadowQuality getMotionBlurQuality() const noexcept { return motionBlurQuality; }
+
+    static constexpr float kMotionBlurAmountDefault = 0.55f;
+    static constexpr float kMotionBlurMaxDefault = 32.0f;
+    static constexpr float kMotionBlurMaxMin = 4.0f;
+    static constexpr float kMotionBlurMaxMax = 96.0f;
+
+    /**
         Soft-path post DOF (EEVEE / Marmoset Post Effect style): thin-lens CoC +
         disc gather. Focus distance (view Z) + aperture (higher = more blur) +
         sample quality.
@@ -506,33 +526,40 @@ public:
     void recolourVertexColoursOnly() noexcept;
 
     // ── Particle mode (modular; default off — zero cost until enabled) ─────────
-    /** Slice = all bins fire together (waterfall columns). Continuous = random bins for even fill. */
+    /** Slice = per-bin rates (grid-ish). Continuous = random playhead samples (default). */
     enum class ParticleEmitMode : int { slice = 0, continuous = 1 };
 
     void setParticleModeEnabled (bool shouldEnable) noexcept;
     bool isParticleModeEnabled() const noexcept { return particleModeEnabled; }
     void setParticleEmitMode (ParticleEmitMode mode) noexcept;
     ParticleEmitMode getParticleEmitMode() const noexcept { return particleEmitMode; }
-    /** Emission rate scale 0..5 (higher = more particles). */
+    void setParticleBindingMode (ParticleBindingMode mode) noexcept;
+    ParticleBindingMode getParticleBindingMode() const noexcept { return particleBindingMode; }
     void setParticleEmission (float amount) noexcept;
     float getParticleEmission() const noexcept { return particleEmission; }
+    void setParticleSpawnJitter (float amount) noexcept;
+    float getParticleSpawnJitter() const noexcept { return particleSpawnJitter; }
 
     static constexpr int getParticleModSlotCount() noexcept { return kParticleModSlotCount; }
     ParticleModSlot getParticleModSlot (int index) const noexcept;
     void setParticleModSlot (int index, const ParticleModSlot& slot) noexcept;
-    const std::array<ParticleModSlot, kParticleModSlotCount>& getParticleModSlots() const noexcept
-    {
-        return particleModSlots;
-    }
-    void setParticleRiseSpeed (float unitsPerSec) noexcept;
-    float getParticleRiseSpeed() const noexcept { return particleRiseSpeed; }
-    /** 0 = fixed rise speed; 1 = ±100% random at spawn. */
+    ParticleRandomSource getParticleRandomSource (int index) const noexcept;
+    void setParticleRandomSource (int index, const ParticleRandomSource& src) noexcept;
+
+    /** Initial linear velocity (world units/s) at spawn — Vec3. */
+    void setParticleInitVelX (float unitsPerSec) noexcept;
+    void setParticleInitVelY (float unitsPerSec) noexcept;
+    void setParticleInitVelZ (float unitsPerSec) noexcept;
+    float getParticleInitVelX() const noexcept { return particleInitVelX; }
+    float getParticleInitVelY() const noexcept { return particleInitVelY; }
+    float getParticleInitVelZ() const noexcept { return particleInitVelZ; }
+    /** @deprecated Prefer setParticleInitVelY — kept for prefs / older call sites. */
+    void setParticleRiseSpeed (float unitsPerSec) noexcept { setParticleInitVelY (unitsPerSec); }
+    float getParticleRiseSpeed() const noexcept { return particleInitVelY; }
     void setParticleVelRandom (float amount01) noexcept;
     float getParticleVelRandom() const noexcept { return particleVelRandom; }
-    /** Seconds; 0 = indefinite (live until scrolled off history). */
     void setParticleLifespan (float seconds) noexcept;
     float getParticleLifespan() const noexcept { return particleLifespan; }
-    /** 0 = fixed lifespan; 1 = ±100% random at spawn (ignored when lifespan is 0). */
     void setParticleLifespanRandom (float amount01) noexcept;
     float getParticleLifespanRandom() const noexcept { return particleLifespanRandom; }
     void setParticleSize (float worldSize) noexcept;
@@ -547,6 +574,32 @@ public:
     float getParticleMetalness() const noexcept { return particleMetalness; }
     void setParticleSpecular (float amount01) noexcept;
     float getParticleSpecular() const noexcept { return particleSpecular; }
+
+    // Forces stack (ordered modules; matrix can scale types)
+    void setParticleForcesEnabled (bool e) noexcept;
+    bool isParticleForcesEnabled() const noexcept { return particleForcesEnabled; }
+    void setParticleWaterfallLock (bool e) noexcept;
+    bool isParticleWaterfallLock() const noexcept { return particleWaterfallLock; }
+    int getParticleForceModuleCount() const noexcept { return (int) particleForceStack.size(); }
+    ParticleForceModule getParticleForceModule (int index) const noexcept;
+    void setParticleForceModule (int index, const ParticleForceModule& m) noexcept;
+    void addParticleForceModule (ParticleForceType type) noexcept;
+    void removeParticleForceModule (int index) noexcept;
+    void moveParticleForceModule (int from, int to) noexcept;
+    void clearParticleForceModules() noexcept;
+    void setParticleForceStack (std::vector<ParticleForceModule> stack) noexcept;
+    uint32_t nextParticleForceUid() noexcept { return ++particleForceUidSerial; }
+
+    void setParticleMeshShape (ParticleMeshShape s) noexcept;
+    ParticleMeshShape getParticleMeshShape() const noexcept { return particleMeshShape; }
+    void setParticleInitRotX (float deg) noexcept;
+    float getParticleInitRotX() const noexcept { return particleInitRotX; }
+    void setParticleInitRotY (float deg) noexcept;
+    float getParticleInitRotY() const noexcept { return particleInitRotY; }
+    void setParticleInitRotZ (float deg) noexcept;
+    float getParticleInitRotZ() const noexcept { return particleInitRotZ; }
+    void setParticleInitRotRandom (float amount01) noexcept;
+    float getParticleInitRotRandom() const noexcept { return particleInitRotRandom; }
 
     /** @deprecated Use getMeshHeight() — kept as alias for call sites expecting a constant. */
     static constexpr float kMeshHeight = kDefaultMeshHeight;
@@ -576,10 +629,15 @@ public:
     std::function<void()> onUserResized;
     std::function<void()> onUserMoved;
     std::function<void()> onDefaultViewChanged;
-    /** Append look-preset items (ids >= 100). */
+    /** Toggle OS-level F11 fullscreen (borderless desktop window). */
+    std::function<void()> onToggleFullscreen;
+    /** True while Spec3D is in OS fullscreen (for menu tick / label). */
+    std::function<bool()> isFullscreenQuery;
+    /** Append look-preset items (ids >= 100). Fullscreen uses id 20. */
     std::function<void (juce::PopupMenu&)> onAugmentContextMenu;
     /** Return true if result was handled. */
     std::function<bool (int)> onContextMenuResult;
+    static constexpr int kContextMenuFullscreenId = 20;
     /** Fired when turntable / zoom-oscillate settings change (persist prefs). */
     std::function<void()> onAutoRotateSettingsChanged;
     /** Fired when DOF focus is picked (Ctrl/Cmd+LMB) or otherwise changed with notify. */
@@ -597,12 +655,29 @@ public:
     const Spec3DRampSequence& getRampSequence() const noexcept { return rampSequence; }
     void setRampSequence (const Spec3DRampSequence& s) noexcept;
     float getRampTimelinePlayheadSec() const noexcept { return rampPlayheadSec; }
+    /** Seek ramp playhead (sequence seconds) and apply morph / lighting for that time. */
+    void setRampTimelinePlayheadSec (float sec) noexcept;
     void clearMorphRamp() noexcept;
+
+    /**
+        Thread-safe copy of the latest soft-composite image (empty if hard path or not ready).
+        Live UI only — prefer captureExportFrame for offline export.
+    */
+    juce::Image copySoftCompositeImage() const;
+
+    /**
+        Offline export: force soft FBO render at width x height (blocks on the GL thread)
+        and return an ARGB image. Invalid image if GL is unavailable.
+        Temporarily disables temporal SSGI history for a clean frame.
+    */
+    juce::Image captureExportFrame (int width, int height);
 
     /** Persist when timeline model is edited (not per playhead tick). */
     std::function<void()> onRampSequenceChanged;
     /** Open expanded floating timeline editor. */
     std::function<void()> onRequestRampTimelineExpand;
+    /** Offline export (region settings) — MainComponent runs Spec3DExportJob. */
+    std::function<void (const struct Spec3DExportSettings&)> onExportRegionOffline;
 
     juce::Rectangle<int> getFrameBounds() const noexcept { return getBounds(); }
     int getShadowPad() const noexcept;
@@ -647,6 +722,7 @@ private:
         void applyBackgroundTransparency() noexcept;
         void reattachWithCurrentFormat();
         void triggerRedraw() { if (openGLContext.isAttached()) openGLContext.triggerRepaint(); }
+        juce::OpenGLContext& getOpenGLContext() noexcept { return openGLContext; }
         bool isGlReady() const noexcept { return glReady; }
         bool hasContextFailed() const noexcept { return contextFailed; }
         void markSoftContentDirty() noexcept { softContentDirty = true; }
@@ -656,6 +732,11 @@ private:
             ssgiHistoryValid = false;
             ssgiMomentsValid = false;
         }
+        /**
+            Force soft composite at exact pixel size and copy into outImage (ARGB).
+            Must be called on the OpenGL thread (or via executeOnGLThread).
+        */
+        bool captureSoftFrameOnGlThread (int width, int height, juce::Image& outImage);
         bool projectWorldToNdc (float wx, float wy, float wz,
                                 float& ndcX, float& ndcY, float& ndcZ) const;
 
@@ -831,6 +912,9 @@ private:
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postParamUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postResolutionUniform;
         std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postInvProjUniform;
+        /** Mode 20 motion blur: current inv(view), previous viewProj. */
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postMotionInvViewUniform;
+        std::unique_ptr<juce::OpenGLShaderProgram::Uniform> postMotionPrevVpUniform;
 
         std::unique_ptr<juce::OpenGLShaderProgram> normalsShader;
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> normalsPositionAttrib;
@@ -924,6 +1008,14 @@ private:
         int ssgiNormalsH = 0;
         bool ssgiHistoryValid = false;
         bool ssgiMomentsValid = false;
+        /** When > 0, getViewPixelBounds uses these dims (export override). */
+        int exportForceW = 0;
+        int exportForceH = 0;
+        /** Previous frame view-projection for UE-style camera motion blur. */
+        float motionPrevVp[16] = {
+            1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
+        };
+        bool motionPrevVpValid = false;
         unsigned int postFrameIndex = 0;
         double floorGridSr = 0.0;
         bool floorGridLog = true;
@@ -972,7 +1064,8 @@ private:
     bool usesSoftComposite() const noexcept;
     bool needsPostEffects() const noexcept
     {
-        return bloomEnabled || dofEnabled || ssgiEnabled || ssrEnabled || tonemapEnabled;
+        return bloomEnabled || dofEnabled || ssgiEnabled || ssrEnabled
+            || tonemapEnabled || motionBlurEnabled;
     }
     bool needsAdvancedSsgi() const noexcept
     {
@@ -1041,23 +1134,38 @@ private:
 
     // Particle mode (default off — Spec3DParticleSystem allocated lazily on enable)
     bool particleModeEnabled = false;
-    ParticleEmitMode particleEmitMode = ParticleEmitMode::slice;
+    ParticleEmitMode particleEmitMode = ParticleEmitMode::continuous;
+    ParticleBindingMode particleBindingMode = ParticleBindingMode::spectrogramTrail;
     float particleEmission = 0.5f; // 0..5
-    float particleRiseSpeed = 1.0f;
+    /** World-space spawn scatter. Default > 0 so particles don't stack on exact mesh points. */
+    float particleSpawnJitter = 0.035f;
+    float particleInitVelX = 0.0f;
+    float particleInitVelY = 1.0f; // was "rise speed"
+    float particleInitVelZ = 0.0f;
     float particleVelRandom = 0.0f;
-    float particleLifespan = 0.0f;       // 0 = indefinite
+    float particleLifespan = 0.0f;
     float particleLifespanRandom = 0.0f;
     float particleSize = 0.008f;
-    bool particleEmissiveEnabled = true;
-    float particleEmissiveStrength = 1.0f;
+    /** When true: unlit emissive-only (skip PBR). When false: lit PBR + additive emissive. */
+    bool particleEmissiveEnabled = false;
+    float particleEmissiveStrength = 0.0f;
     float particleRoughness = 0.45f;
     float particleMetalness = 0.0f;
     float particleSpecular = 0.35f;
+    bool particleForcesEnabled = false;
+    bool particleWaterfallLock = true;
+    std::vector<ParticleForceModule> particleForceStack;
+    uint32_t particleForceUidSerial = 1;
+    ParticleMeshShape particleMeshShape = ParticleMeshShape::sphere;
+    float particleInitRotX = 0.0f, particleInitRotY = 0.0f, particleInitRotZ = 0.0f;
+    float particleInitRotRandom = 0.0f; // 0..1 scales random euler at spawn
     std::array<ParticleModSlot, kParticleModSlotCount> particleModSlots {};
+    std::array<ParticleRandomSource, kParticleRandomSourceCount> particleRandomSources {};
     std::unique_ptr<Spec3DParticleSystem> particleSystem;
     double particleLastUpdateSec = 0.0;
     void ensureParticleSystem();
     void initDefaultParticleModSlots() noexcept;
+    void initDefaultParticleForceStack() noexcept;
 
     bool lightingEnabled = false;
     float lightingAmount = 0.70f;
@@ -1128,6 +1236,10 @@ private:
     bool bloomEnabled = false;
     float bloomStrength = 0.45f;
     float bloomThreshold = 0.62f;
+    bool motionBlurEnabled = false;
+    float motionBlurAmount = kMotionBlurAmountDefault;
+    float motionBlurMax = kMotionBlurMaxDefault;
+    ShadowQuality motionBlurQuality = ShadowQuality::medium;
     bool dofEnabled = false;
     float dofFocusDistance = kDofFocusDefault;
     float dofFStop = kDofFStopDefault;

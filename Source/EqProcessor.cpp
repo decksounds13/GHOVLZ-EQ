@@ -2381,6 +2381,9 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     this->sampleRate = sampleRate;
     m_analyser.setSampleRate (sampleRate);
+#if SPEC3D_EXPORT_ENABLED
+    exportAudioRing.prepare (sampleRate);
+#endif
     if (auto* osc = oscilloscopeTarget.load (std::memory_order_acquire))
         osc->prepare (sampleRate);
     if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
@@ -4321,6 +4324,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             hist->pushSamples (left, right, mainBuffer.getNumSamples());
         }
     }
+
+#if SPEC3D_EXPORT_ENABLED
+    // Spec3D offline export: always capture main-bus post output (DAW audio).
+    if (mainBuffer.getNumChannels() > 0 && mainBuffer.getNumSamples() > 0)
+    {
+        const auto* left = mainBuffer.getReadPointer (0);
+        const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+        exportAudioRing.push (left, right, mainBuffer.getNumSamples());
+    }
+#endif
 }
 
 

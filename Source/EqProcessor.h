@@ -24,6 +24,10 @@
 #include "ShapeMod.h"
 #include "EqBand.h"
 #include "Menu/SharedResources.h"
+#include "Export/Spec3DExportSandbox.h"
+#if SPEC3D_EXPORT_ENABLED
+#include "Export/ExportAudioRingBuffer.h"
+#endif
 
 class FrequencyResponseComponent;
 class OscilloscopeComponent;
@@ -84,6 +88,12 @@ public:
     /** Optional level histogram (Scope UI). Audio thread pushes when non-null and enabled. */
     void setHistogramTarget (class HistogramComponent* target) noexcept;
     HistogramComponent* getHistogramTarget() const noexcept;
+
+#if SPEC3D_EXPORT_ENABLED
+    /** Continuous plugin output capture for Spec3D offline video export (DAW audio). */
+    ExportAudioRingBuffer& getExportAudioRing() noexcept { return exportAudioRing; }
+    const ExportAudioRingBuffer& getExportAudioRing() const noexcept { return exportAudioRing; }
+#endif
 
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     const juce::UndoManager& getUndoManager() const noexcept { return undoManager; }
@@ -572,6 +582,10 @@ private:
     std::atomic<LoudnessComponent*> loudnessTarget { nullptr };
     std::atomic<StereogramComponent*> stereogramTarget { nullptr };
     std::atomic<HistogramComponent*> histogramTarget { nullptr };
+
+#if SPEC3D_EXPORT_ENABLED
+    ExportAudioRingBuffer exportAudioRing;
+#endif
 
     std::atomic<bool> ecoMode { false };
     std::atomic<bool> scopeMode { false };

@@ -1,5 +1,7 @@
 #include "Spectrogram3DComponent.h"
 #include "Spec3DParticleSystem.h"
+#include <utility>
+#include <cmath>
 #include "SpectrogramComponent.h"
 #include "Menu/SharedResources.h"
 #include "ComboBoxLookAndFeel.h"
@@ -2384,6 +2386,10 @@ void Spectrogram3DComponent::GlHost::ensureLabelAtlas()
 
 juce::Rectangle<int> Spectrogram3DComponent::GlHost::getViewPixelBounds() const noexcept
 {
+    // Offline export may force exact pixel size (no live 1280 cap).
+    if (exportForceW > 0 && exportForceH > 0)
+        return { 0, 0, exportForceW, exportForceH };
+
     // Soft / docked-FBO: render at the framed view size (peer is a tiny context keeper).
     // Hard HWND: match this component's pixel size.
     const auto logical = owner.usesSoftComposite() ? owner.getGlViewLocal()
@@ -2392,7 +2398,7 @@ juce::Rectangle<int> Spectrogram3DComponent::GlHost::getViewPixelBounds() const 
     int w = juce::jmax (1, juce::roundToInt ((float) logical.getWidth() * scale));
     int h = juce::jmax (1, juce::roundToInt ((float) logical.getHeight() * scale));
 
-    // Cap soft-mode readback cost.
+    // Cap soft-mode readback cost for live UI.
     constexpr int kMaxDim = 1280;
     const int maxSide = juce::jmax (w, h);
     if (owner.usesSoftComposite() && maxSide > kMaxDim)
@@ -2403,6 +2409,42 @@ juce::Rectangle<int> Spectrogram3DComponent::GlHost::getViewPixelBounds() const 
     }
 
     return { 0, 0, w, h };
+}
+
+bool Spectrogram3DComponent::GlHost::captureSoftFrameOnGlThread (int width, int height, juce::Image& outImage)
+{
+    if (! glReady || ! openGLContext.isAttached())
+        return false;
+
+    width = juce::jlimit (16, 7680, width);
+    height = juce::jlimit (16, 4320, height);
+
+    exportForceW = width;
+    exportForceH = height;
+    softContentDirty = true;
+    // Fresh temporal history so export frames are not smeared by live SSGI.
+    ssgiHistoryValid = false;
+    ssgiMomentsValid = false;
+
+    // Soft path is required for FBO readback.
+    const bool wasSoft = owner.usesSoftComposite();
+    juce::ignoreUnused (wasSoft);
+
+    renderSoftComposite();
+
+    exportForceW = 0;
+    exportForceH = 0;
+
+    const juce::ScopedLock sl (owner.softImageLock);
+    if (! owner.softCompositeImage.isValid())
+        return false;
+
+    outImage = owner.softCompositeImage.createCopy();
+    if (! outImage.isValid())
+        return false;
+    if (outImage.getWidth() != width || outImage.getHeight() != height)
+        outImage = outImage.rescaled (width, height);
+    return outImage.isValid();
 }
 
 juce::Matrix3D<float> Spectrogram3DComponent::GlHost::getProjectionMatrix() const
@@ -5246,6 +5288,7 @@ Spectrogram3DComponent::Spectrogram3DComponent()
     defaultCamera = getFactoryCameraState();
     camera = defaultCamera;
     initDefaultParticleModSlots();
+    initDefaultParticleForceStack();
     applyChromeMode();
 }
 
@@ -5477,12 +5520,29 @@ void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcep
     markSoftContentDirty();
 }
 
+void Spectrogram3DComponent::setParticleBindingMode (ParticleBindingMode mode) noexcept
+{
+    if (mode != ParticleBindingMode::spectrogramTrail && mode != ParticleBindingMode::freeVisualizer)
+        mode = ParticleBindingMode::spectrogramTrail;
+    if (particleBindingMode == mode) return;
+    particleBindingMode = mode;
+    markSoftContentDirty();
+}
+
 void Spectrogram3DComponent::setParticleEmission (float amount) noexcept
 {
-    amount = juce::jlimit (0.0f, 5.0f, amount);
-    if (std::abs (particleEmission - amount) < 1.0e-4f) return;
+    // No artistic cap — extreme values allowed via manual text entry.
+    if (! std::isfinite (amount)) return;
+    if (std::abs (particleEmission - amount) < 1.0e-6f) return;
     particleEmission = amount;
     markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpawnJitter (float amount) noexcept
+{
+    if (! std::isfinite (amount)) return;
+    if (std::abs (particleSpawnJitter - amount) < 1.0e-6f) return;
+    particleSpawnJitter = amount;
 }
 
 void Spectrogram3DComponent::initDefaultParticleModSlots() noexcept
@@ -5523,50 +5583,187 @@ void Spectrogram3DComponent::setParticleModSlot (int index, const ParticleModSlo
 {
     if (! juce::isPositiveAndBelow (index, kParticleModSlotCount))
         return;
+    // No artistic clamps — manual extremes (amount, map range, constant, thr, A/R) must stick.
+    if (! std::isfinite (slot.amount) || ! std::isfinite (slot.constant)
+        || ! std::isfinite (slot.mapMin) || ! std::isfinite (slot.mapMax)
+        || ! std::isfinite (slot.curveShape) || ! std::isfinite (slot.threshold)
+        || ! std::isfinite (slot.attackMs) || ! std::isfinite (slot.releaseMs))
+        return;
     particleModSlots[(size_t) index] = slot;
-    auto& s = particleModSlots[(size_t) index];
-    s.amount = juce::jlimit (0.0f, 4.0f, slot.amount);
-    s.constant = juce::jlimit (0.0f, 1.0f, slot.constant);
-    s.curveShape = juce::jlimit (-1.0f, 1.0f, slot.curveShape);
-    s.threshold = juce::jlimit (0.0f, 1.0f, slot.threshold);
-    s.attackMs = juce::jlimit (0.1f, 2000.0f, slot.attackMs);
-    s.releaseMs = juce::jlimit (0.1f, 5000.0f, slot.releaseMs);
     markSoftContentDirty();
 }
 
-void Spectrogram3DComponent::setParticleRiseSpeed (float unitsPerSec) noexcept
+ParticleRandomSource Spectrogram3DComponent::getParticleRandomSource (int index) const noexcept
 {
-    unitsPerSec = juce::jlimit (0.05f, 5.0f, unitsPerSec);
-    if (std::abs (particleRiseSpeed - unitsPerSec) < 1.0e-4f) return;
-    particleRiseSpeed = unitsPerSec;
+    if (juce::isPositiveAndBelow (index, kParticleRandomSourceCount))
+        return particleRandomSources[(size_t) index];
+    return {};
+}
+
+void Spectrogram3DComponent::setParticleRandomSource (int index, const ParticleRandomSource& src) noexcept
+{
+    if (! juce::isPositiveAndBelow (index, kParticleRandomSourceCount))
+        return;
+    if (! std::isfinite (src.minV) || ! std::isfinite (src.maxV) || ! std::isfinite (src.smoothMs))
+        return;
+    particleRandomSources[(size_t) index] = src;
+}
+
+void Spectrogram3DComponent::setParticleForcesEnabled (bool e) noexcept
+{
+    if (particleForcesEnabled == e) return;
+    particleForcesEnabled = e;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleWaterfallLock (bool e) noexcept
+{
+    particleWaterfallLock = e;
+}
+
+void Spectrogram3DComponent::initDefaultParticleForceStack() noexcept
+{
+    particleForceStack.clear();
+    particleForceStack.push_back (makeDefaultForceModule (ParticleForceType::gravity, nextParticleForceUid()));
+    particleForceStack.back().enabled = false;
+    particleForceStack.back().p[0] = 0.0f;
+    particleForceStack.push_back (makeDefaultForceModule (ParticleForceType::drag, nextParticleForceUid()));
+    particleForceStack.back().enabled = false;
+    particleForceStack.back().p[0] = 0.0f;
+}
+
+ParticleForceModule Spectrogram3DComponent::getParticleForceModule (int index) const noexcept
+{
+    if (juce::isPositiveAndBelow (index, (int) particleForceStack.size()))
+        return particleForceStack[(size_t) index];
+    return {};
+}
+
+void Spectrogram3DComponent::setParticleForceModule (int index, const ParticleForceModule& m) noexcept
+{
+    if (! juce::isPositiveAndBelow (index, (int) particleForceStack.size()))
+        return;
+    particleForceStack[(size_t) index] = m;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::addParticleForceModule (ParticleForceType type) noexcept
+{
+    if ((int) particleForceStack.size() >= kParticleForceStackMax)
+        return;
+    particleForceStack.push_back (makeDefaultForceModule (type, nextParticleForceUid()));
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::removeParticleForceModule (int index) noexcept
+{
+    if (! juce::isPositiveAndBelow (index, (int) particleForceStack.size()))
+        return;
+    particleForceStack.erase (particleForceStack.begin() + index);
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::moveParticleForceModule (int from, int to) noexcept
+{
+    const int n = (int) particleForceStack.size();
+    if (! juce::isPositiveAndBelow (from, n) || ! juce::isPositiveAndBelow (to, n) || from == to)
+        return;
+    auto m = particleForceStack[(size_t) from];
+    particleForceStack.erase (particleForceStack.begin() + from);
+    particleForceStack.insert (particleForceStack.begin() + to, m);
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::clearParticleForceModules() noexcept
+{
+    particleForceStack.clear();
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleForceStack (std::vector<ParticleForceModule> stack) noexcept
+{
+    if (stack.size() > (size_t) kParticleForceStackMax)
+        stack.resize ((size_t) kParticleForceStackMax);
+    for (auto& m : stack)
+        if (m.uid == 0)
+            m.uid = nextParticleForceUid();
+    particleForceStack = std::move (stack);
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleMeshShape (ParticleMeshShape s) noexcept
+{
+    if (particleMeshShape == s) return;
+    particleMeshShape = s;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleInitRotX (float deg) noexcept
+{
+    if (std::isfinite (deg)) particleInitRotX = deg;
+}
+void Spectrogram3DComponent::setParticleInitRotY (float deg) noexcept
+{
+    if (std::isfinite (deg)) particleInitRotY = deg;
+}
+void Spectrogram3DComponent::setParticleInitRotZ (float deg) noexcept
+{
+    if (std::isfinite (deg)) particleInitRotZ = deg;
+}
+void Spectrogram3DComponent::setParticleInitRotRandom (float amount01) noexcept
+{
+    if (std::isfinite (amount01)) particleInitRotRandom = amount01;
+}
+
+void Spectrogram3DComponent::setParticleInitVelX (float unitsPerSec) noexcept
+{
+    if (! std::isfinite (unitsPerSec)) return;
+    if (std::abs (particleInitVelX - unitsPerSec) < 1.0e-6f) return;
+    particleInitVelX = unitsPerSec;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleInitVelY (float unitsPerSec) noexcept
+{
+    if (! std::isfinite (unitsPerSec)) return;
+    if (std::abs (particleInitVelY - unitsPerSec) < 1.0e-6f) return;
+    particleInitVelY = unitsPerSec;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleInitVelZ (float unitsPerSec) noexcept
+{
+    if (! std::isfinite (unitsPerSec)) return;
+    if (std::abs (particleInitVelZ - unitsPerSec) < 1.0e-6f) return;
+    particleInitVelZ = unitsPerSec;
     markSoftContentDirty();
 }
 
 void Spectrogram3DComponent::setParticleVelRandom (float amount01) noexcept
 {
-    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
-    if (std::abs (particleVelRandom - amount01) < 1.0e-4f) return;
+    if (! std::isfinite (amount01)) return;
+    if (std::abs (particleVelRandom - amount01) < 1.0e-6f) return;
     particleVelRandom = amount01;
 }
 
 void Spectrogram3DComponent::setParticleLifespan (float seconds) noexcept
 {
-    seconds = juce::jlimit (0.0f, 60.0f, seconds);
-    if (std::abs (particleLifespan - seconds) < 1.0e-4f) return;
+    if (! std::isfinite (seconds)) return;
+    if (std::abs (particleLifespan - seconds) < 1.0e-6f) return;
     particleLifespan = seconds;
 }
 
 void Spectrogram3DComponent::setParticleLifespanRandom (float amount01) noexcept
 {
-    amount01 = juce::jlimit (0.0f, 1.0f, amount01);
-    if (std::abs (particleLifespanRandom - amount01) < 1.0e-4f) return;
+    if (! std::isfinite (amount01)) return;
+    if (std::abs (particleLifespanRandom - amount01) < 1.0e-6f) return;
     particleLifespanRandom = amount01;
 }
 
 void Spectrogram3DComponent::setParticleSize (float worldSize) noexcept
 {
-    worldSize = juce::jlimit (0.001f, 0.08f, worldSize);
-    if (std::abs (particleSize - worldSize) < 1.0e-5f) return;
+    if (! std::isfinite (worldSize)) return;
+    if (std::abs (particleSize - worldSize) < 1.0e-7f) return;
     particleSize = worldSize;
     markSoftContentDirty();
 }
@@ -5580,32 +5777,36 @@ void Spectrogram3DComponent::setParticleEmissiveEnabled (bool shouldEnable) noex
 
 void Spectrogram3DComponent::setParticleEmissiveStrength (float amount) noexcept
 {
-    amount = juce::jlimit (0.0f, 4.0f, amount);
-    if (std::abs (particleEmissiveStrength - amount) < 1.0e-4f) return;
+    if (! std::isfinite (amount)) return;
+    amount = juce::jmax (0.0f, amount);
+    if (std::abs (particleEmissiveStrength - amount) < 1.0e-6f) return;
     particleEmissiveStrength = amount;
     markSoftContentDirty();
 }
 
 void Spectrogram3DComponent::setParticleRoughness (float amount01) noexcept
 {
+    if (! std::isfinite (amount01)) return;
     amount01 = juce::jlimit (0.04f, 1.0f, amount01);
-    if (std::abs (particleRoughness - amount01) < 1.0e-4f) return;
+    if (std::abs (particleRoughness - amount01) < 1.0e-6f) return;
     particleRoughness = amount01;
     markSoftContentDirty();
 }
 
 void Spectrogram3DComponent::setParticleMetalness (float amount01) noexcept
 {
+    if (! std::isfinite (amount01)) return;
     amount01 = juce::jlimit (0.0f, 1.0f, amount01);
-    if (std::abs (particleMetalness - amount01) < 1.0e-4f) return;
+    if (std::abs (particleMetalness - amount01) < 1.0e-6f) return;
     particleMetalness = amount01;
     markSoftContentDirty();
 }
 
 void Spectrogram3DComponent::setParticleSpecular (float amount01) noexcept
 {
+    if (! std::isfinite (amount01)) return;
     amount01 = juce::jlimit (0.0f, 1.0f, amount01);
-    if (std::abs (particleSpecular - amount01) < 1.0e-4f) return;
+    if (std::abs (particleSpecular - amount01) < 1.0e-6f) return;
     particleSpecular = amount01;
     markSoftContentDirty();
 }
@@ -7089,6 +7290,14 @@ bool Spectrogram3DComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
+    // F11 = editor-wide fullscreen toggle (also wired on MainComponent).
+    if (key == juce::KeyPress::F11Key)
+    {
+        if (onToggleFullscreen != nullptr)
+            onToggleFullscreen();
+        return true;
+    }
+
     if (key == juce::KeyPress ('f') || key == juce::KeyPress ('F'))
     {
         resetCamera();
@@ -8150,6 +8359,11 @@ namespace
                 if (owner.onRequestRampTimelineExpand != nullptr)
                     owner.onRequestRampTimelineExpand();
             };
+            timeline.onExportRegionOffline = [this] (const Spec3DExportSettings& s)
+            {
+                if (owner.onExportRegionOffline != nullptr)
+                    owner.onExportRegionOffline (s);
+            };
             addAndMakeVisible (timeline);
         }
 
@@ -8365,11 +8579,71 @@ void Spectrogram3DComponent::tickRampTimeline (float dt) noexcept
     applyMorphLightingAutomation();
 }
 
+void Spectrogram3DComponent::setRampTimelinePlayheadSec (float sec) noexcept
+{
+    const float len = juce::jmax (Spec3DRampSequence::kMinLengthSec, rampSequence.lengthSec);
+    float t = sec;
+    if (len > 1.0e-4f)
+    {
+        t = std::fmod (t, len);
+        if (t < 0.0f)
+            t += len;
+    }
+    else
+        t = 0.0f;
+
+    if (std::abs (rampPlayheadSec - t) < 1.0e-6f)
+    {
+        // Still re-apply morph so export seeks are deterministic.
+        applyMorphRampIfNeeded();
+        applyMorphLightingAutomation();
+        markSoftContentDirty();
+        return;
+    }
+
+    rampPlayheadSec = t;
+    // Force morph re-eval on seek (invalidate last-clip cache).
+    lastMorphClipIndex = -2;
+    lastMorphFadeStep = -2;
+    applyMorphRampIfNeeded();
+    applyMorphLightingAutomation();
+    markSoftContentDirty();
+}
+
+juce::Image Spectrogram3DComponent::copySoftCompositeImage() const
+{
+    const juce::ScopedLock sl (softImageLock);
+    if (! softCompositeImage.isValid())
+        return {};
+    return softCompositeImage.createCopy();
+}
+
+juce::Image Spectrogram3DComponent::captureExportFrame (int width, int height)
+{
+    if (glHost == nullptr || ! glHost->isGlReady())
+        return {};
+
+    juce::Image out;
+    // OpenGLContext::executeOnGLThread is the correct barrier for offline readback.
+    glHost->getOpenGLContext().executeOnGLThread (
+        [this, width, height, &out] (juce::OpenGLContext&)
+        {
+            glHost->captureSoftFrameOnGlThread (width, height, out);
+        },
+        true);
+    return out;
+}
+
 void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
 {
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addItem (1, "Freeze", true, waterfallFrozen);
+    menu.addSeparator();
+    const bool fs = (isFullscreenQuery != nullptr && isFullscreenQuery());
+    menu.addItem (kContextMenuFullscreenId,
+                  fs ? "Exit Fullscreen (F11)" : "Fullscreen (F11)",
+                  true, fs);
     menu.addSeparator();
     menu.addItem (2, "Save as Default View");
     menu.addItem (3, "Reset Camera (F)");
@@ -8404,6 +8678,12 @@ void Spectrogram3DComponent::showContextMenu (juce::Point<int> screenPos)
         {
             if (safe == nullptr || result <= 0)
                 return;
+            if (result == kContextMenuFullscreenId)
+            {
+                if (safe->onToggleFullscreen != nullptr)
+                    safe->onToggleFullscreen();
+                return;
+            }
             if (safe->onContextMenuResult != nullptr && safe->onContextMenuResult (result))
                 return;
             if (result == 1)

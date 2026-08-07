@@ -74,6 +74,14 @@
             file="Source/FramedFloatingScopeWindow.cpp"/>
       <FILE id="fRmSch" name="FramedFloatingScopeWindow.h" compile="0" resource="0"
             file="Source/FramedFloatingScopeWindow.h"/>
+      <GROUP name="Export" id="ExPrt1">
+        <FILE id="exp01" name="ExportAudioRingBuffer.h" compile="0" resource="0" file="Source/Export/ExportAudioRingBuffer.h"/>
+        <FILE id="exp02" name="Spec3DExportSettings.h" compile="0" resource="0" file="Source/Export/Spec3DExportSettings.h"/>
+        <FILE id="exp03" name="MediaFoundationMp4Writer.h" compile="0" resource="0" file="Source/Export/MediaFoundationMp4Writer.h"/>
+        <FILE id="exp04" name="MediaFoundationMp4Writer.cpp" compile="1" resource="0" file="Source/Export/MediaFoundationMp4Writer.cpp"/>
+        <FILE id="exp05" name="Spec3DExportJob.h" compile="0" resource="0" file="Source/Export/Spec3DExportJob.h"/>
+        <FILE id="exp06" name="Spec3DExportJob.cpp" compile="1" resource="0" file="Source/Export/Spec3DExportJob.cpp"/>
+      </GROUP>
       <GROUP name="ColourRamp" id="SCMpqC">
         <FILE id="cRamp01" name="GradientRamp.h" compile="0" resource="0" file="Source/ColourRamp/GradientRamp.h"/>
         <FILE id="cRamp02" name="ColourRampBank.cpp" compile="1" resource="0"

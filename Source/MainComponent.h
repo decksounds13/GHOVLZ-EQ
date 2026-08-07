@@ -155,6 +155,13 @@ public:
 
     void setSpec3DMode (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DMode() const noexcept { return spec3DEnabled; }
+    /**
+        True OS fullscreen for Spec3D (F11 / right-click): borderless top-level window
+        covering the monitor — not just the plugin editor.
+    */
+    void setSpec3DFullscreen (bool shouldEnable, bool notifyPrefs = true);
+    void toggleSpec3DFullscreen (bool notifyPrefs = true);
+    bool isSpec3DFullscreen() const noexcept { return spec3DFullscreen; }
     /** Restored floating Spec3D frame (component bounds, includes shadow pad). */
     bool hasSpec3DFrameBounds() const noexcept { return spec3DBoundsCustom; }
     int getSpec3DFramePreferredX() const noexcept { return spec3DPreferredX; }
@@ -412,10 +419,39 @@ public:
     bool isSpec3DParticleModeEnabled() const noexcept;
     void setSpec3DParticleEmitMode (int mode, bool notifyPrefs = true);
     int getSpec3DParticleEmitMode() const noexcept;
+    void setSpec3DParticleBindingMode (int mode, bool notifyPrefs = true);
+    int getSpec3DParticleBindingMode() const noexcept;
     void setSpec3DParticleEmission (float amount, bool notifyPrefs = true);
     float getSpec3DParticleEmission() const noexcept;
+    void setSpec3DParticleSpawnJitter (float amount, bool notifyPrefs = true);
+    float getSpec3DParticleSpawnJitter() const noexcept;
     void setSpec3DParticleModSlot (int index, const ParticleModSlot& slot, bool notifyPrefs = true);
     ParticleModSlot getSpec3DParticleModSlot (int index) const noexcept;
+    void setSpec3DParticleRandomSource (int index, const ParticleRandomSource& src, bool notifyPrefs = true);
+    ParticleRandomSource getSpec3DParticleRandomSource (int index) const noexcept;
+    void setSpec3DParticleForcesEnabled (bool e, bool notifyPrefs = true);
+    bool isSpec3DParticleForcesEnabled() const noexcept;
+    void setSpec3DParticleWaterfallLock (bool e, bool notifyPrefs = true);
+    bool isSpec3DParticleWaterfallLock() const noexcept;
+    void setSpec3DParticleForceStack (const std::vector<ParticleForceModule>& stack, bool notifyPrefs = true);
+    std::vector<ParticleForceModule> getSpec3DParticleForceStack() const;
+    void setSpec3DParticleMeshShape (int shape, bool notifyPrefs = true);
+    int getSpec3DParticleMeshShape() const noexcept;
+    void setSpec3DParticleInitRotX (float deg, bool notifyPrefs = true);
+    float getSpec3DParticleInitRotX() const noexcept;
+    void setSpec3DParticleInitRotY (float deg, bool notifyPrefs = true);
+    float getSpec3DParticleInitRotY() const noexcept;
+    void setSpec3DParticleInitRotZ (float deg, bool notifyPrefs = true);
+    float getSpec3DParticleInitRotZ() const noexcept;
+    void setSpec3DParticleInitRotRandom (float amount, bool notifyPrefs = true);
+    float getSpec3DParticleInitRotRandom() const noexcept;
+    void setSpec3DParticleInitVelX (float unitsPerSec, bool notifyPrefs = true);
+    void setSpec3DParticleInitVelY (float unitsPerSec, bool notifyPrefs = true);
+    void setSpec3DParticleInitVelZ (float unitsPerSec, bool notifyPrefs = true);
+    float getSpec3DParticleInitVelX() const noexcept;
+    float getSpec3DParticleInitVelY() const noexcept;
+    float getSpec3DParticleInitVelZ() const noexcept;
+    /** @deprecated Prefer setSpec3DParticleInitVelY. */
     void setSpec3DParticleRiseSpeed (float unitsPerSec, bool notifyPrefs = true);
     float getSpec3DParticleRiseSpeed() const noexcept;
     void setSpec3DParticleVelRandom (float amount01, bool notifyPrefs = true);
@@ -536,6 +572,9 @@ private:
     void syncSpec3DPresentation();
     void syncSpec3DAudioSidechainToProcessor() noexcept;
     void raiseSpecToolButtons();
+    void enterSpec3DOsFullscreen();
+    void exitSpec3DOsFullscreen();
+    void applySpec3DFullscreenLayout(); // keeps OS FS host sized; no-op when not FS
     /** Expanded Osc/Gon/Spec bounds — excludes piano strip when open. */
     juce::Rectangle<int> getExpandedScopeContentBounds() const;
     /** Bottom of top chrome (bypass/presets/settings) — GL must stay below this. */
@@ -831,7 +870,10 @@ private:
     FramedFloatingScopeWindow specFrame;
     Spectrogram3DComponent spectrogram3D;
     std::unique_ptr<class Spec3DRampTimelineWindow> rampTimelineWindow;
+    /** Only used when SPEC3D_EXPORT_ENABLED (see Export/Spec3DExportSandbox.h). */
+    std::unique_ptr<class Spec3DExportJob> activeSpec3DExport;
     void showRampTimelineWindow();
+    void startSpec3DRegionExport (const struct Spec3DExportSettings& settings);
 
     ScopeLevelMeterModule levelMeterIn;
     ScopeLevelMeterModule levelMeterOut;
@@ -1003,6 +1045,17 @@ private:
     bool gonFullGraph = false;
     bool specFullGraph = false;
     bool spec3DEnabled = false;
+    /** True when Spec3D is in OS-level F11 fullscreen (borderless desktop window). */
+    bool spec3DFullscreen = false;
+    /**
+        Top-level borderless host that owns the 3D view while fullscreen.
+        Exit chrome is a separate always-on-top desktop widget (native GL HWND
+        would cover sibling JUCE buttons inside the same window).
+    */
+    struct Spec3DOsFullscreenHost;
+    std::unique_ptr<Spec3DOsFullscreenHost> spec3DOsFullscreenHost;
+    struct Spec3DFsExitChrome;
+    std::unique_ptr<Spec3DFsExitChrome> spec3DFsExitChrome;
     /** User-dragged expanded 3D window size/position (component bounds, includes shadow pad). */
     bool spec3DBoundsCustom = false;
     int spec3DPreferredW = 0;

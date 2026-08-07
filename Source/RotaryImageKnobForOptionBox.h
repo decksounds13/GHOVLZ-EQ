@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "ControlReset.h"
 #include <functional>
 #include "MelatoninBlur/melatonin/shadows.h"
 #include "Menu/SharedResources.h"
@@ -11,7 +12,7 @@
 #include "RotaryImageKnobLookAndFeel5.h"
 #include "RotaryImageKnobLookAndFeel6.h"
 
-class RotaryImageKnobForOptionBox : public juce::Slider
+class RotaryImageKnobForOptionBox : public ResettableSlider
 {
 public:
     RotaryImageKnobForOptionBox();

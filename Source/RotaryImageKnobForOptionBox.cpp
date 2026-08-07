@@ -19,7 +19,9 @@ RotaryImageKnobForOptionBox::RotaryImageKnobForOptionBox()
     setTextBoxStyle(Slider::TextBoxBelow, false, 45, 20);
     setTextBoxIsEditable(true);
     setRange(0.36, 0.80, .01);
-    // Melatonin disc drop extends past local bounds; without this the blur is clipped away.
+    
+    setControlDefault (0.36);
+// Melatonin disc drop extends past local bounds; without this the blur is clipped away.
     setPaintingIsUnclipped (true);
 
     float startAngleDegrees = 40.0;
@@ -76,6 +78,8 @@ void RotaryImageKnobForOptionBox::paint(juce::Graphics& g)
 void RotaryImageKnobForOptionBox::setCustomRange(double newMin, double newMax, double newInterval)
 {
     setRange(newMin, newMax, newInterval);
+
+    setControlDefault (newMin);
 }
 
 void RotaryImageKnobForOptionBox::setCompactNoValueBox (bool shouldBeCompact)

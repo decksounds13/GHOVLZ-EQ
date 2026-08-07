@@ -1030,6 +1030,9 @@
     <ClCompile Include="..\..\Source\Spec3DParticleSystem.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.cpp">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp">
       <Filter>ParametricEqProject\Source\Assets</Filter>
     </ClCompile>
@@ -4790,6 +4793,12 @@
     </ClInclude>
     <ClInclude Include="..\..\Source\Spec3DParticleSystem.h">
       <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ParticleForceModule.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.h">
+      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h">
       <Filter>ParametricEqProject\Source</Filter>

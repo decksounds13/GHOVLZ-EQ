@@ -18,7 +18,9 @@ RotaryImageKnob5::RotaryImageKnob5()
     setTextBoxIsEditable(true);
     setRange(5000.0, 20000.0, 1.0);
 
-    float startAngleDegrees = 40.0;
+    
+    setControlDefault (5000.0);
+float startAngleDegrees = 40.0;
     float endAngleDegrees = 320.0;
     setRotaryParameters(juce::degreesToRadians(startAngleDegrees), juce::degreesToRadians(endAngleDegrees), true);
 
@@ -52,6 +54,8 @@ void RotaryImageKnob5::paint(juce::Graphics& g)
 void RotaryImageKnob5::setCustomRange(double newMin, double newMax, double newInterval)
 {
     setRange(newMin, newMax, newInterval);
+
+    setControlDefault (newMin);
 }
 
 void RotaryImageKnob5::mouseEnter(const juce::MouseEvent& event)

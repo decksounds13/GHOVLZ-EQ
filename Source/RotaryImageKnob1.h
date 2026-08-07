@@ -3,8 +3,9 @@
 #include <JuceHeader.h>
 #include "RotaryImageKnobLookAndFeel1.h"
 #include "Menu/SharedResources.h"
+#include "ControlReset.h"
 
-class RotaryImageKnob1 : public juce::Slider
+class RotaryImageKnob1 : public ResettableSlider
 {
 public:
     RotaryImageKnob1();

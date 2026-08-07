@@ -5,6 +5,7 @@
 #include "GradientStripEditor.h"
 #include "RampColorPickerPanel.h"
 #include "../Menu/SharedResources.h"
+#include "../Export/Spec3DExportSettings.h"
 #include <functional>
 
 class ColourRampBank;
@@ -31,6 +32,17 @@ public:
     std::function<void()> onSequenceChanged;
     std::function<void()> onRequestExpand;
     std::function<void()> onEnabledChanged;
+    /**
+        Offline export of the selected timeline region (video + DAW audio).
+        Host (MainComponent) runs Spec3DExportJob.
+    */
+    std::function<void (const Spec3DExportSettings&)> onExportRegionOffline;
+
+    bool hasRegionSelection() const noexcept { return regionValid; }
+    float getRegionStartSec() const noexcept { return juce::jmin (regionInSec, regionOutSec); }
+    float getRegionEndSec() const noexcept { return juce::jmax (regionInSec, regionOutSec); }
+    void clearRegionSelection() noexcept;
+    void setRegionSelection (float startSec, float endSec) noexcept;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -71,15 +83,22 @@ private:
 
     void paintRampLane (juce::Graphics& g);
     void paintAutoLane (juce::Graphics& g, int autoIdx);
+    void paintRegionOverlay (juce::Graphics& g) const;
     void paintRampInClip (juce::Graphics& g, juce::Rectangle<float> r, const GradientRamp& ramp) const;
 
     void showAddPresetPicker (juce::Component* anchor);
     void showChangePresetPicker (int clipIndex, juce::Component* anchor);
     void showClipContextMenu (int clipIndex, juce::Point<int> screenPos);
+    void showRegionContextMenu (juce::Point<int> screenPos);
+    void showExportRegionDialog();
+    bool hitRegion (juce::Point<float> p) const noexcept;
+    juce::Rectangle<float> getTrackContentBounds() const noexcept;
+    float xToTimeFull (float x) const noexcept;
+    float timeToXFull (float t) const noexcept;
     void openClipRampEditor (int clipIndex);
     void closeClipRampEditor (bool persist);
     void showAddLaneMenu();
-    /** autoIdx < 0 → Ramp colour lane; else autoLanes[autoIdx]. */
+    /** autoIdx < 0 = Ramp colour lane; else autoLanes[autoIdx]. */
     void showLaneLabelMenu (int autoIdx, juce::Point<int> screenPos);
     void toggleLaneEnabled (int autoIdx);
     void showKeyInterpMenu (int autoIdx, int keyIdx, bool isColour, juce::Point<int> screenPos);
@@ -101,7 +120,7 @@ private:
     enum class DragMode
     {
         none, reorder, resizeLeft, resizeRight, fade,
-        floatKey, colourKey, bezierHandle
+        floatKey, colourKey, bezierHandle, selectRegion
     };
     DragMode dragMode = DragMode::none;
     int dragClip = -1;
@@ -116,6 +135,11 @@ private:
     float dragStartKeyT = 0.0f;
     float dragStartKeyV = 0.0f;
 
+    // Selected export region (sequence seconds). Drag empty track to set; RMB Export.
+    bool regionValid = false;
+    float regionInSec = 0.0f;
+    float regionOutSec = 0.0f;
+
     struct ClipCache
     {
         juce::Rectangle<float> bounds;
@@ -129,7 +153,7 @@ private:
     juce::TextButton addButton { "+" };
     juce::TextButton removeButton { "-" };
     juce::TextButton addLaneButton { "+Lane" };
-    juce::TextButton expandButton { juce::String::charToString ((juce::juce_wchar) 0x2922) };
+    juce::TextButton expandButton { "Exp" };
 
     // Inline clip editor (expanded/pop-out preferred)
     std::unique_ptr<GradientStripEditor> clipEditor;

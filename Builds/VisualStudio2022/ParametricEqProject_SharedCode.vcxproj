@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 
 <Project DefaultTargets="Build"
          ToolsVersion="17.0"
@@ -152,6 +152,7 @@
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp"/>
     <ClCompile Include="..\..\Source\Spec3DParticleSystem.cpp"/>
+    <ClCompile Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.cpp"/>
     <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp"/>
     <ClCompile Include="..\..\Source\FramedFloatingScopeWindow.cpp"/>
@@ -170,6 +171,8 @@
     <ClCompile Include="..\..\Source\ColourRamp\RampPresetPicker.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\Spec3DRampTimelineComponent.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\Spec3DRampTimelineWindow.cpp"/>
+    <ClCompile Include="..\..\Source\Export\MediaFoundationMp4Writer.cpp"/>
+    <ClCompile Include="..\..\Source\Export\Spec3DExportJob.cpp"/>
     <ClCompile Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.cpp"/>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
@@ -3489,6 +3492,8 @@
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h"/>
     <ClInclude Include="..\..\Source\Spec3DParticleSystem.h"/>
+    <ClInclude Include="..\..\Source\ParticleForceModule.h"/>
+    <ClInclude Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.h"/>
     <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h"/>
     <ClInclude Include="..\..\Source\ScopeModules.h"/>
     <ClInclude Include="..\..\Source\ScopeLayoutPresets.h"/>
@@ -3509,6 +3514,10 @@
     <ClInclude Include="..\..\Source\ColourRamp\RampPresetPicker.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\Spec3DRampTimelineComponent.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\Spec3DRampTimelineWindow.h"/>
+    <ClInclude Include="..\..\Source\Export\ExportAudioRingBuffer.h"/>
+    <ClInclude Include="..\..\Source\Export\Spec3DExportSettings.h"/>
+    <ClInclude Include="..\..\Source\Export\MediaFoundationMp4Writer.h"/>
+    <ClInclude Include="..\..\Source\Export\Spec3DExportJob.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.h"/>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.h"/>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.h"/>

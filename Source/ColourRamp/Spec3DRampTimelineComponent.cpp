@@ -42,14 +42,15 @@ Spec3DRampTimelineComponent::Spec3DRampTimelineComponent (SharedResources& resou
     lengthLabel.setText ("Length", juce::dontSendNotification);
     lengthLabel.setJustificationType (juce::Justification::centredRight);
     lengthLabel.setMinimumHorizontalScale (1.0f); // never ellipsize "Length"
-    lengthLabel.setTooltip ("Timeline length (0.5 s – 5 min)");
+    lengthLabel.setTooltip ("Timeline length (0.5 s - 5 min)");
     addAndMakeVisible (lengthLabel);
 
     lengthSlider.setRange (Spec3DRampSequence::kMinLengthSec, Spec3DRampSequence::kMaxLengthSec, 0.01);
     lengthSlider.setSkewFactorFromMidPoint (8.0);
     lengthSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    lengthSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 48, 16);
-    lengthSlider.setTooltip ("Timeline length (0.5 s – 5 min). Crossfades: drag the X between clips.");
+    lengthSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 16);
+    lengthSlider.setNumDecimalPlacesToDisplay (2);
+    lengthSlider.setTooltip ("Timeline length (0.5 s - 5 min). Crossfades: drag the X between clips.");
     lengthSlider.textFromValueFunction = [] (double v)
     {
         if (v < 60.0) return juce::String (v, v < 10.0 ? 2 : 1) + "s";
@@ -101,7 +102,7 @@ Spec3DRampTimelineComponent::Spec3DRampTimelineComponent (SharedResources& resou
     enableButton.setToggleState (sequence.enabled, juce::dontSendNotification);
     lengthSlider.setValue (sequence.lengthSec, juce::dontSendNotification);
     rebuildCaches();
-    // Playhead paint only while visible — do not thrash the message thread when hidden.
+    // Playhead paint only while visible - do not thrash the message thread when hidden.
     startTimerHz (12);
 }
 
@@ -133,6 +134,83 @@ void Spec3DRampTimelineComponent::setPlayheadSec (float sec) noexcept
     playheadSec = sec;
     if (isShowing())
         repaint();
+}
+
+void Spec3DRampTimelineComponent::clearRegionSelection() noexcept
+{
+    regionValid = false;
+    regionInSec = regionOutSec = 0.0f;
+    repaint();
+}
+
+void Spec3DRampTimelineComponent::setRegionSelection (float startSec, float endSec) noexcept
+{
+    const float len = juce::jmax (1.0e-4f, sequence.lengthSec);
+    regionInSec = juce::jlimit (0.0f, len, startSec);
+    regionOutSec = juce::jlimit (0.0f, len, endSec);
+    regionValid = std::abs (regionOutSec - regionInSec) > 1.0e-3f;
+    repaint();
+}
+
+juce::Rectangle<float> Spec3DRampTimelineComponent::getTrackContentBounds() const noexcept
+{
+    auto area = getTracksArea();
+    area.removeFromLeft (labelColW() + 4.0f);
+    return area;
+}
+
+float Spec3DRampTimelineComponent::timeToXFull (float t) const noexcept
+{
+    const auto area = getTrackContentBounds();
+    const float len = juce::jmax (1.0e-4f, sequence.lengthSec);
+    return area.getX() + area.getWidth() * (t / len);
+}
+
+float Spec3DRampTimelineComponent::xToTimeFull (float x) const noexcept
+{
+    const auto area = getTrackContentBounds();
+    const float len = juce::jmax (1.0e-4f, sequence.lengthSec);
+    const float n = (x - area.getX()) / juce::jmax (1.0f, area.getWidth());
+    return juce::jlimit (0.0f, len, n * len);
+}
+
+bool Spec3DRampTimelineComponent::hitRegion (juce::Point<float> p) const noexcept
+{
+    if (! regionValid)
+        return false;
+    const auto area = getTrackContentBounds();
+    if (! area.contains (p))
+        return false;
+    const float x0 = timeToXFull (getRegionStartSec());
+    const float x1 = timeToXFull (getRegionEndSec());
+    return p.x >= x0 && p.x <= x1;
+}
+
+void Spec3DRampTimelineComponent::paintRegionOverlay (juce::Graphics& g) const
+{
+    if (! regionValid)
+        return;
+    const auto& c = colors();
+    const auto area = getTrackContentBounds();
+    const float x0 = juce::jmax (area.getX(), timeToXFull (getRegionStartSec()));
+    const float x1 = juce::jmin (area.getRight(), timeToXFull (getRegionEndSec()));
+    if (x1 <= x0)
+        return;
+    auto r = juce::Rectangle<float> (x0, area.getY(), x1 - x0, area.getHeight());
+    g.setColour (c.pluginButtonAccent.withAlpha (0.16f));
+    g.fillRect (r);
+    g.setColour (c.pluginButtonAccent.withAlpha (0.85f));
+    g.fillRect (x0 - 1.0f, area.getY(), 2.0f, area.getHeight());
+    g.fillRect (x1 - 1.0f, area.getY(), 2.0f, area.getHeight());
+    if (r.getWidth() > 48.0f)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.75f));
+        g.setFont (juce::FontOptions (10.0f));
+        const float dur = getRegionEndSec() - getRegionStartSec();
+        g.drawFittedText ("Export " + juce::String (dur, 2) + "s",
+                          r.reduced (4.0f, 2.0f).toNearestInt(),
+                          juce::Justification::centredTop, 1);
+    }
 }
 
 int Spec3DRampTimelineComponent::getPreferredHeight() const noexcept
@@ -237,7 +315,7 @@ void Spec3DRampTimelineComponent::layoutChrome()
     addLaneButton.setBounds (row.removeFromRight (expandedLayout ? 48 : 40).reduced (1));
     removeButton.setBounds (row.removeFromRight (24).reduced (1));
     addButton.setBounds (row.removeFromRight (24).reduced (1));
-    // "Length" needs room — never squeeze into ellipsis.
+    // "Length" needs room - never squeeze into ellipsis.
     lengthSlider.setBounds (row.removeFromRight (expandedLayout ? 128 : 112).reduced (1, 3));
     lengthLabel.setBounds (row.removeFromRight (expandedLayout ? 48 : 44).reduced (1, 2));
 
@@ -545,12 +623,13 @@ void Spec3DRampTimelineComponent::paint (juce::Graphics& g)
     for (int i = 0; i < (int) sequence.autoLanes.size(); ++i)
         paintAutoLane (g, i);
 
+    paintRegionOverlay (g);
+
     // Playhead across all tracks
     if (sequence.enabled)
     {
         const auto& c = colors();
-        auto area = getTracksArea();
-        area.removeFromLeft (labelColW() + 4.0f);
+        auto area = getTrackContentBounds();
         const float len = juce::jmax (1.0e-4f, sequence.lengthSec);
         float t = playheadSec;
         t = std::fmod (t, len);
@@ -700,6 +779,13 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
     // Lane labels: LMB toggle enable, RMB menu (enable/disable + remove for auto)
     if (e.mods.isPopupMenu())
     {
+        // Prefer export on a selected region (NLE-style right-click range).
+        if (hitRegion (p) || (regionValid && getTrackContentBounds().contains (p)
+                              && hitClipBody (p) < 0 && hitAutoLane (p) < 0))
+        {
+            showRegionContextMenu (e.getScreenPosition());
+            return;
+        }
         if (hitRampLabel (p))
         {
             showLaneLabelMenu (-1, e.getScreenPosition());
@@ -724,6 +810,12 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
             showClipContextMenu (body, e.getScreenPosition());
             return;
         }
+        // Empty track: allow export menu if a region exists, else start nothing.
+        if (regionValid && getTrackContentBounds().contains (p))
+        {
+            showRegionContextMenu (e.getScreenPosition());
+            return;
+        }
         return;
     }
 
@@ -745,7 +837,7 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
     int body = hitClipBody (p);
     int al = hitAutoLane (p);
 
-    // LMB on auto-lane label → mute/unmute (don't start key drag)
+    // LMB on auto-lane label -> mute/unmute (don't start key drag)
     if (al >= 0 && hitAutoLaneLabel (al, p))
     {
         toggleLaneEnabled (al);
@@ -808,6 +900,18 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
             selectedClip = -1;
         }
     }
+    else if (getTrackContentBounds().contains (p)
+             && hitClipBody (p) < 0 && hitAutoLane (p) < 0 && ! hitEmptyAdd (p))
+    {
+        // Drag empty track content to select an export region (NLE range).
+        selectedClip = -1;
+        selectedKey = -1;
+        selectedAutoLane = -1;
+        closeClipRampEditor (true);
+        dragMode = DragMode::selectRegion;
+        regionInSec = regionOutSec = xToTimeFull (p.x);
+        regionValid = false;
+    }
     else
     {
         selectedClip = -1;
@@ -826,6 +930,14 @@ void Spec3DRampTimelineComponent::mouseDrag (const juce::MouseEvent& e)
     const float len = juce::jmax (1.0e-4f, sequence.lengthSec);
     const float dx = (float) e.getDistanceFromDragStartX();
     const float dSec = (dx / juce::jmax (1.0f, lane.getWidth())) * len;
+
+    if (dragMode == DragMode::selectRegion)
+    {
+        regionOutSec = xToTimeFull (e.position.x);
+        regionValid = std::abs (regionOutSec - regionInSec) > 1.0e-3f;
+        repaint();
+        return;
+    }
 
     if (dragMode == DragMode::fade && dragClip >= 0)
     {
@@ -897,6 +1009,17 @@ void Spec3DRampTimelineComponent::mouseDrag (const juce::MouseEvent& e)
 
 void Spec3DRampTimelineComponent::mouseUp (const juce::MouseEvent&)
 {
+    if (dragMode == DragMode::selectRegion)
+    {
+        if (std::abs (regionOutSec - regionInSec) <= 1.0e-3f)
+            clearRegionSelection();
+        else
+            regionValid = true;
+        dragMode = DragMode::none;
+        repaint();
+        return;
+    }
+
     if (dragMode == DragMode::reorder && dragClip >= 0 && dropInsertAt >= 0)
     {
         int from = dragClip, insertAt = dropInsertAt;
@@ -1034,6 +1157,113 @@ void Spec3DRampTimelineComponent::showChangePresetPicker (int clipIndex, juce::C
         });
 }
 
+void Spec3DRampTimelineComponent::showRegionContextMenu (juce::Point<int> screenPos)
+{
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    const bool ok = regionValid && (getRegionEndSec() - getRegionStartSec()) > 1.0e-3f;
+    menu.addItem (1, "Export region offline...", ok);
+    menu.addSeparator();
+    menu.addItem (2, "Clear region", ok);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 }),
+                        [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this)] (int r)
+                        {
+                            if (safe == nullptr || r == 0) return;
+                            if (r == 1)
+                                safe->showExportRegionDialog();
+                            else if (r == 2)
+                                safe->clearRegionSelection();
+                        });
+}
+
+void Spec3DRampTimelineComponent::showExportRegionDialog()
+{
+    if (! regionValid)
+        return;
+    const float t0 = getRegionStartSec();
+    const float t1 = getRegionEndSec();
+    if (t1 - t0 < 1.0e-3f)
+        return;
+
+    // Settings dialog (NLE-style). Audio (DAW/plugin) is always included.
+    auto* aw = new juce::AlertWindow ("Export region offline",
+                                      "Region " + juce::String (t0, 2) + "s - " + juce::String (t1, 2)
+                                          + "s (" + juce::String (t1 - t0, 2) + "s)\n"
+                                          + "Video: offline Spec3D re-render. Audio: DAW/plugin stereo (required).\n"
+                                          + "Choose resolution and frame rate, then Export.",
+                                      juce::AlertWindow::NoIcon,
+                                      this);
+    aw->addComboBox ("resolution", { "1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160" },
+                     "Resolution");
+    if (auto* cb = aw->getComboBoxComponent ("resolution"))
+        cb->setSelectedItemIndex (1, juce::dontSendNotification);
+    aw->addComboBox ("fps", { "24", "25", "30", "60" }, "Frame rate");
+    if (auto* cb = aw->getComboBoxComponent ("fps"))
+        cb->setSelectedItemIndex (2, juce::dontSendNotification);
+    aw->addComboBox ("quality", { "Draft", "High", "Maximum" }, "Quality");
+    if (auto* cb = aw->getComboBoxComponent ("quality"))
+        cb->setSelectedItemIndex (1, juce::dontSendNotification);
+    aw->addButton ("Export", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    aw->enterModalState (true,
+                         juce::ModalCallbackFunction::create (
+                             [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this),
+                              aw, t0, t1] (int result)
+                             {
+                                 std::unique_ptr<juce::AlertWindow> cleanup (aw);
+                                 if (safe == nullptr || result != 1)
+                                     return;
+
+                                 int resId = 2, fpsId = 3, qualityId = 2;
+                                 if (auto* cb = aw->getComboBoxComponent ("resolution"))
+                                     resId = cb->getSelectedItemIndex() + 1;
+                                 if (auto* cb = aw->getComboBoxComponent ("fps"))
+                                     fpsId = cb->getSelectedItemIndex() + 1;
+                                 if (auto* cb = aw->getComboBoxComponent ("quality"))
+                                     qualityId = cb->getSelectedItemIndex() + 1;
+
+                                 Spec3DExportSettings settings;
+                                 settings.startSec = t0;
+                                 settings.endSec = t1;
+                                 settings.width = Spec3DExportSettings::widthForPreset (resId);
+                                 settings.height = Spec3DExportSettings::heightForPreset (resId);
+                                 settings.fps = Spec3DExportSettings::fpsForPreset (fpsId);
+                                 settings.quality = juce::jlimit (0, 2, qualityId - 1);
+                                 settings.includeAudio = true;
+
+                                 auto chooser = std::make_shared<juce::FileChooser> (
+                                     "Export video",
+                                     juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                         .getChildFile ("Spec3D_export.mp4"),
+                                     "*.mp4");
+                                 chooser->launchAsync (
+                                     juce::FileBrowserComponent::saveMode
+                                         | juce::FileBrowserComponent::canSelectFiles
+                                         | juce::FileBrowserComponent::warnAboutOverwriting,
+                                     [safe, chooser, settings] (const juce::FileChooser& fc) mutable
+                                     {
+                                         juce::ignoreUnused (chooser);
+                                         if (safe == nullptr)
+                                             return;
+                                         auto file = fc.getResult();
+                                         if (file == juce::File())
+                                             return;
+                                         if (! file.hasFileExtension (".mp4"))
+                                             file = file.withFileExtension (".mp4");
+                                         settings.outputFile = file;
+                                         if (safe->onExportRegionOffline)
+                                             safe->onExportRegionOffline (settings);
+                                         else
+                                             juce::AlertWindow::showMessageBoxAsync (
+                                                 juce::AlertWindow::WarningIcon,
+                                                 "Export region offline",
+                                                 "Export is not connected to the host.");
+                                     });
+                             }),
+                         true);
+}
+
 void Spec3DRampTimelineComponent::showClipContextMenu (int clipIndex, juce::Point<int> screenPos)
 {
     selectedClip = clipIndex;
@@ -1041,12 +1271,25 @@ void Spec3DRampTimelineComponent::showClipContextMenu (int clipIndex, juce::Poin
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addItem (1, "Delete");
     menu.addSeparator();
-    menu.addItem (2, "Change ramp…");
-    menu.addItem (3, "Edit ramp…");
+    menu.addItem (2, "Change ramp...");
+    menu.addItem (3, "Edit ramp...");
+    if (regionValid)
+    {
+        menu.addSeparator();
+        menu.addItem (4, "Export region offline...");
+    }
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 }),
                         [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this),
                          clipIndex] (int r)
                         {
+                            if (safe == nullptr) return;
+                            if (r == 4)
+                            {
+                                safe->showExportRegionDialog();
+                                return;
+                            }
+                            // Fall through to original handlers below via re-entry pattern:
+                            // Re-dispatch legacy items.
                             if (safe == nullptr || r <= 0) return;
                             if (r == 1 && clipIndex < (int) safe->sequence.clips.size())
                             {
@@ -1197,7 +1440,7 @@ void Spec3DRampTimelineComponent::showKeyInterpMenu (int autoIdx, int keyIdx, bo
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     if (! isColour)
-        menu.addItem (2, "Edit value…");
+        menu.addItem (2, "Edit value...");
     menu.addItem (1, "Delete key");
     menu.addSeparator();
     menu.addItem (10, "Step");
@@ -1207,7 +1450,7 @@ void Spec3DRampTimelineComponent::showKeyInterpMenu (int autoIdx, int keyIdx, bo
     if (isColour)
     {
         menu.addSeparator();
-        menu.addItem (20, "Set colour…");
+        menu.addItem (20, "Set colour...");
     }
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 }),
                         [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this),
@@ -1258,10 +1501,10 @@ void Spec3DRampTimelineComponent::beginEditFloatKeyValue (int autoIdx, int keyId
 
     auto& env = lane.floatEnv;
     const float cur = env.keys[(size_t) keyIdx].value;
-    const bool wideRange = (env.maxV - env.minV) > 2.0f; // azimuth / elevation vs 0–1 amounts
+    const bool wideRange = (env.maxV - env.minV) > 2.0f; // azimuth / elevation vs 0-1 amounts
     const juce::String initial = juce::String (cur, wideRange ? 1 : 3);
     const juce::String rangeText = lane.label + " (" + juce::String (env.minV, wideRange ? 0 : 2)
-                                   + " – " + juce::String (env.maxV, wideRange ? 0 : 2) + ")";
+                                   + " - " + juce::String (env.maxV, wideRange ? 0 : 2) + ")";
 
     auto* aw = new juce::AlertWindow ("Edit key value", rangeText, juce::AlertWindow::NoIcon);
     aw->addTextEditor ("value", initial, "Value");
@@ -1280,7 +1523,7 @@ void Spec3DRampTimelineComponent::beginEditFloatKeyValue (int autoIdx, int keyId
                     && keyIdx >= 0 && keyIdx < (int) ln.floatEnv.keys.size())
                 {
                     const auto text = aw->getTextEditorContents ("value").trim();
-                    // Require at least one digit so "abc" is rejected (getDoubleValue → 0).
+                    // Require at least one digit so "abc" is rejected (getDoubleValue -> 0).
                     bool hasDigit = false;
                     for (int i = 0; i < text.length(); ++i)
                     {

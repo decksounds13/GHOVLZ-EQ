@@ -1,5 +1,8 @@
 #include "MainComponent.h"
 #include "ColourRamp/Spec3DRampTimelineWindow.h"
+#include "Export/Spec3DExportSandbox.h"
+#include "Export/Spec3DExportSettings.h"
+#include "Export/Spec3DExportJob.h" // kept; run() is sandboxed when SPEC3D_EXPORT_ENABLED=0
 #include <JuceHeader.h>
 #include "FrequencyResponseComponent.h"
 #include "EqEditor.h"
@@ -14,6 +17,154 @@
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>
+
+// ── True OS fullscreen host for Spec3D (F11) ────────────────────────────────
+
+struct MainComponent::Spec3DOsFullscreenHost final : public juce::Component
+{
+    MainComponent& owner;
+
+    explicit Spec3DOsFullscreenHost (MainComponent& o) : owner (o)
+    {
+        setOpaque (true);
+        setWantsKeyboardFocus (true);
+        setMouseClickGrabsKeyboardFocus (true);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black);
+    }
+
+    void resized() override
+    {
+        if (auto* view = findChildWithID ("spec3dFsView"))
+            view->setBounds (getLocalBounds());
+        else if (getNumChildComponents() > 0)
+            if (auto* c = getChildComponent (0))
+                if (dynamic_cast<Spectrogram3DComponent*> (c) != nullptr)
+                    c->setBounds (getLocalBounds());
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::F11Key || key == juce::KeyPress::escapeKey)
+        {
+            owner.setSpec3DFullscreen (false, true);
+            return true;
+        }
+        return false;
+    }
+
+    void attachView (Spectrogram3DComponent& view)
+    {
+        // Monitor that contains the plugin editor (multi-monitor safe).
+        const auto pluginScreen = owner.localAreaToGlobal (owner.getLocalBounds());
+        const auto* display = juce::Desktop::getInstance().getDisplays()
+                                  .getDisplayForRect (pluginScreen);
+        if (display == nullptr)
+            display = &juce::Desktop::getInstance().getDisplays().getMainDisplay();
+
+        // Full physical display — true F11 surface (includes taskbar region; peer FS covers it).
+        const auto area = display->totalArea;
+
+        // Borderless top-level: no title bar / no OS chrome flags.
+        constexpr int kFlags = juce::ComponentPeer::windowIsTemporary
+                             | juce::ComponentPeer::windowHasDropShadow; // drop shadow ignored when FS
+        // windowIsTemporary alone → no title bar on Windows
+        addToDesktop (juce::ComponentPeer::windowIsTemporary);
+        juce::ignoreUnused (kFlags);
+
+        setBounds (area);
+        setVisible (true);
+        setAlwaysOnTop (true);
+        toFront (true);
+
+        if (auto* peer = getPeer())
+        {
+            peer->setFullScreen (true);
+            peer->setAlwaysOnTop (true);
+        }
+
+        view.setComponentID ("spec3dFsView");
+        addAndMakeVisible (view);
+        view.setChromeMode (Spectrogram3DComponent::ChromeMode::docked);
+        view.setActive (true);
+        view.setVisible (true);
+        view.setInterceptsMouseClicks (true, true);
+        view.setBounds (getLocalBounds());
+        view.toFront (false);
+
+        grabKeyboardFocus();
+        view.grabKeyboardFocus();
+    }
+
+    void detachView (Spectrogram3DComponent& view, juce::Component& restoreParent)
+    {
+        view.setComponentID ({});
+        restoreParent.addChildComponent (view);
+        setVisible (false);
+        setAlwaysOnTop (false);
+        if (auto* peer = getPeer())
+            peer->setFullScreen (false);
+        removeFromDesktop();
+    }
+};
+
+/** Always-on-top exit control (separate peer so native GL HWND cannot bury it). */
+struct MainComponent::Spec3DFsExitChrome final : public juce::Component
+{
+    MainComponent& owner;
+    MainComponent::OscToolButton exitButton { MainComponent::OscToolButton::Glyph::Collapse };
+
+    explicit Spec3DFsExitChrome (MainComponent& o) : owner (o)
+    {
+        setOpaque (false);
+        setAlwaysOnTop (true);
+        exitButton.setTooltip ("Exit fullscreen (F11 / Esc)");
+        exitButton.onClick = [this] { owner.setSpec3DFullscreen (false, true); };
+        addAndMakeVisible (exitButton);
+    }
+
+    void placeOnDisplay (juce::Rectangle<int> displayTotalArea)
+    {
+        constexpr int kSize = 36;
+        constexpr int kMargin = 14;
+        const auto b = juce::Rectangle<int> (displayTotalArea.getX() + kMargin,
+                                             displayTotalArea.getY() + kMargin,
+                                             kSize, kSize);
+        if (! isOnDesktop())
+            addToDesktop (juce::ComponentPeer::windowIsTemporary
+                          | juce::ComponentPeer::windowIgnoresKeyPresses);
+        setBounds (b);
+        setVisible (true);
+        setAlwaysOnTop (true);
+        toFront (true);
+        if (auto* peer = getPeer())
+            peer->setAlwaysOnTop (true);
+        exitButton.setBounds (getLocalBounds());
+    }
+
+    void dismiss()
+    {
+        setVisible (false);
+        setAlwaysOnTop (false);
+        removeFromDesktop();
+    }
+
+    void resized() override
+    {
+        exitButton.setBounds (getLocalBounds());
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
+        g.setColour (juce::Colours::goldenrod.withAlpha (0.55f));
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f, 1.0f);
+    }
+};
 
 namespace
 {
@@ -1153,7 +1304,15 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.setAlwaysOnTop (false);
     spectrogram3D.setColourRampBank (&colourRamps);
     spectrogram3D.setAudioLevelProvider ([this] { return processor.getSpec3DVisualLevel01(); });
-    spectrogram3D.onEscape = [this] { collapseAnyExpandedScope(); };
+    spectrogram3D.onEscape = [this]
+    {
+        if (spec3DFullscreen)
+            setSpec3DFullscreen (false, true);
+        else
+            collapseAnyExpandedScope();
+    };
+    spectrogram3D.onToggleFullscreen = [this] { toggleSpec3DFullscreen (true); };
+    spectrogram3D.isFullscreenQuery = [this] { return isSpec3DFullscreen(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onAugmentContextMenu = [this] (juce::PopupMenu& menu)
     {
@@ -1166,6 +1325,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onRampSequenceChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onRequestRampTimelineExpand = [this] { showRampTimelineWindow(); };
+    spectrogram3D.onExportRegionOffline =
+        [this] (const Spec3DExportSettings& s) { startSpec3DRegionExport (s); };
     spectrogram3D.onDofFocusChanged = [this]
     {
         editor.requestSaveUiPrefs();
@@ -1185,6 +1346,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     spectrogram3D.onUserResized = [this]
     {
+        if (spec3DFullscreen)
+            return; // do not clobber floating prefs while edge-to-edge
         syncSpec3DFramedTools();
         spec3DPreferredW = spectrogram3D.getWidth();
         spec3DPreferredH = spectrogram3D.getHeight();
@@ -1194,6 +1357,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     spectrogram3D.onUserMoved = [this]
     {
+        if (spec3DFullscreen)
+            return;
         syncSpec3DFramedTools();
         spec3DPreferredX = spectrogram3D.getX();
         spec3DPreferredY = spectrogram3D.getY();
@@ -1317,6 +1482,10 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
 MainComponent::~MainComponent()
 {
+    // Reparent 3D view out of the OS fullscreen host before teardown.
+    if (spec3DFullscreen)
+        exitSpec3DOsFullscreen();
+
     persistSessionUiTheme();
     colourRamps.removeChangeListener (this);
     processor.treeState.removeParameterListener ("METER_CHANNEL_MODE_ID", this);
@@ -2076,6 +2245,11 @@ void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
 bool MainComponent::collapseAnyExpandedScope()
 {
     bool collapsed = false;
+    if (spec3DFullscreen)
+    {
+        setSpec3DFullscreen (false, true);
+        collapsed = true;
+    }
     if (scopeModeEnabled && scopeFullscreenModule.has_value())
     {
         setScopeFullscreenModule (std::nullopt);
@@ -2089,6 +2263,19 @@ bool MainComponent::collapseAnyExpandedScope()
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress::F11Key)
+    {
+        // F11 toggles Spec3D fullscreen when 3D is available / already fullscreen.
+        const bool canFs = spec3DFullscreen
+            || spectrogram3D.isActive()
+            || (scopeModeEnabled && isScopeModuleEnabled (ScopeModuleId::spectrogram3D))
+            || (! scopeModeEnabled && spec3DEnabled);
+        if (canFs)
+        {
+            toggleSpec3DFullscreen (true);
+            return true;
+        }
+    }
     if (key == juce::KeyPress::escapeKey && collapseAnyExpandedScope())
         return true;
     return false;
@@ -2099,19 +2286,21 @@ void MainComponent::syncSpec3DPresentation()
     const bool has3DModule = scopeModeEnabled && isScopeModuleEnabled (ScopeModuleId::spectrogram3D);
     const bool hasSpecModule = scopeModeEnabled && isScopeModuleEnabled (ScopeModuleId::spectrogram);
     // Scope: 3D only via its own module. Expanded (non-Scope): cube flag on Spec expand.
-    const bool show3D = (scopeModeEnabled && has3DModule)
+    // Fullscreen forces presentation even if intermediate chrome is mid-toggle.
+    const bool show3D = spec3DFullscreen
+                        || (scopeModeEnabled && has3DModule)
                         || (! scopeModeEnabled && specExpanded && spec3DEnabled
                             && specButton.getToggleState());
 
     spectrogram3D.setAlwaysOnTop (false);
     spectrogram3D.setThemeColors (&sharedResources);
-    spectrogram3D.setChromeMode (scopeModeEnabled && show3D
+    spectrogram3D.setChromeMode ((spec3DFullscreen || (scopeModeEnabled && show3D))
                                      ? Spectrogram3DComponent::ChromeMode::docked
                                      : Spectrogram3DComponent::ChromeMode::floating);
     spectrogram3D.setActive (show3D);
     spectrogram3D.setVisible (show3D);
 
-    // Mesh history comes from the 2D spectrogram feeder â€” keep analysing whenever 3D is up.
+    // Mesh history comes from the 2D spectrogram feeder — keep analysing whenever 3D is up.
     if (show3D)
         spectrogram.setEnabled (true);
 
@@ -2119,13 +2308,20 @@ void MainComponent::syncSpec3DPresentation()
                         || (scopeModeEnabled && hasSpecModule)
                         || (! scopeModeEnabled && specButton.getToggleState() && specExpanded && ! spec3DEnabled);
     // Expanded non-Scope with 3D on: hide 2D under the floating 3D frame.
-    const bool show2DFinal = scopeModeEnabled
-                                 ? hasSpecModule
-                                 : (specButton.getToggleState() && ! (specExpanded && spec3DEnabled));
+    const bool show2DFinal = ! spec3DFullscreen
+                             && (scopeModeEnabled
+                                     ? hasSpecModule
+                                     : (specButton.getToggleState() && ! (specExpanded && spec3DEnabled)));
 
     spectrogram.setVisible (show2DFinal);
     spectrogram.setInterceptsMouseClicks (show2DFinal && (specExpanded || scopeModeEnabled), true);
     juce::ignoreUnused (show2D);
+
+    if (spec3DFullscreen)
+    {
+        applySpec3DFullscreenLayout();
+        return;
+    }
 
     if (show3D)
     {
@@ -2170,11 +2366,146 @@ void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
     if (scopeModeEnabled)
         setScopeModuleEnabled (ScopeModuleId::spectrogram3D, shouldEnable, false);
 
+    if (! shouldEnable && spec3DFullscreen)
+        spec3DFullscreen = false;
+
     syncSpecToolButtons();
     resized();
     syncExpandedOscOverlayStack();
     if (notifyPrefs)
         editor.requestSaveUiPrefs();
+}
+
+void MainComponent::setSpec3DFullscreen (bool shouldEnable, bool notifyPrefs)
+{
+    if (spec3DFullscreen == shouldEnable)
+        return;
+
+    if (shouldEnable)
+    {
+        // Ensure 3D is live so the mesh keeps feeding while OS-fullscreen.
+        if (scopeModeEnabled)
+        {
+            if (! isScopeModuleEnabled (ScopeModuleId::spectrogram3D))
+                setScopeModuleEnabled (ScopeModuleId::spectrogram3D, true, false);
+            setScopeFullscreenModule (std::nullopt);
+        }
+        else
+        {
+            if (! spec3DEnabled)
+                setSpec3DMode (true, false);
+            if (! specExpanded)
+                setSpecExpanded (true, false);
+            if (! specButton.getToggleState())
+                specButton.setToggleState (true, juce::dontSendNotification);
+        }
+        if (oscExpanded) setOscExpanded (false, false);
+        if (gonExpanded) setGonExpanded (false, false);
+
+        // Close settings panel — it lives on the editor, not the OS FS surface.
+        if (menu.isVisible())
+            closeSettingsMenu();
+    }
+
+    spec3DFullscreen = shouldEnable;
+
+    if (shouldEnable)
+        enterSpec3DOsFullscreen();
+    else
+        exitSpec3DOsFullscreen();
+
+    resized();
+    syncExpandedOscOverlayStack();
+    if (notifyPrefs)
+        editor.requestSaveUiPrefs();
+}
+
+void MainComponent::toggleSpec3DFullscreen (bool notifyPrefs)
+{
+    setSpec3DFullscreen (! spec3DFullscreen, notifyPrefs);
+}
+
+void MainComponent::enterSpec3DOsFullscreen()
+{
+    // Keep spectrogram analysis feeding the mesh while the view is reparented.
+    spectrogram.setEnabled (true);
+
+    spectrogram3D.setThemeColors (&sharedResources);
+    spectrogram3D.setChromeMode (Spectrogram3DComponent::ChromeMode::docked);
+    spectrogram3D.setActive (true);
+    spectrogram3D.setVisible (true);
+
+    if (spec3DOsFullscreenHost == nullptr)
+        spec3DOsFullscreenHost = std::make_unique<Spec3DOsFullscreenHost> (*this);
+
+    if (spectrogram3D.getParentComponent() != spec3DOsFullscreenHost.get())
+        spec3DOsFullscreenHost->attachView (spectrogram3D);
+    else
+    {
+        // Already attached — just re-assert bounds / FS peer.
+        const auto pluginScreen = localAreaToGlobal (getLocalBounds());
+        const auto* display = juce::Desktop::getInstance().getDisplays()
+                                  .getDisplayForRect (pluginScreen);
+        if (display == nullptr)
+            display = &juce::Desktop::getInstance().getDisplays().getMainDisplay();
+        spec3DOsFullscreenHost->setBounds (display->totalArea);
+        if (auto* peer = spec3DOsFullscreenHost->getPeer())
+            peer->setFullScreen (true);
+        spectrogram3D.setBounds (spec3DOsFullscreenHost->getLocalBounds());
+    }
+
+    // Exit control on its own always-on-top peer (above native GL HWND).
+    if (spec3DFsExitChrome == nullptr)
+        spec3DFsExitChrome = std::make_unique<Spec3DFsExitChrome> (*this);
+    {
+        const auto hostBounds = spec3DOsFullscreenHost->getBounds();
+        spec3DFsExitChrome->placeOnDisplay (hostBounds);
+    }
+
+    spec3DOsFullscreenHost->grabKeyboardFocus();
+    spectrogram3D.grabKeyboardFocus();
+}
+
+void MainComponent::exitSpec3DOsFullscreen()
+{
+    if (spec3DFsExitChrome != nullptr)
+    {
+        spec3DFsExitChrome->dismiss();
+        spec3DFsExitChrome.reset();
+    }
+
+    if (spec3DOsFullscreenHost != nullptr)
+    {
+        if (spectrogram3D.getParentComponent() == spec3DOsFullscreenHost.get())
+            spec3DOsFullscreenHost->detachView (spectrogram3D, *this);
+        spec3DOsFullscreenHost.reset();
+    }
+
+    // Restore in-editor presentation.
+    spectrogram3D.setThemeColors (&sharedResources);
+    addChildComponent (spectrogram3D);
+    syncSpec3DPresentation();
+}
+
+void MainComponent::applySpec3DFullscreenLayout()
+{
+    if (! spec3DFullscreen)
+        return;
+
+    // Plugin editor resized while OS FS is up — keep the desktop host on the right display.
+    if (spec3DOsFullscreenHost != nullptr)
+    {
+        const auto pluginScreen = localAreaToGlobal (getLocalBounds());
+        const auto* display = juce::Desktop::getInstance().getDisplays()
+                                  .getDisplayForRect (pluginScreen);
+        if (display == nullptr)
+            display = &juce::Desktop::getInstance().getDisplays().getMainDisplay();
+        if (spec3DOsFullscreenHost->getBounds() != display->totalArea)
+            spec3DOsFullscreenHost->setBounds (display->totalArea);
+        spectrogram3D.setBounds (spec3DOsFullscreenHost->getLocalBounds());
+        if (spec3DFsExitChrome != nullptr)
+            spec3DFsExitChrome->placeOnDisplay (display->totalArea);
+    }
 }
 
 void MainComponent::setSpec3DMeshQuality (Spectrogram3DComponent::MeshQuality q, bool notifyPrefs)
@@ -2309,6 +2640,8 @@ void MainComponent::showRampTimelineWindow()
         rampTimelineWindow->setThemeColors (&sharedResources);
         rampTimelineWindow->getTimeline().playheadProvider =
             [this] { return spectrogram3D.getRampTimelinePlayheadSec(); };
+        rampTimelineWindow->getTimeline().onExportRegionOffline =
+            [this] (const Spec3DExportSettings& s) { startSpec3DRegionExport (s); };
         rampTimelineWindow->onSequenceChanged = [this] { editor.requestSaveUiPrefs(); };
         rampTimelineWindow->onEnabledChanged = [this]
         {
@@ -2324,6 +2657,53 @@ void MainComponent::showRampTimelineWindow()
     rampTimelineWindow->setVisible (true);
     rampTimelineWindow->toFront (true);
     rampTimelineWindow->setPlayheadSec (spectrogram3D.getRampTimelinePlayheadSec());
+}
+
+void MainComponent::startSpec3DRegionExport (const Spec3DExportSettings& settings)
+{
+#if ! SPEC3D_EXPORT_ENABLED
+    juce::ignoreUnused (settings);
+    juce::AlertWindow::showMessageBoxAsync (
+        juce::AlertWindow::InfoIcon,
+        "Export region offline",
+        "Offline export is sandboxed for now (kept for a future standalone / re-enable).\n\n"
+        "To restore: set SPEC3D_EXPORT_ENABLED to 1 in Source/Export/Spec3DExportSandbox.h "
+        "and rebuild.");
+    return;
+#else
+    if (activeSpec3DExport != nullptr)
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                                                "Export region offline",
+                                                "An export is already running.");
+        return;
+    }
+
+    if (! spectrogram3D.isActive())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                                                "Export region offline",
+                                                "Enable Spectrogram 3D before exporting.");
+        return;
+    }
+
+    activeSpec3DExport = std::make_unique<Spec3DExportJob> (
+        spectrogram3D, processor.getExportAudioRing(), settings);
+    activeSpec3DExport->onFinished =
+        [this] (bool ok, juce::String msg)
+        {
+            juce::MessageManager::callAsync (
+                [this, ok, msg]
+                {
+                    activeSpec3DExport.reset();
+                    juce::AlertWindow::showMessageBoxAsync (
+                        ok ? juce::AlertWindow::InfoIcon : juce::AlertWindow::WarningIcon,
+                        "Export region offline",
+                        msg);
+                });
+        };
+    activeSpec3DExport->launchThread();
+#endif
 }
 
 void MainComponent::setSpec3DAutoRotatePeriodSec (float secondsPerRevolution, bool notifyPrefs)
@@ -3145,6 +3525,17 @@ int MainComponent::getSpec3DParticleEmitMode() const noexcept
 {
     return (int) spectrogram3D.getParticleEmitMode();
 }
+void MainComponent::setSpec3DParticleBindingMode (int mode, bool notifyPrefs)
+{
+    spectrogram3D.setParticleBindingMode (
+        mode == 1 ? ParticleBindingMode::freeVisualizer
+                  : ParticleBindingMode::spectrogramTrail);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+int MainComponent::getSpec3DParticleBindingMode() const noexcept
+{
+    return (int) spectrogram3D.getParticleBindingMode();
+}
 void MainComponent::setSpec3DParticleEmission (float amount, bool notifyPrefs)
 {
     spectrogram3D.setParticleEmission (amount);
@@ -3153,6 +3544,15 @@ void MainComponent::setSpec3DParticleEmission (float amount, bool notifyPrefs)
 float MainComponent::getSpec3DParticleEmission() const noexcept
 {
     return spectrogram3D.getParticleEmission();
+}
+void MainComponent::setSpec3DParticleSpawnJitter (float amount, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSpawnJitter (amount);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSpawnJitter() const noexcept
+{
+    return spectrogram3D.getParticleSpawnJitter();
 }
 void MainComponent::setSpec3DParticleModSlot (int index, const ParticleModSlot& slot, bool notifyPrefs)
 {
@@ -3163,14 +3563,99 @@ ParticleModSlot MainComponent::getSpec3DParticleModSlot (int index) const noexce
 {
     return spectrogram3D.getParticleModSlot (index);
 }
+void MainComponent::setSpec3DParticleRandomSource (int index, const ParticleRandomSource& src, bool notifyPrefs)
+{
+    spectrogram3D.setParticleRandomSource (index, src);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+ParticleRandomSource MainComponent::getSpec3DParticleRandomSource (int index) const noexcept
+{
+    return spectrogram3D.getParticleRandomSource (index);
+}
+void MainComponent::setSpec3DParticleForcesEnabled (bool e, bool notifyPrefs)
+{
+    spectrogram3D.setParticleForcesEnabled (e);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DParticleForcesEnabled() const noexcept { return spectrogram3D.isParticleForcesEnabled(); }
+void MainComponent::setSpec3DParticleWaterfallLock (bool e, bool notifyPrefs)
+{
+    spectrogram3D.setParticleWaterfallLock (e);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+bool MainComponent::isSpec3DParticleWaterfallLock() const noexcept { return spectrogram3D.isParticleWaterfallLock(); }
+void MainComponent::setSpec3DParticleForceStack (const std::vector<ParticleForceModule>& stack, bool notifyPrefs)
+{
+    spectrogram3D.setParticleForceStack (stack);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+std::vector<ParticleForceModule> MainComponent::getSpec3DParticleForceStack() const
+{
+    std::vector<ParticleForceModule> out;
+    const int n = spectrogram3D.getParticleForceModuleCount();
+    out.reserve ((size_t) n);
+    for (int i = 0; i < n; ++i)
+        out.push_back (spectrogram3D.getParticleForceModule (i));
+    return out;
+}
+void MainComponent::setSpec3DParticleMeshShape (int shape, bool notifyPrefs)
+{
+    spectrogram3D.setParticleMeshShape ((ParticleMeshShape) juce::jlimit (0, 2, shape));
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+int MainComponent::getSpec3DParticleMeshShape() const noexcept
+{
+    return (int) spectrogram3D.getParticleMeshShape();
+}
+void MainComponent::setSpec3DParticleInitRotX (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setParticleInitRotX (deg);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleInitRotX() const noexcept { return spectrogram3D.getParticleInitRotX(); }
+void MainComponent::setSpec3DParticleInitRotY (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setParticleInitRotY (deg);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleInitRotY() const noexcept { return spectrogram3D.getParticleInitRotY(); }
+void MainComponent::setSpec3DParticleInitRotZ (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setParticleInitRotZ (deg);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleInitRotZ() const noexcept { return spectrogram3D.getParticleInitRotZ(); }
+void MainComponent::setSpec3DParticleInitRotRandom (float amount, bool notifyPrefs)
+{
+    spectrogram3D.setParticleInitRotRandom (amount);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleInitRotRandom() const noexcept { return spectrogram3D.getParticleInitRotRandom(); }
+void MainComponent::setSpec3DParticleInitVelX (float unitsPerSec, bool notifyPrefs)
+{
+    spectrogram3D.setParticleInitVelX (unitsPerSec);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+void MainComponent::setSpec3DParticleInitVelY (float unitsPerSec, bool notifyPrefs)
+{
+    spectrogram3D.setParticleInitVelY (unitsPerSec);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+void MainComponent::setSpec3DParticleInitVelZ (float unitsPerSec, bool notifyPrefs)
+{
+    spectrogram3D.setParticleInitVelZ (unitsPerSec);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleInitVelX() const noexcept { return spectrogram3D.getParticleInitVelX(); }
+float MainComponent::getSpec3DParticleInitVelY() const noexcept { return spectrogram3D.getParticleInitVelY(); }
+float MainComponent::getSpec3DParticleInitVelZ() const noexcept { return spectrogram3D.getParticleInitVelZ(); }
 void MainComponent::setSpec3DParticleRiseSpeed (float unitsPerSec, bool notifyPrefs)
 {
-    spectrogram3D.setParticleRiseSpeed (unitsPerSec);
-    if (notifyPrefs) editor.requestSaveUiPrefs();
+    setSpec3DParticleInitVelY (unitsPerSec, notifyPrefs);
 }
 float MainComponent::getSpec3DParticleRiseSpeed() const noexcept
 {
-    return spectrogram3D.getParticleRiseSpeed();
+    return getSpec3DParticleInitVelY();
 }
 void MainComponent::setSpec3DParticleVelRandom (float amount01, bool notifyPrefs)
 {
@@ -6545,6 +7030,10 @@ void MainComponent::resized()
     // Settings panel: freely movable/resizable; content stays at design size (viewport scrolls).
     layoutSettingsMenu();
 
+    // Spec3D OS fullscreen: keep desktop host sized if display/editor moved.
+    if (spec3DFullscreen)
+        applySpec3DFullscreenLayout();
+
     // Wordmark may be re-hosted from EqEditor::resized; keep menu chrome above it.
     syncExpandedOscOverlayStack();
 }
@@ -6593,9 +7082,16 @@ void MainComponent::layoutSettingsMenu()
     }
 
     auto b = settingsMenuBounds;
+    // Clamp size first, then re-pin so the *entire* frame stays on-screen.
+    // (Previously a wide menu could keep a large X and push the right edge off.)
     b.setWidth (juce::jlimit (200, parentW, b.getWidth()));
     b.setHeight (juce::jlimit (140, parentH, b.getHeight()));
-    b.setX (juce::jlimit (0, juce::jmax (0, parentW - b.getWidth()), b.getX()));
+    if (b.getRight() > parentW)
+        b.setX (juce::jmax (0, parentW - b.getWidth()));
+    if (b.getX() < 0)
+        b.setX (0);
+    if (b.getRight() > parentW)
+        b.setWidth (parentW - b.getX());
     b.setY (juce::jlimit (0, juce::jmax (0, parentH - b.getHeight()), b.getY()));
 
     // Keep the panel above the shared bottom-chrome line (even after user drag/resize).
@@ -6616,6 +7112,10 @@ void MainComponent::layoutSettingsMenu()
     menu.setBounds (b);
     updatingSettingsMenuBounds = false;
     settingsMenuBounds = menu.getBounds();
+
+    // Constrain border-resize so left-edge drags cannot push the right edge off-screen.
+    if (auto* parent = menu.getParentComponent())
+        menu.setResizeLimitsWithinParent (parent->getLocalBounds());
 }
 
 void MainComponent::componentMovedOrResized (juce::Component& component, bool wasMoved, bool wasResized)
@@ -6626,6 +7126,53 @@ void MainComponent::componentMovedOrResized (juce::Component& component, bool wa
 
     settingsMenuBounds = menu.getBounds();
     settingsMenuBoundsFromUser = true;
+
+    // If a border-resize shoved any edge past the editor, clamp immediately
+    // (left-edge drag used to grow width and park the right edge off-screen).
+    {
+        const int parentW = getWidth();
+        const int parentH = getHeight();
+        auto b = settingsMenuBounds;
+        bool fixed = false;
+        if (b.getWidth() > parentW)
+        {
+            b.setWidth (parentW);
+            fixed = true;
+        }
+        if (b.getHeight() > parentH)
+        {
+            b.setHeight (parentH);
+            fixed = true;
+        }
+        if (b.getRight() > parentW)
+        {
+            b.setX (juce::jmax (0, parentW - b.getWidth()));
+            fixed = true;
+        }
+        if (b.getX() < 0)
+        {
+            b.setX (0);
+            fixed = true;
+        }
+        if (b.getBottom() > parentH)
+        {
+            b.setY (juce::jmax (0, parentH - b.getHeight()));
+            fixed = true;
+        }
+        if (b.getY() < 0)
+        {
+            b.setY (0);
+            fixed = true;
+        }
+        if (fixed)
+        {
+            updatingSettingsMenuBounds = true;
+            menu.setBounds (b);
+            updatingSettingsMenuBounds = false;
+            settingsMenuBounds = menu.getBounds();
+        }
+        menu.setResizeLimitsWithinParent (getLocalBounds());
+    }
 
     // Keep expanded 3D parked left of Settings as the menu is dragged/resized.
     if (menu.isVisible() && spectrogram3D.isActive() && specExpanded)
@@ -6798,6 +7345,15 @@ void MainComponent::raiseMenuSystemAboveWordmark()
             menu.toFront (false);
         else
             menuToggleButton.toFront (false);
+    }
+
+    // Spec3D OS fullscreen lives on its own desktop peers (host + exit chrome).
+    if (spec3DFullscreen)
+    {
+        if (spec3DOsFullscreenHost != nullptr)
+            spec3DOsFullscreenHost->toFront (true);
+        if (spec3DFsExitChrome != nullptr)
+            spec3DFsExitChrome->toFront (true);
     }
 
     if (rampSampleOverlay.isVisible())

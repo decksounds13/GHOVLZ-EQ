@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "ParticleForceModule.h"
 #include <vector>
 #include <cstdint>
 #include <array>
@@ -8,37 +9,181 @@
 
 class Spectrogram3DComponent;
 
-// ── Particle mod matrix (Niagara-inspired, fixed slots) ─────────────────────
+// ── Particle mod matrix ─────────────────────────────────────────────────────
 
 enum class ParticleModSource : int
 {
     none = 0,
-    amplitude,   // playhead energy 0..1 (smoothed)
-    binDb,       // this particle's column/bin height 0..1
-    binFreq,     // frequency axis 0..1 for particle bin
-    ageNorm,     // age/maxLife (0 if indefinite)
-    history,     // column age 0=old .. 1=now
-    constant     // row constant slider
+    amplitude,
+    binDb,
+    binFreq,
+    ageNorm,
+    history,
+    constant,
+    random1,
+    random2,
+    random3,
+    /** Birth velocity (Float = speed magnitude; Vec3 dests sample XYZ). */
+    initVel,
+    /** Stable per-particle id hashed to 0–1 (unique for each birth). */
+    particleId
 };
 
 enum class ParticleModDest : int
 {
-    emission = 0,  // emitter rate (emitter stage)
-    riseSpeed,     // spawn
-    lifespan,      // spawn
-    size,          // spawn + update
-    colourGain,    // spawn + update (multiply RGB)
-    colourHue,     // spawn + update (set hue from source)
-    emissive,      // spawn + update (brightness scale)
-    alpha          // spawn + update
+    emission = 0,
+    riseSpeed,         // Float — modulates upward (Y) speed at spawn
+    lifespan,
+    size,
+    colourGain,
+    colourHue,
+    emissive,
+    alpha,
+    spawnJitter,       // scale spawn position jitter
+    sizeScale,         // alias clarity — same as size (kept for UI grouping)
+    initRot,           // Vec3 spawn euler (radians) — one slot for all axes
+    // Legacy single-axis ids (prefs remap → initRot). Keep values stable for older XML.
+    initRotY_legacy = 11,
+    initRotZ_legacy = 12,
+    // System-stage force destinations scale matching modules in the stack
+    forceGravity = 13,
+    forceDrag,
+    forceWindX,
+    forceWindY,
+    forceWindZ,
+    forceCurlStrength,
+    forceCurlScale,
+    forceCurlSpeed,
+    forceTurbulence,
+    /** Vec3 birth linear velocity (world units/s). Float sources broadcast to XYZ. */
+    initVel = 22
 };
 
 enum class ParticleModOp : int
 {
-    set = 0,       // lerp(base, src, amount)
-    multiply,      // base * lerp(1, src, amount)
-    add            // base + src * amount
+    set = 0,
+    multiply,
+    add
 };
+
+/** Channel count of a value (Float / Vec2 / Vec3). Used for dest labels and random matching. */
+enum class ParticleValueType : int
+{
+    Float = 0,
+    Vec2 = 1,
+    Vec3 = 2
+};
+
+inline ParticleValueType particleModDestType (ParticleModDest d) noexcept
+{
+    switch (d)
+    {
+        case ParticleModDest::initRot:
+        case ParticleModDest::initRotY_legacy:
+        case ParticleModDest::initRotZ_legacy:
+        case ParticleModDest::initVel:
+            return ParticleValueType::Vec3;
+        default:
+            return ParticleValueType::Float;
+    }
+}
+
+inline const char* particleValueTypeLabel (ParticleValueType t) noexcept
+{
+    switch (t)
+    {
+        case ParticleValueType::Vec2: return "Vec2";
+        case ParticleValueType::Vec3: return "Vec3";
+        default:                      return "Float";
+    }
+}
+
+/** Preferred channel type when using a source (for UI matching / Random dim hints). */
+inline ParticleValueType particleModSourceType (ParticleModSource s) noexcept
+{
+    switch (s)
+    {
+        case ParticleModSource::initVel:
+            return ParticleValueType::Vec3; // XYZ available; Float dests use speed
+        case ParticleModSource::particleId:
+        default:
+            return ParticleValueType::Float;
+    }
+}
+
+inline const char* particleModSourceBaseName (ParticleModSource s) noexcept
+{
+    switch (s)
+    {
+        case ParticleModSource::none:      return "None";
+        case ParticleModSource::amplitude: return "Amplitude";
+        case ParticleModSource::binDb:     return "Bin dB";
+        case ParticleModSource::binFreq:   return "Bin freq";
+        case ParticleModSource::ageNorm:   return "Age";
+        case ParticleModSource::history:   return "History";
+        case ParticleModSource::constant:  return "Constant";
+        case ParticleModSource::random1:   return "Random 1";
+        case ParticleModSource::random2:   return "Random 2";
+        case ParticleModSource::random3:   return "Random 3";
+        case ParticleModSource::initVel:   return "Init vel";
+        case ParticleModSource::particleId: return "Particle id";
+        default:                           return "Source";
+    }
+}
+
+inline juce::String particleModSourceMenuLabel (ParticleModSource s)
+{
+    if (s == ParticleModSource::none)
+        return "None";
+    return juce::String (particleModSourceBaseName (s))
+           + " (" + particleValueTypeLabel (particleModSourceType (s)) + ")";
+}
+
+inline const char* particleModDestBaseName (ParticleModDest d) noexcept
+{
+    switch (d)
+    {
+        case ParticleModDest::emission:         return "Emission";
+        case ParticleModDest::riseSpeed:        return "Init vel Y"; // legacy float dest
+        case ParticleModDest::lifespan:         return "Lifespan";
+        case ParticleModDest::size:             return "Size";
+        case ParticleModDest::colourGain:       return "Colour gain";
+        case ParticleModDest::colourHue:        return "Colour hue";
+        case ParticleModDest::emissive:         return "Emissive";
+        case ParticleModDest::alpha:            return "Alpha";
+        case ParticleModDest::spawnJitter:      return "Spawn jitter";
+        case ParticleModDest::sizeScale:        return "Size scale";
+        case ParticleModDest::initRot:
+        case ParticleModDest::initRotY_legacy:
+        case ParticleModDest::initRotZ_legacy:  return "Init rot";
+        case ParticleModDest::forceGravity:     return "Force gravity";
+        case ParticleModDest::forceDrag:        return "Force drag";
+        case ParticleModDest::forceWindX:       return "Force wind X";
+        case ParticleModDest::forceWindY:       return "Force wind Y";
+        case ParticleModDest::forceWindZ:       return "Force wind Z";
+        case ParticleModDest::forceCurlStrength:return "Force curl str";
+        case ParticleModDest::forceCurlScale:   return "Force curl scale";
+        case ParticleModDest::forceCurlSpeed:   return "Force curl speed";
+        case ParticleModDest::forceTurbulence:  return "Force turbulence";
+        case ParticleModDest::initVel:          return "Init vel";
+        default:                                return "Dest";
+    }
+}
+
+/** Menu label with type suffix, e.g. "Init rot (Vec3)". */
+inline juce::String particleModDestMenuLabel (ParticleModDest d)
+{
+    return juce::String (particleModDestBaseName (d))
+           + " (" + particleValueTypeLabel (particleModDestType (d)) + ")";
+}
+
+/** Normalize legacy single-axis init rot dests to initRot. */
+inline ParticleModDest particleModDestCanonical (ParticleModDest d) noexcept
+{
+    if (d == ParticleModDest::initRotY_legacy || d == ParticleModDest::initRotZ_legacy)
+        return ParticleModDest::initRot;
+    return d;
+}
 
 struct ParticleModSlot
 {
@@ -48,16 +193,58 @@ struct ParticleModSlot
     ParticleModOp op = ParticleModOp::multiply;
     float amount = 1.0f;
     float constant = 0.5f;
-    /** Serum-style response curve: 0 = linear 1:1, + = ease-in (x^k), − = ease-out. Range −1..1. */
-    float curveShape = 0.0f;
-    /** When true: envelope-follow source, soft-gate above threshold (attack/release). */
+    float curveShape = 0.0f;   // −1..1 transfer curve
+    float mapMin = 0.0f;       // map-range low
+    float mapMax = 1.0f;       // map-range high
+    /** After curve + map range: use (1 − s) so high source drives low dest. */
+    bool invert = false;
     bool thresholdEnabled = false;
-    float threshold = 0.25f;   // 0..1
-    float attackMs = 10.0f;    // 0.1..2000
-    float releaseMs = 80.0f;   // 0.1..5000
+    float threshold = 0.25f;
+    float attackMs = 10.0f;
+    float releaseMs = 80.0f;
 };
 
 static constexpr int kParticleModSlotCount = 8;
+static constexpr int kParticleRandomSourceCount = 3;
+
+enum class ParticleRandomDim : int { Float = 0, Vec2 = 1, Vec3 = 2 };
+enum class ParticleRandomMode : int { PerParticle = 0, PerFrame = 1, Smoothed = 2 };
+
+inline ParticleValueType particleRandomDimType (ParticleRandomDim d) noexcept
+{
+    switch (d)
+    {
+        case ParticleRandomDim::Vec2: return ParticleValueType::Vec2;
+        case ParticleRandomDim::Vec3: return ParticleValueType::Vec3;
+        default:                      return ParticleValueType::Float;
+    }
+}
+
+inline const char* particleRandomDimMenuLabel (ParticleRandomDim d) noexcept
+{
+    switch (d)
+    {
+        case ParticleRandomDim::Vec2: return "Vec2 (2 channels)";
+        case ParticleRandomDim::Vec3: return "Vec3 (3 channels)";
+        default:                      return "Float (1 channel)";
+    }
+}
+
+struct ParticleRandomSource
+{
+    bool active = false; // shown when any matrix row uses it
+    ParticleRandomDim dim = ParticleRandomDim::Float;
+    ParticleRandomMode mode = ParticleRandomMode::PerParticle;
+    float minV = 0.0f;
+    float maxV = 1.0f;
+    float smoothMs = 50.0f;
+};
+
+enum class ParticleBindingMode : int
+{
+    spectrogramTrail = 0, // waterfall lock / rise-to-height
+    freeVisualizer = 1    // free motion; spectrum as sources only
+};
 
 /** Map 0..1 through bipolar curve shape (−1..1). 0 = identity. */
 inline float particleModApplyCurve (float x, float shape) noexcept
@@ -66,15 +253,14 @@ inline float particleModApplyCurve (float x, float shape) noexcept
     shape = juce::jlimit (-1.0f, 1.0f, shape);
     if (std::abs (shape) < 1.0e-4f)
         return x;
-    // shape +1 → power 4 (slow then steep), shape −1 → power 0.25 (steep then flat)
     const float power = std::pow (4.0f, shape);
     return std::pow (juce::jmax (0.0f, x), power);
 }
 
 /**
-    Modular Spec3D particle spectrogram (CPU sim + GPU billboards).
-    Lazy GL init. Continuous emit = uniform random bins. Slice = phase-locked columns.
-    Mod matrix: source → dest bindings applied at emitter / spawn / update stages.
+    Modular Spec3D particle system.
+    CPU sim + GPU path: instanced low-poly mesh (sphere/cube) or billboard sprites.
+    Force stack (ordered modules); mod matrix; trail / free visualizer binding.
 */
 class Spec3DParticleSystem
 {
@@ -104,35 +290,85 @@ private:
     struct Particle
     {
         float x = 0, y = 0, z = 0;
-        float velY = 0;
+        float velX = 0, velY = 0, velZ = 0;
         float targetY = 0;
         float r = 1, g = 1, b = 1;
-        float baseR = 1, baseG = 1, baseB = 1; // ramp colour before mod
+        float baseR = 1, baseG = 1, baseB = 1;
         float age = 0;
-        float maxLife = -1.0f; // < 0 = indefinite
+        float maxLife = -1.0f;
         float sizeScale = 1.0f;
         float colourGain = 1.0f;
         float emissiveScale = 1.0f;
         float alpha = 1.0f;
+        float rotX = 0, rotY = 0, rotZ = 0; // euler radians
+        /**
+            Per-particle spin multipliers in −1…1 (set once at spawn).
+            Rotation force rate is multiplied by these so every particle tumbles
+            differently (direction + relative speed), not one shared random.
+        */
+        float spinScaleX = 1.0f, spinScaleY = 1.0f, spinScaleZ = 1.0f;
         float binDb01 = 0.0f;
         float binFreq01 = 0.0f;
+        /** Unique birth id (matrix source Particle id → hashed 0–1). */
+        uint32_t id = 0;
+        /** Continuous mesh-row coordinate (0..meshH-1); not only integer bin centers. */
+        float binF = 0.0f;
+        /** Spawn scatter retained under trail lock (exact grid is optional via jitter=0). */
+        float spawnOffX = 0, spawnOffY = 0, spawnOffZ = 0;
+        /** Per random source: up to 3 channels (Float / Vec2 / Vec3). [source][xyz]. */
+        float randV[kParticleRandomSourceCount][3] = {};
         int bin = 0;
         int col = 0;
         bool alive = false;
         bool settled = false;
     };
 
-    struct GpuVert
+    /** Per-instance GPU payload for mesh instancing. */
+    struct GpuInstance
+    {
+        float px, py, pz;
+        float sx; // uniform scale
+        float qx, qy, qz, qw; // rotation quaternion
+        float r, g, b, a;     // albedo + alpha
+        float em;             // per-particle emissive scale (matrix dest)
+    };
+
+    /** Billboard fallback vertex. */
+    struct GpuBillboardVert
     {
         float px, py, pz;
         float r, g, b, a;
         float cx, cy;
         float size;
+        float em; // per-particle emissive scale (matrix dest)
+    };
+
+    struct MeshVert
+    {
+        float px, py, pz;
+        float nx, ny, nz;
     };
 
     struct FrameSources
     {
         float amplitude = 0.0f;
+        /** Per random source channels (matches ParticleRandomDim). [source][xyz]. */
+        float randomV[kParticleRandomSourceCount][3] = {};
+    };
+
+    /** Runtime force params after matrix (type-keyed scales applied to stack). */
+    struct ForceModScales
+    {
+        float gravity = 1.0f;
+        float drag = 1.0f;
+        float windX = 1.0f, windY = 1.0f, windZ = 1.0f;
+        float curlStrength = 1.0f, curlScale = 1.0f, curlSpeed = 1.0f;
+        float turbulence = 1.0f;
+        // Additive offsets from Set/Add ops accumulated separately
+        float gravityAdd = 0, dragAdd = 0;
+        float windAddX = 0, windAddY = 0, windAddZ = 0;
+        float curlStrAdd = 0, curlScaleAdd = 0, curlSpeedAdd = 0;
+        float turbAdd = 0;
     };
 
     Spectrogram3DComponent& owner;
@@ -141,16 +377,22 @@ private:
     std::vector<float> emitAccum;
     float emitGlobal = 0.0f;
     float amplitudeSmooth = 0.0f;
+    float simTime = 0.0f;
     int nextWrite = 0;
     juce::Random rng { 0x53c33dU };
-    /** Per-slot envelope followers (only advanced when that slot's threshold is on). */
+    /** Monotonic birth counter for ParticleModSource::particleId. */
+    uint32_t nextParticleId = 1;
     std::array<float, kParticleModSlotCount> slotEnv {};
-    /** Cached processed global sources (amplitude/constant) after threshold+curve for this frame. */
     std::array<float, kParticleModSlotCount> slotGlobalSrc {};
     std::array<bool, kParticleModSlotCount> slotGlobalValid {};
+    /** Smoothed / per-frame random channels [source][xyz]. */
+    float randomSmoothV[kParticleRandomSourceCount][3] = {};
 
     void ensurePool();
-    void spawnAtBin (int bin, float riseSpeedBase, float lifespanBase, float sizeBase);
+    /** Spawn on the playhead. binF is continuous in [0, meshH-1] (interpolated). */
+    void spawnAtPlayhead (float binF, float lifespanBase, float sizeBase, float spawnJitterScale);
+    /** Energy-weighted random binF on the playhead (louder bands emit more). */
+    float pickPlayheadBinF() noexcept;
     float sampleColumn (int bin, int col,
                         float& outR, float& outG, float& outB, float& outZ,
                         float& outDb01, float& outFreq01) const;
@@ -159,41 +401,70 @@ private:
     float playheadAmplitude01() const;
     float sampleSource (ParticleModSource src, float constant,
                         const Particle* p, const FrameSources& frame) const;
+    /** Multi-channel sample; Float sources broadcast to all axes. */
+    juce::Vector3D<float> sampleSourceVec (ParticleModSource src, float constant,
+                                           const Particle* p, const FrameSources& frame) const;
+    void rollRandomChannels (int sourceIndex, float out[3]) noexcept;
     static bool isGlobalSource (ParticleModSource src) noexcept;
-    /** Advance envelopes once/frame for global thresholded slots. */
+    static int randomIndex (ParticleModSource src) noexcept;
+    void tickRandomSources (float dt) noexcept;
     void tickGlobalThresholds (const FrameSources& frame, float dt) noexcept;
-    /** Sample → optional threshold → curve. Global thresholded slots use frame cache. */
     float processSource (int slotIndex, const Particle* p, const FrameSources& frame) const noexcept;
+    juce::Vector3D<float> processSourceVec (int slotIndex, const Particle* p,
+                                            const FrameSources& frame) const noexcept;
     static float applyOp (float base, float src, ParticleModOp op, float amount) noexcept;
-    void applyEmitterMods (float& emission, const FrameSources& frame) noexcept;
-    void applySpawnMods (Particle& p, float& riseSpeed, float& lifespan, float& sizeScale,
+    void applySystemMods (float& emission, float& spawnJitter, ForceModScales& scales,
+                          const FrameSources& frame) noexcept;
+    void applySpawnMods (Particle& p, float& lifespan, float& sizeScale, float& jitterScale,
+                         float& velX, float& velY, float& velZ,
+                         float& rotX, float& rotY, float& rotZ,
                          const FrameSources& frame) noexcept;
     void applyUpdateMods (Particle& p, const FrameSources& frame) noexcept;
     void applyColourMods (Particle& p, ParticleModDest dest, float src, ParticleModOp op, float amount) const;
     static void setHue (float& r, float& g, float& b, float hue01) noexcept;
+    void integrateForceStack (Particle& p, const ForceModScales& scales, float dt) noexcept;
+    static juce::Vector3D<float> curlNoise (float x, float y, float z) noexcept;
+    static float hashNoise (int x, int y, int z) noexcept;
+    static float valueNoise (float x, float y, float z) noexcept;
+    static void eulerToQuat (float rx, float ry, float rz,
+                             float& qx, float& qy, float& qz, float& qw) noexcept;
+    void buildUnitMeshes();
+    bool createMeshProgram (juce::OpenGLContext& context);
+    bool createBillboardProgram (juce::OpenGLContext& context);
+    void drawInstancedMeshes (const juce::Matrix3D<float>& projection,
+                              const juce::Matrix3D<float>& view);
+    void drawBillboards (const juce::Matrix3D<float>& projection,
+                         const juce::Matrix3D<float>& view,
+                         juce::Vector3D<float> camRight,
+                         juce::Vector3D<float> camUp);
 
     bool glReady = false;
-    std::unique_ptr<juce::OpenGLShaderProgram> program;
-    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> aPos;
-    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> aCol;
-    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> aCorner;
-    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> aSize;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uProj;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uView;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uCamRight;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uCamUp;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uSize;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uEmissiveMode;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uEmissiveStrength;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uRoughness;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uMetalness;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uSpecular;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uLightingAmount;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uLightDirView;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uLightColour;
+    // Shared lighting uniforms used by both programs
+    std::unique_ptr<juce::OpenGLShaderProgram> meshProgram;
+    std::unique_ptr<juce::OpenGLShaderProgram> billboardProgram;
+    // Mesh mesh attrs
+    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> aMeshPos, aMeshNrm;
+    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> aInstPos, aInstScale, aInstQuat, aInstCol, aInstEm;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uMeshProj, uMeshView;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uMeshEmissiveMode, uMeshEmissiveStr;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uMeshRough, uMeshMetal, uMeshSpec;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uMeshLightAmt, uMeshLightDir, uMeshLightCol;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uMeshEnergyConserve;
+    // Billboard attrs (legacy path)
+    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> aPos, aCol, aCorner, aSize, aEm;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uProj, uView, uCamRight, uCamUp, uSize;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uEmissiveMode, uEmissiveStrength;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uRoughness, uMetalness, uSpecular;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uEnergyConserve;
+    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> uLightingAmount, uLightDirView, uLightColour;
 
-    unsigned int vbo = 0;
-    std::vector<GpuVert> gpuVerts;
-
-    bool createProgram (juce::OpenGLContext& context);
+    unsigned int meshVbo = 0, meshIbo = 0, instanceVbo = 0;
+    unsigned int billboardVbo = 0;
+    int sphereIndexCount = 0, cubeIndexCount = 0;
+    int sphereVertexOffset = 0, cubeVertexOffset = 0;
+    int sphereIndexOffset = 0, cubeIndexOffset = 0;
+    std::vector<MeshVert> meshVerts;
+    std::vector<uint16_t> meshIndices;
+    std::vector<GpuInstance> instances;
+    std::vector<GpuBillboardVert> gpuVerts;
 };

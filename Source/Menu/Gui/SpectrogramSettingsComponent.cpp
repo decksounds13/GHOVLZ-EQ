@@ -141,7 +141,7 @@ void ColourSchemeComboLookAndFeel::drawComboBox (juce::Graphics& g, int width, i
     g.strokePath (path, juce::PathStrokeType (1.4f));
 }
 
-// Hide default combo label — we paint name beside the swatch ourselves.
+// Hide default combo label  -  we paint name beside the swatch ourselves.
 void ColourSchemeComboLookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
 {
     label.setBounds ({});
@@ -292,7 +292,7 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     styleToggle (enhancedFreqToggle);
     enhancedFreqToggle.setTooltip (
         "2D waterfall: multi-resolution analysis + instantaneous-frequency reassignment "
-        "(thinner tonal ridges, especially bass). Uses more CPU — tune Strength / LF Detail below. "
+        "(thinner tonal ridges, especially bass). Uses more CPU  -  tune Strength / LF Detail below. "
         "Independent of the 3D toggle.");
     addAndMakeVisible (enhancedFreqToggle);
     enhancedFreqAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_ENHANCED_FREQ_ID", enhancedFreqToggle);
@@ -314,7 +314,7 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
             enhancedLfDetailCombo.addItem (names[i], i + 1);
     }
     enhancedLfDetailCombo.setTooltip (
-        "Off = base FFT only. 2× = longer bass window. 4× = longest bass + mid-band 2× window.");
+        "Off = base FFT only. 2x = longer bass window. 4x = longest bass + mid-band 2x window.");
     addAndMakeVisible (enhancedLfDetailLabel);
     addAndMakeVisible (enhancedLfDetailCombo);
     enhancedLfDetailAttachment = std::make_unique<ComboBoxAttachment> (

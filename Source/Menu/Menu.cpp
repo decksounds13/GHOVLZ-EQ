@@ -91,7 +91,9 @@ Menu::Menu (SharedResources& resources,
 
     constrainer.setMinimumSize (200, 140);
     constrainer.setMaximumSize (4000, 4000);
-    constrainer.setMinimumOnscreenAmounts (kDragBarHeight, 40, 40, 40);
+    // Keep the whole frame usable; tiny onscreen margins made left-edge resize
+    // easy to shove most of the panel off-screen.
+    constrainer.setMinimumOnscreenAmounts (kDragBarHeight, 80, 40, 80);
     borderResizer = std::make_unique<juce::ResizableBorderComponent> (this, &constrainer);
     // Thin edges on all sides; centre of the panel still receives clicks for scrolling / controls.
     // Top edge stays thin so most of the drag bar remains available for moving.
@@ -425,13 +427,8 @@ int Menu::getActiveTabPreferredContentHeight() const
 
 int Menu::getActiveTabPreferredContentWidth() const
 {
-    auto* c = tabBar.getCurrentContentComponent();
-    if (c == nullptr)
-        return kContentWidth;
-
-    if (auto* t = dynamic_cast<Spectrogram3DSettingsComponent*> (c))
-        return juce::jmax (kContentWidth, t->getPreferredContentWidth());
-
+    // Frame width is user-controlled; tabs must not request a wider panel.
+    juce::ignoreUnused (tabBar);
     return kContentWidth;
 }
 
@@ -455,17 +452,19 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
 
     // Resolve viewport bounds first so content can fill the panel when the user
     // widens Settings (avoids a floating content island / grey inset frame).
+    //
+    // IMPORTANT: never setSize() the outer frame from tab preferred width.
+    // That pushed the right edge off-screen (frame is often right-anchored) and
+    // fought left-edge resize (grow-back-to-preferred). Frame width is owned by
+    // the user / MainComponent layout; content lays out into the viewport.
     layoutScrollBars();
 
-    // Grow the settings window when the active tab needs more width (e.g. particle matrix).
-    const int preferredW = getActiveTabPreferredContentWidth();
-    if (preferredW > getWidth())
-        setSize (preferredW, getHeight());
-
-    const int contentW = juce::jmax (kContentWidth, preferredW, viewport.getWidth());
+    // Content fills the panel viewport. Wider Settings → wider content; never
+    // forces the outer frame wider (that used to shove the right edge off-screen).
+    const int panelContentW = juce::jmax (1, viewport.getWidth());
 
     // Provisional size so tab content can sync/layout before we measure height.
-    contentPanel.setSize (contentW, juce::jmax (kContentHeight, viewport.getHeight()));
+    contentPanel.setSize (panelContentW, juce::jmax (kContentHeight, viewport.getHeight()));
     tabBar.setBounds (contentPanel.getLocalBounds());
     if (auto* c = tabBar.getCurrentContentComponent())
     {
@@ -480,7 +479,7 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
 
     const int preferred = getActiveTabPreferredContentHeight();
     const int contentH = juce::jmax (viewport.getHeight(), tabBarDepth + preferred);
-    contentPanel.setSize (contentW, contentH);
+    contentPanel.setSize (panelContentW, contentH);
     tabBar.setBounds (contentPanel.getLocalBounds());
 
     // Page arrows sit on the tab strip (right), clear of tab labels on each page.
@@ -489,7 +488,7 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
     constexpr int arrowPad = 6;
     constexpr int arrowGap = 3;
     const int arrowY = (tabBarDepth - arrowH) / 2;
-    tabNextButton.setBounds (contentW - arrowPad - arrowW, arrowY, arrowW, arrowH);
+    tabNextButton.setBounds (panelContentW - arrowPad - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.setBounds (tabNextButton.getX() - arrowGap - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.toFront (false);
     tabNextButton.toFront (false);
@@ -511,6 +510,23 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
 void Menu::notifyContentHeightChanged()
 {
     refreshContentPanelSize (true);
+}
+
+void Menu::setResizeLimitsWithinParent (juce::Rectangle<int> parentLocalBounds) noexcept
+{
+    if (parentLocalBounds.isEmpty())
+        return;
+
+    const int maxW = juce::jmax (200, parentLocalBounds.getWidth());
+    const int maxH = juce::jmax (140, parentLocalBounds.getHeight());
+    constrainer.setMinimumSize (200, 140);
+    constrainer.setMaximumSize (maxW, maxH);
+    // Prefer keeping the panel fully inside the parent when possible.
+    constrainer.setMinimumOnscreenAmounts (
+        juce::jmin (kDragBarHeight, maxH),
+        juce::jmin (80, maxW / 4),
+        juce::jmin (40, maxH / 4),
+        juce::jmin (80, maxW / 4));
 }
 
 void Menu::resized()
