@@ -158,10 +158,8 @@ namespace FilterType
     }
 
     /**
-        Band shelf (Holters–Zölzer Tier C): higher-order Butterworth low-shelf
-        prototype → LP→BP spectral transform → bilinear → SOS cascade.
-        Independent centre / bandwidth (Q) / gain with a true flat plateau.
-        See FilterBandShelf.h.
+        Band shelf: log-symmetric flat plateau about f0.
+        Higher-order dual high-shelf edges (see FilterBandShelf.h).
     */
     inline juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>
         makeBandShelfStages (double sampleRate, float frequency, float q, float gainDb)
