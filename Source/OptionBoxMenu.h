@@ -7,6 +7,7 @@
 #include "BandMonitorButton.h"
 #include "TextButtonLookAndFeel.h"
 #include "FilterSlope.h"
+#include "FilterType.h"
 #include "BandChannel.h"
 #include "DynamicEq.h"
 #include "Spectral/SpectralBandSettings.h"
@@ -88,6 +89,14 @@ private:
     void bindKnobsToBand (int index);
     void clearAttachments();
     void setupFilterModelMenu (int bandIndex);
+    void showHierarchicalFilterMenu();
+    void applyFilterMenuResult (int resultId);
+    void refreshFilterModelComboText();
+    juce::String currentTypeParamID() const;
+    juce::String currentSlopeParamID() const;
+    int readCurrentFilterType() const;
+    int readCurrentFilterSlope() const;
+    void setChoiceParam (const juce::String& paramID, int choiceIndex);
     void syncChannelModeButtons();
     void syncSatControls();
     void showSatContextMenu();
@@ -108,9 +117,7 @@ private:
     /** Bind Res to per-band *SpectralResHz when PB on, else global spectralResHz. */
     void bindSpectralResSlider (int bandIndex);
     bool isPerBandLatticeEnabled() const;
-    void setupFilterSlopeMenu (int bandIndex);
-    void updateFilterSlopeVisibility();
-    bool currentBandShowsFilterSlope() const;
+    void updateFilterModelChrome();
     bool isCurrentBandEnabled() const;
     bool currentBandSupportsDynamic() const;
     bool currentBandSupportsSpectral() const;
@@ -149,9 +156,26 @@ private:
     juce::String currentSpectralPackParamID;
     juce::String currentSplitModeParamID;
 
-    juce::ComboBox customComboBox;
-    /** HP/LP slope — visible whenever the band's filter model is Highpass/Lowpass. */
-    juce::ComboBox filterSlopeComboBox;
+    /**
+        Filter model combo — opens a hierarchical PopupMenu (Highpass/Lowpass
+        submenus carry slopes) instead of a flat item list.
+    */
+    class HierarchicalFilterCombo : public juce::ComboBox
+    {
+    public:
+        std::function<void()> onOpenHierarchicalMenu;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (onOpenHierarchicalMenu != nullptr && e.mods.isLeftButtonDown())
+            {
+                onOpenHierarchicalMenu();
+                return;
+            }
+            juce::ComboBox::mouseDown (e);
+        }
+    };
+
+    HierarchicalFilterCombo customComboBox;
     juce::Label bandNameLabel;
     juce::TextButton prevBandButton { "<" };
     juce::TextButton nextBandButton { ">" };
@@ -185,8 +209,9 @@ private:
     std::unique_ptr<SliderAttachment> spectralBandwidthAttachment;
     /** Inverted vertical Amount: slider 0 at bottom = max Amount. */
     std::unique_ptr<juce::ParameterAttachment> spectralAmountAttachment;
-    std::unique_ptr<ComboBoxAttachment> filterModelAttachment;
-    std::unique_ptr<ComboBoxAttachment> filterSlopeAttachment;
+    /** Type/slope are set from the hierarchical menu (no ComboBoxAttachment). */
+    juce::String listenedTypeParamID;
+    juce::String listenedSlopeParamID;
     std::unique_ptr<ButtonAttachment> dynamicButtonAttachment;
     std::unique_ptr<ButtonAttachment> spectralButtonAttachment;
     std::unique_ptr<ButtonAttachment> spectralExpandButtonAttachment;

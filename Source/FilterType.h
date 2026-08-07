@@ -42,6 +42,42 @@ namespace FilterType
                  "Brick HP", "Brick LP", "Vintage LS", "Vintage HS" };
     }
 
+    /** Closed combo / menu label (HP/LP include slope; brickwall is its own label). */
+    inline juce::String displayName (int type, int slopeChoice) noexcept
+    {
+        switch (type)
+        {
+            case highpass:
+            {
+                const auto slopes = FilterSlope::getShortChoiceNames();
+                const int s = juce::jlimit (0, slopes.size() - 1, slopeChoice);
+                return "HP " + slopes[s];
+            }
+            case lowpass:
+            {
+                const auto slopes = FilterSlope::getShortChoiceNames();
+                const int s = juce::jlimit (0, slopes.size() - 1, slopeChoice);
+                return "LP " + slopes[s];
+            }
+            case brickwallHighpass: return "HP Brickwall";
+            case brickwallLowpass:  return "LP Brickwall";
+            default:
+            {
+                const auto names = getChoiceNames();
+                if (juce::isPositiveAndBelow (type, names.size()))
+                    return names[type];
+                return "Bell";
+            }
+        }
+    }
+
+    /** Top-level menu types (HP/LP/brickwall live under Highpass/Lowpass submenus). */
+    inline bool isTopLevelMenuType (int type) noexcept
+    {
+        return type != highpass && type != lowpass
+            && type != brickwallHighpass && type != brickwallLowpass;
+    }
+
     inline bool usesGain (int type) noexcept
     {
         return type == bell || type == lowShelf || type == highShelf

@@ -57,19 +57,15 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     setSize (designWidth, designHeight);
     setPaintingIsUnclipped (true);
 
-    // ComboBox is populated per-band in setupFilterModelMenu().
-    // Same pattern as working Level Meters / Spectrum combos (stock ComboBox + colour LAF).
+    // Hierarchical filter menu (HP/LP slopes live under submenus).
     customComboBox.setLookAndFeel (&customLookAndFeel);
     customComboBox.addListener (this);
-    addAndMakeVisible(customComboBox);
-    customComboBox.setTooltip ("Filter model");
+    customComboBox.onOpenHierarchicalMenu = [this] { showHierarchicalFilterMenu(); };
+    addAndMakeVisible (customComboBox);
+    customComboBox.setTooltip (
+        "Filter model. Highpass / Lowpass open a submenu of slopes (and Brickwall).");
 
-    filterSlopeComboBox.setLookAndFeel (&customLookAndFeel);
-    filterSlopeComboBox.addListener (this);
-    addChildComponent (filterSlopeComboBox);
-    filterSlopeComboBox.setTooltip ("Slope - highpass / lowpass steepness");
-
-    // Per-band saturation — right of filter model / slope dropdowns.
+    // Per-band saturation — right of filter model dropdown.
     satButton.setClickingTogglesState (true);
     satButton.setTooltip ("Saturation - raising band gain adds harmonics in that region (Q sets how wide). Right-click to choose a model or oversampling.");
     satButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
@@ -335,10 +331,13 @@ OptionBoxMenu::~OptionBoxMenu()
     attackKnob.removeListener (this);
     releaseKnob.removeListener (this);
 
+    if (listenedTypeParamID.isNotEmpty())
+        treeState.removeParameterListener (listenedTypeParamID, this);
+    if (listenedSlopeParamID.isNotEmpty())
+        treeState.removeParameterListener (listenedSlopeParamID, this);
+    customComboBox.onOpenHierarchicalMenu = nullptr;
     customComboBox.removeListener (this);
     customComboBox.setLookAndFeel (nullptr);
-    filterSlopeComboBox.removeListener (this);
-    filterSlopeComboBox.setLookAndFeel (nullptr);
 
     // Remove the listener from each button
     midSelectorButton.removeListener(this);
@@ -420,7 +419,6 @@ void OptionBoxMenu::applyThemeToChildControls()
     };
 
     styleCombo (customComboBox);
-    styleCombo (filterSlopeComboBox);
 
     auto styleLabel = [&c] (juce::Label& lab)
     {
@@ -623,32 +621,13 @@ void OptionBoxMenu::resized()
     const int satBtnW = 28;
     const int prePostW = 32;
     const int satGap = 3;
-    const int slopeGap = 3;
-    // Keep designWidth 150 (pre-widen proportions); short slope labels fit beside type.
-    const int slopeW = 52;
-    const bool showSlope = currentBandShowsFilterSlope();
     const int rowY = bandNameLabel.getBottom() + elementYSpacing;
     const int rowLeft = padding * 3;
-    const int rowRightLimit = getWidth() - padding;
-
-    if (showSlope)
-    {
-        // Type + slope on one row; Sat/Pre drop under so the right edge stays clear.
-        const int comboW = juce::jmax (56, rowRightLimit - rowLeft - slopeGap - slopeW);
-        customComboBox.setBounds (rowLeft, rowY, comboW, comboBoxHeight);
-        filterSlopeComboBox.setBounds (customComboBox.getRight() + slopeGap, rowY, slopeW, comboBoxHeight);
-        satButton.setBounds (rowLeft, customComboBox.getBottom() + 3, satBtnW, comboBoxHeight);
-        satPrePostButton.setBounds (satButton.getRight() + satGap, satButton.getY(), prePostW, comboBoxHeight);
-    }
-    else
-    {
-        filterSlopeComboBox.setBounds ({});
-        // Match prior 150-wide layout: type ~42% width, Sat/Pre on the same row.
-        const int comboW = juce::roundToInt (getWidth() * 0.42f);
-        customComboBox.setBounds (rowLeft, rowY, comboW, comboBoxHeight);
-        satButton.setBounds (customComboBox.getRight() + satGap, rowY, satBtnW, comboBoxHeight);
-        satPrePostButton.setBounds (satButton.getRight() + satGap, rowY, prePostW, comboBoxHeight);
-    }
+    // Type ~42% width, Sat/Pre on the same row (slope lives inside the type menu).
+    const int comboW = juce::roundToInt (getWidth() * 0.42f);
+    customComboBox.setBounds (rowLeft, rowY, comboW, comboBoxHeight);
+    satButton.setBounds (customComboBox.getRight() + satGap, rowY, satBtnW, comboBoxHeight);
+    satPrePostButton.setBounds (satButton.getRight() + satGap, rowY, prePostW, comboBoxHeight);
 
     // Post drive under Pre/Post — same compact footprint as Side Check HP/LP (~btnSize).
     constexpr int satDriveSize = 20;
@@ -706,10 +685,10 @@ void OptionBoxMenu::resized()
         addAndMakeVisible(qLabel);
     }
 
-    // M/S/L/R under the filter-type row (or under Sat when slope pushed Sat down).
+    // M/S/L/R under the filter-type row.
     int buttonWidth = 15;  // Width for each of M, S, L, R buttons
     int buttonHeight = 20; // Height for each of M, S, L, R buttons
-    int comboBoxBottom = showSlope ? satButton.getBottom() : customComboBox.getBottom();
+    int comboBoxBottom = customComboBox.getBottom();
     int spacing = 5;  // Spacing between the buttons
 
     // Calculate x-positions for M, S, L, R buttons
@@ -1233,6 +1212,14 @@ void OptionBoxMenu::parameterChanged (const juce::String& parameterID, float new
                 safe->updateDisplayAlpha();
         });
     }
+    else if (parameterID == listenedTypeParamID || parameterID == listenedSlopeParamID)
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
+        {
+            if (safe != nullptr)
+                safe->updateFilterModelChrome();
+        });
+    }
     else if (parameterID == currentDynamicParamID
              || parameterID == currentSpectralParamID
              || parameterID == currentSplitModeParamID)
@@ -1322,14 +1309,16 @@ void OptionBoxMenu::clearAttachments()
     sidechainButtonAttachment.reset();
     sidechainMidiButtonAttachment.reset();
     spectralSatDriveAttachment.reset();
-    filterModelAttachment.reset();
-    filterSlopeAttachment.reset();
-}
-
-bool OptionBoxMenu::currentBandShowsFilterSlope() const
-{
-    // Brickwall is always max steepness — no slope menu.
-    return FilterType::showsFilterSlope (customComboBox.getSelectedItemIndex());
+    if (listenedTypeParamID.isNotEmpty())
+    {
+        treeState.removeParameterListener (listenedTypeParamID, this);
+        listenedTypeParamID = {};
+    }
+    if (listenedSlopeParamID.isNotEmpty())
+    {
+        treeState.removeParameterListener (listenedSlopeParamID, this);
+        listenedSlopeParamID = {};
+    }
 }
 
 bool OptionBoxMenu::currentBandSupportsDynamic() const
@@ -1338,8 +1327,7 @@ bool OptionBoxMenu::currentBandSupportsDynamic() const
         return false;
 
     // D / S / Sat only when the selected filter type has a gain control.
-    const int type = customComboBox.getSelectedItemIndex();
-    return FilterType::usesGain (type);
+    return FilterType::usesGain (readCurrentFilterType());
 }
 
 bool OptionBoxMenu::currentBandSupportsSpectral() const
@@ -1347,8 +1335,7 @@ bool OptionBoxMenu::currentBandSupportsSpectral() const
     if (! SpectralDynamics::supportsSpectral (currentBandIndex))
         return false;
 
-    const int type = customComboBox.getSelectedItemIndex();
-    return FilterType::usesGain (type);
+    return FilterType::usesGain (readCurrentFilterType());
 }
 
 bool OptionBoxMenu::currentBandSupportsSplitMode() const
@@ -1372,8 +1359,7 @@ bool OptionBoxMenu::currentBandSupportsSat() const
     if (! BandSaturation::supportsSat (currentBandIndex))
         return false;
 
-    const int type = customComboBox.getSelectedItemIndex();
-    return FilterType::usesGain (type);
+    return FilterType::usesGain (readCurrentFilterType());
 }
 
 void OptionBoxMenu::updateDynamicControlsVisibility()
@@ -1682,91 +1668,191 @@ void OptionBoxMenu::bindSpectralResSlider (int bandIndex)
     }
 }
 
-void OptionBoxMenu::setupFilterModelMenu (int bandIndex)
+juce::String OptionBoxMenu::currentTypeParamID() const
 {
-    filterModelAttachment.reset();
+    if (currentBandIndex < 0)
+        return {};
+    return (currentBandIndex >= EqBand::kBankSize)
+               ? FilterType::paramIDForGlobal (currentBandIndex)
+               : FilterType::paramIDForBandIndex (currentBandIndex);
+}
+
+juce::String OptionBoxMenu::currentSlopeParamID() const
+{
+    if (currentBandIndex < 0)
+        return {};
+    return (currentBandIndex >= EqBand::kBankSize)
+               ? FilterSlope::paramIDForGlobal (currentBandIndex)
+               : FilterSlope::paramIDForBandIndex (currentBandIndex);
+}
+
+int OptionBoxMenu::readCurrentFilterType() const
+{
+    return BandChannel::readChoiceIndex (treeState, currentTypeParamID(), FilterType::bell);
+}
+
+int OptionBoxMenu::readCurrentFilterSlope() const
+{
+    return BandChannel::readChoiceIndex (treeState, currentSlopeParamID(), FilterSlope::db12);
+}
+
+void OptionBoxMenu::setChoiceParam (const juce::String& paramID, int choiceIndex)
+{
+    if (paramID.isEmpty())
+        return;
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (treeState.getParameter (paramID)))
+    {
+        const int clamped = juce::jlimit (0, juce::jmax (0, choice->choices.size() - 1), choiceIndex);
+        if (choice->getIndex() == clamped)
+            return;
+        choice->beginChangeGesture();
+        choice->setValueNotifyingHost (choice->convertTo0to1 ((float) clamped));
+        choice->endChangeGesture();
+    }
+}
+
+void OptionBoxMenu::refreshFilterModelComboText()
+{
+    const auto label = FilterType::displayName (readCurrentFilterType(), readCurrentFilterSlope());
     customComboBox.clear (juce::dontSendNotification);
-
-    // All bands share the same type menu (core + tilt / flat tilt / all-pass).
-    const auto names = FilterType::getChoiceNames();
-    for (int i = 0; i < names.size(); ++i)
-        customComboBox.addItem (names[i], i + 1);
-
-    const auto typeID = (bandIndex >= EqBand::kBankSize)
-                            ? FilterType::paramIDForGlobal (bandIndex)
-                            : FilterType::paramIDForBandIndex (bandIndex);
-    if (typeID.isNotEmpty())
-        filterModelAttachment = std::make_unique<ComboBoxAttachment> (treeState, typeID, customComboBox);
-
-    customComboBox.setEnabled (typeID.isNotEmpty());
+    // Single display item — real choices live in the hierarchical popup.
+    customComboBox.addItem (label, 1);
+    customComboBox.setSelectedId (1, juce::dontSendNotification);
+    customComboBox.setText (label, juce::dontSendNotification);
 }
 
-void OptionBoxMenu::setupFilterSlopeMenu (int bandIndex)
+void OptionBoxMenu::updateFilterModelChrome()
 {
-    filterSlopeAttachment.reset();
-    filterSlopeComboBox.clear (juce::dontSendNotification);
-
-    const auto slopeID = (bandIndex >= EqBand::kBankSize)
-                             ? FilterSlope::paramIDForGlobal (bandIndex)
-                             : FilterSlope::paramIDForBandIndex (bandIndex);
-    if (slopeID.isEmpty())
-    {
-        filterSlopeComboBox.setVisible (false);
-        return;
-    }
-
-    // Short labels so the closed combo fits designWidth 150 beside the type menu.
-    const auto names = FilterSlope::getShortChoiceNames();
-    for (int i = 0; i < names.size(); ++i)
-        filterSlopeComboBox.addItem (names[i], i + 1);
-
-    filterSlopeAttachment = std::make_unique<ComboBoxAttachment> (
-        treeState, slopeID, filterSlopeComboBox);
-    updateFilterSlopeVisibility();
-}
-
-void OptionBoxMenu::updateFilterSlopeVisibility()
-{
-    const bool show = currentBandShowsFilterSlope();
-    filterSlopeComboBox.setVisible (show);
-    if (! show)
-        filterSlopeComboBox.setBounds ({});
-}
-
-void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
-{
-    if (comboBoxThatHasChanged == &filterSlopeComboBox)
-    {
-        if (undoManager != nullptr)
-            undoManager->beginNewTransaction ("Filter slope");
-        return;
-    }
-
-    if (comboBoxThatHasChanged != &customComboBox)
-        return;
-
-    if (undoManager != nullptr)
-        undoManager->beginNewTransaction ("Filter type");
-
-    // HP / LP / notch / band-pass / all-pass: no gain.
-    // Flat tilt / Baxandall: fixed gentle Q (knob hidden). Band shelf Q = plateau width.
-    const int type = customComboBox.getSelectedItemIndex();
+    const int type = readCurrentFilterType();
     const bool showGain = FilterType::usesGain (type);
     const bool showQ = ! FilterType::hidesQ (type);
     rotaryImageKnobForOptionBox2.setVisible (showGain);
     gainLabel.setVisible (showGain);
     rotaryImageKnobForOptionBox3.setVisible (showQ);
     qLabel.setVisible (showQ);
-    updateFilterSlopeVisibility();
+    refreshFilterModelComboText();
     updateDynamicControlsVisibility();
     resized();
+}
+
+void OptionBoxMenu::setupFilterModelMenu (int bandIndex)
+{
+    juce::ignoreUnused (bandIndex);
+
+    if (listenedTypeParamID.isNotEmpty())
+        treeState.removeParameterListener (listenedTypeParamID, this);
+    if (listenedSlopeParamID.isNotEmpty())
+        treeState.removeParameterListener (listenedSlopeParamID, this);
+
+    listenedTypeParamID = currentTypeParamID();
+    listenedSlopeParamID = currentSlopeParamID();
+
+    if (listenedTypeParamID.isNotEmpty())
+        treeState.addParameterListener (listenedTypeParamID, this);
+    if (listenedSlopeParamID.isNotEmpty())
+        treeState.addParameterListener (listenedSlopeParamID, this);
+
+    customComboBox.setEnabled (listenedTypeParamID.isNotEmpty());
+    refreshFilterModelComboText();
+}
+
+void OptionBoxMenu::showHierarchicalFilterMenu()
+{
+    if (currentBandIndex < 0)
+        return;
+
+    const int curType = readCurrentFilterType();
+    const int curSlope = readCurrentFilterSlope();
+    const auto slopeNames = FilterSlope::getChoiceNames();
+    const auto typeNames = FilterType::getChoiceNames();
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&getLookAndFeel());
+
+    // Top-level shapes (HP/LP/brickwall are submenus only).
+    for (int t = 0; t < FilterType::numChoices; ++t)
+    {
+        if (! FilterType::isTopLevelMenuType (t))
+            continue;
+        // Insert Highpass/Lowpass submenus after Band Pass (enum order).
+        if (t == FilterType::tiltShelf)
+        {
+            juce::PopupMenu hp;
+            for (int s = 0; s < FilterSlope::numChoices; ++s)
+                hp.addItem (200 + s, slopeNames[s], true,
+                            curType == FilterType::highpass && curSlope == s);
+            hp.addSeparator();
+            hp.addItem (299, "Brickwall", true, curType == FilterType::brickwallHighpass);
+            menu.addSubMenu ("Highpass", hp, true);
+
+            juce::PopupMenu lp;
+            for (int s = 0; s < FilterSlope::numChoices; ++s)
+                lp.addItem (300 + s, slopeNames[s], true,
+                            curType == FilterType::lowpass && curSlope == s);
+            lp.addSeparator();
+            lp.addItem (399, "Brickwall", true, curType == FilterType::brickwallLowpass);
+            menu.addSubMenu ("Lowpass", lp, true);
+        }
+
+        menu.addItem (100 + t, typeNames[t], true, curType == t);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options()
+                            .withTargetComponent (&customComboBox)
+                            .withMinimumWidth (customComboBox.getWidth()),
+                        [safe = juce::Component::SafePointer<OptionBoxMenu> (this)] (int result)
+                        {
+                            if (safe != nullptr && result != 0)
+                                safe->applyFilterMenuResult (result);
+                        });
+}
+
+void OptionBoxMenu::applyFilterMenuResult (int resultId)
+{
+    if (undoManager != nullptr)
+        undoManager->beginNewTransaction ("Filter type");
+
+    const auto typeID = currentTypeParamID();
+    const auto slopeID = currentSlopeParamID();
+
+    if (resultId >= 200 && resultId < 200 + FilterSlope::numChoices)
+    {
+        setChoiceParam (typeID, FilterType::highpass);
+        setChoiceParam (slopeID, resultId - 200);
+    }
+    else if (resultId == 299)
+    {
+        setChoiceParam (typeID, FilterType::brickwallHighpass);
+    }
+    else if (resultId >= 300 && resultId < 300 + FilterSlope::numChoices)
+    {
+        setChoiceParam (typeID, FilterType::lowpass);
+        setChoiceParam (slopeID, resultId - 300);
+    }
+    else if (resultId == 399)
+    {
+        setChoiceParam (typeID, FilterType::brickwallLowpass);
+    }
+    else if (resultId >= 100 && resultId < 100 + FilterType::numChoices)
+    {
+        const int type = resultId - 100;
+        if (FilterType::isTopLevelMenuType (type))
+            setChoiceParam (typeID, type);
+    }
+
+    updateFilterModelChrome();
+}
+
+void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
+{
+    // Type selection is hierarchical (mouseDown → PopupMenu); ignore stock combo changes.
+    juce::ignoreUnused (comboBoxThatHasChanged);
 }
 
 void OptionBoxMenu::bindKnobsToBand (int index)
 {
     clearAttachments();
     setupFilterModelMenu (index);
-    setupFilterSlopeMenu (index);
 
     auto attachFloat = [this] (std::unique_ptr<SliderAttachment>& attachment,
                                const juce::String& paramID,
@@ -1850,7 +1936,7 @@ void OptionBoxMenu::bindKnobsToBand (int index)
             break;
     }
 
-    comboBoxChanged (&customComboBox);
+    updateFilterModelChrome();
     bindDynamicControls (index);
 }
 
