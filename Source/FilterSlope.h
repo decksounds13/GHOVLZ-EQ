@@ -174,11 +174,14 @@ namespace FilterSlope
     {
         if (stages.isEmpty() || sampleRate <= 0.0)
             return 1.0f;
-        float mag = 1.0f;
+        // Product in double — float product of many stages can underflow to 0.
+        double mag = 1.0;
         for (auto* coeffs : stages)
             if (coeffs != nullptr)
-                mag *= (float) coeffs->getMagnitudeForFrequency (frequencyHz, sampleRate);
-        return juce::jmax (0.0f, mag);
+                mag *= coeffs->getMagnitudeForFrequency (frequencyHz, sampleRate);
+        if (! std::isfinite (mag) || mag < 0.0)
+            return 0.0f;
+        return (float) mag;
     }
 
     /**
@@ -211,21 +214,33 @@ namespace FilterSlope
                                        int step)
     {
         const int w = (int) outDb.size();
-        if (stages.isEmpty() || w == 0 || frequencies.size() != (size_t) w)
+        if (w == 0 || frequencies.size() != (size_t) w)
             return;
+
+        // Empty cascade → flat 0 dB (never leave a stale previous curve).
+        if (stages.isEmpty())
+        {
+            std::fill (outDb.begin(), outDb.end(), 0.0f);
+            return;
+        }
 
         const int stride = juce::jmax (1, step);
 
         auto evalDb = [&] (int i) -> float
         {
-            float mag = 1.0f;
+            // Double product — matches DSP cascade; float product of 6–8 stages
+            // can underflow and paint a vanished band on the graph.
+            double mag = 1.0;
             const double freq = (double) frequencies[(size_t) i];
 
             for (auto* coeffs : stages)
                 if (coeffs != nullptr)
-                    mag *= (float) coeffs->getMagnitudeForFrequency (freq, sampleRate);
+                    mag *= coeffs->getMagnitudeForFrequency (freq, sampleRate);
 
-            return juce::Decibels::gainToDecibels (mag, -100.0f);
+            if (! std::isfinite (mag) || mag <= 0.0)
+                return -100.0f;
+
+            return juce::Decibels::gainToDecibels ((float) mag, -100.0f);
         };
 
         for (int i = 0; i < w; i += stride)

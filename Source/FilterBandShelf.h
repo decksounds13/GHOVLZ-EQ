@@ -184,6 +184,61 @@ namespace FilterBandShelf
 
     // ── Cascade helpers ─────────────────────────────────────────────────────
 
+    /**
+        Magnitude of one JUCE IIR section.
+
+        Important: Coefficients::assign() divides by a0 and DROPS a0 from the
+        stored array. Layout is therefore:
+          order 1 → [b0, b1, a1]                 (3 floats)
+          order 2 → [b0, b1, b2, a1, a2]         (5 floats)
+        Matching Filter::processSample / getMagnitudeForFrequency.
+        Reading c[3..5] as if a0 were still present corrupts design-time
+        normalise/gain-lock and made the shelf collapse above ~200 Hz.
+    */
+    inline double evalSectionMagAt (
+        const juce::dsp::IIR::Coefficients<float>& sec,
+        double freqHz, double sampleRate) noexcept
+    {
+        const double nyq = 0.5 * sampleRate;
+        const double f = juce::jmin (freqHz, nyq * 0.999999);
+        const double w = 2.0 * kPi * f / sampleRate;
+        // z^{-1}
+        const Complex zm1 (std::cos (-w), std::sin (-w));
+
+        const float* c = sec.getRawCoefficients();
+        const size_t order = sec.getFilterOrder();
+        const int n = sec.coefficients.size();
+        if (c == nullptr || n < 2 || order < 1)
+            return 1.0;
+
+        // Same as juce::dsp::IIR::Coefficients::getMagnitudeForFrequency
+        Complex num (0.0, 0.0);
+        Complex factor (1.0, 0.0);
+        for (size_t k = 0; k <= order; ++k)
+        {
+            num += (double) c[k] * factor;
+            factor *= zm1;
+        }
+
+        Complex den (1.0, 0.0);
+        factor = zm1;
+        for (size_t k = order + 1; k <= 2 * order; ++k)
+        {
+            // Stored array has length 2*order+1 (a0 removed): indices order+1 .. 2*order
+            // map to a1 .. a_order after the b's.
+            if ((int) k >= n)
+                break;
+            den += (double) c[k] * factor;
+            factor *= zm1;
+        }
+
+        if (std::abs (den) < 1.0e-30 || ! isFiniteC (num) || ! isFiniteC (den))
+            return 1.0;
+
+        const double mag = std::abs (num / den);
+        return (std::isfinite (mag) && mag > 1.0e-30) ? mag : 1.0;
+    }
+
     inline double evalCascadeMagAt (
         const juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>>& stages,
         double freqHz, double sampleRate) noexcept
@@ -191,26 +246,15 @@ namespace FilterBandShelf
         if (stages.isEmpty() || sampleRate <= 0.0 || freqHz < 0.0)
             return 1.0;
 
-        const double nyq = 0.5 * sampleRate;
-        const double f = juce::jmin (freqHz, nyq * 0.999999);
-        const double w = 2.0 * kPi * f / sampleRate;
-        const Complex zm1 (std::cos (-w), std::sin (-w));
-        const Complex zm2 = zm1 * zm1;
-        Complex H (1.0, 0.0);
-
+        double mag = 1.0;
         for (int i = 0; i < stages.size(); ++i)
         {
             const juce::dsp::IIR::Coefficients<float>::Ptr sec = stages.getUnchecked (i);
             if (sec == nullptr)
                 continue;
-            const float* c = sec->getRawCoefficients();
-            const Complex num = (double) c[0] + (double) c[1] * zm1 + (double) c[2] * zm2;
-            const Complex den = (double) c[3] + (double) c[4] * zm1 + (double) c[5] * zm2;
-            if (std::abs (den) > 1.0e-30 && isFiniteC (num) && isFiniteC (den))
-                H *= num / den;
+            mag *= evalSectionMagAt (*sec, freqHz, sampleRate);
         }
 
-        const double mag = std::abs (H);
         return (std::isfinite (mag) && mag > 1.0e-30) ? mag : 1.0;
     }
 
@@ -223,10 +267,11 @@ namespace FilterBandShelf
         juce::dsp::IIR::Coefficients<float>::Ptr s0 = stages.getUnchecked (0);
         if (s0 == nullptr)
             return;
+        // Stored layout: [b0, b1, b2, a1, a2] — scale all b's (first order+1 entries).
         float* c = s0->getRawCoefficients();
-        c[0] = (float) ((double) c[0] * linearScale);
-        c[1] = (float) ((double) c[1] * linearScale);
-        c[2] = (float) ((double) c[2] * linearScale);
+        const size_t order = s0->getFilterOrder();
+        for (size_t k = 0; k <= order; ++k)
+            c[k] = (float) ((double) c[k] * linearScale);
     }
 
     /** Append one higher-order high shelf at cutoffHz with gainDb. */
