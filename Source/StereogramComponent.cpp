@@ -48,6 +48,14 @@ void StereogramComponent::setEnabled (bool shouldEnable) noexcept
         trailImage.clear (trailImage.getBounds(), juce::Colours::transparentBlack);
 }
 
+void StereogramComponent::setUiTimerRunning (bool shouldRun) noexcept
+{
+    if (shouldRun)
+        startTimerHz (kTimerHz);
+    else
+        stopTimer();
+}
+
 void StereogramComponent::setColourRamp (const GradientRamp& ramp)
 {
     colourRamp = ramp;

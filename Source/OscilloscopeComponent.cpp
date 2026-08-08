@@ -89,6 +89,14 @@ void OscilloscopeComponent::setEnabled (bool shouldEnable) noexcept
     }
 }
 
+void OscilloscopeComponent::setUiTimerRunning (bool shouldRun) noexcept
+{
+    if (shouldRun && enabled.load (std::memory_order_relaxed))
+        startTimerHz (30);
+    else
+        stopTimer();
+}
+
 void OscilloscopeComponent::setScrollMode (bool shouldScroll) noexcept
 {
     if (scrollMode == shouldScroll)

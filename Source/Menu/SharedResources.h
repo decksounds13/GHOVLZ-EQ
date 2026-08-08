@@ -175,9 +175,9 @@ public:
 
     /**
         Accessibility: after randomize, adjust text value (V only) vs its background
-        so labels stay readable. Off by default; enable in Appearance.
+        so labels stay readable. On by default; can disable in Appearance.
     */
-    bool enforceLegibleText = false;
+    bool enforceLegibleText = true;
     /** 0 = mild separation, 1 = strong. Only used when enforceLegibleText. */
     float textContrastAmount = 0.55f;
 
@@ -235,6 +235,19 @@ public:
         No-op when enforceLegibleText is false.
     */
     void enforceLegibleTextContrast() noexcept;
+
+    /**
+        Per-pixel / per-widget legibility (e.g. band-handle numbers on multi-colour fills).
+        When enforceLegibleText is off, returns text unchanged.
+        Adjusts value first (keeps hue); falls back to white/black if still weak.
+    */
+    juce::Colour legibleTextOn (juce::Colour text, juce::Colour background) const noexcept;
+
+    /**
+        Nudge an opaque handle fill so it still reads on the graph background
+        without fully discarding the band colour. No-op when enforceLegibleText is off.
+    */
+    juce::Colour legibleHandleFill (juce::Colour fill, juce::Colour graphBackground) const noexcept;
 
     /** One HSV colour inside the Appearance H/S/V limit sliders (and H/S/V gates). */
     juce::Colour randomColourInLimits (float alpha = 1.0f) const;

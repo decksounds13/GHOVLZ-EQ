@@ -2439,7 +2439,7 @@ void EqEditor::loadUiPrefs()
     float spec3DParticleVelRandom = 0.0f;
     float spec3DParticleLifespan = 0.0f;
     float spec3DParticleLifespanRandom = 0.0f;
-    float spec3DParticleSize = 0.008f;
+    float spec3DParticleSize = 0.001f;
     float spec3DParticleSizeRndMin = 1.0f;
     float spec3DParticleSizeRndMax = 1.0f;
     bool spec3DParticleEmissive = false; // unlit emissive-only off by default
@@ -2778,7 +2778,7 @@ void EqEditor::loadUiPrefs()
                 spec3DParticleVelRandom = (float) xml->getDoubleAttribute ("spec3dParticleVelRandom", 0.0);
                 spec3DParticleLifespan = (float) xml->getDoubleAttribute ("spec3dParticleLifespan", 0.0);
                 spec3DParticleLifespanRandom = (float) xml->getDoubleAttribute ("spec3dParticleLifespanRandom", 0.0);
-                spec3DParticleSize = (float) xml->getDoubleAttribute ("spec3dParticleSize", 0.008);
+                spec3DParticleSize = (float) xml->getDoubleAttribute ("spec3dParticleSize", 0.001);
                 spec3DParticleSizeRndMin = (float) xml->getDoubleAttribute ("spec3dParticleSizeRndMin", 1.0);
                 spec3DParticleSizeRndMax = (float) xml->getDoubleAttribute ("spec3dParticleSizeRndMax", 1.0);
                 spec3DParticleEmissive = xml->getBoolAttribute ("spec3dParticleEmissive", false);

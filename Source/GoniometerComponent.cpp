@@ -86,6 +86,14 @@ void GoniometerComponent::setEnabled (bool shouldEnable) noexcept
     }
 }
 
+void GoniometerComponent::setUiTimerRunning (bool shouldRun) noexcept
+{
+    if (shouldRun && enabled.load (std::memory_order_relaxed))
+        startTimerHz (expanded ? 30 : 20);
+    else
+        stopTimer();
+}
+
 void GoniometerComponent::setExpanded (bool shouldExpand) noexcept
 {
     if (expanded == shouldExpand)

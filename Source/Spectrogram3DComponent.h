@@ -543,6 +543,22 @@ public:
     /** Default world-space spawn scatter (particles don't stack when jitter is unset). */
     static constexpr float kDefaultParticleSpawnJitter = 0.0025f;
 
+    /**
+        Hitch / catch-up tuning (particle sim only).
+        Emit catch-up Hz: max births use dt ≤ 1/hz after a long frame (default 60).
+        Sim catch-up Hz: max integrate/update step ≤ 1/hz (default 30).
+        Slice backlog: max per-bin emission debt in seconds (default 0.25).
+    */
+    void setParticleEmitCatchupHz (float hz) noexcept;
+    float getParticleEmitCatchupHz() const noexcept { return particleEmitCatchupHz; }
+    void setParticleSimCatchupHz (float hz) noexcept;
+    float getParticleSimCatchupHz() const noexcept { return particleSimCatchupHz; }
+    void setParticleSliceBacklogSec (float seconds) noexcept;
+    float getParticleSliceBacklogSec() const noexcept { return particleSliceBacklogSec; }
+    static constexpr float kDefaultParticleEmitCatchupHz = 60.0f;
+    static constexpr float kDefaultParticleSimCatchupHz = 30.0f;
+    static constexpr float kDefaultParticleSliceBacklogSec = 0.25f;
+
     static constexpr int getParticleModSlotCount() noexcept { return kParticleModSlotCount; }
     ParticleModSlot getParticleModSlot (int index) const noexcept;
     void setParticleModSlot (int index, const ParticleModSlot& slot) noexcept;
@@ -696,6 +712,8 @@ public:
     std::function<void (juce::PopupMenu&)> onAugmentContextMenu;
     /** Return true if result was handled. */
     std::function<bool (int)> onContextMenuResult;
+    /** After particle sim (each Spec3D timer) — MainComponent uses this for FRC curve eco. */
+    std::function<void()> onParticleSimTick;
     static constexpr int kContextMenuFullscreenId = 20;
     /** Fired when turntable / zoom-oscillate settings change (persist prefs). */
     std::function<void()> onAutoRotateSettingsChanged;
@@ -1216,13 +1234,16 @@ private:
     float particleEmission = 1000.0f;
     /** World-space spawn scatter. Default > 0 so particles don't stack on exact mesh points. */
     float particleSpawnJitter = kDefaultParticleSpawnJitter;
+    float particleEmitCatchupHz = kDefaultParticleEmitCatchupHz;
+    float particleSimCatchupHz = kDefaultParticleSimCatchupHz;
+    float particleSliceBacklogSec = kDefaultParticleSliceBacklogSec;
     float particleInitVelX = 0.0f;
     float particleInitVelY = 1.0f; // was "rise speed"
     float particleInitVelZ = 0.0f;
     float particleVelRandom = 0.0f;
     float particleLifespan = 0.0f;
     float particleLifespanRandom = 0.0f;
-    float particleSize = 0.008f;
+    float particleSize = 0.001f;
     /** Spawn size scale range (× base particle size). Default 1…1 = no random. */
     float particleSizeRandomMin = 1.0f;
     float particleSizeRandomMax = 1.0f;

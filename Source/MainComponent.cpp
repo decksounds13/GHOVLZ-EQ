@@ -131,7 +131,14 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
         settingsButton.setColour (juce::TextButton::buttonOnColourId, juce::Colours::goldenrod.withAlpha (0.75f));
         settingsButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.95f));
         settingsButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-        settingsButton.onClick = [this] { owner.openSettingsMenuFromFullscreen(); };
+        settingsButton.onClick = [this]
+        {
+            // Toggle: same panel as in-editor Settings (drag bar, tabs, close X).
+            if (owner.menu.isVisible() && owner.menu.isOnDesktop())
+                owner.closeSettingsMenu();
+            else
+                owner.openSettingsMenuFromFullscreen();
+        };
         addAndMakeVisible (settingsButton);
 
         exitButton.setTooltip ("Exit fullscreen (F11 / Esc)");
@@ -150,9 +157,11 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
         const auto b = juce::Rectangle<int> (displayTotalArea.getX() + kMargin,
                                              displayTotalArea.getY() + kMargin,
                                              totalW, kH);
+        // Do NOT use windowIsTemporary — on Windows those peers auto-hide when the
+        // GL freecam view takes focus (WASD / RMB look), which made Settings vanish.
         if (! isOnDesktop())
-            addToDesktop (juce::ComponentPeer::windowIsTemporary
-                          | juce::ComponentPeer::windowIgnoresKeyPresses);
+            addToDesktop (juce::ComponentPeer::windowIgnoresKeyPresses
+                          | juce::ComponentPeer::windowHasDropShadow);
         setBounds (b);
         setVisible (true);
         setAlwaysOnTop (true);
@@ -161,6 +170,17 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
             peer->setAlwaysOnTop (true);
         settingsButton.setBounds (0, 0, kSettingsW, kH);
         exitButton.setBounds (kSettingsW + kGap, 0, kExitW, kH);
+    }
+
+    /** Call while freecam/WASD is active so the GL peer cannot bury this strip. */
+    void reassertOnTop()
+    {
+        if (! isVisible())
+            return;
+        setAlwaysOnTop (true);
+        toFront (true);
+        if (auto* peer = getPeer())
+            peer->setAlwaysOnTop (true);
     }
 
     void dismiss()
@@ -1337,27 +1357,64 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.onToggleFullscreen = [this] { toggleSpec3DFullscreen (true); };
     spectrogram3D.isFullscreenQuery = [this] { return isSpec3DFullscreen(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
-    spectrogram3D.onAugmentContextMenu = [this] (juce::PopupMenu& menu)
+    spectrogram3D.onAugmentContextMenu = [this] (juce::PopupMenu& m)
     {
-        menu.addSeparator();
-        menu.addItem (30,
-                      isBypassOtherAnalyzers()
-                          ? "Resume Other Analyzers"
-                          : "Bypass Other Analyzers",
-                      true,
-                      isBypassOtherAnalyzers());
-        // Checked item = currently bypassing. Freezes EQ spectrum + scopes; keeps Spec3D + meters.
-        menu.addSeparator();
-        appendModuleLookMenuItems (menu, ModuleLookPresets::Kind::spectrogram3D, 1000);
+        m.addSeparator();
+        const bool settingsOpen = menu.isVisible();
+        m.addItem (29, "Settings…", true, settingsOpen);
+        // Fullscreen: click-off does not close Settings — only × or this item.
+        if (settingsOpen && (spec3DFullscreen || menu.isOnDesktop()))
+            m.addItem (28, "Close Settings Menu");
+        m.addSeparator();
+        m.addItem (30,
+                   "Bypass Other Analyzers",
+                   true,
+                   isBypassOtherAnalyzers());
+        // Checked = currently bypassing. Freezes EQ spectrum + scopes; keeps Spec3D + meters.
+        m.addItem (31,
+                   "Bypass Cumulative Curve",
+                   true,
+                   isDisableCumulativeCurve());
+        // Checked = sum curve off — frees UI CPU for dense particles while DSP stays on.
+        m.addSeparator();
+        appendModuleLookMenuItems (m, ModuleLookPresets::Kind::spectrogram3D, 1000);
     };
     spectrogram3D.onContextMenuResult = [this] (int result)
     {
+        if (result == 28)
+        {
+            closeSettingsMenu();
+            return true;
+        }
+        if (result == 29)
+        {
+            if (spec3DFullscreen)
+                openSettingsMenuFromFullscreen();
+            else if (! menu.isVisible())
+                menuToggleButton.triggerClick();
+            else
+                menu.toFront (false);
+            return true;
+        }
         if (result == 30)
         {
             setBypassOtherAnalyzers (! isBypassOtherAnalyzers());
             return true;
         }
+        if (result == 31)
+        {
+            setDisableCumulativeCurve (! isDisableCumulativeCurve());
+            return true;
+        }
         return handleModuleLookMenuResult (ModuleLookPresets::Kind::spectrogram3D, result, 1000);
+    };
+    spectrogram3D.onParticleSimTick = [this]
+    {
+        syncParticleCurveEco();
+        // Freecam/WASD: native GL peer steals topmost — keep FS Settings/Exit visible.
+        if (spec3DFullscreen && spec3DFsExitChrome != nullptr
+            && spectrogram3D.isFreecamActive())
+            spec3DFsExitChrome->reassertOnTop();
     };
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onRampSequenceChanged = [this] { editor.requestSaveUiPrefs(); };
@@ -1800,6 +1857,7 @@ void MainComponent::closeSettingsMenu()
 {
     if (! menu.isVisible() && ! menuDismissCatcher.isVisible())
         return;
+    const bool wasFsDesktop = menu.isOnDesktop() && spec3DFullscreen;
     menu.setVisible (false);
     menuDismissCatcher.setVisible (false);
     // Restore parenting if Settings was floated for Spec3D OS fullscreen.
@@ -1809,6 +1867,20 @@ void MainComponent::closeSettingsMenu()
         addChildComponent (menu);
         menu.setAlwaysOnTop (false);
     }
+    // Avoid resized() re-clamping a desktop menu; still refresh chrome after FS lookdev.
+    if (wasFsDesktop)
+    {
+        frequencyResponseComponent.setInterceptsMouseClicks (true, true);
+        // FS host is always-on-top — reassert Settings/Exit chrome so it never stays buried.
+        if (spec3DFsExitChrome != nullptr && spec3DOsFullscreenHost != nullptr)
+        {
+            spec3DFsExitChrome->placeOnDisplay (spec3DOsFullscreenHost->getBounds());
+            spec3DFsExitChrome->toFront (true);
+            if (auto* peer = spec3DFsExitChrome->getPeer())
+                peer->setAlwaysOnTop (true);
+        }
+        return;
+    }
     resized();
     syncExpandedOscOverlayStack();
     frequencyResponseComponent.setInterceptsMouseClicks (true, true);
@@ -1816,8 +1888,8 @@ void MainComponent::closeSettingsMenu()
 
 void MainComponent::openSettingsMenuFromFullscreen()
 {
-    // Keep Spec3D fullscreen; float Settings as its own always-on-top desktop peer
-    // so lookdev remains available over the OS F11 surface.
+    // Keep Spec3D fullscreen; float Settings as the same Menu panel (drag bar, borders,
+    // tabs) on its own always-on-top desktop peer over the OS F11 surface.
     if (! menu.isVisible())
     {
         menu.setVisible (true);
@@ -1825,17 +1897,17 @@ void MainComponent::openSettingsMenuFromFullscreen()
         menu.setInterceptsMouseClicks (true, true);
     }
 
+    // No windowIsTemporary: temporary peers close/hide when the 3D view steals focus
+    // (click-off / freecam). FS Settings closes only via × or right-click → Close Settings.
+    menuDismissCatcher.setVisible (false);
     if (! menu.isOnDesktop())
-        menu.addToDesktop (juce::ComponentPeer::windowIsTemporary
-                           | juce::ComponentPeer::windowIsResizable
+        menu.addToDesktop (juce::ComponentPeer::windowIsResizable
                            | juce::ComponentPeer::windowHasDropShadow);
 
     menu.setAlwaysOnTop (true);
-    menu.toFront (true);
     if (auto* peer = menu.getPeer())
         peer->setAlwaysOnTop (true);
 
-    // Place beside the FS chrome (top-left of the display that hosts Spec3D).
     juce::Rectangle<int> displayArea;
     if (spec3DOsFullscreenHost != nullptr)
         displayArea = spec3DOsFullscreenHost->getBounds();
@@ -1845,18 +1917,54 @@ void MainComponent::openSettingsMenuFromFullscreen()
         displayArea = d.totalArea;
     }
 
+    // Same content width as in-editor Settings; place once if not already on this display.
     constexpr int kMargin = 14;
-    constexpr int kChromeH = 36 + kMargin; // below Settings/Exit strip
-    const int w = juce::jlimit (280, displayArea.getWidth() - kMargin * 2, Menu::kContentWidth + 40);
-    const int h = juce::jlimit (320, displayArea.getHeight() - kChromeH - kMargin,
-                                displayArea.getHeight() - kChromeH - kMargin);
-    menu.setBounds (displayArea.getX() + kMargin,
-                    displayArea.getY() + kChromeH,
-                    w, h);
+    constexpr int kChromeH = 36 + kMargin; // leave room under Settings/Exit strip
+    const int w = juce::jmin (Menu::kContentWidth + 24,
+                              juce::jmax (280, displayArea.getWidth() - kMargin * 2));
+    const int h = juce::jlimit (320,
+                                displayArea.getHeight() - kChromeH - kMargin,
+                                juce::jmin (Menu::kContentHeight + Menu::kDragBarHeight + 40,
+                                            displayArea.getHeight() - kChromeH - kMargin));
+
+    auto b = menu.getBounds();
+    // Fresh open (editor-local coords or off-display) → default under FS chrome; keep user drag after that.
+    const bool needPlace = b.getWidth() < 200 || b.getHeight() < 140
+                           || ! displayArea.expanded (40).contains (b.getCentre());
+    if (needPlace)
+    {
+        b = { displayArea.getX() + kMargin,
+              displayArea.getY() + kChromeH,
+              w, h };
+    }
+    else
+    {
+        // Keep user drag position; only re-clamp size to the display.
+        b.setWidth (juce::jlimit (200, displayArea.getWidth() - kMargin, b.getWidth()));
+        b.setHeight (juce::jlimit (140, displayArea.getHeight() - kMargin, b.getHeight()));
+        if (b.getRight() > displayArea.getRight())
+            b.setX (displayArea.getRight() - b.getWidth());
+        if (b.getBottom() > displayArea.getBottom())
+            b.setY (displayArea.getBottom() - b.getHeight());
+        if (b.getX() < displayArea.getX())
+            b.setX (displayArea.getX());
+        if (b.getY() < displayArea.getY())
+            b.setY (displayArea.getY());
+    }
+
+    menu.setBounds (b);
     menu.setVisible (true);
     menu.toFront (true);
+    // Constrainer for free drag across the fullscreen display (not the plugin editor).
+    menu.setResizeLimitsWithinParent (displayArea);
+
     if (spec3DFsExitChrome != nullptr)
+    {
+        spec3DFsExitChrome->placeOnDisplay (displayArea);
         spec3DFsExitChrome->toFront (true);
+        if (auto* peer = spec3DFsExitChrome->getPeer())
+            peer->setAlwaysOnTop (true);
+    }
 }
 
 bool MainComponent::isPointOverSettingsDismissExempt (int catcherX, int catcherY,
@@ -2461,6 +2569,26 @@ bool MainComponent::isBypassOtherAnalyzers() const noexcept
     return processor.isBypassOtherAnalyzers();
 }
 
+void MainComponent::setDisableCumulativeCurve (bool shouldDisable) noexcept
+{
+    frequencyResponseComponent.setDisableCumulativeCurve (shouldDisable);
+}
+
+bool MainComponent::isDisableCumulativeCurve() const noexcept
+{
+    return frequencyResponseComponent.isDisableCumulativeCurve();
+}
+
+void MainComponent::syncParticleCurveEco() noexcept
+{
+    // Spec3D visible + particles on → FRC downreses sum/IIR sampling and slows D/S timer.
+    const bool particlesOn = (spec3DEnabled || (scopeModeEnabled
+                                && isScopeModuleEnabled (ScopeModuleId::spectrogram3D)))
+                             && spectrogram3D.isParticleModeEnabled();
+    const int alive = particlesOn ? spectrogram3D.getParticleAliveCount() : 0;
+    frequencyResponseComponent.setParticleCurveEco (particlesOn, alive);
+}
+
 void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
 {
     if (scopeModeEnabled)
@@ -2484,9 +2612,12 @@ void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
     if (! shouldEnable && spec3DFullscreen)
         spec3DFullscreen = false;
 
-    // Closing Spec3D always restores other analyzers.
+    // Closing Spec3D always restores other analyzers + cumulative curve.
     if (! shouldEnable && isBypassOtherAnalyzers())
         setBypassOtherAnalyzers (false);
+    if (! shouldEnable && isDisableCumulativeCurve())
+        setDisableCumulativeCurve (false);
+    syncParticleCurveEco();
 
     syncSpecToolButtons();
     resized();
@@ -2632,7 +2763,23 @@ void MainComponent::applySpec3DFullscreenLayout()
             spec3DOsFullscreenHost->setBounds (display->totalArea);
         spectrogram3D.setBounds (spec3DOsFullscreenHost->getLocalBounds());
         if (spec3DFsExitChrome != nullptr)
+        {
             spec3DFsExitChrome->placeOnDisplay (display->totalArea);
+            // Always reassert chrome above the GL fullscreen peer (Settings button
+            // was easy to lose under the host after closing the Settings panel).
+            spec3DFsExitChrome->toFront (true);
+            if (auto* peer = spec3DFsExitChrome->getPeer())
+                peer->setAlwaysOnTop (true);
+        }
+        if (menu.isVisible() && menu.isOnDesktop())
+        {
+            menu.toFront (true);
+            if (auto* peer = menu.getPeer())
+                peer->setAlwaysOnTop (true);
+            // Chrome above the settings panel so Settings/Exit stay clickable.
+            if (spec3DFsExitChrome != nullptr)
+                spec3DFsExitChrome->toFront (true);
+        }
     }
 }
 
@@ -3667,6 +3814,7 @@ bool MainComponent::isSpec3DSssEnabled() const noexcept
 void MainComponent::setSpec3DParticleModeEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setParticleModeEnabled (shouldEnable);
+    syncParticleCurveEco();
     if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DParticleModeEnabled() const noexcept
@@ -3715,6 +3863,33 @@ void MainComponent::setSpec3DParticleSpawnJitter (float amount, bool notifyPrefs
 float MainComponent::getSpec3DParticleSpawnJitter() const noexcept
 {
     return spectrogram3D.getParticleSpawnJitter();
+}
+void MainComponent::setSpec3DParticleEmitCatchupHz (float hz, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmitCatchupHz (hz);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleEmitCatchupHz() const noexcept
+{
+    return spectrogram3D.getParticleEmitCatchupHz();
+}
+void MainComponent::setSpec3DParticleSimCatchupHz (float hz, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSimCatchupHz (hz);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSimCatchupHz() const noexcept
+{
+    return spectrogram3D.getParticleSimCatchupHz();
+}
+void MainComponent::setSpec3DParticleSliceBacklogSec (float seconds, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSliceBacklogSec (seconds);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSliceBacklogSec() const noexcept
+{
+    return spectrogram3D.getParticleSliceBacklogSec();
 }
 void MainComponent::setSpec3DParticleModSlot (int index, const ParticleModSlot& slot, bool notifyPrefs)
 {
@@ -7272,6 +7447,12 @@ void MainComponent::layoutSettingsMenu()
 {
     menu.setTransform ({});
 
+    // Spec3D OS fullscreen: menu is a desktop peer — do not clamp to editor coords
+    // (that pinned it to the top-left and fought drag). Placement is owned by
+    // openSettingsMenuFromFullscreen / Menu's own dragger.
+    if (menu.isOnDesktop() && spec3DFullscreen)
+        return;
+
     const int contentW = Menu::kContentWidth;
     const int parentW = getWidth();
     const int parentH = getHeight();
@@ -7342,6 +7523,17 @@ void MainComponent::componentMovedOrResized (juce::Component& component, bool wa
     juce::ignoreUnused (wasMoved, wasResized);
     if (updatingSettingsMenuBounds || &component != &menu)
         return;
+
+    // Desktop FS settings: screen-space bounds — never clamp with editor width/height.
+    if (menu.isOnDesktop() && spec3DFullscreen)
+    {
+        if (spec3DOsFullscreenHost != nullptr)
+            menu.setResizeLimitsWithinParent (spec3DOsFullscreenHost->getBounds());
+        // Keep Settings/Exit chrome above the panel after drag.
+        if (spec3DFsExitChrome != nullptr)
+            spec3DFsExitChrome->toFront (true);
+        return;
+    }
 
     settingsMenuBounds = menu.getBounds();
     settingsMenuBoundsFromUser = true;

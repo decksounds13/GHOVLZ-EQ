@@ -296,6 +296,13 @@ private:
         juce::Slider particleEmissionSlider;
         juce::Label particleSpawnJitterLabel;
         juce::Slider particleSpawnJitterSlider;
+        /** Hitch / catch-up tuning (see tooltips). */
+        juce::Label particleEmitCatchupLabel;
+        juce::Slider particleEmitCatchupSlider;
+        juce::Label particleSimCatchupLabel;
+        juce::Slider particleSimCatchupSlider;
+        juce::Label particleSliceBacklogLabel;
+        juce::Slider particleSliceBacklogSlider;
         juce::Label particleInitVelXLabel;
         juce::Slider particleInitVelXSlider;
         juce::Label particleInitVelYLabel;
@@ -310,7 +317,7 @@ private:
         juce::Slider particleLifespanRandomSlider;
         juce::Label particleSizeLabel;
         juce::Slider particleSizeSlider;
-        /** Dual-thumb size scale range at spawn (min / max arrows). */
+        /** Dual-thumb "Random Size" scale range at spawn (min / max). */
         juce::Label particleSizeRandomLabel;
         juce::Slider particleSizeRandomSlider;
         juce::Label particleSizeRandomMinReadout, particleSizeRandomMaxReadout;

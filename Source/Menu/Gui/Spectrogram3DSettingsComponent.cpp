@@ -738,6 +738,27 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                          "Offsets are kept under waterfall lock.");
     setSliderActual (particleSpawnJitterSlider,
                      (double) Spectrogram3DComponent::kDefaultParticleSpawnJitter);
+    particleEmitCatchupLabel.setText ("Emit catch-up (Hz)", juce::dontSendNotification);
+    setupParticleSlider (particleEmitCatchupLabel, particleEmitCatchupSlider, 15.0, 240.0, 1.0,
+                         "After a long frame, births use at most 1/Hz seconds of emission. "
+                         "Lower = smoother (less burst after hitch); higher = keep rate when recovering. "
+                         "Default 60. Does not change steady-state particles/s.");
+    setSliderActual (particleEmitCatchupSlider,
+                     (double) Spectrogram3DComponent::kDefaultParticleEmitCatchupHz);
+    particleSimCatchupLabel.setText ("Sim catch-up (Hz)", juce::dontSendNotification);
+    setupParticleSlider (particleSimCatchupLabel, particleSimCatchupSlider, 10.0, 120.0, 1.0,
+                         "Max integrate/update step = 1/Hz after a stall. "
+                         "Lower = less physics jump after hitch; higher = catch up motion faster. "
+                         "Default 30. Steady frames at 60 Hz are unaffected.");
+    setSliderActual (particleSimCatchupSlider,
+                     (double) Spectrogram3DComponent::kDefaultParticleSimCatchupHz);
+    particleSliceBacklogLabel.setText ("Slice backlog (s)", juce::dontSendNotification);
+    setupParticleSlider (particleSliceBacklogLabel, particleSliceBacklogSlider, 0.02, 2.0, 0.01,
+                         "Slice emit mode only: max per-bin birth debt in seconds of rate. "
+                         "Lower = less column dump after hitch; higher = more catch-up. "
+                         "Default 0.25. Continuous mode ignores this.");
+    setSliderActual (particleSliceBacklogSlider,
+                     (double) Spectrogram3DComponent::kDefaultParticleSliceBacklogSec);
     particleInitVelXLabel.setText ("Init vel X", juce::dontSendNotification);
     setupParticleSlider (particleInitVelXLabel, particleInitVelXSlider, -10.0, 10.0, 0.01,
                          "Initial velocity X (world units / second).");
@@ -777,21 +798,25 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                          "Randomize lifetime at spawn (+/- fraction of Lifespan).");
     setSliderActual (particleLifespanRandomSlider, 0.0);
     particleSizeLabel.setText ("Particle size", juce::dontSendNotification);
-    setupParticleSlider (particleSizeLabel, particleSizeSlider, 0.001, 0.08, 0.0005,
-                         "Particle radius / mesh scale in world units.");
-    setSliderActual (particleSizeSlider, 0.008);
-    particleSizeRandomLabel.setText ("Size random (min / max scale)", juce::dontSendNotification);
+    // World-unit radius: ~0.005 is already large on the Spec3D mesh; keep drag range tiny.
+    setupParticleSlider (particleSizeLabel, particleSizeSlider, 0.00005, 0.005, 0.00005,
+                         "Particle radius / mesh scale in world units. "
+                         "Default 0.001; ~0.005 is large for this sim. "
+                         "Type beyond the slider for extreme tests.");
+    setSliderActual (particleSizeSlider, 0.001);
+    particleSizeRandomLabel.setText ("Random Size", juce::dontSendNotification);
     styleLabel (particleSizeRandomLabel);
+    // Match other Look rows: same track/thumb/text colours as styleSlider, dual thumbs.
+    styleSlider (particleSizeRandomSlider);
     particleSizeRandomSlider.setSliderStyle (juce::Slider::TwoValueHorizontal);
-    particleSizeRandomSlider.setLookAndFeel (&particleRangeLnF);
+    particleSizeRandomSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     particleSizeRandomSlider.setRange (0.05, 3.0, 0.01);
     particleSizeRandomSlider.setMinValue (1.0, juce::dontSendNotification);
     particleSizeRandomSlider.setMaxValue (1.0, juce::dontSendNotification);
-    particleSizeRandomSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     particleSizeRandomSlider.setSliderSnapsToMousePosition (false);
     particleSizeRandomSlider.setTooltip (
         "Per-particle size scale range at spawn (multiplies Particle size). "
-        "Drag the two arrows: left = min scale, right = max scale. "
+        "Drag the two thumbs: left = min scale, right = max scale. "
         "1…1 = all particles the same size; e.g. 0.5…1.5 = half to 1.5× base size.");
     particleSizeRandomSlider.onValueChange = [this]
     {
@@ -804,18 +829,21 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (particleSizeRandomLabel);
     addAndMakeVisible (particleSizeRandomSlider);
     {
-        auto styleReadout = [this] (juce::Label& lab)
+        // Value boxes on the right — same colours / size language as styleSlider text boxes.
+        auto styleValueBox = [this] (juce::Label& lab)
         {
-            lab.setFont (juce::FontOptions().withName ("Lato").withHeight (12.0f));
+            lab.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
             lab.setJustificationType (juce::Justification::centred);
             lab.setMinimumHorizontalScale (0.55f);
-            lab.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.88f));
-            lab.setColour (juce::Label::backgroundColourId, juce::Colours::black.withAlpha (0.30f));
+            lab.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
+            lab.setColour (juce::Label::backgroundColourId, juce::Colours::black.withAlpha (0.35f));
+            lab.setColour (juce::Label::outlineColourId, juce::Colours::whitesmoke.withAlpha (0.2f));
+            lab.setBorderSize (juce::BorderSize<int> (1));
             lab.setInterceptsMouseClicks (false, false);
             addAndMakeVisible (lab);
         };
-        styleReadout (particleSizeRandomMinReadout);
-        styleReadout (particleSizeRandomMaxReadout);
+        styleValueBox (particleSizeRandomMinReadout);
+        styleValueBox (particleSizeRandomMaxReadout);
         particleSizeRandomMinReadout.setText ("1.00", juce::dontSendNotification);
         particleSizeRandomMaxReadout.setText ("1.00", juce::dontSendNotification);
     }
@@ -1457,6 +1485,12 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (particleEmissionSlider, particleOn);
     setLookChildVisible (particleSpawnJitterLabel, particleOn);
     setLookChildVisible (particleSpawnJitterSlider, particleOn);
+    setLookChildVisible (particleEmitCatchupLabel, particleOn);
+    setLookChildVisible (particleEmitCatchupSlider, particleOn);
+    setLookChildVisible (particleSimCatchupLabel, particleOn);
+    setLookChildVisible (particleSimCatchupSlider, particleOn);
+    setLookChildVisible (particleSliceBacklogLabel, particleOn);
+    setLookChildVisible (particleSliceBacklogSlider, particleOn);
     setLookChildVisible (particleInitVelXLabel, particleOn);
     setLookChildVisible (particleInitVelXSlider, particleOn);
     setLookChildVisible (particleInitVelYLabel, particleOn);
@@ -2037,6 +2071,9 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     particleEmitModeCombo.setSelectedId (main->getSpec3DParticleEmitMode() + 1, juce::dontSendNotification);
     setSliderActual (particleEmissionSlider, main->getSpec3DParticleEmission());
     setSliderActual (particleSpawnJitterSlider, main->getSpec3DParticleSpawnJitter());
+    setSliderActual (particleEmitCatchupSlider, main->getSpec3DParticleEmitCatchupHz());
+    setSliderActual (particleSimCatchupSlider, main->getSpec3DParticleSimCatchupHz());
+    setSliderActual (particleSliceBacklogSlider, main->getSpec3DParticleSliceBacklogSec());
     setSliderActual (particleInitVelXSlider, main->getSpec3DParticleInitVelX());
     setSliderActual (particleInitVelYSlider, main->getSpec3DParticleInitVelY());
     setSliderActual (particleInitVelZSlider, main->getSpec3DParticleInitVelZ());
@@ -2743,19 +2780,20 @@ void Spectrogram3DSettingsComponent::Content::resized()
         if (particleLifespanSlider.getValue() > 1.0e-4)
             layoutSliderRow (area, particleLifespanRandomLabel, particleLifespanRandomSlider);
         layoutSliderRow (area, particleSizeLabel, particleSizeSlider);
+        // Same row geometry as layoutSliderRow; dual value boxes on the right like TextBoxRight.
         particleSizeRandomLabel.setBounds (area.removeFromTop (kLabelH));
         area.removeFromTop (kLabelGap);
         {
-            auto rr = area.removeFromTop (26);
-            constexpr int kReadoutW = 48;
-            particleSizeRandomMinReadout.setBounds (
-                rr.removeFromLeft (kReadoutW).withSizeKeepingCentre (kReadoutW, 18));
-            rr.removeFromLeft (4);
+            auto rr = area.removeFromTop (kSliderH).removeFromLeft (juce::jmin (420, area.getWidth()));
+            constexpr int kBoxW = 48;
+            constexpr int kBoxH = 20;
             particleSizeRandomMaxReadout.setBounds (
-                rr.removeFromRight (kReadoutW).withSizeKeepingCentre (kReadoutW, 18));
+                rr.removeFromRight (kBoxW).withSizeKeepingCentre (kBoxW, kBoxH));
             rr.removeFromRight (4);
-            particleSizeRandomSlider.setBounds (
-                rr.withSizeKeepingCentre (juce::jmin (420, rr.getWidth()), 22));
+            particleSizeRandomMinReadout.setBounds (
+                rr.removeFromRight (kBoxW).withSizeKeepingCentre (kBoxW, kBoxH));
+            rr.removeFromRight (6);
+            particleSizeRandomSlider.setBounds (rr);
         }
         area.removeFromTop (kRowGap);
         // Material (waterfall-matching PBR + additive emissive)

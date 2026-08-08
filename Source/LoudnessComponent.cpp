@@ -93,6 +93,14 @@ void LoudnessComponent::setEnabled (bool shouldEnable) noexcept
     enabled.store (shouldEnable, std::memory_order_relaxed);
 }
 
+void LoudnessComponent::setUiTimerRunning (bool shouldRun) noexcept
+{
+    if (shouldRun)
+        startTimerHz (20);
+    else
+        stopTimer();
+}
+
 void LoudnessComponent::resetIntegrated() noexcept
 {
     const juce::ScopedLock sl (lock);

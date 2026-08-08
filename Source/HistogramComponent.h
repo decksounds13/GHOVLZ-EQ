@@ -27,6 +27,8 @@ public:
     void prepare (double sampleRate);
     void setEnabled (bool shouldEnable) noexcept;
     bool isScopeEnabled() const noexcept { return enabled.load (std::memory_order_relaxed); }
+    /** Pause/resume paint timer without changing enabled (Spec3D analyzer bypass). */
+    void setUiTimerRunning (bool shouldRun) noexcept;
 
     void setParameterTree (juce::AudioProcessorValueTreeState* tree) noexcept { valueTree = tree; }
     void setThemeColors (SharedResources* r) noexcept { themeColors = r; repaint(); }

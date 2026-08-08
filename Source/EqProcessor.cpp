@@ -362,7 +362,14 @@ void EqProcessor::setAuditionBandpass (bool active, float frequencyHz, float q) 
 void EqProcessor::setEcoMode (bool shouldEnable) noexcept
 {
     ecoMode.store (shouldEnable);
-    m_analyser.setEcoMode (shouldEnable);
+    m_analyser.setEcoMode (shouldEnable || bypassOtherAnalyzers.load (std::memory_order_acquire));
+}
+
+void EqProcessor::setBypassOtherAnalyzers (bool shouldBypass) noexcept
+{
+    bypassOtherAnalyzers.store (shouldBypass, std::memory_order_release);
+    // Reuse analyser eco flag so the FFT worker thread also idles (EQ graph spectrum).
+    m_analyser.setEcoMode (ecoMode.load (std::memory_order_acquire) || shouldBypass);
 }
 
 void EqProcessor::setScopeMode (bool shouldEnable) noexcept
@@ -377,7 +384,10 @@ void EqProcessor::setScopeTapPost (bool shouldTapPost) noexcept
 
 bool EqProcessor::isSpectrumAnalyserActive() const noexcept
 {
-    if (ecoMode.load())
+    if (ecoMode.load (std::memory_order_acquire))
+        return false;
+    // Spec3D “bypass other analyzers” freezes the EQ graph spectrum FFT.
+    if (bypassOtherAnalyzers.load (std::memory_order_acquire))
         return false;
 
     // Quad Scope view always needs the spectrum analyser.
@@ -2837,30 +2847,36 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             m_analyser.pushSamplesIntoFifo (left, right, numSamples);
         }
 
-        if (auto* osc = oscilloscopeTarget.load (std::memory_order_acquire))
+        const bool pushScopes = ! bypassOtherAnalyzers.load (std::memory_order_acquire);
+
+        if (pushScopes)
         {
-            if (osc->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            if (auto* osc = oscilloscopeTarget.load (std::memory_order_acquire))
             {
-                const auto* left = mainBuffer.getReadPointer (0);
-                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-                if (auto* playHead = getPlayHead())
-                    if (auto pos = playHead->getPosition())
-                        if (auto bpmOpt = pos->getBpm())
-                            osc->setHostBpm (*bpmOpt);
-                osc->pushSamples (left, right, numSamples);
+                if (osc->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+                {
+                    const auto* left = mainBuffer.getReadPointer (0);
+                    const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                    if (auto* playHead = getPlayHead())
+                        if (auto pos = playHead->getPosition())
+                            if (auto bpmOpt = pos->getBpm())
+                                osc->setHostBpm (*bpmOpt);
+                    osc->pushSamples (left, right, numSamples);
+                }
+            }
+
+            if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
+            {
+                if (gon->isGoniometerEnabled() && mainBuffer.getNumChannels() > 0)
+                {
+                    const auto* left = mainBuffer.getReadPointer (0);
+                    const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                    gon->pushSamples (left, right, numSamples);
+                }
             }
         }
 
-        if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
-        {
-            if (gon->isGoniometerEnabled() && mainBuffer.getNumChannels() > 0)
-            {
-                const auto* left = mainBuffer.getReadPointer (0);
-                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-                gon->pushSamples (left, right, numSamples);
-            }
-        }
-
+        // Spectrogram history always feeds when enabled — Spec3D mesh depends on it.
         if (auto* spec = spectrogramTarget.load (std::memory_order_acquire))
         {
             if (spec->isSpectrogramEnabled() && mainBuffer.getNumChannels() > 0)
@@ -2871,33 +2887,36 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             }
         }
 
-        if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
+        if (pushScopes)
         {
-            if (loud->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
             {
-                const auto* left = mainBuffer.getReadPointer (0);
-                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-                loud->pushSamples (left, right, numSamples);
+                if (loud->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+                {
+                    const auto* left = mainBuffer.getReadPointer (0);
+                    const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                    loud->pushSamples (left, right, numSamples);
+                }
             }
-        }
 
-        if (auto* stereo = stereogramTarget.load (std::memory_order_acquire))
-        {
-            if (stereo->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            if (auto* stereo = stereogramTarget.load (std::memory_order_acquire))
             {
-                const auto* left = mainBuffer.getReadPointer (0);
-                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-                stereo->pushSamples (left, right, numSamples);
+                if (stereo->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+                {
+                    const auto* left = mainBuffer.getReadPointer (0);
+                    const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                    stereo->pushSamples (left, right, numSamples);
+                }
             }
-        }
 
-        if (auto* hist = histogramTarget.load (std::memory_order_acquire))
-        {
-            if (hist->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            if (auto* hist = histogramTarget.load (std::memory_order_acquire))
             {
-                const auto* left = mainBuffer.getReadPointer (0);
-                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-                hist->pushSamples (left, right, numSamples);
+                if (hist->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+                {
+                    const auto* left = mainBuffer.getReadPointer (0);
+                    const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                    hist->pushSamples (left, right, numSamples);
+                }
             }
         }
 
@@ -4378,26 +4397,32 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         }
     }
 
-    if (auto* osc = oscilloscopeTarget.load (std::memory_order_acquire))
+    const bool pushScopes = ! bypassOtherAnalyzers.load (std::memory_order_acquire);
+
+    if (pushScopes)
     {
-        if (osc->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+        if (auto* osc = oscilloscopeTarget.load (std::memory_order_acquire))
         {
-            const auto* left = mainBuffer.getReadPointer (0);
-            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-            osc->pushSamples (left, right, mainBuffer.getNumSamples());
+            if (osc->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                osc->pushSamples (left, right, mainBuffer.getNumSamples());
+            }
+        }
+
+        if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
+        {
+            if (gon->isGoniometerEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                gon->pushSamples (left, right, mainBuffer.getNumSamples());
+            }
         }
     }
 
-    if (auto* gon = goniometerTarget.load (std::memory_order_acquire))
-    {
-        if (gon->isGoniometerEnabled() && mainBuffer.getNumChannels() > 0)
-        {
-            const auto* left = mainBuffer.getReadPointer (0);
-            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-            gon->pushSamples (left, right, mainBuffer.getNumSamples());
-        }
-    }
-
+    // Spectrogram history always (Spec3D mesh feed); 2D strip still paints last frame when bypassed.
     if (auto* spec = spectrogramTarget.load (std::memory_order_acquire))
     {
         if (spec->isSpectrogramEnabled() && mainBuffer.getNumChannels() > 0)
@@ -4408,33 +4433,36 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         }
     }
 
-    if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
+    if (pushScopes)
     {
-        if (loud->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+        if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
         {
-            const auto* left = mainBuffer.getReadPointer (0);
-            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-            loud->pushSamples (left, right, mainBuffer.getNumSamples());
+            if (loud->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                loud->pushSamples (left, right, mainBuffer.getNumSamples());
+            }
         }
-    }
 
-    if (auto* stereo = stereogramTarget.load (std::memory_order_acquire))
-    {
-        if (stereo->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+        if (auto* stereo = stereogramTarget.load (std::memory_order_acquire))
         {
-            const auto* left = mainBuffer.getReadPointer (0);
-            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-            stereo->pushSamples (left, right, mainBuffer.getNumSamples());
+            if (stereo->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                stereo->pushSamples (left, right, mainBuffer.getNumSamples());
+            }
         }
-    }
 
-    if (auto* hist = histogramTarget.load (std::memory_order_acquire))
-    {
-        if (hist->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+        if (auto* hist = histogramTarget.load (std::memory_order_acquire))
         {
-            const auto* left = mainBuffer.getReadPointer (0);
-            const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
-            hist->pushSamples (left, right, mainBuffer.getNumSamples());
+            if (hist->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                hist->pushSamples (left, right, mainBuffer.getNumSamples());
+            }
         }
     }
 

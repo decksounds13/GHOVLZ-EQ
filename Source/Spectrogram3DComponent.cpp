@@ -2273,8 +2273,9 @@ void Spectrogram3DComponent::GlHost::rebuildFloorGeometry()
     constexpr float groundY = -0.012f;
     constexpr float gridY = -0.010f;
     const bool soft = owner.usesSoftComposite();
-    // Soft: ~1px world ribbons. Solid keeps slightly wider strokes for DOF gather.
-    const float kGridHalfW = soft ? 0.00055f : 0.0045f;
+    // Soft: thin ribbons (MSAA resolves edges). Solid keeps slightly wider strokes for DOF gather.
+    // Was 0.00055 — sub-pixel without reliable MSAA on post-stack chrome looked jagged.
+    const float kGridHalfW = soft ? 0.0011f : 0.0045f;
     // Solid-only thick ticks (soft uses camera-facing billboards in drawPlayheadTicks).
     constexpr float kTickHalfW = 0.00115f;
     constexpr float kTickTopY = 0.017f;
@@ -4967,13 +4968,40 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
     }
 
     // Grid / ticks / labels after SSGI+SSR+bloom — chrome must not feed GI/bloom.
-    // Gizmo stays in the pre-SSGI colour buffer so it can bounce. Still before DOF.
+    // Draw into the MSAA soft target when available so thin ribbons resolve cleanly
+    // (drawing only on the resolved softFbo left jaggies even with MSAA "on").
     {
-        softFbo.makeCurrentRenderingTarget();
-        glViewport (0, 0, width, height);
-        drawGroundAndGrid();
-        drawPlayheadTicks();
-        drawFrequencyLabels();
+        const int samples = effectiveMsaaSamples();
+        const bool chromeMsaa = samples >= 2 && softMsaaFbo != 0;
+        if (chromeMsaa)
+        {
+            // Seed MSAA buffer with the post-processed scene, then AA the chrome on top.
+            const GLuint sceneFbo = (GLuint) softFbo.getFrameBufferID();
+            glBindFramebuffer (GL_READ_FRAMEBUFFER, sceneFbo);
+            glBindFramebuffer (GL_DRAW_FRAMEBUFFER, softMsaaFbo);
+            glBlitFramebuffer (0, 0, width, height, 0, 0, width, height,
+                               GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+            glBindFramebuffer (GL_FRAMEBUFFER, softMsaaFbo);
+            glViewport (0, 0, width, height);
+            glEnable (GL_MULTISAMPLE);
+            drawGroundAndGrid();
+            drawPlayheadTicks();
+            drawFrequencyLabels();
+            glBindFramebuffer (GL_READ_FRAMEBUFFER, softMsaaFbo);
+            glBindFramebuffer (GL_DRAW_FRAMEBUFFER, sceneFbo);
+            glBlitFramebuffer (0, 0, width, height, 0, 0, width, height,
+                               GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            softFbo.makeCurrentRenderingTarget();
+            glViewport (0, 0, width, height);
+        }
+        else
+        {
+            softFbo.makeCurrentRenderingTarget();
+            glViewport (0, 0, width, height);
+            drawGroundAndGrid();
+            drawPlayheadTicks();
+            drawFrequencyLabels();
+        }
         // #region agent log
         if ((gSoftFrameCounter % 30) == 1)
         {
@@ -5731,6 +5759,30 @@ void Spectrogram3DComponent::setParticleSpawnJitter (float amount) noexcept
     if (! std::isfinite (amount)) return;
     if (std::abs (particleSpawnJitter - amount) < 1.0e-6f) return;
     particleSpawnJitter = amount;
+}
+
+void Spectrogram3DComponent::setParticleEmitCatchupHz (float hz) noexcept
+{
+    if (! std::isfinite (hz)) return;
+    hz = juce::jlimit (15.0f, 240.0f, hz);
+    if (std::abs (particleEmitCatchupHz - hz) < 1.0e-4f) return;
+    particleEmitCatchupHz = hz;
+}
+
+void Spectrogram3DComponent::setParticleSimCatchupHz (float hz) noexcept
+{
+    if (! std::isfinite (hz)) return;
+    hz = juce::jlimit (10.0f, 120.0f, hz);
+    if (std::abs (particleSimCatchupHz - hz) < 1.0e-4f) return;
+    particleSimCatchupHz = hz;
+}
+
+void Spectrogram3DComponent::setParticleSliceBacklogSec (float seconds) noexcept
+{
+    if (! std::isfinite (seconds)) return;
+    seconds = juce::jlimit (0.02f, 2.0f, seconds);
+    if (std::abs (particleSliceBacklogSec - seconds) < 1.0e-5f) return;
+    particleSliceBacklogSec = seconds;
 }
 
 void Spectrogram3DComponent::initDefaultParticleModSlots() noexcept
@@ -7747,10 +7799,13 @@ void Spectrogram3DComponent::applyFreecamLookDelta (float dxPixels, float dyPixe
     if (! freecamActive)
         return;
 
-    // UE freecam mouse-look about freecamEye only (never writes orbit camera.*).
+    // UE freecam mouse-look: rotate in place about freecamEye only.
+    // Never touch orbit camera.distance / pan — RMB must not dolly or zoom.
     // Mouse right → turn right; mouse up → look up (unless invert Y).
     const float sens = freecamLookSensitivity;
     freecamYawDeg += dxPixels * sens;
+    while (freecamYawDeg > 180.0f) freecamYawDeg -= 360.0f;
+    while (freecamYawDeg < -180.0f) freecamYawDeg += 360.0f;
     const float pitchDelta = freecamInvertY ? dyPixels * sens : -dyPixels * sens;
     freecamPitchDeg = juce::jlimit (-kMaxPitchDeg, kMaxPitchDeg, freecamPitchDeg + pitchDelta);
 }
@@ -7774,31 +7829,24 @@ juce::Matrix3D<float> Spectrogram3DComponent::getTurntableViewMatrix() const noe
 juce::Matrix3D<float> Spectrogram3DComponent::getFreecamViewMatrix() const noexcept
 {
     /**
-        Pure freecam view — eye stays put; only freecamYaw/Pitch change look.
-        Built with the same JUCE Matrix3D products as the orbit camera, but the
-        look-at is derived from freecamEye + look direction (never orbit pan).
-        Orbit elev pitch = −FPS pitch (elev+ looks down, FPS+ looks up).
+        Pure FPS freecam: eye = freecamEye (fixed during mouse-look); only yaw/pitch
+        change orientation. Do NOT reuse the orbit boom product (look-at + pull-back) —
+        that drifted the effective eye when looking down and felt like a zoom-out.
+        Column-major OpenGL view: rows of R are right, up, −forward; t = −R * eye.
     */
     juce::Vector3D<float> right, up, forward;
     freecamBasis (right, up, forward);
-    juce::ignoreUnused (right, up);
 
-    // Dummy boom length for the shared product; does not affect freecam eye.
-    constexpr float kBoom = 1.0f;
-    const float lookX = freecamEye.x + forward.x * kBoom;
-    const float lookY = freecamEye.y + forward.y * kBoom;
-    const float lookZ = freecamEye.z + forward.z * kBoom;
-
-    // Orbit-product pitch is elevation of eye above look-at. Freecam eye is behind
-    // the look point along −forward, so elev = −fpsPitch.
-    const float elev = juce::degreesToRadians (-freecamPitchDeg);
-    const float yaw = juce::degreesToRadians (freecamYawDeg);
-
-    const auto toOrigin = juce::Matrix3D<float>::fromTranslation ({ -lookX, -lookY, -lookZ });
-    const auto rotYaw = juce::Matrix3D<float>::rotation ({ 0.0f, yaw, 0.0f });
-    const auto rotPitch = juce::Matrix3D<float>::rotation ({ elev, 0.0f, 0.0f });
-    const auto pullBack = juce::Matrix3D<float>::fromTranslation ({ 0.0f, 0.0f, -kBoom });
-    return pullBack * rotPitch * rotYaw * toOrigin;
+    const float m[16] = {
+        right.x, up.x, -forward.x, 0.0f,
+        right.y, up.y, -forward.y, 0.0f,
+        right.z, up.z, -forward.z, 0.0f,
+        -(right.x * freecamEye.x + right.y * freecamEye.y + right.z * freecamEye.z),
+        -(up.x * freecamEye.x + up.y * freecamEye.y + up.z * freecamEye.z),
+        (forward.x * freecamEye.x + forward.y * freecamEye.y + forward.z * freecamEye.z),
+        1.0f
+    };
+    return juce::Matrix3D<float> (m);
 }
 
 juce::Matrix3D<float> Spectrogram3DComponent::getActiveViewMatrix() const noexcept
@@ -8223,10 +8271,13 @@ void Spectrogram3DComponent::timerCallback()
         ensureParticleSystem();
         if (particleSystem != nullptr)
         {
-            // Cap to 60 Hz sim steps; never accumulate more than 30 Hz of debt.
+            // Nominal 60 Hz step; max debt from settings (sim catch-up Hz).
             float pdt = 1.0f / 60.0f;
             if (particleLastUpdateSec > 0.0)
-                pdt = juce::jlimit (0.0f, 1.0f / 30.0f, (float) (nowSec - particleLastUpdateSec));
+            {
+                const float maxDt = 1.0f / juce::jmax (10.0f, particleSimCatchupHz);
+                pdt = juce::jlimit (0.0f, maxDt, (float) (nowSec - particleLastUpdateSec));
+            }
             particleLastUpdateSec = nowSec;
             particleSystem->update (pdt);
             markSoftContentDirty();
@@ -8236,6 +8287,10 @@ void Spectrogram3DComponent::timerCallback()
     {
         particleLastUpdateSec = 0.0;
     }
+
+    // FRC cumulative-curve eco tracks particle density (MainComponent).
+    if (onParticleSimTick != nullptr)
+        onParticleSimTick();
 
     // Lighting automation only writes uniforms. Fold into the mesh soft frame when
     // possible; if the waterfall is idle, throttle light-only soft redraws (~12 Hz)
@@ -9811,8 +9866,8 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
 void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
 {
     // Live button state wins — some hosts drop popup flags mid-drag.
-    // Freecam RMB never falls through into orbit / ground pan.
-    if (isRightMouse (e) || freecamRmbHeld || freecamActive)
+    // RMB freecam look only (never steal LMB orbit because freecamActive is still true).
+    if (isRightMouse (e) || freecamRmbHeld)
     {
         dragMode = DragMode::freecamLook;
         freecamRmbHeld = true;
