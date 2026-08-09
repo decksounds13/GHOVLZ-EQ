@@ -2,6 +2,8 @@
 #include "ColourRampBank.h"
 #include "RampPresetPicker.h"
 #include "../ComboBoxLookAndFeel.h"
+#include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -18,6 +20,314 @@ namespace
         ++r.revision;
         return r;
     }
+
+    /** Snapshot undo for Spec3DRampSequence (NLE-style history). */
+    class RampSequenceUndoAction final : public juce::UndoableAction
+    {
+    public:
+        RampSequenceUndoAction (Spec3DRampSequence& seqIn,
+                                juce::ValueTree beforeIn,
+                                juce::ValueTree afterIn,
+                                std::function<void()> notifyIn)
+            : seq (seqIn),
+              before (std::move (beforeIn)),
+              after (std::move (afterIn)),
+              notify (std::move (notifyIn))
+        {
+        }
+
+        bool perform() override
+        {
+            seq.applyValueTree (after);
+            if (notify) notify();
+            return true;
+        }
+
+        bool undo() override
+        {
+            seq.applyValueTree (before);
+            if (notify) notify();
+            return true;
+        }
+
+        int getSizeInUnits() override { return 8; }
+
+    private:
+        Spec3DRampSequence& seq;
+        juce::ValueTree before, after;
+        std::function<void()> notify;
+    };
+
+    // ── Square toolbar icons (UE5 Sequencer / Premiere / Resolve language) ──
+
+    void paintSelectIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.20f, r.getHeight() * 0.12f);
+        juce::Path p;
+        p.startNewSubPath (c.getX() + c.getWidth() * 0.12f, c.getY());
+        p.lineTo (c.getX() + c.getWidth() * 0.12f, c.getBottom());
+        p.lineTo (c.getX() + c.getWidth() * 0.40f, c.getY() + c.getHeight() * 0.60f);
+        p.lineTo (c.getX() + c.getWidth() * 0.52f, c.getBottom() - c.getHeight() * 0.08f);
+        p.lineTo (c.getX() + c.getWidth() * 0.66f, c.getY() + c.getHeight() * 0.76f);
+        p.lineTo (c.getRight(), c.getY() + c.getHeight() * 0.52f);
+        p.closeSubPath();
+        g.setColour (ink);
+        g.fillPath (p);
+    }
+
+    void paintRazorIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.16f, r.getHeight() * 0.16f);
+        // Vertical cut line
+        g.setColour (ink.withAlpha (0.55f));
+        g.drawLine (c.getCentreX(), c.getY(), c.getCentreX(), c.getBottom(), 1.15f);
+        // Blade
+        juce::Path blade;
+        blade.startNewSubPath (c.getX() + c.getWidth() * 0.08f, c.getY() + c.getHeight() * 0.62f);
+        blade.lineTo (c.getX() + c.getWidth() * 0.52f, c.getY() + c.getHeight() * 0.08f);
+        blade.lineTo (c.getX() + c.getWidth() * 0.68f, c.getY() + c.getHeight() * 0.28f);
+        blade.lineTo (c.getX() + c.getWidth() * 0.28f, c.getBottom() - c.getHeight() * 0.05f);
+        blade.closeSubPath();
+        g.setColour (ink);
+        g.fillPath (blade);
+        g.drawLine (c.getX() + c.getWidth() * 0.58f, c.getY() + c.getHeight() * 0.22f,
+                    c.getRight() - 1.0f, c.getY() + c.getHeight() * 0.78f, 2.0f);
+    }
+
+    void paintUndoIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.20f, r.getHeight() * 0.20f);
+        g.setColour (ink);
+        juce::Path arc;
+        arc.addCentredArc (c.getCentreX() + c.getWidth() * 0.06f, c.getCentreY(),
+                           c.getWidth() * 0.40f, c.getHeight() * 0.40f,
+                           0.0f, -2.5f, 1.15f, true);
+        g.strokePath (arc, juce::PathStrokeType (1.7f, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+        const float ax = c.getX() + c.getWidth() * 0.10f;
+        const float ay = c.getY() + c.getHeight() * 0.26f;
+        juce::Path head;
+        head.addTriangle (ax, ay, ax + 4.5f, ay - 0.5f, ax + 1.2f, ay + 4.5f);
+        g.fillPath (head);
+    }
+
+    void paintRedoIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.20f, r.getHeight() * 0.20f);
+        g.setColour (ink);
+        juce::Path arc;
+        arc.addCentredArc (c.getCentreX() - c.getWidth() * 0.06f, c.getCentreY(),
+                           c.getWidth() * 0.40f, c.getHeight() * 0.40f,
+                           0.0f, 2.5f, -1.15f, true);
+        g.strokePath (arc, juce::PathStrokeType (1.7f, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+        const float ax = c.getRight() - c.getWidth() * 0.10f;
+        const float ay = c.getY() + c.getHeight() * 0.26f;
+        juce::Path head;
+        head.addTriangle (ax, ay, ax - 4.5f, ay - 0.5f, ax - 1.2f, ay + 4.5f);
+        g.fillPath (head);
+    }
+
+    void paintDupIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.20f, r.getHeight() * 0.20f);
+        const float w = c.getWidth() * 0.55f;
+        const float h = c.getHeight() * 0.55f;
+        g.setColour (ink.withAlpha (0.45f));
+        g.drawRoundedRectangle (c.getX(), c.getY(), w, h, 1.5f, 1.3f);
+        g.setColour (ink);
+        g.drawRoundedRectangle (c.getRight() - w, c.getBottom() - h, w, h, 1.5f, 1.5f);
+    }
+
+    void paintDeleteIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.22f, r.getHeight() * 0.18f);
+        g.setColour (ink);
+        // Lid
+        g.drawLine (c.getX() + c.getWidth() * 0.15f, c.getY() + c.getHeight() * 0.28f,
+                    c.getRight() - c.getWidth() * 0.15f, c.getY() + c.getHeight() * 0.28f, 1.5f);
+        g.drawLine (c.getCentreX() - c.getWidth() * 0.12f, c.getY() + c.getHeight() * 0.12f,
+                    c.getCentreX() + c.getWidth() * 0.12f, c.getY() + c.getHeight() * 0.12f, 1.4f);
+        // Body
+        juce::Path body;
+        body.startNewSubPath (c.getX() + c.getWidth() * 0.22f, c.getY() + c.getHeight() * 0.32f);
+        body.lineTo (c.getX() + c.getWidth() * 0.30f, c.getBottom());
+        body.lineTo (c.getX() + c.getWidth() * 0.70f, c.getBottom());
+        body.lineTo (c.getX() + c.getWidth() * 0.78f, c.getY() + c.getHeight() * 0.32f);
+        body.closeSubPath();
+        g.strokePath (body, juce::PathStrokeType (1.4f));
+        g.drawLine (c.getCentreX(), c.getY() + c.getHeight() * 0.40f,
+                    c.getCentreX(), c.getBottom() - c.getHeight() * 0.12f, 1.2f);
+    }
+
+    void paintArrowLeftIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.22f, r.getHeight() * 0.22f);
+        g.setColour (ink);
+        juce::Path p;
+        p.addTriangle (c.getX(), c.getCentreY(),
+                       c.getX() + c.getWidth() * 0.55f, c.getY(),
+                       c.getX() + c.getWidth() * 0.55f, c.getBottom());
+        g.fillPath (p);
+        g.fillRoundedRectangle (c.getX() + c.getWidth() * 0.42f,
+                                c.getCentreY() - c.getHeight() * 0.14f,
+                                c.getWidth() * 0.55f, c.getHeight() * 0.28f, 1.0f);
+    }
+
+    void paintArrowRightIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.22f, r.getHeight() * 0.22f);
+        g.setColour (ink);
+        juce::Path p;
+        p.addTriangle (c.getRight(), c.getCentreY(),
+                       c.getRight() - c.getWidth() * 0.55f, c.getY(),
+                       c.getRight() - c.getWidth() * 0.55f, c.getBottom());
+        g.fillPath (p);
+        g.fillRoundedRectangle (c.getX(),
+                                c.getCentreY() - c.getHeight() * 0.14f,
+                                c.getWidth() * 0.55f, c.getHeight() * 0.28f, 1.0f);
+    }
+
+    void paintPlusIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.28f, r.getHeight() * 0.28f);
+        g.setColour (ink);
+        const float t = juce::jmax (1.6f, c.getWidth() * 0.18f);
+        g.fillRoundedRectangle (c.getCentreX() - t * 0.5f, c.getY(), t, c.getHeight(), 1.0f);
+        g.fillRoundedRectangle (c.getX(), c.getCentreY() - t * 0.5f, c.getWidth(), t, 1.0f);
+    }
+
+    void paintAddLaneIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.18f, r.getHeight() * 0.20f);
+        g.setColour (ink.withAlpha (0.9f));
+        // Three track lines
+        for (int i = 0; i < 3; ++i)
+        {
+            const float y = c.getY() + c.getHeight() * (0.18f + 0.28f * (float) i);
+            g.drawLine (c.getX(), y, c.getX() + c.getWidth() * 0.58f, y, 1.35f);
+        }
+        // Plus on the right
+        const float px = c.getX() + c.getWidth() * 0.72f;
+        const float py = c.getCentreY();
+        const float s = c.getWidth() * 0.22f;
+        g.drawLine (px - s, py, px + s, py, 1.6f);
+        g.drawLine (px, py - s, px, py + s, 1.6f);
+    }
+
+    void paintExpandIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink)
+    {
+        auto c = r.reduced (r.getWidth() * 0.22f, r.getHeight() * 0.22f);
+        g.setColour (ink);
+        const float L = c.getWidth() * 0.32f;
+        auto corner = [&] (float x, float y, float dx, float dy)
+        {
+            g.drawLine (x, y, x + dx * L, y, 1.5f);
+            g.drawLine (x, y, x, y + dy * L, 1.5f);
+        };
+        corner (c.getX(), c.getY(), 1, 1);
+        corner (c.getRight(), c.getY(), -1, 1);
+        corner (c.getX(), c.getBottom(), 1, -1);
+        corner (c.getRight(), c.getBottom(), -1, -1);
+    }
+
+    void paintSeqEnableIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink, bool on)
+    {
+        auto c = r.reduced (r.getWidth() * 0.20f, r.getHeight() * 0.20f);
+        // Film strip / sequence block
+        g.setColour (ink);
+        g.drawRoundedRectangle (c.reduced (0.5f), 2.0f, 1.4f);
+        const float midY = c.getCentreY();
+        g.drawLine (c.getX() + 2.0f, midY, c.getRight() - 2.0f, midY, 1.2f);
+        // Play triangle when on
+        if (on)
+        {
+            juce::Path play;
+            const float cx = c.getCentreX() + c.getWidth() * 0.04f;
+            play.addTriangle (cx - c.getWidth() * 0.12f, midY - c.getHeight() * 0.22f,
+                              cx - c.getWidth() * 0.12f, midY + c.getHeight() * 0.22f,
+                              cx + c.getWidth() * 0.22f, midY);
+            g.fillPath (play);
+        }
+        else
+        {
+            // Sprocket ticks
+            for (int i = 0; i < 3; ++i)
+            {
+                const float x = c.getX() + c.getWidth() * (0.25f + 0.25f * (float) i);
+                g.fillEllipse (x - 1.2f, c.getY() + 2.0f, 2.4f, 2.4f);
+                g.fillEllipse (x - 1.2f, c.getBottom() - 4.4f, 2.4f, 2.4f);
+            }
+        }
+    }
+
+    /** Square graphic toolbar button — UE5 Sequencer / Premiere style. */
+    class SeqToolButton final : public juce::Button
+    {
+    public:
+        enum class Glyph
+        {
+            select, razor, undo, redo,
+            duplicate, deleteClip, nudgeLeft, nudgeRight,
+            addClip, addLane, expand, seqEnable
+        };
+
+        explicit SeqToolButton (Glyph g)
+            : juce::Button ({}), glyph (g)
+        {
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        }
+
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            // Square face, tight radius (editor chrome — not pill labels).
+            auto r = getLocalBounds().toFloat().reduced (0.5f);
+            const bool on = getToggleState();
+            auto fill = findColour (on ? juce::TextButton::buttonOnColourId
+                                       : juce::TextButton::buttonColourId);
+            if (down) fill = fill.darker (0.15f);
+            else if (over) fill = fill.brighter (0.10f);
+
+            g.setColour (fill);
+            g.fillRoundedRectangle (r, 2.0f);
+
+            // Inner top edge highlight
+            g.setColour (juce::Colours::white.withAlpha (on ? 0.14f : (over ? 0.10f : 0.06f)));
+            g.drawLine (r.getX() + 1.0f, r.getY() + 1.0f, r.getRight() - 1.0f, r.getY() + 1.0f, 1.0f);
+
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.drawRoundedRectangle (r, 2.0f, 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (on ? 0.22f : 0.10f));
+            g.drawRoundedRectangle (r.reduced (0.5f), 1.5f, 1.0f);
+
+            const auto ink = (on ? juce::Colours::black
+                                 : findColour (juce::TextButton::textColourOffId))
+                                 .withAlpha (isEnabled() ? (on ? 0.92f : 0.90f) : 0.32f);
+            auto icon = r.reduced (r.getWidth() * 0.12f);
+            switch (glyph)
+            {
+                case Glyph::select:      paintSelectIcon (g, icon, ink); break;
+                case Glyph::razor:       paintRazorIcon (g, icon, ink); break;
+                case Glyph::undo:        paintUndoIcon (g, icon, ink); break;
+                case Glyph::redo:        paintRedoIcon (g, icon, ink); break;
+                case Glyph::duplicate:   paintDupIcon (g, icon, ink); break;
+                case Glyph::deleteClip:  paintDeleteIcon (g, icon, ink); break;
+                case Glyph::nudgeLeft:   paintArrowLeftIcon (g, icon, ink); break;
+                case Glyph::nudgeRight:  paintArrowRightIcon (g, icon, ink); break;
+                case Glyph::addClip:     paintPlusIcon (g, icon, ink); break;
+                case Glyph::addLane:     paintAddLaneIcon (g, icon, ink); break;
+                case Glyph::expand:      paintExpandIcon (g, icon, ink); break;
+                case Glyph::seqEnable:   paintSeqEnableIcon (g, icon, ink, on); break;
+            }
+        }
+
+        Glyph glyph;
+    };
+
+    SeqToolButton* asTool (juce::Button* b) noexcept
+    {
+        return dynamic_cast<SeqToolButton*> (b);
+    }
 }
 
 Spec3DRampTimelineComponent::Spec3DRampTimelineComponent (SharedResources& resourcesIn,
@@ -26,22 +336,32 @@ Spec3DRampTimelineComponent::Spec3DRampTimelineComponent (SharedResources& resou
     : resources (resourcesIn), theme (&resourcesIn), bank (bankIn), sequence (sequenceIn)
 {
     setOpaque (false);
+    setWantsKeyboardFocus (true);
     sequence.hydrateFromStore (bank.getPresets());
 
-    enableButton.setClickingTogglesState (true);
-    enableButton.setTooltip ("Enable sequencer (ramp morph + automation)");
-    enableButton.onClick = [this]
+    auto makeTool = [this] (SeqToolButton::Glyph g, const juce::String& tip) -> std::unique_ptr<juce::Button>
     {
-        sequence.enabled = enableButton.getToggleState();
+        auto b = std::make_unique<SeqToolButton> (g);
+        b->setTooltip (tip);
+        addAndMakeVisible (*b);
+        return b;
+    };
+
+    enableButton = makeTool (SeqToolButton::Glyph::seqEnable,
+                             "Enable sequencer (ramp morph + automation)");
+    enableButton->setClickingTogglesState (true);
+    enableButton->onClick = [this]
+    {
+        beginEditSnapshot();
+        sequence.enabled = enableButton->getToggleState();
         if (onEnabledChanged) onEnabledChanged();
-        notifyChanged();
+        commitEdit ("Seq enable");
         repaint();
     };
-    addAndMakeVisible (enableButton);
 
     lengthLabel.setText ("Length", juce::dontSendNotification);
     lengthLabel.setJustificationType (juce::Justification::centredRight);
-    lengthLabel.setMinimumHorizontalScale (1.0f); // never ellipsize "Length"
+    lengthLabel.setMinimumHorizontalScale (1.0f);
     lengthLabel.setTooltip ("Timeline length (0.5 s - 5 min)");
     addAndMakeVisible (lengthLabel);
 
@@ -63,46 +383,73 @@ Spec3DRampTimelineComponent::Spec3DRampTimelineComponent (SharedResources& resou
         if (s.endsWithChar ('s')) return s.dropLastCharacters (1).getDoubleValue();
         return s.getDoubleValue();
     };
+    lengthSlider.onDragStart = [this] { beginEditSnapshot(); };
+    lengthSlider.onDragEnd = [this] { commitDragEdit ("Timeline length"); };
     lengthSlider.onValueChange = [this]
     {
         sequence.lengthSec = (float) lengthSlider.getValue();
         sequence.clamp();
-        notifyChanged();
+        rebuildCaches();
         repaint();
     };
     addAndMakeVisible (lengthSlider);
 
-    addButton.setTooltip ("Add ramp clip");
-    addButton.onClick = [this] { showAddPresetPicker (&addButton); };
-    addAndMakeVisible (addButton);
+    // Tool groups (always created; visibility depends on expanded layout)
+    selectToolButton = makeTool (SeqToolButton::Glyph::select,
+                                 "Selection tool (V) — select, move, trim");
+    selectToolButton->setClickingTogglesState (true);
+    selectToolButton->setRadioGroupId (0x51E0);
+    selectToolButton->onClick = [this] { setEditTool (EditTool::select); };
 
-    removeButton.setTooltip ("Remove selected clip");
-    removeButton.onClick = [this]
+    razorToolButton = makeTool (SeqToolButton::Glyph::razor,
+                                "Razor tool (C) — click clip to cut at mouse");
+    razorToolButton->setClickingTogglesState (true);
+    razorToolButton->setRadioGroupId (0x51E0);
+    razorToolButton->onClick = [this] { setEditTool (EditTool::razor); };
+
+    undoToolButton = makeTool (SeqToolButton::Glyph::undo, "Undo (Ctrl+Z)");
+    undoToolButton->onClick = [this]
     {
-        if (selectedClip < 0 || selectedClip >= (int) sequence.clips.size())
-            return;
-        closeClipRampEditor (false);
-        sequence.clips.erase (sequence.clips.begin() + selectedClip);
-        selectedClip = -1;
-        sequence.clamp();
-        notifyChanged();
-        repaint();
+        if (getUndoManager().canUndo())
+            getUndoManager().undo();
+        updateEditToolEnabled();
     };
-    addAndMakeVisible (removeButton);
 
-    addLaneButton.setTooltip ("Add lighting automation lane");
-    addLaneButton.onClick = [this] { showAddLaneMenu(); };
-    addAndMakeVisible (addLaneButton);
+    redoToolButton = makeTool (SeqToolButton::Glyph::redo, "Redo (Ctrl+Shift+Z)");
+    redoToolButton->onClick = [this]
+    {
+        if (getUndoManager().canRedo())
+            getUndoManager().redo();
+        updateEditToolEnabled();
+    };
 
-    expandButton.setTooltip ("Expand sequencer window");
-    expandButton.onClick = [this] { if (onRequestExpand) onRequestExpand(); };
-    addAndMakeVisible (expandButton);
+    dupButton = makeTool (SeqToolButton::Glyph::duplicate, "Duplicate selected clip");
+    dupButton->onClick = [this] { duplicateSelectedClip(); };
+
+    deleteButton = makeTool (SeqToolButton::Glyph::deleteClip, "Delete selected clip (Del)");
+    deleteButton->onClick = [this] { deleteSelectedClip(); };
+
+    moveLeftButton = makeTool (SeqToolButton::Glyph::nudgeLeft, "Nudge clip earlier");
+    moveLeftButton->onClick = [this] { moveSelectedClip (-1); };
+
+    moveRightButton = makeTool (SeqToolButton::Glyph::nudgeRight, "Nudge clip later");
+    moveRightButton->onClick = [this] { moveSelectedClip (1); };
+
+    addButton = makeTool (SeqToolButton::Glyph::addClip, "Add ramp clip");
+    addButton->onClick = [this] { showAddPresetPicker (addButton.get()); };
+
+    addLaneButton = makeTool (SeqToolButton::Glyph::addLane, "Add lighting automation lane");
+    addLaneButton->onClick = [this] { showAddLaneMenu(); };
+
+    expandButton = makeTool (SeqToolButton::Glyph::expand, "Expand sequencer window");
+    expandButton->onClick = [this] { if (onRequestExpand) onRequestExpand(); };
 
     styleChrome();
-    enableButton.setToggleState (sequence.enabled, juce::dontSendNotification);
+    enableButton->setToggleState (sequence.enabled, juce::dontSendNotification);
     lengthSlider.setValue (sequence.lengthSec, juce::dontSendNotification);
     rebuildCaches();
-    // Playhead paint only while visible - do not thrash the message thread when hidden.
+    setEditTool (EditTool::select);
+    updateEditToolEnabled();
     startTimerHz (12);
 }
 
@@ -116,6 +463,7 @@ Spec3DRampTimelineComponent::~Spec3DRampTimelineComponent()
 void Spec3DRampTimelineComponent::setExpandedLayout (bool expanded) noexcept
 {
     expandedLayout = expanded;
+    updateEditToolEnabled();
     resized();
     repaint();
 }
@@ -123,7 +471,8 @@ void Spec3DRampTimelineComponent::setExpandedLayout (bool expanded) noexcept
 void Spec3DRampTimelineComponent::setShowExpandButton (bool shouldShow) noexcept
 {
     showExpandButton = shouldShow;
-    expandButton.setVisible (shouldShow);
+    if (expandButton != nullptr)
+        expandButton->setVisible (shouldShow);
     resized();
 }
 
@@ -132,6 +481,7 @@ void Spec3DRampTimelineComponent::setPlayheadSec (float sec) noexcept
     if (std::abs (playheadSec - sec) < 1.0e-4f)
         return;
     playheadSec = sec;
+    updateEditToolEnabled();
     if (isShowing())
         repaint();
 }
@@ -215,6 +565,7 @@ void Spec3DRampTimelineComponent::paintRegionOverlay (juce::Graphics& g) const
 
 int Spec3DRampTimelineComponent::getPreferredHeight() const noexcept
 {
+    // Single chrome row (compact or expanded).
     const float chrome = expandedLayout ? 28.0f : 24.0f;
     constexpr float kLaneGap = 5.0f;
     const float lanes = rampLaneH() + kLaneGap
@@ -232,18 +583,25 @@ const SharedColors& Spec3DRampTimelineComponent::colors() const noexcept
 void Spec3DRampTimelineComponent::styleChrome()
 {
     const auto& c = colors();
-    auto styleBtn = [&] (juce::TextButton& b)
+    // Flat square tool face — dark idle, gold active (Sequencer / Premiere).
+    const auto face = c.pluginButtonBackground.brighter (0.06f);
+    const auto faceOn = c.pluginButtonAccent;
+    auto styleBtn = [&] (juce::Button* b)
     {
-        b.setColour (juce::TextButton::buttonColourId, c.pluginButtonBackground);
-        b.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
-        b.setColour (juce::TextButton::textColourOffId, c.pluginButtonText.withAlpha (0.9f));
-        b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        if (b == nullptr) return;
+        b->setColour (juce::TextButton::buttonColourId, face);
+        b->setColour (juce::TextButton::buttonOnColourId, faceOn);
+        b->setColour (juce::TextButton::textColourOffId, c.pluginButtonText.withAlpha (0.92f));
+        b->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     };
-    styleBtn (enableButton);
-    styleBtn (addButton);
-    styleBtn (removeButton);
-    styleBtn (addLaneButton);
-    styleBtn (expandButton);
+    juce::Button* all[] = {
+        enableButton.get(), selectToolButton.get(), razorToolButton.get(),
+        undoToolButton.get(), redoToolButton.get(), dupButton.get(), deleteButton.get(),
+        moveLeftButton.get(), moveRightButton.get(), addButton.get(),
+        addLaneButton.get(), expandButton.get()
+    };
+    for (auto* b : all)
+        styleBtn (b);
     lengthLabel.setColour (juce::Label::textColourId, c.menuLabelTextColor1.withAlpha (0.85f));
     lengthSlider.setColour (juce::Slider::thumbColourId, c.menuSliderFillColor);
 }
@@ -264,6 +622,248 @@ void Spec3DRampTimelineComponent::rebuildCaches()
     clipCaches.resize (sequence.clips.size());
 }
 
+int Spec3DRampTimelineComponent::findClipIndexAtTime (float timeSec) const noexcept
+{
+    const float len = juce::jmax (1.0e-4f, sequence.lengthSec);
+    float t = timeSec;
+    // Wrap into sequence length like evaluate does for looping playhead.
+    if (len > 0.0f)
+    {
+        t = std::fmod (t, len);
+        if (t < 0.0f)
+            t += len;
+    }
+    for (const auto& L : layout)
+    {
+        if (t >= L.startSec && t < L.endSec)
+            return L.index;
+        // Last clip: include endSec.
+        if (L.index == (int) layout.size() - 1 && t >= L.startSec && t <= L.endSec + 1.0e-4f)
+            return L.index;
+    }
+    return -1;
+}
+
+void Spec3DRampTimelineComponent::setUndoManager (juce::UndoManager* um) noexcept
+{
+    undoManager = um != nullptr ? um : &ownedUndo;
+    updateEditToolEnabled();
+}
+
+juce::UndoManager& Spec3DRampTimelineComponent::getUndoManager() noexcept
+{
+    return undoManager != nullptr ? *undoManager : ownedUndo;
+}
+
+void Spec3DRampTimelineComponent::beginEditSnapshot()
+{
+    editSnapshotBefore = sequence.toValueTree();
+    editSnapshotValid = true;
+}
+
+void Spec3DRampTimelineComponent::commitEdit (const juce::String& name)
+{
+    if (! editSnapshotValid)
+    {
+        notifyChanged();
+        updateEditToolEnabled();
+        return;
+    }
+    editSnapshotValid = false;
+    auto after = sequence.toValueTree();
+    if (after.isEquivalentTo (editSnapshotBefore))
+    {
+        notifyChanged();
+        updateEditToolEnabled();
+        return;
+    }
+
+    auto& um = getUndoManager();
+    um.beginNewTransaction (name);
+    // perform() re-applies `after` (idempotent) and registers undo → `before`.
+    um.perform (new RampSequenceUndoAction (
+        sequence,
+        editSnapshotBefore,
+        after,
+        [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this)]
+        {
+            if (safe != nullptr)
+                safe->refreshAfterUndoRedo();
+        }));
+    updateEditToolEnabled();
+}
+
+void Spec3DRampTimelineComponent::commitDragEdit (const juce::String& name)
+{
+    commitEdit (name);
+}
+
+void Spec3DRampTimelineComponent::refreshAfterUndoRedo()
+{
+    closeClipRampEditor (false);
+    selectedClip = juce::jlimit (-1, (int) sequence.clips.size() - 1, selectedClip);
+    if (enableButton != nullptr)
+        enableButton->setToggleState (sequence.enabled, juce::dontSendNotification);
+    lengthSlider.setValue (sequence.lengthSec, juce::dontSendNotification);
+    rebuildCaches();
+    if (onEnabledChanged)
+        onEnabledChanged();
+    if (onSequenceChanged)
+        onSequenceChanged();
+    updateEditToolEnabled();
+    resized();
+    repaint();
+}
+
+void Spec3DRampTimelineComponent::setEditTool (EditTool t)
+{
+    editTool = t;
+    updateToolButtonToggles();
+    updateEditToolEnabled();
+    // Razor uses a crosshair over the track; selection uses normal cursor.
+    if (editTool == EditTool::razor)
+        setMouseCursor (juce::MouseCursor::CrosshairCursor);
+    else
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+void Spec3DRampTimelineComponent::updateToolButtonToggles()
+{
+    if (selectToolButton != nullptr)
+        selectToolButton->setToggleState (editTool == EditTool::select, juce::dontSendNotification);
+    if (razorToolButton != nullptr)
+        razorToolButton->setToggleState (editTool == EditTool::razor, juce::dontSendNotification);
+    if (enableButton != nullptr)
+        enableButton->setToggleState (sequence.enabled, juce::dontSendNotification);
+}
+
+bool Spec3DRampTimelineComponent::canSplitAtTime (float timeSec) const noexcept
+{
+    if (! sequence.canAddClip() || layout.empty())
+        return false;
+    const int i = findClipIndexAtTime (timeSec);
+    if (i < 0 || i >= (int) layout.size())
+        return false;
+    const auto& L = layout[(size_t) i];
+    const float body = L.endSec - L.startSec;
+    if (body < 1.0e-3f)
+        return false;
+    const float t = juce::jlimit (0.0f, sequence.lengthSec, timeSec);
+    // Industry: refuse cuts too close to edges (Premiere leaves a tiny residual otherwise).
+    const float edge = juce::jmax (0.05f, body * 0.02f);
+    if (t <= L.startSec + edge || t >= L.endSec - edge)
+        return false;
+    const float f = (t - L.startSec) / body;
+    const float w = juce::jmax (Spec3DRampSequence::kMinWeight, sequence.clips[(size_t) i].weight);
+    return (w * f) >= Spec3DRampSequence::kMinWeight
+        && (w * (1.0f - f)) >= Spec3DRampSequence::kMinWeight;
+}
+
+bool Spec3DRampTimelineComponent::splitClipAtTime (float timeSec)
+{
+    if (! canSplitAtTime (timeSec))
+        return false;
+    const int i = findClipIndexAtTime (timeSec);
+    if (i < 0 || i >= (int) sequence.clips.size() || i >= (int) layout.size())
+        return false;
+
+    const auto& L = layout[(size_t) i];
+    const float body = juce::jmax (1.0e-4f, L.endSec - L.startSec);
+    const float t = juce::jlimit (0.0f, sequence.lengthSec, timeSec);
+    const float f = juce::jlimit (0.01f, 0.99f, (t - L.startSec) / body);
+    const float w = juce::jmax (Spec3DRampSequence::kMinWeight, sequence.clips[(size_t) i].weight);
+
+    closeClipRampEditor (true);
+
+    Spec3DRampClip right = sequence.clips[(size_t) i];
+    sequence.clips[(size_t) i].weight = juce::jmax (Spec3DRampSequence::kMinWeight, w * f);
+    right.weight = juce::jmax (Spec3DRampSequence::kMinWeight, w * (1.0f - f));
+    sequence.clips.insert (sequence.clips.begin() + i + 1, std::move (right));
+    sequence.clamp();
+    selectedClip = i + 1; // Premiere: right half selected after razor
+    rebuildCaches();
+    return true;
+}
+
+void Spec3DRampTimelineComponent::duplicateSelectedClip()
+{
+    if (selectedClip < 0 || selectedClip >= (int) sequence.clips.size() || ! sequence.canAddClip())
+        return;
+    beginEditSnapshot();
+    closeClipRampEditor (true);
+    Spec3DRampClip copy = sequence.clips[(size_t) selectedClip];
+    if (! copy.displayName.endsWithIgnoreCase (" copy"))
+        copy.displayName = copy.displayName + " copy";
+    const int insertAt = selectedClip + 1;
+    sequence.clips.insert (sequence.clips.begin() + insertAt, std::move (copy));
+    sequence.clamp();
+    selectedClip = insertAt;
+    commitEdit ("Duplicate clip");
+    repaint();
+}
+
+void Spec3DRampTimelineComponent::moveSelectedClip (int delta)
+{
+    if (delta == 0 || selectedClip < 0 || selectedClip >= (int) sequence.clips.size())
+        return;
+    const int n = (int) sequence.clips.size();
+    const int target = selectedClip + delta;
+    if (target < 0 || target >= n)
+        return;
+    beginEditSnapshot();
+    closeClipRampEditor (true);
+    std::swap (sequence.clips[(size_t) selectedClip], sequence.clips[(size_t) target]);
+    selectedClip = target;
+    commitEdit (delta < 0 ? "Nudge clip earlier" : "Nudge clip later");
+    repaint();
+}
+
+void Spec3DRampTimelineComponent::deleteSelectedClip()
+{
+    if (selectedClip < 0 || selectedClip >= (int) sequence.clips.size())
+        return;
+    beginEditSnapshot();
+    closeClipRampEditor (false);
+    sequence.clips.erase (sequence.clips.begin() + selectedClip);
+    selectedClip = -1;
+    sequence.clamp();
+    commitEdit ("Delete clip");
+    repaint();
+}
+
+void Spec3DRampTimelineComponent::updateEditToolEnabled()
+{
+    const bool exp = expandedLayout;
+    auto setVis = [exp] (std::unique_ptr<juce::Button>& b, bool show)
+    {
+        if (b != nullptr) b->setVisible (exp && show);
+    };
+    setVis (selectToolButton, true);
+    setVis (razorToolButton, true);
+    setVis (undoToolButton, true);
+    setVis (redoToolButton, true);
+    setVis (dupButton, true);
+    setVis (moveLeftButton, true);
+    setVis (moveRightButton, true);
+    // delete / add / addLane / enable stay visible in compact too (layoutChrome).
+
+    const int n = (int) sequence.clips.size();
+    auto en = [] (std::unique_ptr<juce::Button>& b, bool e)
+    {
+        if (b != nullptr) b->setEnabled (e);
+    };
+    en (undoToolButton, getUndoManager().canUndo());
+    en (redoToolButton, getUndoManager().canRedo());
+    en (razorToolButton, sequence.canAddClip() && n > 0);
+    en (dupButton, selectedClip >= 0 && selectedClip < n && sequence.canAddClip());
+    en (deleteButton, selectedClip >= 0 && selectedClip < n);
+    en (moveLeftButton, selectedClip > 0);
+    en (moveRightButton, selectedClip >= 0 && selectedClip < n - 1);
+    en (addButton, sequence.canAddClip());
+    updateToolButtonToggles();
+}
+
 void Spec3DRampTimelineComponent::timerCallback()
 {
     // Skip all work when not on-screen (expanded window closed / menu dismissed).
@@ -279,7 +879,9 @@ void Spec3DRampTimelineComponent::timerCallback()
 juce::Rectangle<float> Spec3DRampTimelineComponent::getTracksArea() const noexcept
 {
     auto r = getLocalBounds().toFloat();
-    r.removeFromTop ((expandedLayout ? 28.0f : 24.0f) + 4.0f);
+    // Match layoutChrome: single chrome row.
+    const float chromeH = expandedLayout ? 28.0f : 24.0f;
+    r.removeFromTop (chromeH + 4.0f);
     if (clipEditor != nullptr)
         r.removeFromBottom (120.0f);
     if (colourKeyPicker != nullptr)
@@ -307,22 +909,59 @@ juce::Rectangle<float> Spec3DRampTimelineComponent::getAutoLaneBounds (int autoI
 
 void Spec3DRampTimelineComponent::layoutChrome()
 {
-    auto row = getLocalBounds().removeFromTop (expandedLayout ? 28 : 24);
-    enableButton.setBounds (row.removeFromLeft (40).reduced (1));
-    expandButton.setVisible (showExpandButton);
-    if (showExpandButton)
-        expandButton.setBounds (row.removeFromRight (26).reduced (1));
-    addLaneButton.setBounds (row.removeFromRight (expandedLayout ? 48 : 40).reduced (1));
-    removeButton.setBounds (row.removeFromRight (24).reduced (1));
-    addButton.setBounds (row.removeFromRight (24).reduced (1));
-    // "Length" needs room - never squeeze into ellipsis.
-    lengthSlider.setBounds (row.removeFromRight (expandedLayout ? 128 : 112).reduced (1, 3));
-    lengthLabel.setBounds (row.removeFromRight (expandedLayout ? 48 : 44).reduced (1, 2));
+    // Single row of square icon buttons (UE5 Sequencer-style tool strip).
+    const int chromeH = expandedLayout ? 28 : 24;
+    auto row = getLocalBounds().removeFromTop (chromeH);
+    const int icon = chromeH - 2; // perfect square hit target
+    const int gap = 1;
 
-    enableButton.setToggleState (sequence.enabled, juce::dontSendNotification);
+    auto placeSq = [&] (std::unique_ptr<juce::Button>& b, bool fromLeft, bool visible)
+    {
+        if (b == nullptr) return;
+        b->setVisible (visible);
+        if (! visible) return;
+        auto cell = fromLeft ? row.removeFromLeft (icon) : row.removeFromRight (icon);
+        b->setBounds (cell.reduced (gap));
+        if (fromLeft)
+            row.removeFromLeft (1);
+        else
+            row.removeFromRight (1);
+    };
+
+    // Left: Enable | Select Razor | Undo Redo | Dup Delete | Nudge
+    placeSq (enableButton, true, true);
+
+    const bool tools = expandedLayout;
+    placeSq (selectToolButton, true, tools);
+    placeSq (razorToolButton, true, tools);
+    if (tools) row.removeFromLeft (3); // group spacer
+    placeSq (undoToolButton, true, tools);
+    placeSq (redoToolButton, true, tools);
+    if (tools) row.removeFromLeft (3);
+    placeSq (dupButton, true, tools);
+    placeSq (deleteButton, true, true); // compact + expanded
+    if (tools) row.removeFromLeft (3);
+    placeSq (moveLeftButton, true, tools);
+    placeSq (moveRightButton, true, tools);
+
+    // Right: Expand | +Lane | +clip
+    placeSq (expandButton, false, showExpandButton);
+    placeSq (addLaneButton, false, true);
+    placeSq (addButton, false, true);
+
+
+    const int lengthLabelW = juce::jmax (
+        48, juce::roundToInt (juce::GlyphArrangement::getStringWidth (
+                                  juce::Font (juce::FontOptions (12.0f)), "Length"))
+                + 10);
+    const int sliderW = expandedLayout ? 118 : 96;
+    lengthSlider.setBounds (row.removeFromRight (sliderW).reduced (1, 3));
+    lengthLabel.setBounds (row.removeFromRight (lengthLabelW).reduced (1, 2));
+
+    if (enableButton != nullptr)
+        enableButton->setToggleState (sequence.enabled, juce::dontSendNotification);
     lengthSlider.setValue (sequence.lengthSec, juce::dontSendNotification);
-    addButton.setEnabled (sequence.canAddClip());
-    removeButton.setEnabled (selectedClip >= 0);
+    updateEditToolEnabled();
 
     auto bottom = getLocalBounds();
     if (colourKeyPicker != nullptr)
@@ -672,14 +1311,34 @@ int Spec3DRampTimelineComponent::hitClipEdge (juce::Point<float> p, bool& leftEd
 int Spec3DRampTimelineComponent::hitFadeHandle (juce::Point<float> p) const noexcept
 {
     const auto lane = getRampLaneBounds();
+    if (! lane.expanded (0.0f, 2.0f).contains (p))
+        return -1;
+
     const float len = juce::jmax (1.0e-4f, sequence.lengthSec);
     for (int i = 0; i < (int) layout.size(); ++i)
     {
-        if (layout[(size_t) i].fadeOutSec <= 1.0e-4f) continue;
         const float xRight = lane.getX() + lane.getWidth() * (layout[(size_t) i].endSec / len);
-        const float fadePx = lane.getWidth() * (layout[(size_t) i].fadeOutSec / len);
-        const float cx = xRight - fadePx * 0.5f;
-        if (std::abs (p.x - cx) <= kFadeHit && p.y >= lane.getY() && p.y <= lane.getBottom())
+        const float xLeft  = lane.getX() + lane.getWidth() * (layout[(size_t) i].startSec / len);
+        const float fadeSec = layout[(size_t) i].fadeOutSec;
+        const float fadePx = juce::jmax (0.0f, lane.getWidth() * (fadeSec / len));
+
+        // Left edge of the fade zone (or just inside the clip end when fade is 0)
+        // — drag this to resize. Always hittable so fades can be created from zero.
+        const float fadeStartX = (fadeSec > 1.0e-4f)
+                                     ? (xRight - fadePx)
+                                     : (xRight - kFadeHit * 1.5f);
+        const float cx = (fadeSec > 1.0e-4f) ? (xRight - fadePx * 0.5f) : fadeStartX;
+
+        if (p.x < xLeft - 1.0f || p.x > xRight + 1.0f)
+            continue;
+        if (p.y < lane.getY() || p.y > lane.getBottom())
+            continue;
+
+        if (std::abs (p.x - fadeStartX) <= kFadeHit || std::abs (p.x - cx) <= kFadeHit)
+            return i;
+
+        // Anywhere inside an existing fade region is also a grab target.
+        if (fadeSec > 1.0e-4f && p.x >= fadeStartX - 1.0f && p.x <= xRight + 1.0f)
             return i;
     }
     return -1;
@@ -757,6 +1416,7 @@ int Spec3DRampTimelineComponent::hitColourKey (int autoIdx, juce::Point<float> p
 
 void Spec3DRampTimelineComponent::toggleLaneEnabled (int autoIdx)
 {
+    beginEditSnapshot();
     if (autoIdx < 0)
     {
         sequence.rampLaneEnabled = ! sequence.rampLaneEnabled;
@@ -767,14 +1427,61 @@ void Spec3DRampTimelineComponent::toggleLaneEnabled (int autoIdx)
         lane.enabled = ! lane.enabled;
     }
     else
+    {
+        editSnapshotValid = false;
         return;
-    notifyChanged();
+    }
+    commitEdit ("Toggle lane");
     repaint();
+}
+
+bool Spec3DRampTimelineComponent::keyPressed (const juce::KeyPress& key)
+{
+    // Premiere / Resolve-style hotkeys (expanded timeline).
+    if (key == juce::KeyPress ('v') || key == juce::KeyPress ('V'))
+    {
+        setEditTool (EditTool::select);
+        return true;
+    }
+    if (key == juce::KeyPress ('c') || key == juce::KeyPress ('C'))
+    {
+        // C alone = Razor tool. Ctrl+C is not used (no system clipboard yet).
+        if (! key.getModifiers().isCommandDown() && ! key.getModifiers().isCtrlDown())
+        {
+            setEditTool (EditTool::razor);
+            return true;
+        }
+    }
+    if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
+    {
+        deleteSelectedClip();
+        return true;
+    }
+    if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0)
+        || key == juce::KeyPress ('z', juce::ModifierKeys::ctrlModifier, 0))
+    {
+        if (getUndoManager().canUndo())
+            getUndoManager().undo();
+        updateEditToolEnabled();
+        return true;
+    }
+    if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)
+        || key == juce::KeyPress ('z', juce::ModifierKeys::ctrlModifier | juce::ModifierKeys::shiftModifier, 0)
+        || key == juce::KeyPress ('y', juce::ModifierKeys::commandModifier, 0)
+        || key == juce::KeyPress ('y', juce::ModifierKeys::ctrlModifier, 0))
+    {
+        if (getUndoManager().canRedo())
+            getUndoManager().redo();
+        updateEditToolEnabled();
+        return true;
+    }
+    return false;
 }
 
 void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
 {
     const auto p = e.position;
+    grabKeyboardFocus();
 
     // Lane labels: LMB toggle enable, RMB menu (enable/disable + remove for auto)
     if (e.mods.isPopupMenu())
@@ -831,6 +1538,28 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // ── Razor tool (C): cut at mouse X — industry standard blade behaviour ──
+    if (editTool == EditTool::razor && expandedLayout)
+    {
+        // Only cut on the ramp clip lane (not automation keys).
+        if (getRampLaneBounds().contains (p) || hitClipBody (p) >= 0)
+        {
+            const float t = xToTimeFull (p.x);
+            if (canSplitAtTime (t))
+            {
+                beginEditSnapshot();
+                if (splitClipAtTime (t))
+                    commitEdit ("Razor cut");
+                else
+                    editSnapshotValid = false;
+            }
+            repaint();
+            return;
+        }
+        // Click elsewhere with razor: no-op (don't start selection drag).
+        return;
+    }
+
     bool left = false;
     int edge = hitClipEdge (p, left);
     int fade = hitFadeHandle (p);
@@ -846,6 +1575,7 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
 
     if (fade >= 0)
     {
+        beginEditSnapshot();
         dragMode = DragMode::fade;
         dragClip = fade;
         dragStartFade = sequence.clips[(size_t) fade].crossfadeOutSec;
@@ -853,6 +1583,7 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
     }
     else if (edge >= 0)
     {
+        beginEditSnapshot();
         dragMode = left ? DragMode::resizeLeft : DragMode::resizeRight;
         dragClip = edge;
         dragStartWeight = sequence.clips[(size_t) edge].weight;
@@ -866,6 +1597,7 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
     }
     else if (body >= 0)
     {
+        beginEditSnapshot();
         dragMode = DragMode::reorder;
         dragClip = body;
         dragGrabX = p.x - clipCaches[(size_t) body].bounds.getX();
@@ -880,6 +1612,7 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
         if (k < 0) k = hitColourKey (al, p);
         if (k >= 0)
         {
+            beginEditSnapshot();
             selectedKey = k;
             dragMode = sequence.autoLanes[(size_t) al].isColourLane() ? DragMode::colourKey : DragMode::floatKey;
             dragAutoLane = al;
@@ -919,7 +1652,7 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
         selectedAutoLane = -1;
         closeClipRampEditor (true);
     }
-    removeButton.setEnabled (selectedClip >= 0);
+    updateEditToolEnabled();
     repaint();
 }
 
@@ -939,9 +1672,17 @@ void Spec3DRampTimelineComponent::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
-    if (dragMode == DragMode::fade && dragClip >= 0)
+    if (dragMode == DragMode::fade && dragClip >= 0
+        && dragClip < (int) sequence.clips.size())
     {
-        sequence.clips[(size_t) dragClip].crossfadeOutSec = juce::jmax (0.0f, dragStartFade + dSec);
+        // Drag left (negative dSec) lengthens the fade from the clip end; right shortens.
+        // Cap at full clip body so a fade can span the entire clip.
+        float body = sequence.lengthSec;
+        if (dragClip < (int) layout.size())
+            body = juce::jmax (1.0e-4f,
+                               layout[(size_t) dragClip].endSec - layout[(size_t) dragClip].startSec);
+        const float next = juce::jmax (0.0f, dragStartFade - dSec);
+        sequence.clips[(size_t) dragClip].crossfadeOutSec = juce::jlimit (0.0f, body, next);
         sequence.clamp();
         rebuildCaches();
         resized();
@@ -1031,25 +1772,37 @@ void Spec3DRampTimelineComponent::mouseUp (const juce::MouseEvent&)
             insertAt = juce::jlimit (0, (int) sequence.clips.size(), insertAt);
             sequence.clips.insert (sequence.clips.begin() + insertAt, std::move (clip));
             selectedClip = insertAt;
-            notifyChanged();
+            commitDragEdit ("Reorder clip");
         }
+        else
+            editSnapshotValid = false; // click without move
     }
-    else if (dragMode == DragMode::fade || dragMode == DragMode::resizeLeft
-             || dragMode == DragMode::resizeRight
-             || dragMode == DragMode::floatKey || dragMode == DragMode::colourKey)
-    {
-        notifyChanged();
-    }
+    else if (dragMode == DragMode::fade)
+        commitDragEdit ("Crossfade");
+    else if (dragMode == DragMode::resizeLeft || dragMode == DragMode::resizeRight)
+        commitDragEdit ("Trim clip");
+    else if (dragMode == DragMode::floatKey || dragMode == DragMode::colourKey)
+        commitDragEdit ("Move keyframe");
+    else
+        editSnapshotValid = false;
+
     dragMode = DragMode::none;
     dragClip = -1;
     dropInsertAt = -1;
     rebuildCaches();
+    updateEditToolEnabled();
     resized();
     repaint();
 }
 
 void Spec3DRampTimelineComponent::mouseMove (const juce::MouseEvent& e)
 {
+    if (editTool == EditTool::razor && expandedLayout)
+    {
+        setMouseCursor (juce::MouseCursor::CrosshairCursor);
+        return;
+    }
+
     bool left = false;
     if (hitEmptyAdd (e.position) || hitClipBody (e.position) >= 0)
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -1118,6 +1871,7 @@ void Spec3DRampTimelineComponent::showAddPresetPicker (juce::Component* anchor)
             if (safe == nullptr) return;
             const auto& presets = safe->bank.getPresets().getPresets();
             if (! juce::isPositiveAndBelow (index, presets.size())) return;
+            safe->beginEditSnapshot();
             Spec3DRampClip c;
             c.displayName = presets.getReference (index).name;
             c.ramp = presets.getReference (index).ramp;
@@ -1129,7 +1883,7 @@ void Spec3DRampTimelineComponent::showAddPresetPicker (juce::Component* anchor)
             safe->sequence.clips.push_back (std::move (c));
             safe->sequence.clamp();
             safe->selectedClip = (int) safe->sequence.clips.size() - 1;
-            safe->notifyChanged();
+            safe->commitEdit ("Add clip");
             safe->repaint();
         });
 }
@@ -1146,13 +1900,14 @@ void Spec3DRampTimelineComponent::showChangePresetPicker (int clipIndex, juce::C
             const auto& presets = safe->bank.getPresets().getPresets();
             if (! juce::isPositiveAndBelow (index, presets.size())) return;
             if (clipIndex >= (int) safe->sequence.clips.size()) return;
+            safe->beginEditSnapshot();
             auto& c = safe->sequence.clips[(size_t) clipIndex];
             c.displayName = presets.getReference (index).name;
             c.ramp = presets.getReference (index).ramp;
             c.ramp.mapMode = GradientRamp::MapMode::intensityLowToHigh;
             c.ramp.enabled = true;
             ++c.ramp.revision;
-            safe->notifyChanged();
+            safe->commitEdit ("Change ramp");
             safe->repaint();
         });
 }
@@ -1267,9 +2022,16 @@ void Spec3DRampTimelineComponent::showExportRegionDialog()
 void Spec3DRampTimelineComponent::showClipContextMenu (int clipIndex, juce::Point<int> screenPos)
 {
     selectedClip = clipIndex;
+    updateEditToolEnabled();
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
-    menu.addItem (1, "Delete");
+    menu.addItem (1, "Delete", true);
+    menu.addItem (5, "Duplicate", sequence.canAddClip());
+    menu.addItem (6, "Razor at playhead",
+                  canSplitAtTime (playheadSec) && findClipIndexAtTime (playheadSec) == clipIndex);
+    menu.addSeparator();
+    menu.addItem (7, "Selection tool (V)");
+    menu.addItem (8, "Razor tool (C)");
     menu.addSeparator();
     menu.addItem (2, "Change ramp...");
     menu.addItem (3, "Edit ramp...");
@@ -1282,24 +2044,37 @@ void Spec3DRampTimelineComponent::showClipContextMenu (int clipIndex, juce::Poin
                         [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this),
                          clipIndex] (int r)
                         {
-                            if (safe == nullptr) return;
+                            if (safe == nullptr || r <= 0) return;
                             if (r == 4)
                             {
                                 safe->showExportRegionDialog();
                                 return;
                             }
-                            // Fall through to original handlers below via re-entry pattern:
-                            // Re-dispatch legacy items.
-                            if (safe == nullptr || r <= 0) return;
-                            if (r == 1 && clipIndex < (int) safe->sequence.clips.size())
+                            if (r == 5)
                             {
-                                safe->closeClipRampEditor (false);
-                                safe->sequence.clips.erase (safe->sequence.clips.begin() + clipIndex);
-                                safe->selectedClip = -1;
-                                safe->notifyChanged();
-                                safe->repaint();
+                                safe->selectedClip = clipIndex;
+                                safe->duplicateSelectedClip();
+                                return;
                             }
-                            else if (r == 2)
+                            if (r == 6)
+                            {
+                                safe->beginEditSnapshot();
+                                if (safe->splitClipAtTime (safe->playheadSec))
+                                    safe->commitEdit ("Razor cut");
+                                else
+                                    safe->editSnapshotValid = false;
+                                safe->repaint();
+                                return;
+                            }
+                            if (r == 7) { safe->setEditTool (EditTool::select); return; }
+                            if (r == 8) { safe->setEditTool (EditTool::razor); return; }
+                            if (r == 1)
+                            {
+                                safe->selectedClip = clipIndex;
+                                safe->deleteSelectedClip();
+                                return;
+                            }
+                            if (r == 2)
                                 safe->showChangePresetPicker (clipIndex, safe.getComponent());
                             else if (r == 3)
                                 safe->openClipRampEditor (clipIndex);
@@ -1365,7 +2140,7 @@ void Spec3DRampTimelineComponent::showAddLaneMenu()
         const auto t = types[i];
         menu.addItem (i + 1, Spec3DSeqLane::defaultLabel (t), ! sequence.hasLaneType (t), false);
     }
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addLaneButton),
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (addLaneButton.get()),
                         [safe = juce::Component::SafePointer<Spec3DRampTimelineComponent> (this)] (int r)
                         {
                             if (safe == nullptr || r <= 0) return;
@@ -1374,11 +2149,14 @@ void Spec3DRampTimelineComponent::showAddLaneMenu()
                                 Spec3DSeqLaneType::lightElevation, Spec3DSeqLaneType::lightColour,
                                 Spec3DSeqLaneType::rimAmount, Spec3DSeqLaneType::rimColour
                             };
+                            safe->beginEditSnapshot();
                             if (safe->sequence.addLane (types[r - 1]))
                             {
-                                safe->notifyChanged();
+                                safe->commitEdit ("Add lane");
                                 safe->repaint();
                             }
+                            else
+                                safe->editSnapshotValid = false;
                         });
 }
 
@@ -1409,10 +2187,11 @@ void Spec3DRampTimelineComponent::showLaneLabelMenu (int autoIdx, juce::Point<in
                             {
                                 if (autoIdx >= 0)
                                 {
+                                    safe->beginEditSnapshot();
                                     safe->sequence.removeLaneAt (autoIdx);
                                     safe->selectedAutoLane = -1;
                                     safe->selectedKey = -1;
-                                    safe->notifyChanged();
+                                    safe->commitEdit ("Remove lane");
                                     safe->repaint();
                                 }
                                 return;

@@ -64,6 +64,22 @@
             file="Source/Spectrogram3DComponent.cpp"/>
       <FILE id="sP3dHd" name="Spectrogram3DComponent.h" compile="0" resource="0"
             file="Source/Spectrogram3DComponent.h"/>
+      <FILE id="png01" name="ParticleNodeTypes.h" compile="0" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeTypes.h"/>
+      <FILE id="png02" name="ParticleNodeTypes.cpp" compile="1" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeTypes.cpp"/>
+      <FILE id="png03" name="ParticleNodeGraphModel.h" compile="0" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeGraphModel.h"/>
+      <FILE id="png04" name="ParticleNodeGraphModel.cpp" compile="1" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeGraphModel.cpp"/>
+      <FILE id="png05" name="ParticleNodeGraphCompiler.h" compile="0" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeGraphCompiler.h"/>
+      <FILE id="png06" name="ParticleNodeGraphCompiler.cpp" compile="1" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeGraphCompiler.cpp"/>
+      <FILE id="png07" name="ParticleNodeGraphCanvas.h" compile="0" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeGraphCanvas.h"/>
+      <FILE id="png08" name="ParticleNodeGraphCanvas.cpp" compile="1" resource="0"
+            file="Source/ParticleNodeGraph/ParticleNodeGraphCanvas.cpp"/>
       <GROUP name="Assets" id="AsSt3D">
         <FILE id="vSunCp" name="VeniceSunsetHdri.cpp" compile="1" resource="0"
               file="Source/Assets/VeniceSunsetHdri.cpp"/>

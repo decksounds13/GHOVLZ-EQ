@@ -174,8 +174,9 @@ public:
     bool orderedRampGradation = true;
 
     /**
-        Accessibility: after randomize, adjust text value (V only) vs its background
-        so labels stay readable. On by default; can disable in Appearance.
+        Accessibility: keep text readable on Scope cards, meters, graph handles, menus.
+        On by default globally (ui_prefs + Appearance); can disable in Appearance.
+        After randomize / theme load, adjusts text value (V only) vs its background.
     */
     bool enforceLegibleText = true;
     /** 0 = mild separation, 1 = strong. Only used when enforceLegibleText. */

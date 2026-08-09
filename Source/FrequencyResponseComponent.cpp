@@ -2311,7 +2311,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand1On())
     {
         // Unified scale factor
-        float scaleFactor = ((isMouseHoveringOverHandle1 || isOptionBoxSelectingBand (0)) ? 1.25f : 1.0f)
+        float scaleFactor = ((isMouseHoveringOverHandle1 || isOptionBoxSelectingBand (0) || isMultiBandSelected (0)) ? 1.25f : 1.0f)
                             * processor.getModHandlePulseScale (0);
 
         // Get the values from the tree state
@@ -2355,7 +2355,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand2On())
     {
         // Unified scale factor for Band 2
-        float scaleFactor2 = ((isMouseHoveringOverHandle2 || isOptionBoxSelectingBand (1)) ? 1.25f : 1.0f)
+        float scaleFactor2 = ((isMouseHoveringOverHandle2 || isOptionBoxSelectingBand (1) || isMultiBandSelected (1)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (1);
 
         // Get the values from the tree state
@@ -2399,7 +2399,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand3On())
     {
         // Unified scale factor for Band 3
-        float scaleFactor3 = ((isMouseHoveringOverHandle3 || isOptionBoxSelectingBand (2)) ? 1.25f : 1.0f)
+        float scaleFactor3 = ((isMouseHoveringOverHandle3 || isOptionBoxSelectingBand (2) || isMultiBandSelected (2)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (2);
 
         // Get the values from the tree state
@@ -2442,7 +2442,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand4On())
     {
         // Unified scale factor for Band 4
-        float scaleFactor4 = ((isMouseHoveringOverHandle4 || isOptionBoxSelectingBand (3)) ? 1.25f : 1.0f)
+        float scaleFactor4 = ((isMouseHoveringOverHandle4 || isOptionBoxSelectingBand (3) || isMultiBandSelected (3)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (3);
 
         // Get the values from the tree state
@@ -2486,7 +2486,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsHighpassOn())
     {
         // Unified scale factor for Highpass
-        float scaleFactor5 = ((isMouseHoveringOverHandle5 || isOptionBoxSelectingBand (4)) ? 1.25f : 1.0f)
+        float scaleFactor5 = ((isMouseHoveringOverHandle5 || isOptionBoxSelectingBand (4) || isMultiBandSelected (4)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (4);
 
         float highpassCutoff = processor.treeState.getRawParameterValue("highpassCutoff")->load();
@@ -2522,7 +2522,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsLowpassOn())
     {
         // Unified scale factor for Lowpass
-        float scaleFactor6 = ((isMouseHoveringOverHandle6 || isOptionBoxSelectingBand (5)) ? 1.25f : 1.0f)
+        float scaleFactor6 = ((isMouseHoveringOverHandle6 || isOptionBoxSelectingBand (5) || isMultiBandSelected (5)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (5);
 
         float lowpassCutoff = processor.treeState.getRawParameterValue("lowpassCutoff")->load();
@@ -2557,7 +2557,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsHighShelfOn())
     {
         // Unified scale factor
-        float scaleFactor7 = ((isMouseHoveringOverHandle7 || isOptionBoxSelectingBand (6)) ? 1.25f : 1.0f)
+        float scaleFactor7 = ((isMouseHoveringOverHandle7 || isOptionBoxSelectingBand (6) || isMultiBandSelected (6)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (6);
 
         // Get the values from the tree state
@@ -2601,7 +2601,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsLowShelfOn())
     {
         // Unified scale factor for LowShelf
-        float scaleFactor8 = ((isMouseHoveringOverHandle8 || isOptionBoxSelectingBand (7)) ? 1.25f : 1.0f)
+        float scaleFactor8 = ((isMouseHoveringOverHandle8 || isOptionBoxSelectingBand (7) || isMultiBandSelected (7)) ? 1.25f : 1.0f)
                              * processor.getModHandlePulseScale (7);
 
         // Get the values from the tree state
@@ -2732,7 +2732,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                                      : 0.0f;
 
             const float scale = (hs.hovering || hs.dragging || activeExtendedGlobal == global
-                                 || isOptionBoxSelectingBand (global)) ? 1.25f : 1.0f;
+                                 || isOptionBoxSelectingBand (global)
+                                 || isMultiBandSelected (global)) ? 1.25f : 1.0f;
             float hx = (getWidth() - 1) * (std::log10 (juce::jmax (20.0f, fHz)) - logMin) / (logMax - logMin);
             float hy = dbToY (gainDb, (float) getPlotHeight());
             const float handleSize = 12.0f * scale;
@@ -2842,7 +2843,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
 
 // Crosshairs
-    if (isShowCrosshair() && mouseInside && !isAnyHandleMouseOver && !optionBoxMenu->isVisible()) {
+    if (isShowCrosshair() && mouseInside && !isAnyHandleMouseOver && !optionBoxMenu->isVisible()
+        && ! marqueeSelecting) {
         g.setColour (theme.graphHandleText);  // Medium/Dark grey
         g.drawLine(cursorX, 0, cursorX, (float) getPlotHeight(), 1.0f);
         g.drawLine(0, cursorY, getWidth(), cursorY, 1.0f);
@@ -2995,7 +2997,15 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     paintPianoStrip (g);
+
+    // Multi-select chrome last inside clip so it sits above curves/handles.
+    paintMultiSelectRings (g);
+    paintMarqueeSelection (g);
     } // clipScope — restore full-component clip for chrome shadows
+
+    // Also draw marquee outside the inset clip so edge selection never gets cropped.
+    paintMarqueeSelection (g);
+    paintMultiSelectRings (g);
 
     paintGraphChromeShadows (g);
 }
@@ -3793,6 +3803,306 @@ float FrequencyResponseComponent::xToFrequency (float x) const
     return juce::jlimit (20.0f, 20000.0f, static_cast<float> (std::pow (10.0, logF)));
 }
 
+float FrequencyResponseComponent::frequencyToX (float freqHz, float width) const noexcept
+{
+    const float w = juce::jmax (2.0f, width);
+    const float f = juce::jlimit (20.0f, 20000.0f, freqHz);
+    const double t = (std::log10 ((double) f) - (double) logMin)
+                     / juce::jmax (1.0e-9, (double) logMax - (double) logMin);
+    return (float) (t * (double) (w - 1.0f));
+}
+
+void FrequencyResponseComponent::clearMultiBandSelection() noexcept
+{
+    if (multiSelectedBands.none() && ! marqueeSelecting && ! groupDragging)
+        return;
+    multiSelectedBands.reset();
+    marqueeSelecting = false;
+    groupDragging = false;
+    groupDragAnchors.clear();
+    repaint();
+}
+
+bool FrequencyResponseComponent::isMultiBandSelected (int bandKey) const noexcept
+{
+    return bandKey >= 0 && bandKey < EqBand::kMaxBands && multiSelectedBands.test ((size_t) bandKey);
+}
+
+juce::Point<float> FrequencyResponseComponent::getHandlePosForBandKey (int bandKey) const noexcept
+{
+    if (bandKey >= 0 && bandKey < EqBand::kBankSize)
+    {
+        switch (bandKey)
+        {
+            case 0: return { handleX, handleY };
+            case 1: return { handleX2, handleY2 };
+            case 2: return { handleX3, handleY3 };
+            case 3: return { handleX4, handleY4 };
+            case 4: return { handleX5, handleY5 };
+            case 5: return { handleX6, handleY6 };
+            case 6: return { handleX7, handleY7 };
+            case 7: return { handleX8, handleY8 };
+            default: break;
+        }
+    }
+    if (bandKey >= EqBand::kBankSize && bandKey < EqBand::kMaxBands)
+    {
+        const auto& hs = extendedHandles[(size_t) (bandKey - EqBand::kBankSize)];
+        return { hs.x, hs.y };
+    }
+    return { -1000.0f, -1000.0f };
+}
+
+juce::String FrequencyResponseComponent::frequencyParamIdForBandKey (int bandKey) const
+{
+    if (bandKey >= 0 && bandKey < EqBand::kBankSize)
+        return EqBand::frequencyParamID (bandKey);
+    if (bandKey >= EqBand::kBankSize && bandKey < EqBand::kMaxBands)
+        return EqBand::frequencyParamIDForGlobal (bandKey);
+    return {};
+}
+
+juce::String FrequencyResponseComponent::gainParamIdForBandKey (int bandKey) const
+{
+    if (bandKey >= 0 && bandKey < EqBand::kBankSize)
+        return EqBand::gainParamID (bandKey);
+    if (bandKey >= EqBand::kBankSize && bandKey < EqBand::kMaxBands)
+        return EqBand::gainParamIDForGlobal (bandKey);
+    return {};
+}
+
+int FrequencyResponseComponent::typeIndexForBandKey (int bandKey) const
+{
+    const auto typeId = (bandKey >= 0 && bandKey < EqBand::kBankSize)
+                            ? FilterType::paramIDForBandIndex (bandKey)
+                            : FilterType::paramIDForGlobal (bandKey);
+    if (typeId.isEmpty())
+        return FilterType::bell;
+    return BandChannel::readChoiceIndex (processor.treeState, typeId, FilterType::bell);
+}
+
+void FrequencyResponseComponent::markBandKeyDirty (int bandKey)
+{
+    if (bandKey >= EqBand::kBankSize)
+    {
+        needsUpdateExtended = true;
+        needsUpdateCombined = true;
+        return;
+    }
+    switch (bandKey)
+    {
+        case 0: needsUpdateBand1 = true; break;
+        case 1: needsUpdateBand2 = true; break;
+        case 2: needsUpdateBand3 = true; break;
+        case 3: needsUpdateBand4 = true; break;
+        case 4: needsUpdateHighpass = true; break;
+        case 5: needsUpdateLowpass = true; break;
+        case 6: needsUpdateHighShelf = true; break;
+        case 7: needsUpdateLowShelf = true; break;
+        default: break;
+    }
+    needsUpdateCombined = true;
+}
+
+void FrequencyResponseComponent::setMultiSelectionFromRect (juce::Rectangle<float> rect)
+{
+    multiSelectedBands.reset();
+    if (rect.getWidth() < 1.0f || rect.getHeight() < 1.0f)
+        return;
+
+    auto consider = [&] (int bandKey, float hx, float hy)
+    {
+        if (hx < -100.0f || hy < -100.0f)
+            return;
+        if (rect.contains (hx, hy))
+            multiSelectedBands.set ((size_t) bandKey);
+    };
+
+    consider (0, handleX, handleY);
+    consider (1, handleX2, handleY2);
+    consider (2, handleX3, handleY3);
+    consider (3, handleX4, handleY4);
+    consider (4, handleX5, handleY5);
+    consider (5, handleX6, handleY6);
+    consider (6, handleX7, handleY7);
+    consider (7, handleX8, handleY8);
+
+    for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
+    {
+        const auto& hs = extendedHandles[(size_t) (global - EqBand::kBankSize)];
+        consider (global, hs.x, hs.y);
+    }
+}
+
+void FrequencyResponseComponent::beginGroupDrag (int primaryBandKey, const juce::MouseEvent& event)
+{
+    groupDragAnchors.clear();
+    groupDragging = true;
+    anyHandleDragging = true;
+    groupDragOrigin = event.position;
+    setBufferedToImage (false);
+
+    for (int k = 0; k < EqBand::kMaxBands; ++k)
+    {
+        if (! multiSelectedBands.test ((size_t) k))
+            continue;
+
+        GroupDragAnchor a;
+        a.bandKey = k;
+        a.usesGain = FilterType::usesGain (typeIndexForBandKey (k));
+        const auto pos = getHandlePosForBandKey (k);
+        a.startX = pos.x;
+        a.startY = pos.y;
+
+        if (auto* rawF = processor.treeState.getRawParameterValue (frequencyParamIdForBandKey (k)))
+            a.freqHz = juce::jlimit (20.0f, 20000.0f, rawF->load());
+        if (a.usesGain)
+        {
+            if (auto* rawG = processor.treeState.getRawParameterValue (gainParamIdForBandKey (k)))
+                a.gainDb = juce::jlimit (-24.0f, 24.0f, rawG->load());
+        }
+
+        if (auto* p = processor.treeState.getParameter (frequencyParamIdForBandKey (k)))
+            p->beginChangeGesture();
+        if (a.usesGain)
+            if (auto* p = processor.treeState.getParameter (gainParamIdForBandKey (k)))
+                p->beginChangeGesture();
+
+        groupDragAnchors.push_back (a);
+    }
+
+    // Focus primary band for OptionBox / faceplate highlight.
+    if (primaryBandKey >= 0 && primaryBandKey < EqBand::kBankSize)
+    {
+        activeBand = primaryBandKey;
+        activeExtendedGlobal = -1;
+        const auto pos = getHandlePosForBandKey (primaryBandKey);
+        showOptionBoxForHandle (primaryBandKey, pos.x, pos.y);
+        setOptionBoxInteractionFaded (true);
+        if (onBandManipulationHighlight)
+            onBandManipulationHighlight (primaryBandKey);
+    }
+    else if (primaryBandKey >= EqBand::kBankSize)
+    {
+        activeExtendedGlobal = primaryBandKey;
+        activeBand = -1;
+        const auto pos = getHandlePosForBandKey (primaryBandKey);
+        showOptionBoxForHandle (primaryBandKey, pos.x, pos.y);
+        setOptionBoxInteractionFaded (true);
+        if (onBandManipulationHighlight)
+            onBandManipulationHighlight (primaryBandKey);
+        if (onFaceplateBankJump)
+            onFaceplateBankJump (EqBand::bankFromGlobal (primaryBandKey));
+    }
+}
+
+void FrequencyResponseComponent::updateGroupDrag (const juce::MouseEvent& event)
+{
+    if (! groupDragging || groupDragAnchors.empty())
+        return;
+
+    const float w = (float) juce::jmax (2, getWidth());
+    const float h = (float) juce::jmax (1, getPlotHeight());
+    const float dX = event.position.x - groupDragOrigin.x;
+    const float dY = event.position.y - groupDragOrigin.y;
+    const float dDb = yToDb (groupDragOrigin.y + dY, h) - yToDb (groupDragOrigin.y, h);
+
+    for (const auto& a : groupDragAnchors)
+    {
+        const float newX = juce::jlimit (0.0f, w - 1.0f, a.startX + dX);
+        const float newFreq = xToFrequency (newX);
+
+        if (auto* paramF = dynamic_cast<juce::RangedAudioParameter*> (
+                processor.treeState.getParameter (frequencyParamIdForBandKey (a.bandKey))))
+            paramF->setValueNotifyingHost (paramF->convertTo0to1 (newFreq));
+
+        if (a.usesGain)
+        {
+            const float newGain = juce::jlimit (-24.0f, 24.0f, a.gainDb + dDb);
+            if (auto* paramG = dynamic_cast<juce::RangedAudioParameter*> (
+                    processor.treeState.getParameter (gainParamIdForBandKey (a.bandKey))))
+                paramG->setValueNotifyingHost (paramG->convertTo0to1 (newGain));
+        }
+
+        markBandKeyDirty (a.bandKey);
+    }
+
+    repaint();
+}
+
+void FrequencyResponseComponent::endGroupDrag()
+{
+    if (! groupDragging)
+        return;
+
+    for (const auto& a : groupDragAnchors)
+    {
+        if (auto* p = processor.treeState.getParameter (frequencyParamIdForBandKey (a.bandKey)))
+            p->endChangeGesture();
+        if (a.usesGain)
+            if (auto* p = processor.treeState.getParameter (gainParamIdForBandKey (a.bandKey)))
+                p->endChangeGesture();
+        markBandKeyDirty (a.bandKey);
+    }
+
+    groupDragging = false;
+    groupDragAnchors.clear();
+    anyHandleDragging = false;
+    setOptionBoxInteractionFaded (false);
+    if (onBandManipulationHighlight)
+        onBandManipulationHighlight (-1);
+    needsUpdateCombined = true;
+    repaint();
+}
+
+void FrequencyResponseComponent::paintMarqueeSelection (juce::Graphics& g) const
+{
+    if (! marqueeSelecting)
+        return;
+    auto rect = juce::Rectangle<float>::leftTopRightBottom (
+        juce::jmin (marqueeStart.x, marqueeEnd.x),
+        juce::jmin (marqueeStart.y, marqueeEnd.y),
+        juce::jmax (marqueeStart.x, marqueeEnd.x),
+        juce::jmax (marqueeStart.y, marqueeEnd.y));
+    if (rect.getWidth() < 1.0f && rect.getHeight() < 1.0f)
+        return;
+
+    // High-contrast so it reads over spectrum + buffered paint.
+    const auto accent = colors().pluginButtonAccent;
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.fillRect (rect);
+    g.setColour (accent.withAlpha (0.22f));
+    g.fillRect (rect);
+    g.setColour (juce::Colours::white.withAlpha (0.95f));
+    g.drawRect (rect, 1.5f);
+    g.setColour (accent.withAlpha (1.0f));
+    const float dash[] = { 4.0f, 3.0f };
+    g.drawDashedLine ({ rect.getX(), rect.getY(), rect.getRight(), rect.getY() }, dash, 2, 1.5f);
+    g.drawDashedLine ({ rect.getRight(), rect.getY(), rect.getRight(), rect.getBottom() }, dash, 2, 1.5f);
+    g.drawDashedLine ({ rect.getRight(), rect.getBottom(), rect.getX(), rect.getBottom() }, dash, 2, 1.5f);
+    g.drawDashedLine ({ rect.getX(), rect.getBottom(), rect.getX(), rect.getY() }, dash, 2, 1.5f);
+}
+
+void FrequencyResponseComponent::paintMultiSelectRings (juce::Graphics& g) const
+{
+    if (multiSelectedBands.none())
+        return;
+
+    const auto accent = colors().pluginButtonAccent;
+    for (int k = 0; k < EqBand::kMaxBands; ++k)
+    {
+        if (! multiSelectedBands.test ((size_t) k))
+            continue;
+        const auto p = getHandlePosForBandKey (k);
+        if (p.x < -100.0f)
+            continue;
+        g.setColour (juce::Colours::white.withAlpha (0.9f));
+        g.drawEllipse (p.x - 12.0f, p.y - 12.0f, 24.0f, 24.0f, 2.0f);
+        g.setColour (accent.withAlpha (1.0f));
+        g.drawEllipse (p.x - 15.0f, p.y - 15.0f, 30.0f, 30.0f, 1.5f);
+    }
+}
+
 void FrequencyResponseComponent::updateAuditionBandpassFromMouse (const juce::MouseEvent& event)
 {
     const float freq = xToFrequency (event.position.x);
@@ -4287,6 +4597,60 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
     if (clickInsideOptionBox)
         return;
 
+    // Resolve primary band key for multi-select (Bank1 internal 0–7, extended global 8+).
+    // Spectral amount handles are excluded from multi-select.
+    int hitBandKey = -1;
+    if (! preferSpectralAmount)
+    {
+        if (clickedExtendedGlobal >= 0)
+            hitBandKey = clickedExtendedGlobal;
+        else if (clickedHandle1) hitBandKey = 0;
+        else if (clickedHandle2) hitBandKey = 1;
+        else if (clickedHandle3) hitBandKey = 2;
+        else if (clickedHandle4) hitBandKey = 3;
+        else if (clickedHandle5) hitBandKey = 4;
+        else if (clickedHandle6) hitBandKey = 5;
+        else if (clickedHandle7) hitBandKey = 6;
+        else if (clickedHandle8) hitBandKey = 7;
+    }
+
+    // Shift+click handle: toggle multi-selection without starting a drag.
+    if (hitBandKey >= 0 && event.mods.isShiftDown() && ! event.mods.isPopupMenu() && ! anyHandleDragging)
+    {
+        multiSelectedBands.flip ((size_t) hitBandKey);
+        repaint();
+        return;
+    }
+
+    // Drag a multi-selection as a group (2+ bands).
+    if (hitBandKey >= 0 && ! anyHandleDragging && ! event.mods.isPopupMenu()
+        && multiSelectedBands.count() >= 2 && multiSelectedBands.test ((size_t) hitBandKey))
+    {
+        beginGroupDrag (hitBandKey, event);
+        return;
+    }
+
+    // Clicking an unselected handle replaces multi-selection with that single band.
+    if (hitBandKey >= 0 && ! multiSelectedBands.test ((size_t) hitBandKey))
+        multiSelectedBands.reset();
+
+    // Empty graph: start marquee selection rectangle (plot area only, not bottom chrome).
+    if (! clickedAnyHandle && ! event.mods.isPopupMenu() && ! anyHandleDragging
+        && ! event.mods.isAltDown()
+        && event.getNumberOfClicks() < 2
+        && event.position.y >= 0.0f
+        && event.position.y < (float) getPlotHeight())
+    {
+        multiSelectedBands.reset();
+        marqueeSelecting = true;
+        marqueeStart = marqueeEnd = event.position;
+        // Buffered paint can keep a stale blit while dragging a selection rect.
+        setBufferedToImage (false);
+        setOpaque (false);
+        repaint (getLocalBounds());
+        return;
+    }
+
     if (preferSpectralAmount && ! anyHandleDragging)
     {
         static const char* kFreqIds[8] = {
@@ -4613,6 +4977,22 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
     if (auditionBandpassDragging)
     {
         updateAuditionBandpassFromMouse (event);
+        return;
+    }
+
+    if (marqueeSelecting)
+    {
+        marqueeEnd = event.position;
+        // Don't rely on dirty-region blit; force full component repaint.
+        repaint (getLocalBounds());
+        return;
+    }
+
+    if (groupDragging)
+    {
+        cursorX = static_cast<float> (event.x);
+        cursorY = static_cast<float> (event.y);
+        updateGroupDrag (event);
         return;
     }
 
@@ -5289,6 +5669,35 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
         return;
 
     juce::ignoreUnused(event);
+
+    if (marqueeSelecting)
+    {
+        marqueeEnd = event.position;
+        marqueeSelecting = false;
+        auto rect = juce::Rectangle<float>::leftTopRightBottom (
+            juce::jmin (marqueeStart.x, marqueeEnd.x),
+            juce::jmin (marqueeStart.y, marqueeEnd.y),
+            juce::jmax (marqueeStart.x, marqueeEnd.x),
+            juce::jmax (marqueeStart.y, marqueeEnd.y));
+        // Tiny drag counts as click → clear selection (already cleared on mouseDown).
+        if (rect.getWidth() >= 4.0f || rect.getHeight() >= 4.0f)
+            setMultiSelectionFromRect (rect);
+        else
+            multiSelectedBands.reset();
+        // Restore analyser-friendly buffering unless D/S animation needs it off.
+        if (! anyActiveDynamicEq())
+            setBufferedToImage (true);
+        repaint (getLocalBounds());
+        return;
+    }
+
+    if (groupDragging)
+    {
+        endGroupDrag();
+        if (! anyActiveDynamicEq())
+            setBufferedToImage (true);
+        return;
+    }
 
     if (auditionBandpassDragging || processor.isAuditionBandpassActive())
     {

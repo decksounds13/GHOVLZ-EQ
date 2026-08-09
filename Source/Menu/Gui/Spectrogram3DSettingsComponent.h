@@ -114,6 +114,7 @@ private:
         juce::Label softAngleLabel;
         juce::Slider softAngleSlider;
         juce::TextButton resetCameraButton { "Reset 3D Camera" };
+
         juce::TextButton saveDefaultButton { "Save Default" };
         juce::TextButton savePresetButton { "Save Preset..." };
 
@@ -287,11 +288,30 @@ private:
         juce::Label particleMaxAliveLabel;
         juce::Slider particleMaxAliveSlider;
         juce::ToggleButton particleDebugOverlayToggle { "Show particle count (debug)" };
+        juce::TextButton particleNodeGraphButton { "Open Particle Node Graph…" };
         juce::TextButton particleClearButton { "Clear particles" };
         juce::Label particleBindingLabel;
         juce::ComboBox particleBindingCombo;
+        juce::Label particleEmitterTypeLabel;
+        juce::ComboBox particleEmitterTypeCombo;
         juce::Label particleEmitModeLabel;
         juce::ComboBox particleEmitModeCombo;
+        juce::Label particleEmitterPosXLabel;
+        juce::Slider particleEmitterPosXSlider;
+        juce::Label particleEmitterPosYLabel;
+        juce::Slider particleEmitterPosYSlider;
+        juce::Label particleEmitterPosZLabel;
+        juce::Slider particleEmitterPosZSlider;
+        juce::Label particleSprayYawLabel;
+        juce::Slider particleSprayYawSlider;
+        juce::Label particleSprayPitchLabel;
+        juce::Slider particleSprayPitchSlider;
+        juce::Label particleSpraySpreadLabel;
+        juce::Slider particleSpraySpreadSlider;
+        juce::Label particleSpraySpeedMinLabel;
+        juce::Slider particleSpraySpeedMinSlider;
+        juce::Label particleSpraySpeedMaxLabel;
+        juce::Slider particleSpraySpeedMaxSlider;
         juce::Label particleEmissionLabel;
         juce::Slider particleEmissionSlider;
         juce::Label particleSpawnJitterLabel;

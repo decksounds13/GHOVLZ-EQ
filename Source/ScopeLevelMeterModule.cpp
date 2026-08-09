@@ -179,15 +179,18 @@ int ScopeLevelMeterModule::computeReadoutWidth (int availableW) const
 
 void ScopeLevelMeterModule::paint (juce::Graphics& g)
 {
+    // Opaque fill (maximize / F11 / Scope — no bleed from underneath).
     auto bounds = getLocalBounds().toFloat();
-    const auto bg = theme != nullptr ? theme->sharedColors.oscBackground
-                                     : juce::Colour::fromRGB (18, 16, 14);
-    g.setColour (bg);
-    g.fillRoundedRectangle (bounds, 3.0f);
+    juce::ignoreUnused (bounds);
+    const auto bg = theme != nullptr ? theme->sharedColors.oscBackground.darker (0.08f)
+                                     : juce::Colour::fromRGB (14, 12, 10);
+    g.fillAll (bg);
 
-    const auto readoutColours = theme != nullptr ? theme->sharedColors.meterReadoutText
-                                                 : juce::Colours::whitesmoke.withAlpha (0.92f);
-    const auto textCol = readoutColours;
+    const auto readoutSeed = theme != nullptr ? theme->sharedColors.meterReadoutText
+                                              : juce::Colours::whitesmoke.withAlpha (0.92f);
+    const auto textCol = theme != nullptr
+                             ? theme->sharedColors.legibleTextOn (readoutSeed, bg)
+                             : readoutSeed;
     juce::ignoreUnused (title);
 
     const float peakL = meterL.getDisplayedPeakDb();
@@ -201,11 +204,9 @@ void ScopeLevelMeterModule::paint (juce::Graphics& g)
     const juce::String chL = processor.isMeterMsMode() ? "M" : "L";
     const juce::String chR = processor.isMeterMsMode() ? "S" : "R";
 
-    // Strip: hug the left edge; tiled keeps a small inset.
-    const int edgePad = tiledPresentation ? 3 : 1;
+    // Header is painted by ScopePaneChrome; content already inset — light pad only.
+    const int edgePad = tiledPresentation ? 2 : 1;
     auto area = getLocalBounds().reduced (edgePad);
-    const int titleBand = tiledPresentation ? kTitleH : 12;
-    area.removeFromTop (titleBand);
 
     auto chLabelRow = area.removeFromBottom (kChannelLabelH);
 

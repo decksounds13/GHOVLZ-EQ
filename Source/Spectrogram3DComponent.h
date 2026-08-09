@@ -527,13 +527,42 @@ public:
     void recolourVertexColoursOnly() noexcept;
 
     // ── Particle mode (modular; default off — zero cost until enabled) ─────────
-    /** Slice = per-bin rates (grid-ish). Continuous = random playhead samples (default). */
+    /** Slice = per-bin rates (grid-ish). Continuous = random samples (default). */
     enum class ParticleEmitMode : int { slice = 0, continuous = 1 };
+    /**
+        Where new particles are born (spectrogram emitter only).
+        playhead (default): live tip column only — trail fills history by scrolling.
+        historyField: emit from the entire waterfall surface (energy-weighted).
+    */
+    enum class ParticleEmitSurface : int { playhead = 0, historyField = 1 };
 
     void setParticleModeEnabled (bool shouldEnable) noexcept;
     bool isParticleModeEnabled() const noexcept { return particleModeEnabled; }
     void setParticleEmitMode (ParticleEmitMode mode) noexcept;
     ParticleEmitMode getParticleEmitMode() const noexcept { return particleEmitMode; }
+    void setParticleEmitSurface (ParticleEmitSurface surface) noexcept;
+    ParticleEmitSurface getParticleEmitSurface() const noexcept { return particleEmitSurface; }
+    /** Emitter geometry source. Default spectrogram — existing behaviour. */
+    void setParticleEmitterType (ParticleEmitterType type) noexcept;
+    ParticleEmitterType getParticleEmitterType() const noexcept { return particleEmitterType; }
+    void setParticleEmitDomain (ParticleEmitDomain domain) noexcept;
+    ParticleEmitDomain getParticleEmitDomain() const noexcept { return particleEmitDomain; }
+    void setParticleEmitterPos (float x, float y, float z) noexcept;
+    float getParticleEmitterPosX() const noexcept { return particleEmitterPosX; }
+    float getParticleEmitterPosY() const noexcept { return particleEmitterPosY; }
+    float getParticleEmitterPosZ() const noexcept { return particleEmitterPosZ; }
+    /** Spray aim: yaw about Y (deg), pitch 90 = +Y up. */
+    void setParticleSprayYawDeg (float deg) noexcept;
+    void setParticleSprayPitchDeg (float deg) noexcept;
+    float getParticleSprayYawDeg() const noexcept { return particleSprayYawDeg; }
+    float getParticleSprayPitchDeg() const noexcept { return particleSprayPitchDeg; }
+    /** Cone half-angle (0 = laser, 180 = full sphere). */
+    void setParticleSpraySpreadDeg (float deg) noexcept;
+    float getParticleSpraySpreadDeg() const noexcept { return particleSpraySpreadDeg; }
+    void setParticleSpraySpeedMin (float unitsPerSec) noexcept;
+    void setParticleSpraySpeedMax (float unitsPerSec) noexcept;
+    float getParticleSpraySpeedMin() const noexcept { return particleSpraySpeedMin; }
+    float getParticleSpraySpeedMax() const noexcept { return particleSpraySpeedMax; }
     void setParticleBindingMode (ParticleBindingMode mode) noexcept;
     ParticleBindingMode getParticleBindingMode() const noexcept { return particleBindingMode; }
     void setParticleEmission (float amount) noexcept;
@@ -1229,9 +1258,20 @@ private:
     // Particle mode (default off — Spec3DParticleSystem allocated lazily on enable)
     bool particleModeEnabled = false;
     ParticleEmitMode particleEmitMode = ParticleEmitMode::continuous;
+    ParticleEmitSurface particleEmitSurface = ParticleEmitSurface::playhead;
+    ParticleEmitterType particleEmitterType = ParticleEmitterType::spectrogram;
+    ParticleEmitDomain particleEmitDomain = ParticleEmitDomain::surface;
+    float particleEmitterPosX = 0.0f;
+    float particleEmitterPosY = 0.25f;
+    float particleEmitterPosZ = 0.0f;
+    float particleSprayYawDeg = 0.0f;
+    float particleSprayPitchDeg = 90.0f; // +Y up
+    float particleSpraySpreadDeg = 15.0f;
+    float particleSpraySpeedMin = 1.0f;
+    float particleSpraySpeedMax = 1.0f;
     ParticleBindingMode particleBindingMode = ParticleBindingMode::spectrogramTrail;
     /** Particles spawned per second (field total). Not a 0–1 scale. */
-    float particleEmission = 1000.0f;
+    float particleEmission = 40000.0f;
     /** World-space spawn scatter. Default > 0 so particles don't stack on exact mesh points. */
     float particleSpawnJitter = kDefaultParticleSpawnJitter;
     float particleEmitCatchupHz = kDefaultParticleEmitCatchupHz;
@@ -1255,8 +1295,8 @@ private:
     float particleSpecular = 0.35f;
     bool particleForcesEnabled = false;
     bool particleWaterfallLock = true;
-    /** CPU default; GPU hybrid integrate when true and compute available. */
-    bool particleGpuSimEnabled = false;
+    /** GPU hybrid integrate default; falls back to CPU if compute unavailable. */
+    bool particleGpuSimEnabled = true;
     int particleMaxAlive = Spec3DParticleSystem::kDefaultMaxAlive;
     bool particleDebugOverlayEnabled = false;
     std::vector<ParticleForceModule> particleForceStack;
@@ -1501,7 +1541,8 @@ private:
     juce::Point<float> gizmoDragStartPos {};
     juce::Vector3D<float> gizmoDragStartSpherePos {};
     /** Elevation above the horizon (0 = edge-on to the floor, 90 = top-down). */
-    static constexpr float kMinPitchDeg = 5.0f;
+    // Full freecam range: negative pitch = look up (was 5° min, which snapped RMB look-up to horizon).
+    static constexpr float kMinPitchDeg = -89.0f;
     static constexpr float kMaxPitchDeg = 89.0f;
 
     juce::ComponentDragger moveDragger;

@@ -152,6 +152,10 @@
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp"/>
     <ClCompile Include="..\..\Source\Spec3DParticleSystem.cpp"/>
+    <ClCompile Include="..\..\Source\ParticleNodeGraph\ParticleNodeTypes.cpp"/>
+    <ClCompile Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphModel.cpp"/>
+    <ClCompile Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphCompiler.cpp"/>
+    <ClCompile Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphCanvas.cpp"/>
     <ClCompile Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.cpp"/>
     <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp"/>
@@ -3492,10 +3496,15 @@
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h"/>
     <ClInclude Include="..\..\Source\Spec3DParticleSystem.h"/>
+    <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleNodeTypes.h"/>
+    <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphModel.h"/>
+    <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphCompiler.h"/>
+    <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphCanvas.h"/>
     <ClInclude Include="..\..\Source\ParticleForceModule.h"/>
     <ClInclude Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.h"/>
     <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h"/>
     <ClInclude Include="..\..\Source\ScopeModules.h"/>
+    <ClInclude Include="..\..\Source\ScopePaneChrome.h"/>
     <ClInclude Include="..\..\Source\ScopeLayoutPresets.h"/>
     <ClInclude Include="..\..\Source\ModuleLookPresets.h"/>
     <ClInclude Include="..\..\Source\ScopeLevelMeterModule.h"/>

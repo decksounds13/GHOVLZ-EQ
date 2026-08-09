@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "ColourRamp/Spec3DRampTimelineWindow.h"
+#include "ParticleNodeGraph/ParticleNodeGraphCanvas.h"
 #include "Export/Spec3DExportSandbox.h"
 #include "Export/Spec3DExportSettings.h"
 #include "Export/Spec3DExportJob.h" // kept; run() is sandboxed when SPEC3D_EXPORT_ENABLED=0
@@ -10,6 +11,7 @@
 #include "ComboBoxLookAndFeel.h"
 #include "EqPresetStore.h"
 #include "ModuleLookPresets.h"
+#include "ScopePaneChrome.h"
 #include "Menu/AnalyserDefaults.h"
 #include "Menu/Gui/ThemeList.h"
 #include "ColourRamp/GradientStripEditor.h"
@@ -91,6 +93,7 @@ struct MainComponent::Spec3DOsFullscreenHost final : public juce::Component
         view.setChromeMode (Spectrogram3DComponent::ChromeMode::docked);
         view.setActive (true);
         view.setVisible (true);
+        view.setOpaque (true);
         view.setInterceptsMouseClicks (true, true);
         view.setBounds (getLocalBounds());
         view.toFront (false);
@@ -206,6 +209,104 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
         g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
         g.setColour (juce::Colours::goldenrod.withAlpha (0.55f));
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f, 1.0f);
+    }
+};
+
+// ── True OS fullscreen host for any Scope module (F11; non-Spec3D) ───────────
+
+struct MainComponent::ScopeOsFullscreenHost final : public juce::Component
+{
+    MainComponent& owner;
+    ScopeModuleId moduleId = ScopeModuleId::spectrum;
+    juce::Component* hosted = nullptr;
+    juce::Component* restoreParent = nullptr;
+    MainComponent::OscToolButton exitButton { MainComponent::OscToolButton::Glyph::Collapse };
+
+    explicit ScopeOsFullscreenHost (MainComponent& o) : owner (o)
+    {
+        setOpaque (true);
+        setWantsKeyboardFocus (true);
+        setMouseClickGrabsKeyboardFocus (true);
+
+        exitButton.setTooltip ("Exit fullscreen (F11 / Esc)");
+        exitButton.onClick = [this] { owner.exitScopeOsFullscreen (true); };
+        addAndMakeVisible (exitButton);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black);
+    }
+
+    void resized() override
+    {
+        if (hosted != nullptr)
+            hosted->setBounds (getLocalBounds());
+        constexpr int kExit = 36;
+        constexpr int kMargin = 14;
+        exitButton.setBounds (getWidth() - kExit - kMargin, kMargin, kExit, kExit);
+        exitButton.toFront (false);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::F11Key || key == juce::KeyPress::escapeKey)
+        {
+            owner.exitScopeOsFullscreen (true);
+            return true;
+        }
+        return false;
+    }
+
+    void attach (ScopeModuleId id, juce::Component& view, juce::Component& parentToRestore)
+    {
+        moduleId = id;
+        hosted = &view;
+        restoreParent = &parentToRestore;
+
+        const auto pluginScreen = owner.localAreaToGlobal (owner.getLocalBounds());
+        const auto* display = juce::Desktop::getInstance().getDisplays()
+                                  .getDisplayForRect (pluginScreen);
+        if (display == nullptr)
+            display = &juce::Desktop::getInstance().getDisplays().getMainDisplay();
+
+        const auto area = display->totalArea;
+
+        addToDesktop (juce::ComponentPeer::windowIsTemporary);
+        setBounds (area);
+        setVisible (true);
+        setAlwaysOnTop (true);
+        toFront (true);
+
+        if (auto* peer = getPeer())
+        {
+            peer->setFullScreen (true);
+            peer->setAlwaysOnTop (true);
+        }
+
+        addAndMakeVisible (view);
+        view.setVisible (true);
+        view.setOpaque (true);
+        view.setInterceptsMouseClicks (true, true);
+        view.setBounds (getLocalBounds());
+        view.toFront (false);
+        exitButton.toFront (false);
+
+        grabKeyboardFocus();
+        view.grabKeyboardFocus();
+    }
+
+    void detach()
+    {
+        if (hosted != nullptr && restoreParent != nullptr)
+            restoreParent->addChildComponent (*hosted);
+        hosted = nullptr;
+        restoreParent = nullptr;
+        setVisible (false);
+        setAlwaysOnTop (false);
+        if (auto* peer = getPeer())
+            peer->setFullScreen (false);
+        removeFromDesktop();
     }
 };
 
@@ -1359,6 +1460,12 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onAugmentContextMenu = [this] (juce::PopupMenu& m)
     {
+        if (scopeModeEnabled)
+        {
+            m.addSeparator();
+            const bool maximized = isScopeModuleFullscreen (ScopeModuleId::spectrogram3D);
+            m.addItem (32, maximized ? "Restore Module" : "Maximize Module", true, maximized);
+        }
         m.addSeparator();
         const bool settingsOpen = menu.isVisible();
         m.addItem (29, "Settings…", true, settingsOpen);
@@ -1404,6 +1511,12 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
         if (result == 31)
         {
             setDisableCumulativeCurve (! isDisableCumulativeCurve());
+            return true;
+        }
+        if (result == 32)
+        {
+            if (scopeModeEnabled)
+                toggleScopePaneFullscreen (ScopeModuleId::spectrogram3D);
             return true;
         }
         return handleModuleLookMenuResult (ModuleLookPresets::Kind::spectrogram3D, result, 1000);
@@ -1576,7 +1689,9 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
 MainComponent::~MainComponent()
 {
-    // Reparent 3D view out of the OS fullscreen host before teardown.
+    // Reparent views out of OS fullscreen hosts before teardown.
+    if (isScopeOsFullscreen())
+        exitScopeOsFullscreen (false);
     if (spec3DFullscreen)
         exitSpec3DOsFullscreen();
 
@@ -1981,8 +2096,10 @@ bool MainComponent::isPointOverSettingsDismissExempt (int catcherX, int catcherY
     if (over (spectrogram3D))
         return true;
 
-    // Framed expanded Osc / Gon / Spec windows.
+    // Framed expanded Osc / Gon / Spec windows (+ expanded sequencer host).
     if (over (oscFrame) || over (gonFrame) || over (specFrame))
+        return true;
+    if (rampTimelineWindow != nullptr && rampTimelineWindow->isVisible() && over (*rampTimelineWindow))
         return true;
 
     // Full-graph or Scope-mode analyser surfaces (not always-on-top).
@@ -2022,6 +2139,8 @@ void MainComponent::deactivateAnalyserFrames()
     oscFrame.setFrameActive (false);
     gonFrame.setFrameActive (false);
     specFrame.setFrameActive (false);
+    if (rampTimelineWindow != nullptr)
+        rampTimelineWindow->setVisible (false);
 }
 
 juce::Rectangle<int> MainComponent::getFramedScopeAvailableArea() const
@@ -2442,6 +2561,11 @@ void MainComponent::layoutExpandedSpectrogramWithTools (int btnSize, int btnGap)
 bool MainComponent::collapseAnyExpandedScope()
 {
     bool collapsed = false;
+    if (isScopeOsFullscreen())
+    {
+        exitScopeOsFullscreen (true);
+        collapsed = true;
+    }
     if (spec3DFullscreen)
     {
         setSpec3DFullscreen (false, true);
@@ -2455,6 +2579,11 @@ bool MainComponent::collapseAnyExpandedScope()
     if (specExpanded) { setSpecExpanded (false); collapsed = true; }
     if (oscExpanded)  { setOscExpanded (false);  collapsed = true; }
     if (gonExpanded)  { setGonExpanded (false);  collapsed = true; }
+    if (rampTimelineWindow != nullptr && rampTimelineWindow->isVisible())
+    {
+        rampTimelineWindow->setVisible (false);
+        collapsed = true;
+    }
     return collapsed;
 }
 
@@ -2462,16 +2591,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::F11Key)
     {
-        // F11 toggles Spec3D fullscreen when 3D is available / already fullscreen.
-        const bool canFs = spec3DFullscreen
-            || spectrogram3D.isActive()
-            || (scopeModeEnabled && isScopeModuleEnabled (ScopeModuleId::spectrogram3D))
-            || (! scopeModeEnabled && spec3DEnabled);
-        if (canFs)
-        {
-            toggleSpec3DFullscreen (true);
-            return true;
-        }
+        toggleOsFullscreenFromHotkey (true);
+        return true;
     }
     if (key == juce::KeyPress::escapeKey && collapseAnyExpandedScope())
         return true;
@@ -2531,10 +2652,16 @@ void MainComponent::syncSpec3DPresentation()
         bypassButton.toFront (false);
         undoButton.toFront (false);
         redoButton.toFront (false);
+        raiseRampTimelineWindowIfOpen();
+        if (menu.isVisible())
+            menu.toFront (false);
     }
     else if (show2DFinal)
     {
         raiseSpecToolButtons();
+        raiseRampTimelineWindowIfOpen();
+        if (menu.isVisible())
+            menu.toFront (false);
     }
 }
 
@@ -2664,6 +2791,10 @@ void MainComponent::setSpec3DFullscreen (bool shouldEnable, bool notifyPrefs)
     else
         exitSpec3DOsFullscreen();
 
+    // Solo other Scope modules off while Spec3D owns the display (and restore after).
+    if (scopeModeEnabled)
+        syncScopeModuleEnabledStates();
+
     resized();
     syncExpandedOscOverlayStack();
     if (notifyPrefs)
@@ -2744,6 +2875,193 @@ void MainComponent::exitSpec3DOsFullscreen()
     spectrogram3D.setThemeColors (&sharedResources);
     addChildComponent (spectrogram3D);
     syncSpec3DPresentation();
+}
+
+juce::Component* MainComponent::getScopeModuleComponent (ScopeModuleId id) noexcept
+{
+    switch (id)
+    {
+        case ScopeModuleId::levelIn:       return &levelMeterIn;
+        case ScopeModuleId::levelOut:      return &levelMeterOut;
+        case ScopeModuleId::loudness:      return &loudnessMeter;
+        case ScopeModuleId::stereogram:    return &stereogram;
+        case ScopeModuleId::histogram:     return &histogram;
+        case ScopeModuleId::goniometer:    return &goniometer;
+        case ScopeModuleId::spectrum:      return &m_visualizer;
+        case ScopeModuleId::oscilloscope:  return &oscilloscope;
+        case ScopeModuleId::spectrogram:   return &spectrogram;
+        case ScopeModuleId::spectrogram3D: return &spectrogram3D;
+        default:                           return nullptr;
+    }
+}
+
+void MainComponent::enterScopeOsFullscreen (ScopeModuleId id, bool notifyPrefs)
+{
+    // Spec3D keeps the dedicated GL host (Settings lookdev + freecam reassert).
+    if (id == ScopeModuleId::spectrogram3D)
+    {
+        if (isScopeOsFullscreen())
+            exitScopeOsFullscreen (false);
+        setSpec3DFullscreen (true, notifyPrefs);
+        return;
+    }
+
+    if (spec3DFullscreen)
+        setSpec3DFullscreen (false, false);
+
+    if (isScopeOsFullscreen() && scopeOsFullscreenModule.has_value()
+        && *scopeOsFullscreenModule == id)
+        return;
+
+    if (isScopeOsFullscreen())
+        exitScopeOsFullscreen (false);
+
+    auto* view = getScopeModuleComponent (id);
+    if (view == nullptr)
+        return;
+
+    // Ensure the module is enabled and known before reparenting.
+    if (scopeModeEnabled && ! isScopeModuleEnabled (id))
+        setScopeModuleEnabled (id, true, false);
+
+    scopeOsFullscreenHadInPluginMaximize = scopeModeEnabled
+                                           && scopeFullscreenModule.has_value()
+                                           && *scopeFullscreenModule == id;
+    if (scopeModeEnabled)
+        setScopeFullscreenModule (std::nullopt); // avoid dual layout while reparented
+
+    if (menu.isVisible())
+        closeSettingsMenu();
+
+    if (scopeOsFullscreenHost == nullptr)
+        scopeOsFullscreenHost = std::make_unique<ScopeOsFullscreenHost> (*this);
+
+    scopeOsFullscreenModule = id;
+    view->setOpaque (true);
+    scopeOsFullscreenHost->attach (id, *view, *this);
+
+    // Solo processing for the OS-fullscreen module (Spec feed kept for 3D).
+    if (scopeModeEnabled)
+        syncScopeModuleEnabledStates();
+    else if (id == ScopeModuleId::spectrogram || id == ScopeModuleId::spectrogram3D)
+        spectrogram.setEnabled (true);
+
+    grabKeyboardFocus();
+    if (notifyPrefs)
+        editor.requestSaveUiPrefs();
+}
+
+void MainComponent::exitScopeOsFullscreen (bool notifyPrefs)
+{
+    if (! isScopeOsFullscreen())
+        return;
+
+    const auto id = *scopeOsFullscreenModule;
+    const bool restoreMaximize = scopeOsFullscreenHadInPluginMaximize;
+    scopeOsFullscreenHadInPluginMaximize = false;
+    scopeOsFullscreenModule.reset();
+
+    if (scopeOsFullscreenHost != nullptr)
+    {
+        scopeOsFullscreenHost->detach();
+        scopeOsFullscreenHost.reset();
+    }
+
+    // Re-attach under MainComponent and restore Scope layout.
+    if (auto* view = getScopeModuleComponent (id))
+        addChildComponent (*view);
+
+    if (restoreMaximize && scopeModeEnabled)
+        setScopeFullscreenModule (id);
+    else
+    {
+        if (scopeModeEnabled)
+            syncScopeModuleEnabledStates();
+        resized();
+    }
+
+    syncSpec3DPresentation();
+    grabKeyboardFocus();
+    if (notifyPrefs)
+        editor.requestSaveUiPrefs();
+}
+
+void MainComponent::toggleScopeOsFullscreen (ScopeModuleId id, bool notifyPrefs)
+{
+    if (id == ScopeModuleId::spectrogram3D)
+    {
+        if (isScopeOsFullscreen())
+            exitScopeOsFullscreen (false);
+        toggleSpec3DFullscreen (notifyPrefs);
+        return;
+    }
+
+    if (isScopeModuleOsFullscreen (id))
+        exitScopeOsFullscreen (notifyPrefs);
+    else
+        enterScopeOsFullscreen (id, notifyPrefs);
+}
+
+void MainComponent::toggleOsFullscreenFromHotkey (bool notifyPrefs)
+{
+    // Already in some OS fullscreen → exit that one.
+    if (isScopeOsFullscreen())
+    {
+        exitScopeOsFullscreen (notifyPrefs);
+        return;
+    }
+    if (spec3DFullscreen)
+    {
+        setSpec3DFullscreen (false, notifyPrefs);
+        return;
+    }
+
+    // Scope: prefer the in-plugin maximized pane, else Spec3D if present, else first enabled.
+    if (scopeModeEnabled)
+    {
+        if (scopeFullscreenModule.has_value())
+        {
+            toggleScopeOsFullscreen (*scopeFullscreenModule, notifyPrefs);
+            return;
+        }
+        if (isScopeModuleEnabled (ScopeModuleId::spectrogram3D))
+        {
+            toggleSpec3DFullscreen (notifyPrefs);
+            return;
+        }
+        if (! scopeEnabledOrder.empty())
+        {
+            toggleScopeOsFullscreen (scopeEnabledOrder.front(), notifyPrefs);
+            return;
+        }
+    }
+
+    // Non-Scope: Spec3D expanded/active path (legacy F11).
+    const bool canSpec3D = spectrogram3D.isActive()
+                           || spec3DEnabled
+                           || (specExpanded && specButton.getToggleState());
+    if (canSpec3D)
+    {
+        toggleSpec3DFullscreen (notifyPrefs);
+        return;
+    }
+
+    // Expanded non-Scope modules → true OS fullscreen of that module.
+    if (specExpanded)
+    {
+        enterScopeOsFullscreen (ScopeModuleId::spectrogram, notifyPrefs);
+        return;
+    }
+    if (oscExpanded)
+    {
+        enterScopeOsFullscreen (ScopeModuleId::oscilloscope, notifyPrefs);
+        return;
+    }
+    if (gonExpanded)
+    {
+        enterScopeOsFullscreen (ScopeModuleId::goniometer, notifyPrefs);
+        return;
+    }
 }
 
 void MainComponent::applySpec3DFullscreenLayout()
@@ -2848,6 +3166,8 @@ bool MainComponent::isSpec3DTransparentBackground() const noexcept
     return spectrogram3D.isTransparentBackground();
 }
 
+
+
 void MainComponent::setSpec3DReverseFrequencyAxis (bool shouldReverse, bool notifyPrefs)
 {
     spectrogram3D.setReverseFrequencyAxis (shouldReverse);
@@ -2901,9 +3221,51 @@ void MainComponent::setSpec3DRampSequence (const Spec3DRampSequence& seq, bool n
     spectrogram3D.setColourRampBank (&colourRamps);
     spectrogram3D.setRampSequence (seq);
     if (rampTimelineWindow != nullptr)
-        rampTimelineWindow->getTimeline().setPlayheadSec (spectrogram3D.getRampTimelinePlayheadSec());
+        rampTimelineWindow->setPlayheadSec (spectrogram3D.getRampTimelinePlayheadSec());
     if (notifyPrefs)
         editor.requestSaveUiPrefs();
+}
+
+void MainComponent::reclampRampTimelineWindow() noexcept
+{
+    if (rampTimelineWindow == nullptr || ! rampTimelineWindow->isVisible())
+        return;
+
+    auto area = getFramedScopeAvailableArea();
+    if (area.getWidth() < 80 || area.getHeight() < 80)
+        area = getLocalBounds();
+
+    const int toolW = getFramedToolColumnWidth();
+    // Same usable rect as maximized floating scopes (leave tool column on the right).
+    if (area.getWidth() > toolW + 180)
+        area.setRight (area.getRight() - toolW);
+
+    rampTimelineWindow->setMovementArea (area);
+    rampTimelineWindow->clampToMovementArea();
+}
+
+void MainComponent::raiseRampTimelineWindowIfOpen() noexcept
+{
+    if (rampTimelineWindow == nullptr || ! rampTimelineWindow->isVisible())
+        return;
+    reclampRampTimelineWindow();
+    rampTimelineWindow->setAlwaysOnTop (true);
+    rampTimelineWindow->toFront (true);
+}
+
+void MainComponent::showParticleNodeGraphWindow()
+{
+    if (particleNodeGraphWindow == nullptr)
+    {
+        particleNodeGraphWindow = std::make_unique<ParticleNodeGraph::ParticleNodeGraphWindow> (
+            spectrogram3D, &sharedResources);
+        particleNodeGraphWindow->onClosed = [this]
+        {
+            // Keep instance; just hide. Destroyed with MainComponent.
+        };
+    }
+    particleNodeGraphWindow->setVisible (true);
+    particleNodeGraphWindow->toFront (true);
 }
 
 void MainComponent::showRampTimelineWindow()
@@ -2913,6 +3275,7 @@ void MainComponent::showRampTimelineWindow()
         rampTimelineWindow = std::make_unique<Spec3DRampTimelineWindow> (
             sharedResources, colourRamps, spectrogram3D.getRampSequence());
         rampTimelineWindow->setThemeColors (&sharedResources);
+        rampTimelineWindow->getTimeline().setUndoManager (&processor.getUndoManager());
         rampTimelineWindow->getTimeline().playheadProvider =
             [this] { return spectrogram3D.getRampTimelinePlayheadSec(); };
         rampTimelineWindow->getTimeline().onExportRegionOffline =
@@ -2924,14 +3287,40 @@ void MainComponent::showRampTimelineWindow()
                 spectrogram3D.clearMorphRamp();
             editor.requestSaveUiPrefs();
         };
-        rampTimelineWindow->onClose = [this] {};
+        rampTimelineWindow->onClose = [this]
+        {
+            if (rampTimelineWindow != nullptr)
+                rampTimelineWindow->setAlwaysOnTop (false);
+        };
+        // Reclamp after drag/resize, but do not clamp mid-drag (that freezes motion).
+        rampTimelineWindow->onUserMovedOrResized = [this]
+        {
+            if (rampTimelineWindow != nullptr)
+                rampTimelineWindow->clampToMovementArea();
+        };
         addAndMakeVisible (*rampTimelineWindow);
-        rampTimelineWindow->setBounds ((getWidth() - 560) / 2, (getHeight() - 200) / 2, 560, 190);
     }
 
+    auto area = getFramedScopeAvailableArea();
+    if (area.getWidth() < 80 || area.getHeight() < 80)
+        area = getLocalBounds();
+    const int toolW = getFramedToolColumnWidth();
+    if (area.getWidth() > toolW + 180)
+        area.setRight (area.getRight() - toolW);
+
+    const int maxW = juce::jmax (180, area.getWidth());
+    const int maxH = juce::jmax (120, area.getHeight());
+    int w = juce::jlimit (420, maxW, juce::jmin (720, maxW));
+    int h = juce::jlimit (160, maxH, juce::jmin (220, maxH));
+    const int x = area.getX() + juce::jmax (0, (area.getWidth() - w) / 2);
+    const int y = area.getY() + juce::jmax (0, (area.getHeight() - h) / 3);
+
+    rampTimelineWindow->setMovementArea (area);
+    rampTimelineWindow->setBounds (x, y, w, h);
+    rampTimelineWindow->clampToMovementArea();
     rampTimelineWindow->setVisible (true);
-    rampTimelineWindow->toFront (true);
     rampTimelineWindow->setPlayheadSec (spectrogram3D.getRampTimelinePlayheadSec());
+    raiseRampTimelineWindowIfOpen();
 }
 
 void MainComponent::startSpec3DRegionExport (const Spec3DExportSettings& settings)
@@ -3835,6 +4224,95 @@ int MainComponent::getSpec3DParticleEmitMode() const noexcept
 {
     return (int) spectrogram3D.getParticleEmitMode();
 }
+
+void MainComponent::setSpec3DParticleEmitterType (int type, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmitterType (
+        (ParticleEmitterType) juce::jlimit (0, (int) ParticleEmitterType::cone, type));
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+
+int MainComponent::getSpec3DParticleEmitterType() const noexcept
+{
+    return (int) spectrogram3D.getParticleEmitterType();
+}
+
+void MainComponent::setSpec3DParticleEmitterPos (float x, float y, float z, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmitterPos (x, y, z);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+
+float MainComponent::getSpec3DParticleEmitterPosX() const noexcept
+{
+    return spectrogram3D.getParticleEmitterPosX();
+}
+
+float MainComponent::getSpec3DParticleEmitterPosY() const noexcept
+{
+    return spectrogram3D.getParticleEmitterPosY();
+}
+
+float MainComponent::getSpec3DParticleEmitterPosZ() const noexcept
+{
+    return spectrogram3D.getParticleEmitterPosZ();
+}
+
+void MainComponent::setSpec3DParticleSprayYawDeg (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSprayYawDeg (deg);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+
+void MainComponent::setSpec3DParticleSprayPitchDeg (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSprayPitchDeg (deg);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+
+float MainComponent::getSpec3DParticleSprayYawDeg() const noexcept
+{
+    return spectrogram3D.getParticleSprayYawDeg();
+}
+
+float MainComponent::getSpec3DParticleSprayPitchDeg() const noexcept
+{
+    return spectrogram3D.getParticleSprayPitchDeg();
+}
+
+void MainComponent::setSpec3DParticleSpraySpreadDeg (float deg, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSpraySpreadDeg (deg);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+
+float MainComponent::getSpec3DParticleSpraySpreadDeg() const noexcept
+{
+    return spectrogram3D.getParticleSpraySpreadDeg();
+}
+
+void MainComponent::setSpec3DParticleSpraySpeedMin (float v, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSpraySpeedMin (v);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+
+void MainComponent::setSpec3DParticleSpraySpeedMax (float v, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSpraySpeedMax (v);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+
+float MainComponent::getSpec3DParticleSpraySpeedMin() const noexcept
+{
+    return spectrogram3D.getParticleSpraySpeedMin();
+}
+
+float MainComponent::getSpec3DParticleSpraySpeedMax() const noexcept
+{
+    return spectrogram3D.getParticleSpraySpeedMax();
+}
+
 void MainComponent::setSpec3DParticleBindingMode (int mode, bool notifyPrefs)
 {
     spectrogram3D.setParticleBindingMode (
@@ -4202,31 +4680,27 @@ float MainComponent::getSpec3DSssMaxThickness() const noexcept { return spectrog
 void MainComponent::placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rectangle<int> overlayTools,
                                             int toolH, int toolSize, int toolGap)
 {
-    juce::Rectangle<int> toolRow = overlayTools;
-    auto placeArea = view;
-    if (toolH > 0)
-    {
-        placeArea = view.withTrimmedBottom (toolH + 2);
-        toolRow = juce::Rectangle<int> (view.getX() + 2,
-                                        placeArea.getBottom() + 1,
-                                        view.getWidth() - 4,
-                                        toolH);
-    }
-
-    // Docked Scope uses Soft FBO compositing (nested GL HWND is unreliable under Direct2D).
+    // Match OSC / Spec 2D: fill the whole Scope card content; tools overlay the bottom
+    // (do not trim the GL view — that left empty dead space under Spec3D).
     spectrogram3D.setChromeMode (Spectrogram3DComponent::ChromeMode::docked);
-    spectrogram3D.setResizeLimits (placeArea.getWidth(), placeArea.getHeight());
-    spectrogram3D.setBounds (placeArea);
+    spectrogram3D.setResizeLimits (view.getWidth(), view.getHeight());
+    spectrogram3D.setBounds (view);
     spectrogram3D.setVisible (true);
 
     // Keep a hidden 2D feeder under the docked frame for mesh history.
     const int pad = spectrogram3D.getShadowPad();
     if (! spectrogram.isVisible())
-        spectrogram.setBounds (placeArea.reduced (pad));
+        spectrogram.setBounds (view.reduced (pad));
 
     if (toolH > 0)
     {
-        auto row = toolRow;
+        // Prefer the shared overlay row from placeScopePane; fall back if empty.
+        auto row = overlayTools.isEmpty()
+                       ? juce::Rectangle<int> (view.getX() + 2,
+                                               view.getBottom() - toolH - 1,
+                                               view.getWidth() - 4,
+                                               toolH)
+                       : overlayTools;
         auto placeOverlayTool = [&] (OscToolButton& b)
         {
             b.setVisible (true);
@@ -4237,7 +4711,7 @@ void MainComponent::placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rec
         placeOverlayTool (specSpeedUpButton);
         placeOverlayTool (specSpeedDownButton);
         placeOverlayTool (specExpandButton);
-        // 2D/3D cube toggle is for expanded Spec only â€” Scope has separate modules.
+        // 2D/3D cube toggle is for expanded Spec only — Scope has separate modules.
     }
 }
 
@@ -4301,22 +4775,55 @@ void MainComponent::syncExpandedOscOverlayStack()
 {
     // Expanded scope/gon/spec: above graph, below OptionBox + Settings menu.
     // Compact strip: stay in the always-on-top chrome layer.
-    // Scope quad: never always-on-top â€” post meters must stay above the BR spectrogram.
+    // Scope quad: never always-on-top — post meters must stay above the BR spectrogram.
     const bool oscExp = oscExpanded && oscButton.getToggleState();
     const bool gonExp = gonExpanded && gonButton.getToggleState();
     const bool specExp = specExpanded && specButton.getToggleState();
     const bool expanded = oscExp || gonExp || specExp;
     const bool compactChrome = ! scopeModeEnabled;
+    const bool scopeMaximized = scopeModeEnabled && scopeFullscreenModule.has_value();
     const bool oscFramed = oscExp && ! oscFullGraph;
     const bool gonFramed = gonExp && ! gonFullGraph;
     const bool specFramed = specExp && ! specFullGraph && ! (spec3DEnabled && specButton.getToggleState());
-    oscilloscope.setAlwaysOnTop (compactChrome && ! oscExp);
-    goniometer.setAlwaysOnTop (compactChrome && ! gonExp);
-    spectrogram.setAlwaysOnTop (compactChrome && ! specExp);
-    oscFrame.setAlwaysOnTop (oscFramed);
-    gonFrame.setAlwaysOnTop (gonFramed);
-    specFrame.setAlwaysOnTop (specFramed);
-    oscDimmer.setAlwaysOnTop (! expanded);
+
+    // Scope maximize: both dimmer + solo module are always-on-top peers so the module
+    // can stack *above* the solid black dimmer (non-AoT peers always lose to AoT dimmer).
+    if (scopeMaximized)
+    {
+        const auto solo = *scopeFullscreenModule;
+        oscDimmer.setAlwaysOnTop (true);
+        oscilloscope.setAlwaysOnTop (solo == ScopeModuleId::oscilloscope);
+        goniometer.setAlwaysOnTop (solo == ScopeModuleId::goniometer);
+        spectrogram.setAlwaysOnTop (solo == ScopeModuleId::spectrogram);
+        spectrogram3D.setAlwaysOnTop (solo == ScopeModuleId::spectrogram3D);
+        m_visualizer.setAlwaysOnTop (solo == ScopeModuleId::spectrum);
+        levelMeterIn.setAlwaysOnTop (solo == ScopeModuleId::levelIn);
+        levelMeterOut.setAlwaysOnTop (solo == ScopeModuleId::levelOut);
+        loudnessMeter.setAlwaysOnTop (solo == ScopeModuleId::loudness);
+        stereogram.setAlwaysOnTop (solo == ScopeModuleId::stereogram);
+        histogram.setAlwaysOnTop (solo == ScopeModuleId::histogram);
+        oscFrame.setAlwaysOnTop (false);
+        gonFrame.setAlwaysOnTop (false);
+        specFrame.setAlwaysOnTop (false);
+    }
+    else
+    {
+        oscilloscope.setAlwaysOnTop (compactChrome && ! oscExp);
+        goniometer.setAlwaysOnTop (compactChrome && ! gonExp);
+        spectrogram.setAlwaysOnTop (compactChrome && ! specExp);
+        spectrogram3D.setAlwaysOnTop (false);
+        m_visualizer.setAlwaysOnTop (false);
+        levelMeterIn.setAlwaysOnTop (false);
+        levelMeterOut.setAlwaysOnTop (false);
+        loudnessMeter.setAlwaysOnTop (false);
+        stereogram.setAlwaysOnTop (false);
+        histogram.setAlwaysOnTop (false);
+        oscFrame.setAlwaysOnTop (oscFramed);
+        gonFrame.setAlwaysOnTop (gonFramed);
+        specFrame.setAlwaysOnTop (specFramed);
+        // Non-Scope expanded: dimmer under the scope. Scope multi-pane: dimmer off / not AoT.
+        oscDimmer.setAlwaysOnTop (! expanded && ! scopeModeEnabled);
+    }
 
     auto* box = frequencyResponseComponent.getOptionBoxMenu();
     const bool optionOpen = box != nullptr && box->isVisible();
@@ -4325,6 +4832,10 @@ void MainComponent::syncExpandedOscOverlayStack()
     hostOptionBoxAboveExpandedOsc (optionOpen);
 
     raiseMenuSystemAboveWordmark();
+
+    // Expanded ramp sequencer above graph chrome (Bypass, Eco, OSC…), but Settings
+    // menu (opened after) still stacks above the sequencer when both are open.
+    raiseRampTimelineWindowIfOpen();
 
     if (menu.isVisible())
     {
@@ -4563,6 +5074,8 @@ void MainComponent::applyScopeMode (bool shouldEnable)
     }
     else
     {
+        if (isScopeOsFullscreen())
+            exitScopeOsFullscreen (false);
         scopeFullscreenModule.reset();
         oscilloscope.setExpanded (oscExpanded);
         goniometer.setExpanded (gonExpanded);
@@ -4839,6 +5352,7 @@ juce::ValueTree MainComponent::captureModuleLook (ModuleLookPresets::Kind kind)
     setF ("freqMeshBiasPivot", getSpec3DFreqMeshBiasPivot());
     setI ("msaaLevel", msaaToInt (getSpec3DMsaaLevel()));
     setB ("transparentBg", isSpec3DTransparentBackground());
+
     setB ("reverseFreq", isSpec3DReverseFrequencyAxis());
     setF ("meshHeight", getSpec3DMeshHeight());
     setB ("closedMesh", isSpec3DClosedMeshEnabled());
@@ -4961,6 +5475,7 @@ void MainComponent::applyModuleLook (ModuleLookPresets::Kind kind, const juce::V
             setSpec3DFreqMeshBiasPivot (getF ("freqMeshBiasPivot", 0.5f), kSave);
             setSpec3DMsaaLevel (msaaFromInt (getI ("msaaLevel", 4)), kSave);
             setSpec3DTransparentBackground (getB ("transparentBg", true), kSave);
+
             setSpec3DReverseFrequencyAxis (getB ("reverseFreq", true), kSave);
             setSpec3DMeshHeight (getF ("meshHeight", Spectrogram3DComponent::kDefaultMeshHeight), kSave);
             setSpec3DClosedMeshEnabled (getB ("closedMesh", false), kSave);
@@ -5266,6 +5781,8 @@ void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Componen
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
 
     const int removeId = 900;
+    const int maximizeId = 901;
+    const int osFullscreenId = 902;
     const int resetIntegId = 10;
     const int tapInId = 20;
     const int tapOutId = 21;
@@ -5318,12 +5835,21 @@ void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Componen
     {
         if (hasExtras)
             menu.addSeparator();
+        const bool maximized = isScopeModuleFullscreen (id);
+        menu.addItem (maximizeId, maximized ? "Restore Module" : "Maximize Module", true, maximized);
+        const bool osFs = isScopeModuleOsFullscreen (id)
+                          || (id == ScopeModuleId::spectrogram3D && isSpec3DFullscreen());
+        menu.addItem (osFullscreenId,
+                      osFs ? "Exit Fullscreen (F11)" : "Fullscreen (F11)",
+                      true, osFs);
+        menu.addSeparator();
         menu.addItem (removeId, "Remove Module", scopeEnabledOrder.size() > 1);
     }
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
                         [safe = juce::Component::SafePointer<MainComponent> (this), id, lookKind,
-                         removeId, resetIntegId, tapInId, tapOutId, oscRedrawId, lookBaseId] (int result)
+                         removeId, maximizeId, osFullscreenId, resetIntegId, tapInId, tapOutId,
+                         oscRedrawId, lookBaseId] (int result)
                         {
                             if (safe == nullptr || result <= 0)
                                 return;
@@ -5331,6 +5857,19 @@ void MainComponent::showScopeModuleContextMenu (ScopeModuleId id, juce::Componen
                             if (lookKind.has_value()
                                 && safe->handleModuleLookMenuResult (*lookKind, result, lookBaseId))
                                 return;
+
+                            if (result == maximizeId)
+                            {
+                                if (safe->scopeModeEnabled)
+                                    safe->toggleScopePaneFullscreen (id);
+                                return;
+                            }
+
+                            if (result == osFullscreenId)
+                            {
+                                safe->toggleScopeOsFullscreen (id, true);
+                                return;
+                            }
 
                             if (result == removeId)
                             {
@@ -5394,26 +5933,92 @@ void MainComponent::setScopeModuleEnabled (ScopeModuleId id, bool enabled, bool 
     {
         if (it == order.end())
             return;
+        if (isScopeModuleOsFullscreen (id))
+            exitScopeOsFullscreen (false);
+        else if (id == ScopeModuleId::spectrogram3D && isSpec3DFullscreen())
+            setSpec3DFullscreen (false, false);
+        if (scopeFullscreenModule.has_value() && *scopeFullscreenModule == id)
+            setScopeFullscreenModule (std::nullopt);
         order.erase (it);
     }
 
     setScopeEnabledOrder (order, notifyPrefs);
 }
 
+std::optional<ScopeModuleId> MainComponent::getScopeSoloModule() const noexcept
+{
+    // OS fullscreen wins over in-plugin maximize.
+    if (isScopeOsFullscreen() && scopeOsFullscreenModule.has_value())
+        return scopeOsFullscreenModule;
+    if (isSpec3DFullscreen())
+        return ScopeModuleId::spectrogram3D;
+    if (scopeModeEnabled && scopeFullscreenModule.has_value())
+        return scopeFullscreenModule;
+    return std::nullopt;
+}
+
 void MainComponent::syncScopeModuleEnabledStates()
 {
     if (! scopeModeEnabled)
+    {
+        processor.setScopeSoloModule (-1);
         return;
+    }
 
-    const auto enabled = [this] (ScopeModuleId id) { return isScopeModuleEnabled (id); };
+    const auto solo = getScopeSoloModule();
+    processor.setScopeSoloModule (solo.has_value() ? (int) *solo : -1);
 
-    oscilloscope.setEnabled (enabled (ScopeModuleId::oscilloscope));
-    applyGoniometerActive (enabled (ScopeModuleId::goniometer));
-    applySpectrogramActive (enabled (ScopeModuleId::spectrogram)
-                            || enabled (ScopeModuleId::spectrogram3D));
-    loudnessMeter.setEnabled (enabled (ScopeModuleId::loudness));
-    stereogram.setEnabled (enabled (ScopeModuleId::stereogram));
-    histogram.setEnabled (enabled (ScopeModuleId::histogram));
+    // Solo: only the visible module processes. Spectrogram3D still needs the 2D feed.
+    const auto live = [this, &solo] (ScopeModuleId id) -> bool
+    {
+        if (! isScopeModuleEnabled (id))
+            return false;
+        if (! solo.has_value())
+            return true;
+        if (id == *solo)
+            return true;
+        if (*solo == ScopeModuleId::spectrogram3D && id == ScopeModuleId::spectrogram)
+            return true;
+        return false;
+    };
+
+    auto setOsc = [this] (bool on)
+    {
+        if (oscilloscope.isScopeEnabled() != on)
+            oscilloscope.setEnabled (on);
+    };
+    auto setGon = [this] (bool on)
+    {
+        gonButton.setToggleState (on, juce::dontSendNotification);
+        if (goniometer.isGoniometerEnabled() != on)
+            goniometer.setEnabled (on);
+    };
+    auto setSpec = [this] (bool on)
+    {
+        specButton.setToggleState (on, juce::dontSendNotification);
+        if (spectrogram.isSpectrogramEnabled() != on)
+            spectrogram.setEnabled (on);
+    };
+
+    setOsc (live (ScopeModuleId::oscilloscope));
+    setGon (live (ScopeModuleId::goniometer));
+    // Spec3D mesh needs the 2D spectrogram feeder while 3D is the solo / live module.
+    setSpec (live (ScopeModuleId::spectrogram) || live (ScopeModuleId::spectrogram3D));
+
+    if (loudnessMeter.isScopeEnabled() != live (ScopeModuleId::loudness))
+        loudnessMeter.setEnabled (live (ScopeModuleId::loudness));
+    if (stereogram.isScopeEnabled() != live (ScopeModuleId::stereogram))
+        stereogram.setEnabled (live (ScopeModuleId::stereogram));
+    if (histogram.isScopeEnabled() != live (ScopeModuleId::histogram))
+        histogram.setEnabled (live (ScopeModuleId::histogram));
+
+    // 3D mesh only while Spec3D is live (solo or multi-pane).
+    const bool want3D = live (ScopeModuleId::spectrogram3D);
+    if (want3D)
+        spectrogram3D.setActive (true);
+    else if (spectrogram3D.isActive() && ! isSpec3DFullscreen()
+             && ! isScopeModuleOsFullscreen (ScopeModuleId::spectrogram3D))
+        spectrogram3D.setActive (false);
 }
 
 void MainComponent::applyScopePaneReorder (int fromSlot, int toSlot, bool insertBefore)
@@ -6397,75 +7002,89 @@ void MainComponent::ScopeArrangeOverlay::mouseUp (const juce::MouseEvent& e)
 
 void MainComponent::ScopeArrangeOverlay::paint (juce::Graphics& g)
 {
-    const auto outline = main.sharedResources.sharedColors.scopeDropOutline;
+    const auto& colours = main.sharedResources.sharedColors;
+    const auto outline = colours.scopeDropOutline;
+    const bool strip = main.scopeStripLayout;
+    const float rad = ScopePaneChrome::radiusFor (strip);
 
-    // Module titles: fixed padding from the window/pane top (not a % of pane height).
-    constexpr int kTitlePadTop = 6;
-    constexpr int kTitleH = 14;
+    // Stroke + header above modules (card FILL is painted in MainComponent::paint
+    // so module content stays visible).
     for (int i = 0; i < (int) slotBounds.size() && i < (int) main.scopeEnabledOrder.size(); ++i)
     {
-        const auto r = slotBounds[(size_t) i];
+        const auto r = slotBounds[(size_t) i].toFloat();
         if (r.isEmpty())
             continue;
 
-        // Strip: pin to window top. Tiled: fixed pad inside each pane.
-        const int titleY = main.scopeStripLayout ? kTitlePadTop : (r.getY() + kTitlePadTop);
-        auto titleArea = juce::Rectangle<int> (r.getX() + 4, titleY, r.getWidth() - 8, kTitleH);
-        g.setColour (juce::Colours::whitesmoke.withAlpha (0.8f));
-        g.setFont (juce::Font (juce::FontOptions (11.0f)));
-        g.drawText (ScopeModules::idToLabel (main.scopeEnabledOrder[(size_t) i]).toUpperCase(),
-                    titleArea, juce::Justification::centred, false);
+        const bool hover = (hoverPaneOutline == i && dragFromSlot < 0)
+                           || dragFromSlot == i;
+        ScopePaneChrome::paintCardStroke (g, r, colours, hover, strip);
+
+        auto header = r;
+        header = ScopePaneChrome::headerBand (header);
+        ScopePaneChrome::paintHeader (g, header, main.scopeEnabledOrder[(size_t) i], colours, hover);
     }
 
-    // Hover / active edges â€” same outline colour in tiled and strip.
-    if (main.scopeStripLayout && ! stripBounds.isEmpty() && (hoverResize || resizingStrip))
+    // Permanent inter-pane hairlines (strip columns)
+    if (strip && slotBounds.size() >= 2)
+    {
+        for (int i = 0; i < (int) slotBounds.size() - 1; ++i)
+        {
+            const auto& a = slotBounds[(size_t) i];
+            const auto& b = slotBounds[(size_t) i + 1];
+            if (a.isEmpty() || b.isEmpty())
+                continue;
+            const float x = 0.5f * (float) (a.getRight() + b.getX());
+            const float y0 = (float) juce::jmin (a.getY(), b.getY()) + 2.0f;
+            const float y1 = (float) juce::jmax (a.getBottom(), b.getBottom()) - 2.0f;
+            g.setColour (outline.withAlpha (0.14f));
+            g.drawLine (x, y0, x, y1, 1.0f);
+        }
+    }
+
+    // Hover / active resize edges
+    if (strip && ! stripBounds.isEmpty() && (hoverResize || resizingStrip))
     {
         const float y = (float) stripBounds.getBottom();
-        g.setColour (outline.withAlpha (resizingStrip ? 0.90f : 0.65f));
-        g.drawLine ((float) stripBounds.getX(), y, (float) stripBounds.getRight(), y, 1.5f);
+        g.setColour (outline.withAlpha (resizingStrip ? 0.95f : 0.70f));
+        g.drawLine ((float) stripBounds.getX(), y, (float) stripBounds.getRight(), y, 2.0f);
+        // Grip ticks
+        const float mid = 0.5f * (float) (stripBounds.getX() + stripBounds.getRight());
+        g.setColour (outline.withAlpha (0.85f));
+        for (int t = -2; t <= 2; ++t)
+            g.fillRoundedRectangle (mid + (float) t * 7.0f - 2.0f, y - 2.0f, 4.0f, 4.0f, 1.0f);
     }
 
     const int activeCol = resizingColumn >= 0 ? resizingColumn : hoverColumnDivider;
-    if (main.scopeStripLayout && activeCol >= 0 && activeCol + 1 < (int) slotBounds.size())
+    if (strip && activeCol >= 0 && activeCol + 1 < (int) slotBounds.size())
     {
         const auto& a = slotBounds[(size_t) activeCol];
-        const float x = (float) a.getRight();
-        g.setColour (outline.withAlpha (resizingColumn >= 0 ? 0.95f : 0.70f));
-        g.drawLine (x, (float) a.getY(), x, (float) a.getBottom(), 2.0f);
-    }
-
-    if (hoverPaneOutline >= 0 && hoverPaneOutline < (int) slotBounds.size()
-        && dragFromSlot < 0)
-    {
-        auto r = slotBounds[(size_t) hoverPaneOutline].toFloat().reduced (0.5f);
-        g.setColour (outline.withAlpha (0.75f));
-        g.drawRoundedRectangle (r, 3.0f, 1.75f);
+        const auto& b = slotBounds[(size_t) activeCol + 1];
+        const float x = 0.5f * (float) (a.getRight() + b.getX());
+        g.setColour (outline.withAlpha (resizingColumn >= 0 ? 0.98f : 0.78f));
+        g.drawLine (x, (float) a.getY() + 2.0f, x, (float) a.getBottom() - 2.0f, 2.25f);
     }
 
     if (dragFromSlot < 0)
         return;
 
-    // Detached ghost keeps the grab point (corner/handle), not recentered on the mouse.
+    // Detached ghost
     if (dragFromSlot >= 0 && dragFromSlot < (int) slotBounds.size())
     {
         auto ghost = slotBounds[(size_t) dragFromSlot].toFloat();
         ghost.setPosition ((float) dragPos.x - dragGrabOffset.x,
                            (float) dragPos.y - dragGrabOffset.y);
-        g.setColour (outline.withAlpha (0.20f));
-        g.fillRoundedRectangle (ghost, 4.0f);
-        g.setColour (outline.withAlpha (0.85f));
-        g.drawRoundedRectangle (ghost, 4.0f, 2.0f);
+        g.setColour (outline.withAlpha (0.18f));
+        g.fillRoundedRectangle (ghost, rad);
+        g.setColour (outline.withAlpha (0.90f));
+        g.drawRoundedRectangle (ghost, rad, 2.0f);
     }
 
     if (dropSlot < 0)
         return;
 
-    if (main.scopeStripLayout && dropInsertBefore)
+    if (strip && dropInsertBefore)
     {
-        // Insertion caret before dropSlot (or after last when dropSlot == N).
-        float x = 0.0f;
-        float y = 0.0f;
-        float h = 0.0f;
+        float x = 0.0f, y = 0.0f, h = 0.0f;
         if (dropSlot >= (int) slotBounds.size())
         {
             const auto& b = slotBounds.back();
@@ -6481,29 +7100,38 @@ void MainComponent::ScopeArrangeOverlay::paint (juce::Graphics& g)
             h = (float) b.getHeight();
         }
         g.setColour (outline);
-        g.fillRect (x - 2.0f, y, 4.0f, h);
+        g.fillRoundedRectangle (x - 2.0f, y + 2.0f, 4.0f, h - 4.0f, 1.5f);
     }
     else if (dropSlot < (int) slotBounds.size())
     {
         auto r = slotBounds[(size_t) dropSlot].toFloat().reduced (1.0f);
-        g.setColour (outline.withAlpha (0.35f));
-        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (outline.withAlpha (0.30f));
+        g.fillRoundedRectangle (r, rad);
         g.setColour (outline);
-        g.drawRoundedRectangle (r, 4.0f, 2.5f);
+        g.drawRoundedRectangle (r, rad, 2.5f);
     }
 }
 
 void MainComponent::hideAllScopePanes()
 {
-    goniometer.setVisible (false);
-    m_visualizer.setVisible (false);
-    oscilloscope.setVisible (false);
-    spectrogram.setVisible (false);
-    levelMeterIn.setVisible (false);
-    levelMeterOut.setVisible (false);
-    loudnessMeter.setVisible (false);
-    stereogram.setVisible (false);
-    histogram.setVisible (false);
+    // Never hide a module currently reparented to the OS-fullscreen host.
+    const auto skip = [this] (ScopeModuleId id)
+    {
+        return isScopeModuleOsFullscreen (id)
+               || (id == ScopeModuleId::spectrogram3D && isSpec3DFullscreen());
+    };
+
+    if (! skip (ScopeModuleId::goniometer))    goniometer.setVisible (false);
+    if (! skip (ScopeModuleId::spectrum))      m_visualizer.setVisible (false);
+    if (! skip (ScopeModuleId::oscilloscope))  oscilloscope.setVisible (false);
+    if (! skip (ScopeModuleId::spectrogram))   spectrogram.setVisible (false);
+    if (! skip (ScopeModuleId::levelIn))       levelMeterIn.setVisible (false);
+    if (! skip (ScopeModuleId::levelOut))      levelMeterOut.setVisible (false);
+    if (! skip (ScopeModuleId::loudness))      loudnessMeter.setVisible (false);
+    if (! skip (ScopeModuleId::stereogram))    stereogram.setVisible (false);
+    if (! skip (ScopeModuleId::histogram))     histogram.setVisible (false);
+    if (! skip (ScopeModuleId::spectrogram3D)) spectrogram3D.setVisible (false);
+
     gonExpandButton.setVisible (false);
     oscZoomInButton.setVisible (false);
     oscZoomOutButton.setVisible (false);
@@ -6513,7 +7141,6 @@ void MainComponent::hideAllScopePanes()
     specSpeedDownButton.setVisible (false);
     specExpandButton.setVisible (false);
     spec3DButton.setVisible (false);
-    spectrogram3D.setVisible (false);
 }
 
 void MainComponent::setScopeFullscreenModule (std::optional<ScopeModuleId> id)
@@ -6521,6 +7148,7 @@ void MainComponent::setScopeFullscreenModule (std::optional<ScopeModuleId> id)
     if (scopeFullscreenModule == id)
         return;
     scopeFullscreenModule = id;
+    syncScopeModuleEnabledStates();
     resized();
     grabKeyboardFocus();
 }
@@ -6538,6 +7166,11 @@ void MainComponent::toggleScopePaneFullscreen (ScopeModuleId id)
 void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int> pane,
                                     int toolH, int toolSize, int toolGap)
 {
+    // Module is on a separate OS-fullscreen peer — do not re-layout under the editor.
+    if (isScopeModuleOsFullscreen (moduleId)
+        || (moduleId == ScopeModuleId::spectrogram3D && isSpec3DFullscreen()))
+        return;
+
     // Tool buttons overlay the pane bottom â€” module keeps the full tile height.
     const auto overlayTools = (toolH > 0)
                                   ? juce::Rectangle<int> (pane.getX() + 2,
@@ -6621,9 +7254,9 @@ void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int>
 
         case ScopeModuleId::spectrogram:
         {
-            // Always 2D â€” Spectrogram 3D is a separate selectable Scope module.
+            // Always 2D — Spectrogram 3D is a separate selectable Scope module.
             auto view = pane;
-            if (menu.isVisible())
+            if (menu.isVisible() && ! scopeFullscreenModule.has_value())
                 view.setRight (juce::jmin (view.getRight(), menu.getX() - 8));
 
             spectrogram.setVisible (true);
@@ -6636,19 +7269,23 @@ void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int>
                 placeOverlayTool (specSpeedUpButton, row);
                 placeOverlayTool (specSpeedDownButton, row);
                 placeOverlayTool (specExpandButton, row);
-                // No 2D/3D cube toggle in Scope â€” Spec and Spec 3D are separate modules.
+                // No 2D/3D cube toggle in Scope — Spec and Spec 3D are separate modules.
             }
-            syncSpec3DPresentation();
+            // When maximized, do not call syncSpec3DPresentation — it reorders z
+            // and can re-hide 2D under 3D chrome. Multi-pane still needs the sync.
+            if (! scopeFullscreenModule.has_value())
+                syncSpec3DPresentation();
             break;
         }
 
         case ScopeModuleId::spectrogram3D:
         {
             auto view = pane;
-            if (menu.isVisible())
+            if (menu.isVisible() && ! scopeFullscreenModule.has_value())
                 view.setRight (juce::jmin (view.getRight(), menu.getX() - 8));
             placeSpectrogram3DPane (view, overlayTools, toolH, toolSize, toolGap);
-            syncSpec3DPresentation();
+            if (! scopeFullscreenModule.has_value())
+                syncSpec3DPresentation();
             break;
         }
 
@@ -6662,7 +7299,8 @@ void MainComponent::layoutScopeModePanes (float scale)
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
 
     const int n = (int) scopeEnabledOrder.size();
-    const int gap = px (3.0f);
+    // Card gutters — keeps panes reading as separate instrument cards.
+    const int gap = juce::jmax (3, px ((float) ScopePaneChrome::Metrics::kTileGapDesign));
     // Compact tool overlay for both strip and tiled (cube / speed / expand on Spec panes).
     const int toolH = px (16.0f);
     const int toolGap = px (1.0f);
@@ -6681,6 +7319,14 @@ void MainComponent::layoutScopeModePanes (float scale)
         return;
     }
 
+    auto placeInset = [this, toolH, toolSize, toolGap, &slots] (int slot, juce::Rectangle<int> cell)
+    {
+        slots[(size_t) slot] = cell;
+        // Module content sits under the chrome header + card inset.
+        const auto content = ScopePaneChrome::contentBounds (cell);
+        placeScopePane (scopeEnabledOrder[(size_t) slot], content, toolH, toolSize, toolGap);
+    };
+
     if (scopeStripLayout)
     {
         scopeSplitOverlay.setVisible (false);
@@ -6688,25 +7334,25 @@ void MainComponent::layoutScopeModePanes (float scale)
         frequencyResponseComponent.setBounds ({});
 
         ensureScopeStripFractions();
-        // Edge-to-edge strip â€” Scope / Settings / Arrange overlay the panes.
+        // Edge-to-edge strip — Scope / Settings / Arrange overlay the panes.
         const int stripTop = 0;
         const int stripH = juce::jmax (px ((float) kScopeStripHeightMinPx), getHeight() - stripTop);
-        auto strip = juce::Rectangle<int> (0, stripTop, getWidth(), stripH).reduced (gap, 0);
+        auto strip = juce::Rectangle<int> (0, stripTop, getWidth(), stripH).reduced (gap, gap);
         stripForOverlay = strip;
 
+        // Distribute width with explicit gutters between cards.
+        const int gutterTotal = gap * juce::jmax (0, n - 1);
+        const int usableW = juce::jmax (1, strip.getWidth() - gutterTotal);
         int x = strip.getX();
-        const int totalW = strip.getWidth();
         for (int slot = 0; slot < n; ++slot)
         {
             int cellW = (slot == n - 1)
                             ? (strip.getRight() - x)
-                            : juce::jmax (1, juce::roundToInt ((float) totalW
+                            : juce::jmax (1, juce::roundToInt ((float) usableW
                                                                * scopeStripFractions[(size_t) slot]));
-            auto cell = juce::Rectangle<int> (x, strip.getY(), cellW, strip.getHeight())
-                            .reduced (gap / 2, gap);
-            slots[(size_t) slot] = cell;
-            placeScopePane (scopeEnabledOrder[(size_t) slot], cell, toolH, toolSize, toolGap);
-            x += cellW;
+            auto cell = juce::Rectangle<int> (x, strip.getY(), cellW, strip.getHeight());
+            placeInset (slot, cell);
+            x += cellW + gap;
         }
     }
     else if (n == 4)
@@ -6717,17 +7363,22 @@ void MainComponent::layoutScopeModePanes (float scale)
 
         const int sx = juce::roundToInt ((float) graph.getWidth() * scopeSplitOverlay.getSplitX());
         const int sy = juce::roundToInt ((float) graph.getHeight() * scopeSplitOverlay.getSplitY());
+        const int halfGap = gap / 2;
 
-        slots[0] = juce::Rectangle<int> (graph.getX(), graph.getY(), sx, sy).reduced (gap);
-        slots[1] = juce::Rectangle<int> (graph.getX() + sx, graph.getY(), graph.getWidth() - sx, sy).reduced (gap);
-        slots[2] = juce::Rectangle<int> (graph.getX(), graph.getY() + sy, sx, graph.getHeight() - sy).reduced (gap);
+        slots[0] = juce::Rectangle<int> (graph.getX(), graph.getY(), sx, sy)
+                       .reduced (gap, gap).withTrimmedRight (halfGap).withTrimmedBottom (halfGap);
+        slots[1] = juce::Rectangle<int> (graph.getX() + sx, graph.getY(), graph.getWidth() - sx, sy)
+                       .reduced (gap, gap).withTrimmedLeft (halfGap).withTrimmedBottom (halfGap);
+        slots[2] = juce::Rectangle<int> (graph.getX(), graph.getY() + sy, sx, graph.getHeight() - sy)
+                       .reduced (gap, gap).withTrimmedRight (halfGap).withTrimmedTop (halfGap);
         slots[3] = juce::Rectangle<int> (graph.getX() + sx, graph.getY() + sy,
-                                           graph.getWidth() - sx, graph.getHeight() - sy).reduced (gap);
+                                         graph.getWidth() - sx, graph.getHeight() - sy)
+                       .reduced (gap, gap).withTrimmedLeft (halfGap).withTrimmedTop (halfGap);
 
         frequencyResponseComponent.setVisible (false);
 
         for (int slot = 0; slot < n; ++slot)
-            placeScopePane (scopeEnabledOrder[(size_t) slot], slots[(size_t) slot], toolH, toolSize, toolGap);
+            placeInset (slot, slots[(size_t) slot]);
     }
     else
     {
@@ -6737,22 +7388,22 @@ void MainComponent::layoutScopeModePanes (float scale)
         auto graph = getLocalBounds().reduced (gap);
         const int cols = juce::jmax (1, (int) std::ceil (std::sqrt ((float) n)));
         const int rows = (n + cols - 1) / cols;
-        const int cellW = juce::jmax (1, graph.getWidth() / cols);
-        const int cellH = juce::jmax (1, graph.getHeight() / rows);
+        const int cellW = juce::jmax (1, (graph.getWidth() - gap * (cols - 1)) / cols);
+        const int cellH = juce::jmax (1, (graph.getHeight() - gap * (rows - 1)) / rows);
 
         for (int slot = 0; slot < n; ++slot)
         {
             const int row = slot / cols;
             const int col = slot % cols;
-            auto cell = juce::Rectangle<int> (graph.getX() + col * cellW,
-                                              graph.getY() + row * cellH,
-                                              cellW, cellH).reduced (gap / 2);
-            slots[(size_t) slot] = cell;
-            placeScopePane (scopeEnabledOrder[(size_t) slot], cell, toolH, toolSize, toolGap);
+            auto cell = juce::Rectangle<int> (graph.getX() + col * (cellW + gap),
+                                              graph.getY() + row * (cellH + gap),
+                                              cellW, cellH);
+            placeInset (slot, cell);
         }
     }
 
     oscDimmer.setVisible (false);
+    oscDimmer.setSolidOpaque (false);
 
     scopeArrangeOverlay.setBounds (getLocalBounds());
     scopeArrangeOverlay.setSlotBounds (slots);
@@ -6857,6 +7508,19 @@ void MainComponent::layoutPresetChrome (float scale)
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll (sharedResources.sharedColors.pluginBackground);
+
+    // Scope card bodies behind modules (overlay only draws stroke + header on top).
+    if (scopeModeEnabled)
+    {
+        const auto& slots = scopeArrangeOverlay.getSlotBounds();
+        const auto& colours = sharedResources.sharedColors;
+        for (const auto& slot : slots)
+        {
+            if (slot.isEmpty())
+                continue;
+            ScopePaneChrome::paintCardFill (g, slot.toFloat(), colours, scopeStripLayout);
+        }
+    }
 }
 
 void MainComponent::resized()
@@ -7127,27 +7791,60 @@ void MainComponent::resized()
             gonButton.setBounds ({});
             specButton.setBounds ({});
 
-            if (! scopeFullscreenModule.has_value())
+            if (isSpec3DFullscreen() || isScopeOsFullscreen())
+            {
+                // Module is on a separate OS-fullscreen peer — keep the editor solid/black.
+                hideAllScopePanes();
+                scopeSplitOverlay.setVisible (false);
+                scopeArrangeOverlay.setVisible (false);
+                frequencyResponseComponent.setVisible (false);
+                arrangeButton.setVisible (false);
+                oscDimmer.setSolidOpaque (true);
+                oscDimmer.setBounds (getLocalBounds());
+                oscDimmer.setVisible (true);
+                oscDimmer.toFront (false);
+                // Keep Spec3D feeder invisible while reparented (don't flash 2D in editor).
+                if (spectrogram.isSpectrogramEnabled()
+                    && spectrogram.getParentComponent() == this)
+                    spectrogram.setVisible (false);
+            }
+            else if (! scopeFullscreenModule.has_value())
             {
                 layoutScopeModePanes (scale);
             }
             else
             {
-                // One Scope pane fullscreen; collapse restores strip or tiled arrange.
+                // One Scope pane maximized: opaque full plugin — only that module is visible.
                 hideAllScopePanes();
                 scopeSplitOverlay.setVisible (false);
                 scopeArrangeOverlay.setVisible (false);
                 frequencyResponseComponent.setVisible (false);
-                oscDimmer.setBounds (getLocalBounds());
+                arrangeButton.setVisible (false);
+                // Cover entire plugin; solid black under the module (not over it).
+                // Both dimmer + module must be always-on-top peers — a non-AoT module
+                // always loses to an AoT dimmer and produces a black screen.
+                const auto expandBounds = getLocalBounds();
+                oscDimmer.setSolidOpaque (true);
+                oscDimmer.setAlwaysOnTop (true);
+                oscDimmer.setBounds (expandBounds);
                 oscDimmer.setVisible (true);
-                const auto expandBounds = getExpandedScopeContentBounds().isEmpty()
-                                              ? getLocalBounds()
-                                              : getExpandedScopeContentBounds();
+                oscDimmer.toFront (false);
+
                 const int toolH = px (16.0f);
                 const int toolGap = px (1.0f);
                 const int toolSize = juce::jmax (12, toolH - 2);
                 placeScopePane (*scopeFullscreenModule, expandBounds, toolH, toolSize, toolGap);
-                // Don't call sync*ToolButtons here â€” they key off chrome toggles and would
+
+                // Absolute top: module (+ tools). Must come after dimmer in AoT stack.
+                if (auto* view = getScopeModuleComponent (*scopeFullscreenModule))
+                {
+                    view->setOpaque (true);
+                    view->setAlwaysOnTop (true);
+                    view->setVisible (true);
+                    view->toFront (false);
+                }
+
+                // Don't call sync*ToolButtons here — they key off chrome toggles and would
                 // re-show Osc/Gon/Spec tools over unrelated fullscreen panes.
                 if (*scopeFullscreenModule == ScopeModuleId::oscilloscope)
                 {
@@ -7172,6 +7869,10 @@ void MainComponent::resized()
                     specExpandButton.setTooltip ("Collapse back to Scope arrange");
                     specExpandButton.setToggleState (true, juce::dontSendNotification);
                     raiseSpecToolButtons();
+                }
+                else if (*scopeFullscreenModule == ScopeModuleId::spectrogram3D)
+                {
+                    spectrogram3D.toFront (false);
                 }
             }
         }
@@ -7430,6 +8131,7 @@ void MainComponent::resized()
 
     // Wordmark may be re-hosted from EqEditor::resized; keep menu chrome above it.
     syncExpandedOscOverlayStack();
+    raiseRampTimelineWindowIfOpen();
 }
 
 void MainComponent::mouseDrag(const juce::MouseEvent& event)
@@ -7618,6 +8320,35 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     // Z-order (bottom → top):
     //   graph → expanded osc/gon/dimmer → brand wordmark → chrome / meters / zoom
     //   → OptionBox → Settings button → Settings menu (panel above hamburger when open)
+    // Scope maximize: solid dimmer under the solo module (both always-on-top peers).
+    if (scopeModeEnabled && scopeFullscreenModule.has_value())
+    {
+        oscDimmer.setAlwaysOnTop (true);
+        oscDimmer.toFront (false);
+        if (auto* view = getScopeModuleComponent (*scopeFullscreenModule))
+        {
+            view->setAlwaysOnTop (true);
+            view->setVisible (true);
+            view->toFront (false);
+        }
+        // Tool buttons above the module.
+        if (*scopeFullscreenModule == ScopeModuleId::oscilloscope)
+        {
+            oscZoomInButton.toFront (false);
+            oscZoomOutButton.toFront (false);
+            oscChannelModeButton.toFront (false);
+            oscExpandButton.toFront (false);
+        }
+        else if (*scopeFullscreenModule == ScopeModuleId::goniometer)
+            gonExpandButton.toFront (false);
+        else if (*scopeFullscreenModule == ScopeModuleId::spectrogram
+                 || *scopeFullscreenModule == ScopeModuleId::spectrogram3D)
+            raiseSpecToolButtons();
+        if (menu.isVisible())
+            menu.toFront (false);
+        return;
+    }
+
     const bool oscExp = oscExpanded && oscButton.getToggleState() && oscilloscope.isVisible();
     const bool gonExp = gonExpanded && gonButton.getToggleState() && goniometer.isVisible();
     const bool specExp = specExpanded && specButton.getToggleState() && spectrogram.isVisible();

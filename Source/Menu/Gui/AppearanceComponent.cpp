@@ -249,7 +249,8 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	enforceLegibleTextToggle.setToggleState (sharedResources.sharedColors.enforceLegibleText,
 	                                         juce::dontSendNotification);
 	enforceLegibleTextToggle.setTooltip (
-	    "After randomize, push text value away from its background so labels stay readable. "
+	    "On by default. Keeps labels readable on Scope modules, meters, graph handles, and menus. "
+	    "After randomize (and on theme load), pushes text value away from its background. "
 	    "Adjusts text only (value), not backgrounds.");
 	enforceLegibleTextToggle.onClick = [this]
 	{

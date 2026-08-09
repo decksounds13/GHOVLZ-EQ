@@ -5736,6 +5736,95 @@ void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcep
     markSoftContentDirty();
 }
 
+void Spectrogram3DComponent::setParticleEmitSurface (ParticleEmitSurface surface) noexcept
+{
+    // History-field emit is reserved for a future UI path. Force playhead so GPU/CPU
+    // always birth only at the live tip (trail fills by scrolling).
+    if (surface != ParticleEmitSurface::playhead && surface != ParticleEmitSurface::historyField)
+        surface = ParticleEmitSurface::playhead;
+    surface = ParticleEmitSurface::playhead;
+    if (particleEmitSurface == surface) return;
+    particleEmitSurface = surface;
+    if (particleSystem != nullptr)
+        particleSystem->resetEmissionAccumulators();
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitterType (ParticleEmitterType type) noexcept
+{
+    if (type < ParticleEmitterType::spectrogram || type > ParticleEmitterType::cone)
+        type = ParticleEmitterType::spectrogram;
+    if (particleEmitterType == type) return;
+    particleEmitterType = type;
+    // Geometric emitters need free binding (no waterfall column lock).
+    if (type != ParticleEmitterType::spectrogram
+        && particleBindingMode == ParticleBindingMode::spectrogramTrail)
+        particleBindingMode = ParticleBindingMode::freeVisualizer;
+    if (particleSystem != nullptr)
+        particleSystem->resetEmissionAccumulators();
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitDomain (ParticleEmitDomain domain) noexcept
+{
+    if (domain != ParticleEmitDomain::surface && domain != ParticleEmitDomain::volume)
+        domain = ParticleEmitDomain::surface;
+    if (particleEmitDomain == domain) return;
+    particleEmitDomain = domain;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitterPos (float x, float y, float z) noexcept
+{
+    particleEmitterPosX = x;
+    particleEmitterPosY = y;
+    particleEmitterPosZ = z;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSprayYawDeg (float deg) noexcept
+{
+    while (deg > 180.0f) deg -= 360.0f;
+    while (deg < -180.0f) deg += 360.0f;
+    if (std::abs (particleSprayYawDeg - deg) < 1.0e-4f) return;
+    particleSprayYawDeg = deg;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSprayPitchDeg (float deg) noexcept
+{
+    deg = juce::jlimit (-90.0f, 90.0f, deg);
+    if (std::abs (particleSprayPitchDeg - deg) < 1.0e-4f) return;
+    particleSprayPitchDeg = deg;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpraySpreadDeg (float deg) noexcept
+{
+    deg = juce::jlimit (0.0f, 180.0f, deg);
+    if (std::abs (particleSpraySpreadDeg - deg) < 1.0e-4f) return;
+    particleSpraySpreadDeg = deg;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpraySpeedMin (float unitsPerSec) noexcept
+{
+    if (! std::isfinite (unitsPerSec)) return;
+    unitsPerSec = juce::jmax (0.0f, unitsPerSec);
+    if (std::abs (particleSpraySpeedMin - unitsPerSec) < 1.0e-6f) return;
+    particleSpraySpeedMin = unitsPerSec;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpraySpeedMax (float unitsPerSec) noexcept
+{
+    if (! std::isfinite (unitsPerSec)) return;
+    unitsPerSec = juce::jmax (0.0f, unitsPerSec);
+    if (std::abs (particleSpraySpeedMax - unitsPerSec) < 1.0e-6f) return;
+    particleSpraySpeedMax = unitsPerSec;
+    markSoftContentDirty();
+}
+
 void Spectrogram3DComponent::setParticleBindingMode (ParticleBindingMode mode) noexcept
 {
     if (mode != ParticleBindingMode::spectrogramTrail && mode != ParticleBindingMode::freeVisualizer)
@@ -5933,6 +6022,9 @@ void Spectrogram3DComponent::setParticleForceStack (std::vector<ParticleForceMod
 
 void Spectrogram3DComponent::setParticleMeshShape (ParticleMeshShape s) noexcept
 {
+    if (s != ParticleMeshShape::sphere && s != ParticleMeshShape::cube
+        && s != ParticleMeshShape::billboard)
+        s = ParticleMeshShape::sphere;
     if (particleMeshShape == s) return;
     particleMeshShape = s;
     markSoftContentDirty();
@@ -7583,12 +7675,13 @@ void Spectrogram3DComponent::seedDefaultOrientation() noexcept
 
 void Spectrogram3DComponent::clampCamera() noexcept
 {
-    // Turntable / orbit framing ONLY. Freecam never uses this.
+    // Turntable / orbit framing ONLY. Freecam never uses this while active.
+    // No ground-plane clamp — freecam bake and free look keep full pitch / panY.
     camera.pitchDeg = juce::jlimit (kMinPitchDeg, kMaxPitchDeg, camera.pitchDeg);
     camera.distance = juce::jlimit (0.35f, 14.0f, camera.distance);
     camera.panX = juce::jlimit (-1.6f, 1.6f, camera.panX);
     camera.panZ = juce::jlimit (-1.6f, 1.6f, camera.panZ);
-    camera.panY = juce::jlimit (-0.05f, meshHeight * 1.4f, camera.panY);
+    camera.panY = juce::jlimit (-80.0f, 80.0f, camera.panY);
 }
 
 float Spectrogram3DComponent::freecamLevelToScale (float level1to8) noexcept
@@ -7765,27 +7858,30 @@ void Spectrogram3DComponent::exitFreecamToTurntable() noexcept
         return;
 
     // Bake freecam pose into orbit rig so LMB orbit continues from the new view.
-    juce::Vector3D<float> right, up, forward;
-    freecamBasis (right, up, forward);
-    juce::ignoreUnused (right, up);
-
+    // Preserve freecamEye exactly — no ground-plane panY/distance rewrite on RMB release.
     camera.yawDeg = freecamYawDeg;
-    // Prefer true look pitch; clamp into orbit elev range for turntable framing.
+    // FPS pitch+ = look up → orbit elevation is inverted.
     camera.pitchDeg = juce::jlimit (kMinPitchDeg, kMaxPitchDeg, -freecamPitchDeg);
-    camera.distance = juce::jlimit (0.35f, 14.0f, camera.distance);
 
-    // Re-derive look-at so orbit eye matches freecam eye under clamped elev.
+    float d = juce::jlimit (0.35f, 14.0f, camera.distance);
     const float yaw = juce::degreesToRadians (camera.yawDeg);
     const float pitch = juce::degreesToRadians (camera.pitchDeg);
     const float cp = std::cos (pitch);
     const float sp = std::sin (pitch);
     const float cy = std::cos (yaw);
     const float sy = std::sin (yaw);
+
     // eye = pan + (-sy*cp, sp, cy*cp)*d  →  pan = eye - offset
-    camera.panX = freecamEye.x - (-sy * cp) * camera.distance;
-    camera.panY = freecamEye.y - sp * camera.distance;
-    camera.panZ = freecamEye.z - (cy * cp) * camera.distance;
-    clampCamera();
+    camera.panX = freecamEye.x - (-sy * cp) * d;
+    camera.panY = freecamEye.y - sp * d;
+    camera.panZ = freecamEye.z - (cy * cp) * d;
+
+    camera.distance = d;
+    camera.panX = juce::jlimit (-1.6f, 1.6f, camera.panX);
+    camera.panY = juce::jlimit (-80.0f, 80.0f, camera.panY);
+    camera.panZ = juce::jlimit (-1.6f, 1.6f, camera.panZ);
+    camera.pitchDeg = juce::jlimit (kMinPitchDeg, kMaxPitchDeg, camera.pitchDeg);
+    camera.distance = juce::jlimit (0.35f, 14.0f, camera.distance);
 
     freecamActive = false;
     flyVel = { 0, 0, 0 };

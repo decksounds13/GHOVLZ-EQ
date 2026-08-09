@@ -480,6 +480,10 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
     live.brightnessLowerLimit = briL;
     live.brightnessUpperLimit = briU;
 
+    // Legible text stays global (default on) — re-enforce after palette swap.
+    if (live.enforceLegibleText)
+        live.enforceLegibleTextContrast();
+
     listBox.selectRow (index);
     selectedRow = index;
 

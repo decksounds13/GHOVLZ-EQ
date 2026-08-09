@@ -516,7 +516,8 @@ void StereogramComponent::paintFrequencyGrid (juce::Graphics& g, juce::Rectangle
 
         if (major && labelW > 12.0f)
         {
-            g.setColour (theme.graphAxisText.withAlpha (0.85f));
+            const auto well = theme.oscBackground.darker (0.08f);
+            g.setColour (theme.legibleTextOn (theme.graphAxisText, well).withAlpha (0.90f));
             g.setFont (juce::FontOptions (10.0f));
             g.drawText (formatGridHz (hz),
                         juce::Rectangle<float> (labelX, y - 7.0f, labelW, 14.0f),
@@ -536,19 +537,19 @@ void StereogramComponent::paint (juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     const auto& theme = themeColors != nullptr ? themeColors->sharedColors
                                                : SharedColors {};
-    const auto bg = theme.oscBackground;
-    g.setColour (bg);
-    g.fillRoundedRectangle (bounds, 3.0f);
+    // Opaque fill (maximize / F11 / Scope — no bleed from underneath).
+    const auto well = theme.oscBackground.darker (0.08f);
+    g.fillAll (well);
 
     auto plot = getPlotBounds();
     const auto plotF = plot.toFloat();
-    // +L / +R sit in the top chrome above the plot (module title from overlay).
-    auto topChrome = juce::Rectangle<int> (plot.getX(), getLocalBounds().getY() + 4,
-                                           plot.getWidth(), 18);
+    // +L / +R sit above the plot (module title is ScopePaneChrome header).
+    auto topChrome = juce::Rectangle<int> (plot.getX(), getLocalBounds().getY() + 2,
+                                           plot.getWidth(), 16);
 
     // X extremes are ±1 balance: full Left / full Right.
     g.setFont (juce::Font (juce::FontOptions (10.0f).withStyle ("Bold")));
-    g.setColour (theme.graphAxisText.withAlpha (0.75f));
+    g.setColour (theme.legibleTextOn (theme.graphAxisText, well).withAlpha (0.88f));
     g.drawText ("+1 (L)", topChrome.removeFromLeft (topChrome.getWidth() / 2),
                 juce::Justification::centredLeft, false);
     g.drawText ("+1 (R)", topChrome, juce::Justification::centredRight, false);

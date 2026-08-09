@@ -375,11 +375,18 @@ void EqProcessor::setBypassOtherAnalyzers (bool shouldBypass) noexcept
 void EqProcessor::setScopeMode (bool shouldEnable) noexcept
 {
     scopeMode.store (shouldEnable, std::memory_order_release);
+    if (! shouldEnable)
+        scopeSoloModule.store (-1, std::memory_order_release);
 }
 
 void EqProcessor::setScopeTapPost (bool shouldTapPost) noexcept
 {
     scopeTapPost.store (shouldTapPost, std::memory_order_release);
+}
+
+void EqProcessor::setScopeSoloModule (int moduleIdOrNeg1) noexcept
+{
+    scopeSoloModule.store (moduleIdOrNeg1, std::memory_order_release);
 }
 
 bool EqProcessor::isSpectrumAnalyserActive() const noexcept
@@ -390,9 +397,15 @@ bool EqProcessor::isSpectrumAnalyserActive() const noexcept
     if (bypassOtherAnalyzers.load (std::memory_order_acquire))
         return false;
 
-    // Quad Scope view always needs the spectrum analyser.
+    // Scope: run analyser only when no module is soloed, or Spectrum is the solo.
     if (scopeMode.load (std::memory_order_acquire))
-        return true;
+    {
+        const int solo = scopeSoloModule.load (std::memory_order_acquire);
+        if (solo < 0)
+            return true;
+        // ScopeModuleId::spectrum == 2
+        return solo == 2;
+    }
 
     if (auto* p = treeState.getRawParameterValue ("SPECTRUM_ANALYSER_ID"))
         return p->load() > 0.5f;

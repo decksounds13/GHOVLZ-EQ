@@ -30,6 +30,8 @@
 #include "ColourRamp/PathSampleOverlay.h"
 #include "GraphOverlayButtonLookAndFeel.h"
 
+namespace ParticleNodeGraph { class ParticleNodeGraphWindow; }
+
 class MainComponent : public juce::Component,
     public juce::ComponentListener,
     public ThemeList::Listener,
@@ -176,6 +178,20 @@ public:
     void setSpec3DFullscreen (bool shouldEnable, bool notifyPrefs = true);
     void toggleSpec3DFullscreen (bool notifyPrefs = true);
     bool isSpec3DFullscreen() const noexcept { return spec3DFullscreen; }
+    /**
+        True OS fullscreen for any Scope module (borderless desktop window).
+        Spec3D uses the dedicated Spec3D path (GL + lookdev chrome).
+    */
+    void enterScopeOsFullscreen (ScopeModuleId id, bool notifyPrefs = true);
+    void exitScopeOsFullscreen (bool notifyPrefs = true);
+    void toggleScopeOsFullscreen (ScopeModuleId id, bool notifyPrefs = true);
+    bool isScopeOsFullscreen() const noexcept { return scopeOsFullscreenModule.has_value(); }
+    bool isScopeModuleOsFullscreen (ScopeModuleId id) const noexcept
+    {
+        return scopeOsFullscreenModule.has_value() && *scopeOsFullscreenModule == id;
+    }
+    /** Resolve F11 target: maximized Scope pane, Spec3D, or first enabled Scope module. */
+    void toggleOsFullscreenFromHotkey (bool notifyPrefs = true);
     /** Restored floating Spec3D frame (component bounds, includes shadow pad). */
     bool hasSpec3DFrameBounds() const noexcept { return spec3DBoundsCustom; }
     int getSpec3DFramePreferredX() const noexcept { return spec3DPreferredX; }
@@ -207,6 +223,7 @@ public:
     float getSpec3DMeshHeight() const noexcept;
     void setSpec3DClosedMeshEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DClosedMeshEnabled() const noexcept;
+
     void setSpec3DAutoRotateEnabled (bool shouldEnable, bool notifyPrefs = true);
     bool isSpec3DAutoRotateEnabled() const noexcept;
     void setSpec3DAutoRotatePeriodSec (float secondsPerRevolution, bool notifyPrefs = true);
@@ -441,6 +458,22 @@ public:
     bool isSpec3DParticleModeEnabled() const noexcept;
     void setSpec3DParticleEmitMode (int mode, bool notifyPrefs = true);
     int getSpec3DParticleEmitMode() const noexcept;
+    void setSpec3DParticleEmitterType (int type, bool notifyPrefs = true);
+    int getSpec3DParticleEmitterType() const noexcept;
+    void setSpec3DParticleEmitterPos (float x, float y, float z, bool notifyPrefs = true);
+    float getSpec3DParticleEmitterPosX() const noexcept;
+    float getSpec3DParticleEmitterPosY() const noexcept;
+    float getSpec3DParticleEmitterPosZ() const noexcept;
+    void setSpec3DParticleSprayYawDeg (float deg, bool notifyPrefs = true);
+    void setSpec3DParticleSprayPitchDeg (float deg, bool notifyPrefs = true);
+    float getSpec3DParticleSprayYawDeg() const noexcept;
+    float getSpec3DParticleSprayPitchDeg() const noexcept;
+    void setSpec3DParticleSpraySpreadDeg (float deg, bool notifyPrefs = true);
+    float getSpec3DParticleSpraySpreadDeg() const noexcept;
+    void setSpec3DParticleSpraySpeedMin (float v, bool notifyPrefs = true);
+    void setSpec3DParticleSpraySpeedMax (float v, bool notifyPrefs = true);
+    float getSpec3DParticleSpraySpeedMin() const noexcept;
+    float getSpec3DParticleSpraySpeedMax() const noexcept;
     void setSpec3DParticleBindingMode (int mode, bool notifyPrefs = true);
     int getSpec3DParticleBindingMode() const noexcept;
     void setSpec3DParticleEmission (float amount, bool notifyPrefs = true);
@@ -516,6 +549,7 @@ public:
     void setSpec3DParticleDebugOverlayEnabled (bool shouldShow, bool notifyPrefs = true);
     bool isSpec3DParticleDebugOverlayEnabled() const noexcept;
 
+
     void resetSpec3DCamera() noexcept { spectrogram3D.resetCamera(); }
     void setSpec3DDefaultCamera (const Spectrogram3DComponent::CameraState& state, bool applyNow = true) noexcept;
     Spectrogram3DComponent::CameraState getSpec3DDefaultCamera() const noexcept;
@@ -548,6 +582,10 @@ public:
             .getUnion (gonButton.getBounds())
             .getUnion (specButton.getBounds());
     }
+
+    void showRampTimelineWindow();
+    /** Embergen/Houdini-style particle node graph (desktop window). */
+    void showParticleNodeGraphWindow();
 
 private:
     /** TextButton that exposes a right-click callback for A/B/C/D snapshot menus. */
@@ -608,6 +646,8 @@ private:
     void placeSpectrogram3DPane (juce::Rectangle<int> view, juce::Rectangle<int> overlayTools,
                                  int toolH, int toolSize, int toolGap);
     void syncScopeModuleEnabledStates();
+    /** When a Scope pane is maximized or OS-fullscreen: only that module (plus Spec feed for 3D). */
+    std::optional<ScopeModuleId> getScopeSoloModule() const noexcept;
     void applyScopePaneReorder (int fromSlot, int toSlot, bool insertBefore);
     void syncMeterChannelModeButton();
     void toggleMeterChannelMode();
@@ -620,6 +660,7 @@ private:
     void enterSpec3DOsFullscreen();
     void exitSpec3DOsFullscreen();
     void applySpec3DFullscreenLayout(); // keeps OS FS host sized; no-op when not FS
+    juce::Component* getScopeModuleComponent (ScopeModuleId id) noexcept;
     /** Expanded Osc/Gon/Spec bounds — excludes piano strip when open. */
     juce::Rectangle<int> getExpandedScopeContentBounds() const;
     /** Bottom of top chrome (bypass/presets/settings) — GL must stay below this. */
@@ -914,10 +955,13 @@ private:
     SpectrogramComponent spectrogram;
     FramedFloatingScopeWindow specFrame;
     Spectrogram3DComponent spectrogram3D;
+    /** Expanded sequencer (title-bar drag host; clamped like framed scopes). */
     std::unique_ptr<class Spec3DRampTimelineWindow> rampTimelineWindow;
+    std::unique_ptr<ParticleNodeGraph::ParticleNodeGraphWindow> particleNodeGraphWindow;
     /** Only used when SPEC3D_EXPORT_ENABLED (see Export/Spec3DExportSandbox.h). */
     std::unique_ptr<class Spec3DExportJob> activeSpec3DExport;
-    void showRampTimelineWindow();
+    void raiseRampTimelineWindowIfOpen() noexcept;
+    void reclampRampTimelineWindow() noexcept;
     void startSpec3DRegionExport (const struct Spec3DExportSettings& settings);
 
     ScopeLevelMeterModule levelMeterIn;
@@ -930,10 +974,24 @@ private:
     class OscDimmerComponent : public juce::Component
     {
     public:
+        void setSolidOpaque (bool solid) noexcept
+        {
+            if (solidOpaque == solid)
+                return;
+            solidOpaque = solid;
+            setOpaque (solid);
+            repaint();
+        }
+
         void paint (juce::Graphics& g) override
         {
-            g.fillAll (juce::Colours::black.withAlpha (0.20f));
+            // Scope maximize / solo: fully opaque so nothing underneath shows through.
+            g.fillAll (solidOpaque ? juce::Colours::black
+                                   : juce::Colours::black.withAlpha (0.20f));
         }
+
+    private:
+        bool solidOpaque = false;
     };
 
     OscDimmerComponent oscDimmer;
@@ -1019,6 +1077,11 @@ private:
             slotBounds = bounds;
         }
 
+        const std::vector<juce::Rectangle<int>>& getSlotBounds() const noexcept
+        {
+            return slotBounds;
+        }
+
         void setStripBounds (juce::Rectangle<int> bounds) noexcept
         {
             stripBounds = bounds;
@@ -1045,7 +1108,8 @@ private:
         int hoverPaneOutline = -1; // slot index to outline on hover
         juce::Point<int> dragPos {};
         juce::Point<float> dragGrabOffset {}; // mouse relative to pane top-left at grab
-        static constexpr int kHandleH = 10;
+        // Match ScopePaneChrome::Metrics::kHeaderH so the whole title bar is draggable.
+        static constexpr int kHandleH = 18;
         static constexpr int kInsertBand = 14;
         static constexpr int kResizeHitPad = 6;
     };
@@ -1101,6 +1165,12 @@ private:
     std::unique_ptr<Spec3DOsFullscreenHost> spec3DOsFullscreenHost;
     struct Spec3DFsExitChrome;
     std::unique_ptr<Spec3DFsExitChrome> spec3DFsExitChrome;
+    /** Non-Spec3D Scope modules: borderless OS fullscreen host (F11). */
+    struct ScopeOsFullscreenHost;
+    std::unique_ptr<ScopeOsFullscreenHost> scopeOsFullscreenHost;
+    std::optional<ScopeModuleId> scopeOsFullscreenModule;
+    /** Restore in-plugin maximize after exiting OS FS (if user had maximized first). */
+    bool scopeOsFullscreenHadInPluginMaximize = false;
     /** User-dragged expanded 3D window size/position (component bounds, includes shadow pad). */
     bool spec3DBoundsCustom = false;
     int spec3DPreferredW = 0;

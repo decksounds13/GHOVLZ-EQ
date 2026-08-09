@@ -1981,6 +1981,9 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
     live.brightnessLowerLimit = briL;
     live.brightnessUpperLimit = briU;
 
+    if (live.enforceLegibleText)
+        live.enforceLegibleTextContrast();
+
     // Seed processor so host getState / reapply paths also see these colours.
     audioProcessor.storeSessionUiTheme (live, {});
     return true;
@@ -2314,6 +2317,9 @@ void EqEditor::loadUiPrefs()
     bool randFaceplate = true, randGraph = true, randMenu = true;
     bool randRampFft = true, randRampSpec = true, randRampSpec3D = true, randRampFill = true;
     bool orderedRampGradation = true;
+    // Accessibility — on by default globally (Appearance can still toggle).
+    bool enforceLegibleText = true;
+    float textContrastAmount = 0.55f;
     bool pianoDisplayOnLoad = false;
     bool spec3DOnLoad = false;
     bool spec3DFrameCustom = false;
@@ -2430,8 +2436,12 @@ void EqEditor::loadUiPrefs()
     float spec3DSssMaxThick = 0.70f;
     bool spec3DParticle = false;
     int spec3DParticleEmitMode = 1; // 0 = slice, 1 = continuous (must stay default)
+    int spec3DParticleEmitterType = 0; // 0 = spectrogram (default)
+    float spec3DParticleEmitterPosX = 0.0f, spec3DParticleEmitterPosY = 0.25f, spec3DParticleEmitterPosZ = 0.0f;
+    float spec3DParticleSprayYaw = 0.0f, spec3DParticleSprayPitch = 90.0f, spec3DParticleSpraySpread = 15.0f;
+    float spec3DParticleSpraySpeedMin = 1.0f, spec3DParticleSpraySpeedMax = 1.0f;
     int spec3DParticleBinding = 0;  // 0 = trail, 1 = free
-    float spec3DParticleEmission = 1000.0f; // particles/sec
+    float spec3DParticleEmission = 40000.0f; // particles/sec
     float spec3DParticleSpawnJitter = 0.0025f; // must match Spectrogram3DComponent::kDefaultParticleSpawnJitter
     float spec3DParticleSpeed = 1.0f; // legacy → Init vel Y
     float spec3DParticleInitVelX = 0.0f;
@@ -2447,8 +2457,8 @@ void EqEditor::loadUiPrefs()
     float spec3DParticleRough = 0.45f;
     float spec3DParticleMetal = 0.0f;
     float spec3DParticleSpec = 0.35f;
-    bool spec3DParticleGpuSim = false; // CPU integrate default
-    int spec3DParticleMaxAlive = 8192;
+    bool spec3DParticleGpuSim = true; // GPU integrate default (falls back if unavailable)
+    int spec3DParticleMaxAlive = 70000;
     bool spec3DParticleDebugOverlay = false;
     bool spec3DParticleForces = false;
     bool spec3DParticleWaterfallLock = true;
@@ -2560,6 +2570,9 @@ void EqEditor::loadUiPrefs()
                 randRampSpec3D = xml->getBoolAttribute ("randRampSpec3D", true);
                 randRampFill = xml->getBoolAttribute ("randRampFill", true);
                 orderedRampGradation = xml->getBoolAttribute ("orderedRampGradation", true);
+                enforceLegibleText = xml->getBoolAttribute ("enforceLegibleText", true);
+                textContrastAmount = (float) xml->getDoubleAttribute ("textContrastAmount", 0.55);
+                textContrastAmount = juce::jlimit (0.0f, 1.0f, textContrastAmount);
                 faceplateBank = juce::jlimit (0, EqBand::kMaxBanks - 1,
                                               xml->getIntAttribute ("faceplateBank", 0));
                 pianoDisplayOnLoad = xml->getBoolAttribute ("pianoDisplay", false);
@@ -2756,8 +2769,19 @@ void EqEditor::loadUiPrefs()
                 spec3DParticleEmitMode = xml->getIntAttribute ("spec3dParticleEmitMode", 1);
                 if (spec3DParticleEmitMode != 0 && spec3DParticleEmitMode != 1)
                     spec3DParticleEmitMode = 1;
+                spec3DParticleEmitterType = xml->getIntAttribute ("spec3dParticleEmitterType", 0);
+                if (spec3DParticleEmitterType < 0 || spec3DParticleEmitterType > 5)
+                    spec3DParticleEmitterType = 0;
+                spec3DParticleEmitterPosX = (float) xml->getDoubleAttribute ("spec3dParticleEmitterPosX", 0.0);
+                spec3DParticleEmitterPosY = (float) xml->getDoubleAttribute ("spec3dParticleEmitterPosY", 0.25);
+                spec3DParticleEmitterPosZ = (float) xml->getDoubleAttribute ("spec3dParticleEmitterPosZ", 0.0);
+                spec3DParticleSprayYaw = (float) xml->getDoubleAttribute ("spec3dParticleSprayYaw", 0.0);
+                spec3DParticleSprayPitch = (float) xml->getDoubleAttribute ("spec3dParticleSprayPitch", 90.0);
+                spec3DParticleSpraySpread = (float) xml->getDoubleAttribute ("spec3dParticleSpraySpread", 15.0);
+                spec3DParticleSpraySpeedMin = (float) xml->getDoubleAttribute ("spec3dParticleSpraySpeedMin", 1.0);
+                spec3DParticleSpraySpeedMax = (float) xml->getDoubleAttribute ("spec3dParticleSpraySpeedMax", 1.0);
                 spec3DParticleBinding = xml->getIntAttribute ("spec3dParticleBinding", 0);
-                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 1000.0);
+                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 40000.0);
                 // V3: particles/sec. Pre-V3 was a unitless ~0–5 scale (plus older 0–1).
                 if (! xml->hasAttribute ("spec3dParticleEmissionV3"))
                 {
@@ -2786,12 +2810,22 @@ void EqEditor::loadUiPrefs()
                 spec3DParticleRough = (float) xml->getDoubleAttribute ("spec3dParticleRough", 0.45);
                 spec3DParticleMetal = (float) xml->getDoubleAttribute ("spec3dParticleMetal", 0.0);
                 spec3DParticleSpec = (float) xml->getDoubleAttribute ("spec3dParticleSpec", 0.35);
-                spec3DParticleGpuSim = xml->getBoolAttribute ("spec3dParticleGpuSim", false);
-                spec3DParticleMaxAlive = xml->getIntAttribute ("spec3dParticleMaxAlive", 8192);
+                spec3DParticleGpuSim = xml->getBoolAttribute ("spec3dParticleGpuSim", true);
+                spec3DParticleMaxAlive = xml->getIntAttribute ("spec3dParticleMaxAlive", 70000);
+                // Force factory particle defaults once. Earlier V70k flag was saved without
+                // actually rewriting max/emission/GPU (prefs still had 8192 / low rate / CPU).
+                if (! xml->hasAttribute ("spec3dParticleDefaultsV70kApplied"))
+                {
+                    spec3DParticleMaxAlive = 70000;
+                    spec3DParticleEmission = 40000.0f;
+                    spec3DParticleGpuSim = true;
+                }
                 spec3DParticleDebugOverlay = xml->getBoolAttribute ("spec3dParticleDebugOverlay", false);
                 spec3DParticleForces = xml->getBoolAttribute ("spec3dParticleForces", false);
                 spec3DParticleWaterfallLock = xml->getBoolAttribute ("spec3dParticleWaterfallLock", true);
                 spec3DParticleMesh = xml->getIntAttribute ("spec3dParticleMesh", 0);
+                if (spec3DParticleMesh < 0 || spec3DParticleMesh > 2)
+                    spec3DParticleMesh = 0;
                 spec3DParticleInitRotX = (float) xml->getDoubleAttribute ("spec3dParticleInitRotX", 0.0);
                 spec3DParticleInitRotY = (float) xml->getDoubleAttribute ("spec3dParticleInitRotY", 0.0);
                 spec3DParticleInitRotZ = (float) xml->getDoubleAttribute ("spec3dParticleInitRotZ", 0.0);
@@ -2852,8 +2886,8 @@ void EqEditor::loadUiPrefs()
                         continue;
                     auto& slot = spec3DParticleMods[(size_t) i];
                     slot.enabled = parts[0].getIntValue() != 0;
-                    slot.source = (ParticleModSource) juce::jlimit (0, (int) ParticleModSource::particleId, parts[1].getIntValue());
-                    slot.dest = (ParticleModDest) juce::jlimit (0, (int) ParticleModDest::initVel, parts[2].getIntValue());
+                    slot.source = (ParticleModSource) juce::jlimit (0, (int) ParticleModSource::initVelZ, parts[1].getIntValue());
+                    slot.dest = (ParticleModDest) juce::jlimit (0, (int) ParticleModDest::initVelZ, parts[2].getIntValue());
                     slot.dest = particleModDestCanonical (slot.dest);
                     slot.op = (ParticleModOp) juce::jlimit (0, 2, parts[3].getIntValue());
                     if (parts.size() > 4)
@@ -3088,6 +3122,14 @@ void EqEditor::loadUiPrefs()
         mainComponent->setSpec3DSssMaxThickness (spec3DSssMaxThick, false);
         mainComponent->setSpec3DParticleModeEnabled (spec3DParticle, false);
         mainComponent->setSpec3DParticleEmitMode (spec3DParticleEmitMode, false);
+        mainComponent->setSpec3DParticleEmitterType (spec3DParticleEmitterType, false);
+        mainComponent->setSpec3DParticleEmitterPos (spec3DParticleEmitterPosX, spec3DParticleEmitterPosY,
+                                                    spec3DParticleEmitterPosZ, false);
+        mainComponent->setSpec3DParticleSprayYawDeg (spec3DParticleSprayYaw, false);
+        mainComponent->setSpec3DParticleSprayPitchDeg (spec3DParticleSprayPitch, false);
+        mainComponent->setSpec3DParticleSpraySpreadDeg (spec3DParticleSpraySpread, false);
+        mainComponent->setSpec3DParticleSpraySpeedMin (spec3DParticleSpraySpeedMin, false);
+        mainComponent->setSpec3DParticleSpraySpeedMax (spec3DParticleSpraySpeedMax, false);
         mainComponent->setSpec3DParticleBindingMode (spec3DParticleBinding, false);
         mainComponent->setSpec3DParticleEmission (spec3DParticleEmission, false);
         mainComponent->setSpec3DParticleSpawnJitter (spec3DParticleSpawnJitter, false);
@@ -3151,7 +3193,13 @@ void EqEditor::loadUiPrefs()
         c.randomizeRampSpectrogram3D = randRampSpec3D;
         c.randomizeRampSpectrumFill = randRampFill;
         c.orderedRampGradation = orderedRampGradation;
+        c.enforceLegibleText = enforceLegibleText;
+        c.textContrastAmount = textContrastAmount;
+        // Re-apply text vs background contrast (Scope + global) after theme restore.
+        if (c.enforceLegibleText)
+            c.enforceLegibleTextContrast();
         mainComponent->getSharedResources().makeActive();
+        mainComponent->repaint();
     }
 
     // Compact / mod strip as last left (after MainComponent prefs so window height matches).
@@ -3213,6 +3261,8 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("randRampSpec3D", c.randomizeRampSpectrogram3D);
         xml->setAttribute ("randRampFill", c.randomizeRampSpectrumFill);
         xml->setAttribute ("orderedRampGradation", c.orderedRampGradation);
+        xml->setAttribute ("enforceLegibleText", c.enforceLegibleText);
+        xml->setAttribute ("textContrastAmount", (double) c.textContrastAmount);
     }
     xml->setAttribute ("lastScopeWidth", lastScopeWidth);
     xml->setAttribute ("lastScopeHeight", lastScopeHeight);
@@ -3414,10 +3464,21 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dSssMaxThick", (double) mainComponent->getSpec3DSssMaxThickness());
         xml->setAttribute ("spec3dParticleMode", mainComponent->isSpec3DParticleModeEnabled());
         xml->setAttribute ("spec3dParticleEmitMode", mainComponent->getSpec3DParticleEmitMode());
+        xml->setAttribute ("spec3dParticleEmitterType", mainComponent->getSpec3DParticleEmitterType());
+        xml->setAttribute ("spec3dParticleEmitterPosX", (double) mainComponent->getSpec3DParticleEmitterPosX());
+        xml->setAttribute ("spec3dParticleEmitterPosY", (double) mainComponent->getSpec3DParticleEmitterPosY());
+        xml->setAttribute ("spec3dParticleEmitterPosZ", (double) mainComponent->getSpec3DParticleEmitterPosZ());
+        xml->setAttribute ("spec3dParticleSprayYaw", (double) mainComponent->getSpec3DParticleSprayYawDeg());
+        xml->setAttribute ("spec3dParticleSprayPitch", (double) mainComponent->getSpec3DParticleSprayPitchDeg());
+        xml->setAttribute ("spec3dParticleSpraySpread", (double) mainComponent->getSpec3DParticleSpraySpreadDeg());
+        xml->setAttribute ("spec3dParticleSpraySpeedMin", (double) mainComponent->getSpec3DParticleSpraySpeedMin());
+        xml->setAttribute ("spec3dParticleSpraySpeedMax", (double) mainComponent->getSpec3DParticleSpraySpeedMax());
         xml->setAttribute ("spec3dParticleBinding", mainComponent->getSpec3DParticleBindingMode());
         xml->setAttribute ("spec3dParticleEmission", (double) mainComponent->getSpec3DParticleEmission());
         xml->setAttribute ("spec3dParticleEmissionV2", 1);
         xml->setAttribute ("spec3dParticleEmissionV3", 1); // particles/sec
+        xml->setAttribute ("spec3dParticleDefaultsV70k", 1);
+        xml->setAttribute ("spec3dParticleDefaultsV70kApplied", 1); // 70k / 40k / GPU actually applied
         xml->setAttribute ("spec3dParticleSpawnJitter", (double) mainComponent->getSpec3DParticleSpawnJitter());
         xml->setAttribute ("spec3dParticleSpeed", (double) mainComponent->getSpec3DParticleInitVelY()); // legacy
         xml->setAttribute ("spec3dParticleInitVelX", (double) mainComponent->getSpec3DParticleInitVelX());

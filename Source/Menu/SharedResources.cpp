@@ -410,6 +410,11 @@ void SharedColors::enforceLegibleTextContrast() noexcept
 
     const float minRatio = minRatioFromAmount (textContrastAmount);
     const auto graphBg = blendBg (graphBackground, graphBackground2);
+    const auto oscBg = blendBg (oscBackground, oscBackground2);
+    const auto gonBg = blendBg (gonBackground, gonBackground2);
+    const auto spectrumBg = blendBg (spectrumBackground, spectrumBackground2);
+    // Scope cards / maximize fills sit on a slightly darkened osc well.
+    const auto scopeWell = oscBackground.darker (0.08f);
 
     auto fix = [&] (juce::Colour& text, juce::Colour bg)
     {
@@ -439,7 +444,16 @@ void SharedColors::enforceLegibleTextContrast() noexcept
 
     fix (knobPopupText, knobPopupBackground);
     fix (meterReadoutText, meterBackground);
-    fix (spectrumText, blendBg (spectrumBackground, spectrumBackground2));
+    // Scope mode modules (level / loudness / histogram / etc.) paint on osc wells.
+    fix (meterReadoutText, scopeWell);
+    fix (meterReadoutText, oscBg);
+    fix (spectrumText, spectrumBg);
+
+    // Scope grid / zoom / goniometer labels share graphAxisText + scopeDropOutline ink.
+    fix (graphAxisText, scopeWell);
+    fix (graphAxisText, oscBg);
+    fix (graphAxisText, gonBg);
+    fix (scopeDropOutline, scopeWell);
 }
 
 juce::Colour SharedColors::legibleTextOn (juce::Colour text, juce::Colour background) const noexcept

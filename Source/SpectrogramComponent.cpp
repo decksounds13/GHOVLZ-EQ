@@ -694,8 +694,46 @@ void SpectrogramComponent::advanceFromRing()
         const int windowEnd = ringReadPos + analysisWindow;
         const int mainStart = windowEnd - fftSize;
 
+        float peakAbs = 0.0f;
         for (int i = 0; i < fftSize; ++i)
-            windowed[(size_t) i] = readChannelSample (mainStart + i);
+        {
+            const float s = readChannelSample (mainStart + i);
+            windowed[(size_t) i] = s;
+            peakAbs = juce::jmax (peakAbs, std::abs (s));
+        }
+
+        // Near-silence: deposit a solid floor column and skip FFT/reassignment.
+        // Residual host dither / denoise noise below this still sparked the LUT
+        // (most visible in Scope with no program audio). ~-86 dBFS peak.
+        constexpr float kSilencePeak = 5.0e-5f;
+        if (peakAbs < kSilencePeak)
+        {
+            if ((int) columnScratch.size() != internalH)
+                columnScratch.assign ((size_t) juce::jmax (0, internalH), -120.0f);
+            else
+                std::fill (columnScratch.begin(), columnScratch.end(), -120.0f);
+
+            // Keep smoothers at floor so the next audible frame doesn't smear up from noise.
+            if ((int) columnDb.size() >= numBins)
+                std::fill (columnDb.begin(), columnDb.begin() + numBins, -120.0f);
+            if (! columnDbLf.empty())
+                std::fill (columnDbLf.begin(), columnDbLf.end(), -120.0f);
+            if (! columnDbMid.empty())
+                std::fill (columnDbMid.begin(), columnDbMid.end(), -120.0f);
+
+            havePrevPhase = false;
+            havePrevPhaseLf = false;
+            havePrevPhaseMid = false;
+
+            appendDisplayColumn (columnScratch.data());
+            if (dualHistory)
+                appendHistory3DColumn (columnScratch.data());
+
+            ringReadPos = (ringReadPos + hop) % cap;
+            available -= hop;
+            ++columnsWritten;
+            continue;
+        }
 
         window->multiplyWithWindowingTable (windowed.data(), (size_t) fftSize);
         std::fill (fftWork.begin(), fftWork.end(), 0.0f);
@@ -1081,11 +1119,21 @@ void SpectrogramComponent::colouriseColumnIntoImage (int x, const float* dbRows,
     const float brightAdj = expanded ? brightness : brightness * 2.75f;
     const float dbGain = juce::Decibels::gainToDecibels (juce::jmax (brightAdj, 1.0e-3f), -100.0f);
     const float denom = juce::jmax (1.0f, maxDb - minDb);
+    // Floor colour (LUT 0) — used for pure silence so brightness never lifts digital floor.
+    const auto floorColour = juce::Colour (colourLut[0]);
 
     juce::Image::BitmapData pixels (scrollImage, juce::Image::BitmapData::readWrite);
     for (int y = 0; y < internalH; ++y)
     {
-        const float dbAdj = dbRows[y] + dbGain;
+        const float db = dbRows[y];
+        // Anything at/under display floor stays pure LUT 0 (no brightness boost sparkle).
+        if (db <= minDb + 0.01f || db <= -119.0f)
+        {
+            pixels.setPixelColour (x, y, floorColour);
+            continue;
+        }
+
+        const float dbAdj = db + dbGain;
         const float norm = juce::jlimit (0.0f, 1.0f, (dbAdj - minDb) / denom);
         const int lutIdx = juce::jlimit (0, kLutSize - 1,
                                          (int) std::lround (norm * (float) (kLutSize - 1)));
@@ -1480,7 +1528,8 @@ void SpectrogramComponent::paintFrequencyGrid (juce::Graphics& g, juce::Rectangl
 
         if (major && bounds.getWidth() > 120.0f)
         {
-            g.setColour (theme.graphAxisText.withAlpha (0.85f));
+            const auto labelBg = theme.oscBackground.darker (0.12f);
+            g.setColour (theme.legibleTextOn (theme.graphAxisText, labelBg).withAlpha (0.90f));
             g.setFont (juce::FontOptions (11.0f));
             g.drawText (formatGridHz (hz),
                         juce::Rectangle<float> (bounds.getX() + 6.0f, y - 8.0f, 44.0f, 16.0f),
@@ -1512,7 +1561,8 @@ void SpectrogramComponent::paint (juce::Graphics& g)
     }
     else
     {
-        g.fillAll (theme.oscBackground);
+        // Expanded / Scope / maximize / F11: fully opaque so nothing shows through.
+        g.fillAll (theme.oscBackground.darker (0.12f));
     }
 
     if (scrollImage.isValid())

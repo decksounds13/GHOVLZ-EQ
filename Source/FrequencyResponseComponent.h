@@ -8,8 +8,10 @@
 #include "BinaryData.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 #include <array>
+#include <bitset>
 #include <cmath>
 #include <functional>
+#include <vector>
 
 class EqProcessor; // Forward declaration
 class EqEditor;    // Forward declaration
@@ -200,6 +202,9 @@ public:
     void mouseDoubleClick(const juce::MouseEvent& event) override;
     void mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
     void mouseMove(const juce::MouseEvent& event) override;
+
+    /** Clear marquee multi-selection of band handles. */
+    void clearMultiBandSelection() noexcept;
 
     void showOptionBoxForHandle (int bandIndex, float handlePosX, float handlePosY);
     /** Open / focus OptionBox for a band using its current handle position (faceplate clicks). */
@@ -631,6 +636,39 @@ private:
 
     
     int activeBand = -1; // Initialize it to -1 to indicate no active band at the start
+
+    // Multi-select band handles (marquee + group drag).
+    // Bits 0–7 = Bank1 internal indices; bits 8–63 = extended global display indices.
+    std::bitset<EqBand::kMaxBands> multiSelectedBands;
+    bool marqueeSelecting = false;
+    juce::Point<float> marqueeStart {};
+    juce::Point<float> marqueeEnd {};
+    bool groupDragging = false;
+    juce::Point<float> groupDragOrigin {};
+    struct GroupDragAnchor
+    {
+        int bandKey = -1; // same indexing as multiSelectedBands
+        float freqHz = 1000.0f;
+        float gainDb = 0.0f;
+        float startX = 0.0f;
+        float startY = 0.0f;
+        bool usesGain = true;
+    };
+    std::vector<GroupDragAnchor> groupDragAnchors;
+
+    bool isMultiBandSelected (int bandKey) const noexcept;
+    juce::Point<float> getHandlePosForBandKey (int bandKey) const noexcept;
+    void setMultiSelectionFromRect (juce::Rectangle<float> rect);
+    void beginGroupDrag (int primaryBandKey, const juce::MouseEvent& event);
+    void updateGroupDrag (const juce::MouseEvent& event);
+    void endGroupDrag();
+    void paintMarqueeSelection (juce::Graphics& g) const;
+    void paintMultiSelectRings (juce::Graphics& g) const;
+    juce::String frequencyParamIdForBandKey (int bandKey) const;
+    juce::String gainParamIdForBandKey (int bandKey) const;
+    int typeIndexForBandKey (int bandKey) const;
+    void markBandKeyDirty (int bandKey);
+    float frequencyToX (float freqHz, float width) const noexcept;
 
     int downsampleFactor = 5;
 

@@ -730,6 +730,8 @@ void OscilloscopeComponent::paint (juce::Graphics& g)
     const auto& theme = colors();
     auto waveArea = getLocalBounds().toFloat();
 
+    // Compact strip: self-contained window. Expanded / Scope: parent card supplies chrome;
+    // draw a soft plot well only.
     if (! expanded)
     {
         juce::Path window;
@@ -739,12 +741,23 @@ void OscilloscopeComponent::paint (juce::Graphics& g)
         g.setColour (theme.oscBackground2.withAlpha (140.0f / 255.0f));
         g.strokePath (window, juce::PathStrokeType (1.0f));
     }
+    else
+    {
+        // Expanded / Scope maximize / F11: solid fill — no transparency under the plot.
+        g.fillAll (theme.oscBackground.darker (0.15f));
+        g.setColour (theme.scopeDropOutline.withAlpha (0.12f));
+        g.drawRect (waveArea.reduced (0.5f), 1.0f);
+    }
 
     auto drawZoomLabel = [this, &g, &theme]()
     {
         const float fontH = expanded ? 13.0f : 10.5f;
         g.setFont (juce::FontOptions().withHeight (fontH));
-        g.setColour (theme.graphAxisText.withAlpha (expanded ? 0.70f : 0.55f));
+        {
+            const auto labelBg = expanded ? theme.oscBackground.darker (0.15f) : theme.oscBackground;
+            const auto ink = theme.legibleTextOn (theme.graphAxisText, labelBg);
+            g.setColour (ink.withAlpha (expanded ? 0.88f : 0.70f));
+        }
         auto textArea = getLocalBounds().reduced (expanded ? 10 : 5, expanded ? 8 : 3);
         g.drawText (getZoomLabel(),
                     textArea.removeFromBottom (expanded ? 16 : 13),

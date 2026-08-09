@@ -660,21 +660,21 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                      "(no cost when disabled).");
     setupLookToggle (particleGpuSimToggle,
                      "Hybrid GPU path: force/age integrate + compact to instance buffer on the GPU "
-                     "(OpenGL 4.3 compute). CPU is the default and always works. GPU needs a 4.3+ "
-                     "context; if compute fails, motion falls back to CPU automatically. "
+                     "(OpenGL 4.3 compute). GPU is the default; CPU always works as fallback. "
+                     "GPU needs a 4.3+ context; if compute fails, motion falls back to CPU automatically. "
                      "Resident GPU sim: positions stay on GPU (no multi-MB readback). "
                      "CPU handles spawn attrs + free-list; integrate/draw on GPU. "
                      "Works well into 100k+ live when compute is healthy.");
-    particleGpuSimToggle.setToggleState (false, juce::dontSendNotification);
+    particleGpuSimToggle.setToggleState (true, juce::dontSendNotification);
     particleMaxAliveLabel.setText ("Max particles", juce::dontSendNotification);
     // Drag range to 250k; type higher if needed (absolute safety hard cap is 1M in engine).
     setupParticleSlider (particleMaxAliveLabel, particleMaxAliveSlider, 256.0, 250000.0, 256.0,
-                         "Live particle budget (default 8192). Drag up to 250k; type higher if needed.\n"
+                         "Live particle budget (default 70000). Drag up to 250k; type higher if needed.\n"
                          "This is the only particle count limit — no hidden GPU/CPU soft caps.\n"
                          "Raising Max does not allocate immediately; pool grows as particles spawn.\n"
                          "At Max: spawn stops and oldest are culled — should not crash.\n"
                          "Emission controls fill rate toward Max.");
-    setSliderActual (particleMaxAliveSlider, 8192.0);
+    setSliderActual (particleMaxAliveSlider, 70000.0);
     setupLookToggle (particleDebugOverlayToggle,
                      "Show live particle stats on the 3D view (alive / budget / pool / "
                      "spawned / culled). Useful when tuning emission without crashing.");
@@ -688,6 +688,17 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
             main->clearSpec3DParticles();
     };
     addAndMakeVisible (particleClearButton);
+    styleSaveDefaultButton (particleNodeGraphButton);
+    particleNodeGraphButton.setButtonText ("Open Particle Node Graph…");
+    particleNodeGraphButton.setTooltip (
+        "Embergen / Houdini / UE-style node graph for emitters, forces, and math. "
+        "Typed wires; red = type mismatch.");
+    particleNodeGraphButton.onClick = [this]
+    {
+        if (auto* main = findParentComponentOfClass<MainComponent>())
+            main->showParticleNodeGraphWindow();
+    };
+    addAndMakeVisible (particleNodeGraphButton);
     styleLabel (particleBindingLabel);
     particleBindingLabel.setText ("Binding", juce::dontSendNotification);
     styleCombo (particleBindingCombo);
@@ -703,6 +714,25 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     };
     addAndMakeVisible (particleBindingLabel);
     addAndMakeVisible (particleBindingCombo);
+    styleLabel (particleEmitterTypeLabel);
+    particleEmitterTypeLabel.setText ("Emitter", juce::dontSendNotification);
+    styleCombo (particleEmitterTypeCombo);
+    particleEmitterTypeCombo.addItem ("Spectrogram", 1);
+    particleEmitterTypeCombo.addItem ("Point", 2);
+    particleEmitterTypeCombo.addItem ("Sphere", 3);
+    particleEmitterTypeCombo.addItem ("Box", 4);
+    particleEmitterTypeCombo.addItem ("Disc", 5);
+    particleEmitterTypeCombo.addItem ("Cone", 6);
+    particleEmitterTypeCombo.setSelectedId (1, juce::dontSendNotification);
+    particleEmitterTypeCombo.setTooltip ("Particle emitter source. Spectrogram is the default.");
+    particleEmitterTypeCombo.onChange = [this]
+    {
+        updateLookDevVisibility();
+        applyLookControlsToMain();
+        requestParentRelayout();
+    };
+    addAndMakeVisible (particleEmitterTypeLabel);
+    addAndMakeVisible (particleEmitterTypeCombo);
     styleLabel (particleEmitModeLabel);
     particleEmitModeLabel.setText ("Emit mode", juce::dontSendNotification);
     styleCombo (particleEmitModeCombo);
@@ -723,13 +753,37 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     };
     addAndMakeVisible (particleEmitModeLabel);
     addAndMakeVisible (particleEmitModeCombo);
+    particleEmitterPosXLabel.setText ("Emitter X", juce::dontSendNotification);
+    setupParticleSlider (particleEmitterPosXLabel, particleEmitterPosXSlider, -2.0, 2.0, 0.01, "Emitter origin X");
+    setSliderActual (particleEmitterPosXSlider, 0.0);
+    particleEmitterPosYLabel.setText ("Emitter Y", juce::dontSendNotification);
+    setupParticleSlider (particleEmitterPosYLabel, particleEmitterPosYSlider, -1.0, 3.0, 0.01, "Emitter origin Y");
+    setSliderActual (particleEmitterPosYSlider, 0.25);
+    particleEmitterPosZLabel.setText ("Emitter Z", juce::dontSendNotification);
+    setupParticleSlider (particleEmitterPosZLabel, particleEmitterPosZSlider, -2.0, 2.0, 0.01, "Emitter origin Z");
+    setSliderActual (particleEmitterPosZSlider, 0.0);
+    particleSprayYawLabel.setText ("Spray yaw°", juce::dontSendNotification);
+    setupParticleSlider (particleSprayYawLabel, particleSprayYawSlider, -180.0, 180.0, 0.5, "Spray aim yaw");
+    setSliderActual (particleSprayYawSlider, 0.0);
+    particleSprayPitchLabel.setText ("Spray pitch°", juce::dontSendNotification);
+    setupParticleSlider (particleSprayPitchLabel, particleSprayPitchSlider, -90.0, 90.0, 0.5, "Spray aim pitch (90 = up)");
+    setSliderActual (particleSprayPitchSlider, 90.0);
+    particleSpraySpreadLabel.setText ("Spray spread°", juce::dontSendNotification);
+    setupParticleSlider (particleSpraySpreadLabel, particleSpraySpreadSlider, 0.0, 180.0, 0.5, "Cone half-angle");
+    setSliderActual (particleSpraySpreadSlider, 15.0);
+    particleSpraySpeedMinLabel.setText ("Spray speed min", juce::dontSendNotification);
+    setupParticleSlider (particleSpraySpeedMinLabel, particleSpraySpeedMinSlider, 0.0, 10.0, 0.01, "Min birth speed along spray");
+    setSliderActual (particleSpraySpeedMinSlider, 1.0);
+    particleSpraySpeedMaxLabel.setText ("Spray speed max", juce::dontSendNotification);
+    setupParticleSlider (particleSpraySpeedMaxLabel, particleSpraySpeedMaxSlider, 0.0, 10.0, 0.01, "Max birth speed along spray");
+    setSliderActual (particleSpraySpeedMaxSlider, 1.0);
     particleEmissionLabel.setText ("Emission rate (particles/s)", juce::dontSendNotification);
     setupParticleSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 100000.0, 1.0,
                          "Particles spawned per second (total across the field). "
-                         "Default 1000; drag 0–100k; type higher if needed. "
+                         "Default 40000; drag 0–100k; type higher if needed. "
                          "Live count ≈ rate × lifespan (until Max particles). "
                          "Continuous and slice modes share this same particles/s budget.");
-    setSliderActual (particleEmissionSlider, 1000.0);
+    setSliderActual (particleEmissionSlider, 40000.0);
     particleSpawnJitterLabel.setText ("Spawn jitter", juce::dontSendNotification);
     setupParticleSlider (particleSpawnJitterLabel, particleSpawnJitterSlider, 0.0, 0.5, 0.001,
                          "Randomize each particle's spawn offset (world units). "
@@ -873,11 +927,11 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (particleMeshLabel);
     particleMeshLabel.setText ("Mesh shape", juce::dontSendNotification);
     styleCombo (particleMeshCombo);
-    particleMeshCombo.addItem ("Sphere (instanced)", 1);
-    particleMeshCombo.addItem ("Cube (instanced)", 2);
-    particleMeshCombo.addItem ("Billboard sprite", 3);
+    particleMeshCombo.addItem ("Sphere", 1);
+    particleMeshCombo.addItem ("Cube", 2);
+    particleMeshCombo.addItem ("Billboard", 3);
     particleMeshCombo.setSelectedId (1, juce::dontSendNotification);
-    particleMeshCombo.setTooltip ("GPU-instanced low-poly mesh (default) or soft billboard sprites.");
+    particleMeshCombo.setTooltip ("Particle mesh shape");
     particleMeshCombo.onChange = [this]
     {
         updateLookDevVisibility();
@@ -950,10 +1004,12 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     {
         c.clear (juce::dontSendNotification);
         // Item id = enum + 1 (stable for prefs).
+        // FFT strength = per-bin intensity 0–1 (colour ramp / mesh height axis).
+        // Labels include type suffix via particleModSourceMenuLabel, e.g. "Init vel (Vec3)".
         const ParticleModSource sources[] = {
             ParticleModSource::none,
             ParticleModSource::amplitude,
-            ParticleModSource::binDb,
+            ParticleModSource::binDb,       // menu: "FFT strength"
             ParticleModSource::binFreq,
             ParticleModSource::ageNorm,
             ParticleModSource::history,
@@ -961,7 +1017,10 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
             ParticleModSource::random1,
             ParticleModSource::random2,
             ParticleModSource::random3,
-            ParticleModSource::initVel,
+            ParticleModSource::initVel,     // Vec3 — full birth velocity
+            ParticleModSource::initVelX,    // Float — X only
+            ParticleModSource::initVelY,    // Float — Y only
+            ParticleModSource::initVelZ,    // Float — Z only
             ParticleModSource::particleId,
         };
         for (auto s : sources)
@@ -971,10 +1030,14 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     auto fillModDest = [] (juce::ComboBox& c)
     {
         c.clear (juce::dontSendNotification);
+        // Labels include type, e.g. "Init vel (Vec3)", "Init vel X (Float)".
         const ParticleModDest dests[] = {
             ParticleModDest::emission,
-            ParticleModDest::initVel,
-            ParticleModDest::riseSpeed, // legacy: Init vel Y only
+            ParticleModDest::initVel,      // Vec3 — all axes
+            ParticleModDest::initVelX,     // Float
+            ParticleModDest::initVelY,     // Float (preferred over riseSpeed)
+            ParticleModDest::initVelZ,     // Float
+            ParticleModDest::riseSpeed,    // legacy: same as Init vel Y
             ParticleModDest::lifespan,
             ParticleModDest::size,
             ParticleModDest::colourGain,
@@ -1023,7 +1086,13 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
 
         styleCombo (row.source);
         fillModSource (row.source);
-        row.source.setTooltip ("Modulation source");
+        row.source.setTooltip (
+            "Modulation source.\n"
+            "FFT strength: 0–1 intensity at this particle's frequency (same axis as the "
+            "colour ramp — hottest bins = 1). Live-sampled as the trail scrolls so it can "
+            "drive size / emissive / alpha / colour after birth.\n"
+            "Amplitude: whole-playhead energy (global).\n"
+            "Bin freq: 0–1 frequency position of the particle.");
         row.source.onChange = [this]
         {
             updateLookDevVisibility();
@@ -1477,10 +1546,31 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (particleMaxAliveSlider, particleOn);
     setLookChildVisible (particleDebugOverlayToggle, particleOn);
     setLookChildVisible (particleClearButton, particleOn);
+    setLookChildVisible (particleNodeGraphButton, particleOn);
     setLookChildVisible (particleBindingLabel, particleOn);
     setLookChildVisible (particleBindingCombo, particleOn);
-    setLookChildVisible (particleEmitModeLabel, particleOn);
-    setLookChildVisible (particleEmitModeCombo, particleOn);
+    setLookChildVisible (particleEmitterTypeLabel, particleOn);
+    setLookChildVisible (particleEmitterTypeCombo, particleOn);
+    const bool spectroEmitter = particleOn && particleEmitterTypeCombo.getSelectedId() == 1;
+    setLookChildVisible (particleEmitModeLabel, spectroEmitter);
+    setLookChildVisible (particleEmitModeCombo, spectroEmitter);
+    const bool sprayOn = particleOn && particleEmitterTypeCombo.getSelectedId() != 1;
+    setLookChildVisible (particleEmitterPosXLabel, sprayOn);
+    setLookChildVisible (particleEmitterPosXSlider, sprayOn);
+    setLookChildVisible (particleEmitterPosYLabel, sprayOn);
+    setLookChildVisible (particleEmitterPosYSlider, sprayOn);
+    setLookChildVisible (particleEmitterPosZLabel, sprayOn);
+    setLookChildVisible (particleEmitterPosZSlider, sprayOn);
+    setLookChildVisible (particleSprayYawLabel, sprayOn);
+    setLookChildVisible (particleSprayYawSlider, sprayOn);
+    setLookChildVisible (particleSprayPitchLabel, sprayOn);
+    setLookChildVisible (particleSprayPitchSlider, sprayOn);
+    setLookChildVisible (particleSpraySpreadLabel, sprayOn);
+    setLookChildVisible (particleSpraySpreadSlider, sprayOn);
+    setLookChildVisible (particleSpraySpeedMinLabel, sprayOn);
+    setLookChildVisible (particleSpraySpeedMinSlider, sprayOn);
+    setLookChildVisible (particleSpraySpeedMaxLabel, sprayOn);
+    setLookChildVisible (particleSpraySpeedMaxSlider, sprayOn);
     setLookChildVisible (particleEmissionLabel, particleOn);
     setLookChildVisible (particleEmissionSlider, particleOn);
     setLookChildVisible (particleSpawnJitterLabel, particleOn);
@@ -1522,7 +1612,7 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (particleEmissiveStrSlider, particleOn);
     setLookChildVisible (particleMeshLabel, particleOn);
     setLookChildVisible (particleMeshCombo, particleOn);
-    const bool meshRotOn = particleOn && particleMeshCombo.getSelectedId() != 3; // not billboard
+    const bool meshRotOn = particleOn && particleMeshCombo.getSelectedId() != 3;
     setLookChildVisible (particleInitRotXLabel, meshRotOn);
     setLookChildVisible (particleInitRotXSlider, meshRotOn);
     setLookChildVisible (particleInitRotYLabel, meshRotOn);
@@ -2068,7 +2158,16 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
                      : "\n\nCompute not ready yet (needs particle draw once, or GL 4.3 unavailable)."));
     }
     particleBindingCombo.setSelectedId (main->getSpec3DParticleBindingMode() + 1, juce::dontSendNotification);
+    particleEmitterTypeCombo.setSelectedId (main->getSpec3DParticleEmitterType() + 1, juce::dontSendNotification);
     particleEmitModeCombo.setSelectedId (main->getSpec3DParticleEmitMode() + 1, juce::dontSendNotification);
+    setSliderActual (particleEmitterPosXSlider, main->getSpec3DParticleEmitterPosX());
+    setSliderActual (particleEmitterPosYSlider, main->getSpec3DParticleEmitterPosY());
+    setSliderActual (particleEmitterPosZSlider, main->getSpec3DParticleEmitterPosZ());
+    setSliderActual (particleSprayYawSlider, main->getSpec3DParticleSprayYawDeg());
+    setSliderActual (particleSprayPitchSlider, main->getSpec3DParticleSprayPitchDeg());
+    setSliderActual (particleSpraySpreadSlider, main->getSpec3DParticleSpraySpreadDeg());
+    setSliderActual (particleSpraySpeedMinSlider, main->getSpec3DParticleSpraySpeedMin());
+    setSliderActual (particleSpraySpeedMaxSlider, main->getSpec3DParticleSpraySpeedMax());
     setSliderActual (particleEmissionSlider, main->getSpec3DParticleEmission());
     setSliderActual (particleSpawnJitterSlider, main->getSpec3DParticleSpawnJitter());
     setSliderActual (particleEmitCatchupSlider, main->getSpec3DParticleEmitCatchupHz());
@@ -2367,6 +2466,11 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     main->setSpec3DParticleDebugOverlayEnabled (particleDebugOverlayToggle.getToggleState(), kSave);
     main->setSpec3DParticleBindingMode (juce::jmax (0, particleBindingCombo.getSelectedId() - 1), kSave);
     {
+        const int emitterId = particleEmitterTypeCombo.getSelectedId();
+        if (emitterId >= 1)
+            main->setSpec3DParticleEmitterType (emitterId - 1, kSave);
+    }
+    {
         // Combo ids: 1 = Slice, 2 = Continuous (default).
         // Never treat id 0 / no selection as Slice — that silently forced Slice on every
         // applyLook pass while the combo was hidden or mid-refresh.
@@ -2377,6 +2481,14 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
             main->setSpec3DParticleEmitMode (0, kSave); // slice
         // else: leave engine mode unchanged
     }
+    main->setSpec3DParticleEmitterPos ((float) getSliderActual (particleEmitterPosXSlider),
+                                       (float) getSliderActual (particleEmitterPosYSlider),
+                                       (float) getSliderActual (particleEmitterPosZSlider), kSave);
+    main->setSpec3DParticleSprayYawDeg ((float) getSliderActual (particleSprayYawSlider), kSave);
+    main->setSpec3DParticleSprayPitchDeg ((float) getSliderActual (particleSprayPitchSlider), kSave);
+    main->setSpec3DParticleSpraySpreadDeg ((float) getSliderActual (particleSpraySpreadSlider), kSave);
+    main->setSpec3DParticleSpraySpeedMin ((float) getSliderActual (particleSpraySpeedMinSlider), kSave);
+    main->setSpec3DParticleSpraySpeedMax ((float) getSliderActual (particleSpraySpeedMaxSlider), kSave);
     main->setSpec3DParticleEmission ((float) getSliderActual (particleEmissionSlider), kSave);
     main->setSpec3DParticleSpawnJitter ((float) getSliderActual (particleSpawnJitterSlider), kSave);
     main->setSpec3DParticleInitVelX ((float) getSliderActual (particleInitVelXSlider), kSave);
@@ -2456,7 +2568,7 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
     const int baseSliderRows = 4; // mesh height + HF density + density start + soft angle
     // base (+ closed) + look masters (+ SSS + DOF + dome + SSGI + SSR + tonemap
     // + cast shadows + energy when lit + audio level)
-    int toggles = 5 + 14; // includes tonemap + audio + SSR + cast + particle; energy when lit
+    int toggles = 4 + 15; // tonemap + audio + SSR + cast + particle; energy when lit
     if (lightingToggle.getToggleState())
         toggles += 1; // energy conserving
     if (audioLevelToggle.getToggleState())
@@ -2516,8 +2628,12 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
         toggles += 1; // GPU particle integrate
         lookRows += 1; // max particles
         toggles += 1; // debug overlay
-        lookRows += 1; // clear button (approx one row)
-        lookRows += 2; // binding + emit mode
+        lookRows += 2; // clear + node graph buttons
+        lookRows += 2; // binding + emitter type
+        if (particleEmitterTypeCombo.getSelectedId() == 1)
+            lookRows += 1; // emit mode (spectrogram only)
+        if (particleEmitterTypeCombo.getSelectedId() != 1)
+            lookRows += 8; // emitter pos XYZ + spray yaw/pitch/spread/speed min/max
         lookRows += 7; // emission, jitter, init vel XYZ, vel random, lifespan
         if (particleLifespanSlider.getValue() > 1.0e-4)
             lookRows += 1;
@@ -2767,9 +2883,24 @@ void Spectrogram3DSettingsComponent::Content::resized()
         layoutSliderRow (area, particleMaxAliveLabel, particleMaxAliveSlider);
         layoutToggle (area, particleDebugOverlayToggle);
         particleClearButton.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (160, area.getWidth())));
+        area.removeFromTop (4);
+        particleNodeGraphButton.setBounds (area.removeFromTop (24).removeFromLeft (juce::jmin (220, area.getWidth())));
         area.removeFromTop (8);
         layoutComboRow (area, particleBindingLabel, particleBindingCombo);
-        layoutComboRow (area, particleEmitModeLabel, particleEmitModeCombo);
+        layoutComboRow (area, particleEmitterTypeLabel, particleEmitterTypeCombo);
+        if (particleEmitterTypeCombo.getSelectedId() == 1)
+            layoutComboRow (area, particleEmitModeLabel, particleEmitModeCombo);
+        if (particleEmitterTypeCombo.getSelectedId() != 1)
+        {
+            layoutSliderRow (area, particleEmitterPosXLabel, particleEmitterPosXSlider);
+            layoutSliderRow (area, particleEmitterPosYLabel, particleEmitterPosYSlider);
+            layoutSliderRow (area, particleEmitterPosZLabel, particleEmitterPosZSlider);
+            layoutSliderRow (area, particleSprayYawLabel, particleSprayYawSlider);
+            layoutSliderRow (area, particleSprayPitchLabel, particleSprayPitchSlider);
+            layoutSliderRow (area, particleSpraySpreadLabel, particleSpraySpreadSlider);
+            layoutSliderRow (area, particleSpraySpeedMinLabel, particleSpraySpeedMinSlider);
+            layoutSliderRow (area, particleSpraySpeedMaxLabel, particleSpraySpeedMaxSlider);
+        }
         layoutSliderRow (area, particleEmissionLabel, particleEmissionSlider);
         layoutSliderRow (area, particleSpawnJitterLabel, particleSpawnJitterSlider);
         layoutSliderRow (area, particleInitVelXLabel, particleInitVelXSlider);

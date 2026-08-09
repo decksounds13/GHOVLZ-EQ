@@ -138,7 +138,15 @@ public:
     void setScopeTapPost (bool shouldTapPost) noexcept;
     bool isScopeTapPost() const noexcept { return scopeTapPost.load (std::memory_order_acquire); }
 
-    /** True when spectrum analyser should run (pref on and Eco off; always on in Scope mode). */
+    /**
+        When a Scope module is maximized / OS-fullscreen: -1 = no solo (all run),
+        else ScopeModuleId cast to int. Spectrum analyser only runs if solo is Spectrum
+        (or no solo). Audio-thread safe.
+    */
+    void setScopeSoloModule (int moduleIdOrNeg1) noexcept;
+    int getScopeSoloModule() const noexcept { return scopeSoloModule.load (std::memory_order_acquire); }
+
+    /** True when spectrum analyser should run (pref on and Eco off; Scope solo-aware). */
     bool isSpectrumAnalyserActive() const noexcept;
 
     bool acceptsMidi() const override;
@@ -601,6 +609,8 @@ private:
     std::atomic<bool> scopeMode { false };
     /** When Scope is on: true = Post (DSP on), false = Pre (analyzer / meteringOnly). */
     std::atomic<bool> scopeTapPost { false };
+    /** -1 = all Scope modules process; else only that ScopeModuleId is live. */
+    std::atomic<int> scopeSoloModule { -1 };
 
     /** -1 = off; otherwise Bank1 internal 0–7 or global display 8–63. */
     std::atomic<int> bandListenIndex { -1 };
