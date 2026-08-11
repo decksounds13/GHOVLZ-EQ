@@ -177,6 +177,19 @@ public:
     FrequencyResponseComponent(EqProcessor& processor);
     ~FrequencyResponseComponent();
 
+    /**
+        Spec3D right-click: skip building/drawing the cumulative (sum) EQ curve so
+        CPU stays free for particles. Per-band curves still update.
+    */
+    void setDisableCumulativeCurve (bool shouldDisable) noexcept;
+    bool isDisableCumulativeCurve() const noexcept { return disableCumulativeCurve; }
+
+    /**
+        Particle load hint for curve eco (from Spec3D). When particles are active /
+        dense, magnitude sampling and the D/S animation timer downres automatically.
+    */
+    void setParticleCurveEco (bool particlesActive, int aliveCount) noexcept;
+
     std::function<void()> handle1DragStart;
     std::function<void()> handle1DragEnd;
 
@@ -193,7 +206,14 @@ public:
     void showOptionBoxForBand (int bandIndex);
     void showHandleModMenu (int bandIndex);
     void resetBandToDefaultsAndDeactivate (int bandIndex);
-    void activateOrSelectBandAtFrequency (float frequencyHz);
+    /**
+        Enable a free band at frequencyHz with 0 dB gain.
+        @param typeOverride  If >= 0, force this FilterType index; else use slot/zone defaults.
+        @param preferPeaking Prefer free peaking slots first (harmonic stacking).
+    */
+    void activateOrSelectBandAtFrequency (float frequencyHz,
+                                          int typeOverride = -1,
+                                          bool preferPeaking = false);
     int bandIndexForFrequencyZone (float frequencyHz) const;
     float xToFrequency (float x) const;
     void updateAuditionBandpassFromMouse (const juce::MouseEvent& event);
@@ -475,6 +495,18 @@ private:
     /** Mark dyn/spectral-active bands (and the sum) dirty so the next paint rebuilds. */
     void markActiveDynamicBandsDirty();
     void timerCallback() override;
+
+    /** Magnitude eval stride for IIR / GR grids (1 = full res). */
+    int resolveMagnitudeSampleStep() const noexcept;
+    /** D/S animation timer rate — lower under particle load. */
+    int resolveDynamicCurveTimerHz() const noexcept;
+    /** True when sum curve should not be rebuilt or drawn. */
+    bool shouldSkipCombinedCurveWork() const noexcept;
+
+    bool disableCumulativeCurve = false;
+    bool particleCurveEcoActive = false;
+    int particleCurveEcoAlive = 0;
+    int lastResolvedMagStep = 1;
 
     // Cached per-band magnitude responses (dB), sized to component width.
     // Rebuilt from APVTS target values (not audio-smoothed coeffs) so the curve tracks knobs/handles instantly.

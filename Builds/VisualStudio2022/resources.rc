@@ -17,9 +17,9 @@ BEGIN
     BLOCK "040904E4"
     BEGIN
       VALUE "CompanyName",  "Decksounds\0"
-      VALUE "FileDescription",  "ParametricEqProject\0"
+      VALUE "FileDescription",  "AnalyzerSuite\0"
       VALUE "FileVersion",  "1.0.0\0"
-      VALUE "ProductName",  "ParametricEqProject\0"
+      VALUE "ProductName",  "AnalyzerSuite\0"
       VALUE "ProductVersion",  "1.0.0\0"
     END
   END

@@ -35,6 +35,8 @@ public:
     void setHostBpm (double bpm) noexcept;
     void setEnabled (bool shouldEnable) noexcept;
     bool isScopeEnabled() const noexcept { return enabled.load (std::memory_order_relaxed); }
+    /** Pause/resume paint timer without changing enabled (Spec3D analyzer bypass). */
+    void setUiTimerRunning (bool shouldRun) noexcept;
 
     /** Zoom: 0 = 1 beat (most zoomed in) … larger = more beats on screen. */
     void zoomIn();

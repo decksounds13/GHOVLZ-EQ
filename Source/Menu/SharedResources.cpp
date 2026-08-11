@@ -362,7 +362,44 @@ juce::Colour ensureTextOnBackground (juce::Colour text, juce::Colour background,
             best = other;
     }
 
+    // Last resort: pure white / black — mid-sat band fills often need this for handle numbers.
+    if (contrastRatio (best, background) < minRatio * 0.9f)
+    {
+        const float a = text.getFloatAlpha();
+        const auto white = juce::Colours::white.withAlpha (a);
+        const auto black = juce::Colours::black.withAlpha (a);
+        best = (contrastRatio (white, background) >= contrastRatio (black, background)) ? white : black;
+    }
+
     return best;
+}
+
+juce::Colour nudgeFillAwayFromBackground (juce::Colour fill, juce::Colour background,
+                                          float minRatio) noexcept
+{
+    if (contrastRatio (fill, background) >= minRatio)
+        return fill;
+
+    const float h = fill.getHue();
+    const float s = juce::jmax (fill.getSaturation(), 0.35f); // keep some chroma
+    const float a = fill.getFloatAlpha();
+    const float bgY = relativeLuminance (background);
+    const bool lighten = bgY < 0.5f;
+
+    auto atV = [&] (float v) noexcept
+    {
+        return juce::Colour::fromHSV (h, s, juce::jlimit (0.0f, 1.0f, v), a);
+    };
+
+    float v = fill.getBrightness();
+    for (int i = 0; i < 12; ++i)
+    {
+        v = lighten ? juce::jmin (1.0f, v + 0.06f) : juce::jmax (0.0f, v - 0.06f);
+        const auto cand = atV (v);
+        if (contrastRatio (cand, background) >= minRatio)
+            return cand;
+    }
+    return atV (lighten ? 0.92f : 0.18f);
 }
 } // namespace
 
@@ -372,6 +409,7 @@ void SharedColors::enforceLegibleTextContrast() noexcept
         return;
 
     const float minRatio = minRatioFromAmount (textContrastAmount);
+    const auto graphBg = blendBg (graphBackground, graphBackground2);
 
     auto fix = [&] (juce::Colour& text, juce::Colour bg)
     {
@@ -388,8 +426,12 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     fix (pluginPresetText, pluginPresetBackground);
     fix (pluginBrandText, blendBg (pluginBackground, pluginBackground2));
 
-    fix (graphAxisText, blendBg (graphBackground, graphBackground2));
-    fix (graphHandleText, graphBackground);
+    fix (graphAxisText, graphBg);
+    // Handle numbers are drawn on band-coloured disks (not the graph); global
+    // graphHandleText is only a seed — per-handle ink is resolved at paint time.
+    // Still fix vs graph for crosshairs / fallbacks that use the same slot.
+    fix (graphHandleText, graphBg);
+    fix (graphHandleOutline, graphBg);
 
     fix (optionText, optionBackground);
     fix (optionComboText, optionComboBackground);
@@ -398,6 +440,26 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     fix (knobPopupText, knobPopupBackground);
     fix (meterReadoutText, meterBackground);
     fix (spectrumText, blendBg (spectrumBackground, spectrumBackground2));
+}
+
+juce::Colour SharedColors::legibleTextOn (juce::Colour text, juce::Colour background) const noexcept
+{
+    if (! enforceLegibleText)
+        return text;
+
+    return ensureTextOnBackground (text, background.withAlpha (1.0f),
+                                   minRatioFromAmount (textContrastAmount));
+}
+
+juce::Colour SharedColors::legibleHandleFill (juce::Colour fill, juce::Colour graphBackground) const noexcept
+{
+    const auto solid = fill.withAlpha (1.0f);
+    if (! enforceLegibleText)
+        return solid;
+
+    // Softer target than text — preserve band identity, just keep the disk visible.
+    constexpr float kHandleMinRatio = 1.85f;
+    return nudgeFillAwayFromBackground (solid, graphBackground.withAlpha (1.0f), kHandleMinRatio);
 }
 
 void SharedColors::randomizeColors()

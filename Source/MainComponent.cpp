@@ -1341,12 +1341,15 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     {
         menu.addSeparator();
         menu.addItem (30,
-                      isBypassOtherAnalyzers()
-                          ? "Resume Other Analyzers"
-                          : "Bypass Other Analyzers",
+                      "Bypass Other Analyzers",
                       true,
                       isBypassOtherAnalyzers());
-        // Checked item = currently bypassing. Freezes EQ spectrum + scopes; keeps Spec3D + meters.
+        // Checked = currently bypassing. Freezes EQ spectrum + scopes; keeps Spec3D + meters.
+        menu.addItem (31,
+                      "Bypass Cumulative Curve",
+                      true,
+                      isDisableCumulativeCurve());
+        // Checked = sum curve off — frees UI CPU for dense particles while DSP stays on.
         menu.addSeparator();
         appendModuleLookMenuItems (menu, ModuleLookPresets::Kind::spectrogram3D, 1000);
     };
@@ -1357,8 +1360,14 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
             setBypassOtherAnalyzers (! isBypassOtherAnalyzers());
             return true;
         }
+        if (result == 31)
+        {
+            setDisableCumulativeCurve (! isDisableCumulativeCurve());
+            return true;
+        }
         return handleModuleLookMenuResult (ModuleLookPresets::Kind::spectrogram3D, result, 1000);
     };
+    spectrogram3D.onParticleSimTick = [this] { syncParticleCurveEco(); };
     spectrogram3D.onAutoRotateSettingsChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onRampSequenceChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onRequestRampTimelineExpand = [this] { showRampTimelineWindow(); };
@@ -1876,6 +1885,9 @@ bool MainComponent::isPointOverSettingsDismissExempt (int catcherX, int catcherY
     // Framed expanded Osc / Gon / Spec windows.
     if (over (oscFrame) || over (gonFrame) || over (specFrame))
         return true;
+    if (rampTimelineWindow != nullptr && rampTimelineWindow->isFrameActive()
+        && over (*rampTimelineWindow))
+        return true;
 
     // Full-graph or Scope-mode analyser surfaces (not always-on-top).
     if (over (oscilloscope) || over (goniometer) || over (spectrogram))
@@ -2347,6 +2359,11 @@ bool MainComponent::collapseAnyExpandedScope()
     if (specExpanded) { setSpecExpanded (false); collapsed = true; }
     if (oscExpanded)  { setOscExpanded (false);  collapsed = true; }
     if (gonExpanded)  { setGonExpanded (false);  collapsed = true; }
+    if (rampTimelineWindow != nullptr && rampTimelineWindow->isFrameActive())
+    {
+        rampTimelineWindow->setFrameActive (false);
+        collapsed = true;
+    }
     return collapsed;
 }
 
@@ -2461,6 +2478,26 @@ bool MainComponent::isBypassOtherAnalyzers() const noexcept
     return processor.isBypassOtherAnalyzers();
 }
 
+void MainComponent::setDisableCumulativeCurve (bool shouldDisable) noexcept
+{
+    frequencyResponseComponent.setDisableCumulativeCurve (shouldDisable);
+}
+
+bool MainComponent::isDisableCumulativeCurve() const noexcept
+{
+    return frequencyResponseComponent.isDisableCumulativeCurve();
+}
+
+void MainComponent::syncParticleCurveEco() noexcept
+{
+    // Spec3D visible + particles on → FRC downreses sum/IIR sampling and slows D/S timer.
+    const bool particlesOn = (spec3DEnabled || (scopeModeEnabled
+                                && isScopeModuleEnabled (ScopeModuleId::spectrogram3D)))
+                             && spectrogram3D.isParticleModeEnabled();
+    const int alive = particlesOn ? spectrogram3D.getParticleAliveCount() : 0;
+    frequencyResponseComponent.setParticleCurveEco (particlesOn, alive);
+}
+
 void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
 {
     if (scopeModeEnabled)
@@ -2484,9 +2521,12 @@ void MainComponent::setSpec3DMode (bool shouldEnable, bool notifyPrefs)
     if (! shouldEnable && spec3DFullscreen)
         spec3DFullscreen = false;
 
-    // Closing Spec3D always restores other analyzers.
+    // Closing Spec3D always restores other analyzers + cumulative curve.
     if (! shouldEnable && isBypassOtherAnalyzers())
         setBypassOtherAnalyzers (false);
+    if (! shouldEnable && isDisableCumulativeCurve())
+        setDisableCumulativeCurve (false);
+    syncParticleCurveEco();
 
     syncSpecToolButtons();
     resized();
@@ -2759,6 +2799,28 @@ void MainComponent::setSpec3DRampSequence (const Spec3DRampSequence& seq, bool n
         editor.requestSaveUiPrefs();
 }
 
+void MainComponent::reclampRampTimelineWindow()
+{
+    if (rampTimelineWindow == nullptr || ! rampTimelineWindow->isFrameActive())
+        return;
+
+    // Identical path to layoutFramedScopeWindow / clampComponentWithToolColumn.
+    auto area = getFramedScopeAvailableArea();
+    if (area.getWidth() < 80 || area.getHeight() < 80)
+        area = getLocalBounds();
+
+    const int toolW = getFramedToolColumnWidth();
+    const int maxW = juce::jmax (180, area.getWidth() - toolW);
+    const int maxH = juce::jmax (120, area.getHeight());
+
+    rampTimelineWindow->setThemeColors (&sharedResources);
+    rampTimelineWindow->setResizeLimits (maxW, maxH);
+    rampTimelineWindow->setMovementBounds (area.withTrimmedRight (toolW > 0 ? toolW : 0));
+    clampComponentWithToolColumn (*rampTimelineWindow, toolW);
+    rampTimelineWindow->clampToMovementArea();
+    rampTimelineWindow->toFront (true);
+}
+
 void MainComponent::showRampTimelineWindow()
 {
     if (rampTimelineWindow == nullptr)
@@ -2778,13 +2840,42 @@ void MainComponent::showRampTimelineWindow()
             editor.requestSaveUiPrefs();
         };
         rampTimelineWindow->onClose = [this] {};
+        rampTimelineWindow->onUserMovedOrResized = [this] { reclampRampTimelineWindow(); };
         addAndMakeVisible (*rampTimelineWindow);
-        rampTimelineWindow->setBounds ((getWidth() - 560) / 2, (getHeight() - 200) / 2, 560, 190);
+    }
+    else if (rampTimelineWindow->getParentComponent() != this)
+    {
+        // Migrate off any old desktop-peer parenting.
+        addAndMakeVisible (*rampTimelineWindow);
     }
 
-    rampTimelineWindow->setVisible (true);
+    // Same placement recipe as layoutFramedScopeWindow (Osc / Gon / Spec maximized).
+    auto area = getFramedScopeAvailableArea();
+    if (area.getWidth() < 80 || area.getHeight() < 80)
+        area = getLocalBounds();
+
+    const int toolW = getFramedToolColumnWidth();
+    const int maxW = juce::jmax (180, area.getWidth() - toolW);
+    const int maxH = juce::jmax (120, area.getHeight());
+
+    // Defaults close to framed Spec window sizing.
+    int w = juce::jlimit (420, maxW, juce::jmin (720, maxW));
+    int h = juce::jlimit (160, maxH, juce::jmin (260, maxH));
+    const int x = area.getX() + juce::jmax (0, (area.getWidth() - toolW - w) / 2);
+    const int y = area.getY() + juce::jmax (0, (area.getHeight() - h) / 3);
+
+    rampTimelineWindow->setThemeColors (&sharedResources);
+    rampTimelineWindow->setResizeLimits (maxW, maxH);
+    rampTimelineWindow->setMovementBounds (
+        area.getWidth() > toolW + 32 ? area.withTrimmedRight (toolW) : area);
+    rampTimelineWindow->setBounds (x, y, w, h);
+    rampTimelineWindow->setFrameActive (true);
+    clampComponentWithToolColumn (*rampTimelineWindow, toolW);
+    rampTimelineWindow->clampToMovementArea();
+    rampTimelineWindow->setAlwaysOnTop (true);
     rampTimelineWindow->toFront (true);
     rampTimelineWindow->setPlayheadSec (spectrogram3D.getRampTimelinePlayheadSec());
+    rampTimelineWindow->grabKeyboardFocus();
 }
 
 void MainComponent::startSpec3DRegionExport (const Spec3DExportSettings& settings)
@@ -3667,6 +3758,7 @@ bool MainComponent::isSpec3DSssEnabled() const noexcept
 void MainComponent::setSpec3DParticleModeEnabled (bool shouldEnable, bool notifyPrefs)
 {
     spectrogram3D.setParticleModeEnabled (shouldEnable);
+    syncParticleCurveEco();
     if (notifyPrefs) editor.requestSaveUiPrefs();
 }
 bool MainComponent::isSpec3DParticleModeEnabled() const noexcept
@@ -6452,6 +6544,7 @@ void MainComponent::placeScopePane (ScopeModuleId moduleId, juce::Rectangle<int>
                 view.setRight (juce::jmin (view.getRight(), menu.getX() - 8));
 
             spectrogram.setVisible (true);
+            spectrogram.setOpaque (true); // Scope pane: no underlay flash between frames
             spectrogram.setInterceptsMouseClicks (true, true);
             spectrogram.setBounds (view);
 
@@ -7255,6 +7348,9 @@ void MainComponent::resized()
 
     // Wordmark may be re-hosted from EqEditor::resized; keep menu chrome above it.
     syncExpandedOscOverlayStack();
+
+    // Expanded sequencer uses the same clamp path as maximized Osc/Gon/Spec frames.
+    reclampRampTimelineWindow();
 }
 
 void MainComponent::mouseDrag(const juce::MouseEvent& event)
@@ -7554,6 +7650,13 @@ void MainComponent::raiseMenuSystemAboveWordmark()
     menuToggleButton.toFront (false);
     if (menuOpen)
         menu.toFront (false);
+
+    // Expanded sequencer = same stack class as maximized Osc/Gon/Spec frames.
+    if (rampTimelineWindow != nullptr && rampTimelineWindow->isFrameActive())
+    {
+        rampTimelineWindow->setAlwaysOnTop (true);
+        rampTimelineWindow->toFront (false);
+    }
 
     // Strip overlays must sit above pane modules (same stack as Settings).
     if (scopeModeEnabled && scopeStripLayout)

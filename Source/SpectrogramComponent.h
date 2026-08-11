@@ -241,6 +241,8 @@ private:
     bool imageDirty = false;
     bool screenSoftDirty = true;
     int lastScreenBlurRadius = -1;
+    int lastScreenW = -1;
+    int lastScreenH = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SpectrogramComponent)
 };

@@ -103,6 +103,14 @@ public:
     bool isEcoMode() const noexcept { return ecoMode.load(); }
 
     /**
+        Spec3D “Bypass Other Analyzers”: freeze EQ spectrum + all scopes except the
+        spectrogram history feed (needed for 3D mesh) and level meters.
+        Does not affect EQ DSP. Audio-thread safe.
+    */
+    void setBypassOtherAnalyzers (bool shouldBypass) noexcept;
+    bool isBypassOtherAnalyzers() const noexcept { return bypassOtherAnalyzers.load (std::memory_order_acquire); }
+
+    /**
         Solo-monitor one band's full processing chain (Bank1 internal 0–7 or global 8–63).
         -1 = off. Works even when that band's OnOff is false (force-enables only that band).
     */
@@ -588,6 +596,8 @@ private:
 #endif
 
     std::atomic<bool> ecoMode { false };
+    /** Spec3D solo: skip EQ spectrum + scopes (not spectrogram history / meters / DSP). */
+    std::atomic<bool> bypassOtherAnalyzers { false };
     std::atomic<bool> scopeMode { false };
     /** When Scope is on: true = Post (DSP on), false = Pre (analyzer / meteringOnly). */
     std::atomic<bool> scopeTapPost { false };

@@ -8237,6 +8237,10 @@ void Spectrogram3DComponent::timerCallback()
         particleLastUpdateSec = 0.0;
     }
 
+    // FRC cumulative-curve eco tracks particle density (MainComponent).
+    if (onParticleSimTick != nullptr)
+        onParticleSimTick();
+
     // Lighting automation only writes uniforms. Fold into the mesh soft frame when
     // possible; if the waterfall is idle, throttle light-only soft redraws (~12 Hz)
     // so DOF/post is not run at full timer rate.

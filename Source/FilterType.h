@@ -418,14 +418,18 @@ namespace FilterType
         }
     }
 
-    /** Preferred type when creating a band by graph-click frequency zone. */
+    /** Preferred type when creating a band by graph-click frequency zone.
+        Original channel-strip zones (not the later Bax trial):
+          <50 Hz HP · <150 Hz Lo Shelf · <8 kHz Bell · <12 kHz Hi Shelf · else LP.
+        New models (band shelf / Bax / vintage / …) stay selectable in the menu only.
+    */
     inline int typeForFrequencyZone (float frequencyHz) noexcept
     {
         const float f = juce::jlimit (20.0f, 20000.0f, frequencyHz);
         if (f < 50.0f)    return highpass;
-        if (f < 120.0f)   return baxandallBass;
+        if (f < 150.0f)   return lowShelf;
         if (f < 8000.0f)  return bell;
-        if (f < 14000.0f) return baxandallTreble;
+        if (f < 12000.0f) return highShelf;
         return lowpass;
     }
 }

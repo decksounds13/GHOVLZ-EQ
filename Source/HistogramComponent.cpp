@@ -150,6 +150,14 @@ void HistogramComponent::setEnabled (bool shouldEnable) noexcept
     enabled.store (shouldEnable, std::memory_order_relaxed);
 }
 
+void HistogramComponent::setUiTimerRunning (bool shouldRun) noexcept
+{
+    if (shouldRun)
+        startTimerHz (30);
+    else
+        stopTimer();
+}
+
 void HistogramComponent::setColourRamp (const GradientRamp& ramp)
 {
     colourRamp = ramp;

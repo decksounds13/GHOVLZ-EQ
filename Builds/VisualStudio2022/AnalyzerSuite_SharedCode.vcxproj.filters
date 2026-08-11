@@ -2,122 +2,122 @@
 
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="ParametricEqProject\Source\Menu\Gui">
-      <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\Gui">
+      <UniqueIdentifier>{6C537CDB-1D6D-4818-B288-1F718C1796B2}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu">
-      <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu">
+      <UniqueIdentifier>{7966BFCF-725A-5290-5BFD-6702184D3990}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Assets">
-      <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Assets">
+      <UniqueIdentifier>{78A92BF5-F487-866C-A323-1C0C54C54CBC}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\ColourRamp">
-      <UniqueIdentifier>{EC9A775C-1238-8D75-54B2-8DB895BEBFE1}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Export">
+      <UniqueIdentifier>{BB99969B-AEDE-1049-62CD-2DDF93EA2584}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Assets">
-      <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\ColourRamp">
+      <UniqueIdentifier>{6B25453C-E53D-3642-1E7A-0D2ECB953D58}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations">
-      <UniqueIdentifier>{A44CA844-07B8-B554-5FA6-7C9504B03FBF}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations">
+      <UniqueIdentifier>{1544F9F7-1E52-8D87-F3AC-9F53469898F9}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal">
-      <UniqueIdentifier>{14CAF6BB-C50B-F636-20B0-779A37377B7F}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\internal">
+      <UniqueIdentifier>{7022E12A-F2D8-A5F5-E0DB-15AE0D553395}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin">
-      <UniqueIdentifier>{9CD8191C-3100-B8A7-5BFA-BB628828565C}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin">
+      <UniqueIdentifier>{C07F1C6F-0B82-E41E-C415-D7B0DFF77B73}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur">
-      <UniqueIdentifier>{AD506983-E63D-D43C-B288-A8F57385F0D3}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur">
+      <UniqueIdentifier>{9F0F4CA7-6D44-4D6A-453D-506FE7F37FB5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects">
-      <UniqueIdentifier>{9F86C40A-42E8-D254-8DAD-0B70DFB2311F}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects">
+      <UniqueIdentifier>{98278D3B-E77A-5876-7A5E-01CAB1DFABDE}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\Gui">
-      <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\Gui">
+      <UniqueIdentifier>{6C537CDB-1D6D-4818-B288-1F718C1796B2}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu">
-      <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu">
+      <UniqueIdentifier>{7966BFCF-725A-5290-5BFD-6702184D3990}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Spectral">
-      <UniqueIdentifier>{069880E3-DEEB-3CBE-9DAD-2D22E0B80C82}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Spectral">
+      <UniqueIdentifier>{B9E5C50C-1F9A-6F2E-9878-9D6D8B8E263A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Match">
-      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Controls\Categories">
+      <UniqueIdentifier>{F752D0EB-2933-CB2F-4D9E-3F31BA7BF1D0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\StructuralSplit">
-      <UniqueIdentifier>{A8C3E1F2-4B5D-6E7F-8091-A2B3C4D5E6F7}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Controls">
+      <UniqueIdentifier>{98604800-413D-855F-170A-61FB2D3691E2}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Controls\Categories">
-      <UniqueIdentifier>{7EFDE8D3-7793-B6C7-C284-26939B297B82}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations">
+      <UniqueIdentifier>{1544F9F7-1E52-8D87-F3AC-9F53469898F9}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Controls">
-      <UniqueIdentifier>{B54D5FC3-1C9D-0539-83FA-87732DDA1F21}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\support">
+      <UniqueIdentifier>{59B7A3AA-89B7-1964-726F-319AD0DE36B0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations">
-      <UniqueIdentifier>{A44CA844-07B8-B554-5FA6-7C9504B03FBF}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin">
+      <UniqueIdentifier>{C07F1C6F-0B82-E41E-C415-D7B0DFF77B73}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support">
-      <UniqueIdentifier>{E8FD5C32-0521-186F-7552-50A8FBFD6F8D}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\MelatoninBlur">
+      <UniqueIdentifier>{9F0F4CA7-6D44-4D6A-453D-506FE7F37FB5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin">
-      <UniqueIdentifier>{9CD8191C-3100-B8A7-5BFA-BB628828565C}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\shadows-main\source">
+      <UniqueIdentifier>{B0142E3F-B32A-CF11-BAF6-2E91ADA127BD}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur">
-      <UniqueIdentifier>{AD506983-E63D-D43C-B288-A8F57385F0D3}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects\shadows-main">
+      <UniqueIdentifier>{A27343CE-E501-8F75-863D-A9C55CD78DBE}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\shadows-main\source">
-      <UniqueIdentifier>{0D40B112-26F9-7BA9-7AE5-17F01734F268}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Effects">
+      <UniqueIdentifier>{98278D3B-E77A-5876-7A5E-01CAB1DFABDE}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\shadows-main">
-      <UniqueIdentifier>{1C0A32BA-E609-5212-4BBB-AAA2AA0E416A}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Resources">
+      <UniqueIdentifier>{D59523E8-C3CA-46B0-A693-E8E3F968DD1A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects">
-      <UniqueIdentifier>{9F86C40A-42E8-D254-8DAD-0B70DFB2311F}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Visualizer\Layers\GraphElements">
+      <UniqueIdentifier>{C15B83E3-C027-EB75-8A93-4401098193F8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Resources">
-      <UniqueIdentifier>{089183F4-FEB2-9841-F6FB-05FFBC774919}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Visualizer\Layers\GridElements">
+      <UniqueIdentifier>{B8CBC19B-BDED-B298-5348-CA66E516B9DE}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer\Layers\GraphElements">
-      <UniqueIdentifier>{039080F4-970D-47C6-2D04-05981EFFC5AC}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Visualizer\Layers">
+      <UniqueIdentifier>{290D0583-9121-95F7-66D5-D12A65B31411}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer\Layers\GridElements">
-      <UniqueIdentifier>{45003241-222E-C93C-DE7B-F14E64DCB489}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Visualizer">
+      <UniqueIdentifier>{A4C92A99-0836-5615-F913-E662A777C167}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer\Layers">
-      <UniqueIdentifier>{3D2E8D91-7E98-089C-A3BA-96FFA9592BE4}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Spectral">
+      <UniqueIdentifier>{B9E5C50C-1F9A-6F2E-9878-9D6D8B8E263A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer">
-      <UniqueIdentifier>{27C311B4-6387-5AD5-2900-893F63833CF9}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\StructuralSplit">
+      <UniqueIdentifier>{52EBD04C-82FD-CE45-EF1F-C9A88634ED68}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Spectral">
-      <UniqueIdentifier>{069880E3-DEEB-3CBE-9DAD-2D22E0B80C82}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Match">
+      <UniqueIdentifier>{5FF43C4C-45A9-3D85-9F8E-F9D9728CE957}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\internal">
-      <UniqueIdentifier>{594E7132-A6F4-4BE6-C85E-32BB24F0A4A7}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\ScreenCaptureLite\internal">
+      <UniqueIdentifier>{AF99C22F-F79E-307F-AB3D-BC97207C28F7}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\ios">
-      <UniqueIdentifier>{0345DFD6-5A54-9C42-4A1D-7506D7AD635A}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\ScreenCaptureLite\ios">
+      <UniqueIdentifier>{AFF4D9C8-ABB4-3925-F86B-F79518927327}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\linux">
-      <UniqueIdentifier>{03A5AE53-24A9-410B-0B40-8151FBC37F14}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\ScreenCaptureLite\linux">
+      <UniqueIdentifier>{50A05D87-BE02-9824-D7AA-FE1B5F2412E0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\windows">
-      <UniqueIdentifier>{5D9C3B57-6767-1A58-BD51-C874C4EC1E49}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\ScreenCaptureLite\windows">
+      <UniqueIdentifier>{3BC5C2BE-B104-065B-90CD-B67D4FAA13AA}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite">
-      <UniqueIdentifier>{085D42B5-079C-01FB-54C1-9D24DEF0C8DA}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\ScreenCaptureLite">
+      <UniqueIdentifier>{500F2852-97E8-5AE4-72FA-F4834AE2F62F}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\Gui">
-      <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu\Gui">
+      <UniqueIdentifier>{6C537CDB-1D6D-4818-B288-1F718C1796B2}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu">
-      <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source\Menu">
+      <UniqueIdentifier>{7966BFCF-725A-5290-5BFD-6702184D3990}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source">
-      <UniqueIdentifier>{128F303A-D396-FB2D-8B57-BC340F1ECB71}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite\Source">
+      <UniqueIdentifier>{59A1CFC3-C742-0284-76C7-B56291751AC0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject">
-      <UniqueIdentifier>{0D1D33AE-9140-10FE-DABA-1AA9195A5DFB}</UniqueIdentifier>
+    <Filter Include="AnalyzerSuite">
+      <UniqueIdentifier>{C5B34663-A406-EC44-56D0-495D37628686}</UniqueIdentifier>
     </Filter>
     <Filter Include="JUCE Modules\gin\3rdparty\bsdiff">
       <UniqueIdentifier>{8B4336DF-211D-0B9C-A60B-814F01293CD7}</UniqueIdentifier>
@@ -1010,340 +1010,340 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\Spec3DParticleSystem.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp">
-      <Filter>ParametricEqProject\Source\Assets</Filter>
+      <Filter>AnalyzerSuite\Source\Assets</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\FramedFloatingScopeWindow.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Export\MediaFoundationMp4Writer.cpp">
+      <Filter>AnalyzerSuite\Source\Export</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Export\Spec3DExportJob.cpp">
+      <Filter>AnalyzerSuite\Source\Export</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\PathSampleOverlay.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\RampColorPickerPanel.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp">
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\GradientStripEditor.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\RampPresetStore.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\rendered_single_channel_shadow.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\cached_blur.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ApplyButton.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColorValuesInput.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\HueSelector.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\OscilloscopeComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\QuadPicker.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\UIElementsList.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\TextButtonLookAndFeel2.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\SettingsButtonLookAndFeel .cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\AvgControl.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\BlockControl.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\ChannelControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\GraphControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\RefreshControl.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\ScaleXControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\ScaleYControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Controls.cpp">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>AnalyzerSuite\Source\Controls</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Separator.cpp">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>AnalyzerSuite\Source\Controls</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin_blur.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\shadows-main\source\StackShadow.cpp">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main\source</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\shadows-main\source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\shadows-main\shadows.cpp">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\shadows-main</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphBins.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\SpectrumBinOverlay.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphInfoLabel.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphLine.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphMaximumsLine.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GridElements\LinearScale.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GridElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GridElements\LogarithmicScale.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GridElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GridElements\NoteScale.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GridElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\Graph.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\Grid.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Analyser.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Visualizer.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ComboBoxLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\EqEditor.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\EqPresetStore.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ModSectionComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\LinearPhaseEqEngine.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\EqProcessor.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\FrequencyResponseComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\MainComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\OnOffButton1.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\BandMonitorButton.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\BandNumberButton.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\OptionBoxMenu.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectral\SpectralDynamicsProcessor.cpp">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>AnalyzerSuite\Source\Spectral</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\StructuralSplit\StructuralSplitEngine.cpp">
-      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+      <Filter>AnalyzerSuite\Source\StructuralSplit</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Match\MatchProcessor.cpp">
-      <Filter>ParametricEqProject\Source\Match</Filter>
+      <Filter>AnalyzerSuite\Source\Match</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob1.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob2.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob3.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob4.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob5.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob6.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobForOptionBox.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel1.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel2.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel3.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel4.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel5.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel6.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectrogram.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\TextButtonLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\VerticalGradientMeter.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\ScreenCaptureLite\SourceCode.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Theme.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\AnalyserDefaults.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Menu.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\SharedResources.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\AppearanceComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrumComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\FftComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ApplyButton.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ColorPicker.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ColorValuesInput.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomHeader.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomHeader2.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomScrollBar.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomSliderLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomTabBarLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomTextButton1.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomTwoValueSliderLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\HueSelector.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\HueSelectorOverlayComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\QuadPicker.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\QuadPickerOverlayComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ThemeList.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\UIElementsList.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\Eyedropper.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\LevelMetersComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\CustomPopup.cpp">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>AnalyzerSuite</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\..\..\modules\gin\3rdparty\bsdiff\bsdiff.c">
       <Filter>JUCE Modules\gin\3rdparty\bsdiff</Filter>
@@ -4774,541 +4774,544 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\GoniometerComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\Spec3DParticleSystem.h">
-      <Filter>ParametricEqProject\Source</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\ParticleForceModule.h">
-      <Filter>ParametricEqProject\Source</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h">
-      <Filter>ParametricEqProject\Source</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\ColourRamp\GradientRamp.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\ColourRamp\ColourRampBank.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\ColourRamp\PathSampleOverlay.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\ColourRamp\RampColorPickerPanel.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\ColourRamp\ColourSwatchEditor.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Assets\VeniceSunsetHdri.h">
-      <Filter>ParametricEqProject\Source\Assets</Filter>
+      <Filter>AnalyzerSuite\Source\Assets</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h">
+      <Filter>AnalyzerSuite\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Export\ExportAudioRingBuffer.h">
+      <Filter>AnalyzerSuite\Source\Export</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Export\Spec3DExportSettings.h">
+      <Filter>AnalyzerSuite\Source\Export</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Export\MediaFoundationMp4Writer.h">
+      <Filter>AnalyzerSuite\Source\Export</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Export\Spec3DExportJob.h">
+      <Filter>AnalyzerSuite\Source\Export</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ColourRamp\GradientRamp.h">
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ColourRamp\ColourRampBank.h">
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ColourRamp\PathSampleOverlay.h">
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ColourRamp\RampColorPickerPanel.h">
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\ColourRamp\ColourSwatchEditor.h">
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\GradientStripEditor.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\RampPresetStore.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>AnalyzerSuite\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\implementations.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\rendered_single_channel_shadow.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\blur_demo_component.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\blur_options.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralPerBandLattice.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>AnalyzerSuite\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ApplyButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandChannel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandSaturation.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColorValuesInput.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqBand.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FactoryDefaultsState.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FilterSlope.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FilterType.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\HueSelector.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\KnobBandHighlight.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OscilloscopeComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\PhaseMode.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\QuadPicker.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RetrigButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ShapeCurveEditor.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ShapeEditorPopup.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SideCheck.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\UIElementsList.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\TextButtonLookAndFeel2.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SettingsButtonLookAndFeel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\AvgControl.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\BlockControl.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\ChannelControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\GraphControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\RefreshControl.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\ScaleXControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\ScaleYControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>AnalyzerSuite\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Controls.h">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>AnalyzerSuite\Source\Controls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Separator.h">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>AnalyzerSuite\Source\Controls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\dequeue.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\float_vector_stack_blur.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\gin.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\ipp.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\ipp_vector.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\naive.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\naive_class.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\naive_with_martin_optimization.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\templated_function.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\templated_function_float.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector_class.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector_convolution.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector_optimized.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vImage.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vImage_macOS14.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\support\cached_shadow.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\support</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\support\helpers.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\support</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\support\implementations.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin\support</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\cached_blur.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\shadows.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin_blur.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\shadows-main\source\StackShadow.h">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main\source</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\shadows-main\source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\shadows-main\shadows.h">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\shadows-main</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\BlurEffect.h">
-      <Filter>ParametricEqProject\Source\Effects</Filter>
+      <Filter>AnalyzerSuite\Source\Effects</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\RenderDropShadow.h">
-      <Filter>ParametricEqProject\Source\Effects</Filter>
+      <Filter>AnalyzerSuite\Source\Effects</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphBins.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\SpectrumBinOverlay.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphInfoLabel.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphLine.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphMaximumsLine.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GridElements\LinearScale.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GridElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GridElements\LogarithmicScale.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GridElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GridElements\NoteScale.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers\GridElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\Graph.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\Grid.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer\Layers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Analyser.h">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Visualizer.h">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>AnalyzerSuite\Source\Visualizer</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ComboBoxLookAndFeel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqEditor.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqPresetStore.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ModSectionComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\LinearPhaseEqEngine.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\LfoMod.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ShapeMod.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandSidechain.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqProcessor.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FrequencyResponseComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\MainComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\BandMonitorButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OnOffButton1.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\BandMonitorButton.h">
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandNumberButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OptionBoxMenu.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\DynamicEq.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralBinning.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>AnalyzerSuite\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralBandSettings.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>AnalyzerSuite\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralDynamicsProcessor.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>AnalyzerSuite\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitSettings.h">
-      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+      <Filter>AnalyzerSuite\Source\StructuralSplit</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitEngine.h">
-      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+      <Filter>AnalyzerSuite\Source\StructuralSplit</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Match\MatchSettings.h">
-      <Filter>ParametricEqProject\Source\Match</Filter>
+      <Filter>AnalyzerSuite\Source\Match</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Match\MatchProcessor.h">
-      <Filter>ParametricEqProject\Source\Match</Filter>
+      <Filter>AnalyzerSuite\Source\Match</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob1.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob2.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob3.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob4.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob5.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob6.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobForOptionBox.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel1.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel2.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel3.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel4.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel5.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel6.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectrogram.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\TextButtonLookAndFeel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\VerticalGradientMeter.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>AnalyzerSuite\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\internal\SCCommon.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\internal</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\internal\ThreadManager.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\internal</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\CGFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSFrameProcessorm.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSMouseCapture.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSMouseProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\linux\X11FrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\linux</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\linux</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\linux\X11MouseProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\linux</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\linux</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\DXFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\GDIFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\GDIHelpers.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\GDIMouseProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ScreenCapture.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ScreenCapture_C_API.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\ScreenCaptureLite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\SourceCode.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Theme.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\AnalyserDefaults.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Menu.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\SharedResources.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ThemeColorRegistry.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>AnalyzerSuite\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\AppearanceComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrumComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\FftComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ApplyButton.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ColorPicker.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ColorValuesInput.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomHeader.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomHeader2.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomScrollBar.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomSliderLookAndFeel.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomTabBarLookAndFeel.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomTextButton1.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomTwoValueSliderLookAndFeel.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\HueSelector.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\HueSelectorOverlayComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\QuadPicker.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\QuadPickerOverlayComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ThemeList.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\Eyedropper.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\LevelMetersComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\UIElementsList.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>AnalyzerSuite\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ArrowSliderLookAndFeel.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>AnalyzerSuite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BrandWordmark.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>AnalyzerSuite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\CustomPopup.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>AnalyzerSuite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\TwoThumbSliderLookAndFeel.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>AnalyzerSuite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\..\..\..\modules\gin\3rdparty\bsdiff\bsdiff.h">
       <Filter>JUCE Modules\gin\3rdparty\bsdiff</Filter>
@@ -10587,13 +10590,16 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\Source\Effects\MelatoninBlur\README.md">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
+      <Filter>AnalyzerSuite\Source\Effects\MelatoninBlur</Filter>
     </None>
     <None Include="..\..\Resources\DarkKnob4_Stitched.png">
-      <Filter>ParametricEqProject\Source\Resources</Filter>
+      <Filter>AnalyzerSuite\Source\Resources</Filter>
     </None>
     <None Include="..\..\Resources\pirulen.ttf">
-      <Filter>ParametricEqProject\Source\Resources</Filter>
+      <Filter>AnalyzerSuite\Source\Resources</Filter>
+    </None>
+    <None Include="..\..\Resources\venice_sunset_1k.jpg">
+      <Filter>AnalyzerSuite\Source\Resources</Filter>
     </None>
     <None Include="..\..\..\..\..\..\..\modules\gin\README.md">
       <Filter>JUCE Modules\gin</Filter>

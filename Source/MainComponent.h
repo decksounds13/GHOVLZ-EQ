@@ -162,6 +162,14 @@ public:
     void setBypassOtherAnalyzers (bool shouldBypass) noexcept;
     bool isBypassOtherAnalyzers() const noexcept;
     /**
+        Spec3D menu: skip building/drawing the EQ cumulative (sum) curve.
+        Cleared when Spec3D is closed or the menu item is toggled off.
+    */
+    void setDisableCumulativeCurve (bool shouldDisable) noexcept;
+    bool isDisableCumulativeCurve() const noexcept;
+    /** Push particle load into FRC for automatic curve downres (call from Spec3D timer path). */
+    void syncParticleCurveEco() noexcept;
+    /**
         True OS fullscreen for Spec3D (F11 / right-click): borderless top-level window
         covering the monitor — not just the plugin editor.
     */
@@ -904,6 +912,8 @@ private:
     /** Only used when SPEC3D_EXPORT_ENABLED (see Export/Spec3DExportSandbox.h). */
     std::unique_ptr<class Spec3DExportJob> activeSpec3DExport;
     void showRampTimelineWindow();
+    /** Keep expanded sequencer inside framed-scope available area (same as maximized scopes). */
+    void reclampRampTimelineWindow();
     void startSpec3DRegionExport (const struct Spec3DExportSettings& settings);
 
     ScopeLevelMeterModule levelMeterIn;

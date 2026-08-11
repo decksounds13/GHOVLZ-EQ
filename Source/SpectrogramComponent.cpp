@@ -694,8 +694,46 @@ void SpectrogramComponent::advanceFromRing()
         const int windowEnd = ringReadPos + analysisWindow;
         const int mainStart = windowEnd - fftSize;
 
+        float peakAbs = 0.0f;
         for (int i = 0; i < fftSize; ++i)
-            windowed[(size_t) i] = readChannelSample (mainStart + i);
+        {
+            const float s = readChannelSample (mainStart + i);
+            windowed[(size_t) i] = s;
+            peakAbs = juce::jmax (peakAbs, std::abs (s));
+        }
+
+        // Near-silence: deposit a solid floor column and skip FFT/reassignment.
+        // Tiny numerical noise at digital zero was colourising as sparkle/flicker
+        // (most visible in Scope when the waterfall is quiet; real signal masks it).
+        constexpr float kSilencePeak = 1.0e-6f; // ~-120 dBFS peak
+        if (peakAbs < kSilencePeak)
+        {
+            if ((int) columnScratch.size() != internalH)
+                columnScratch.assign ((size_t) juce::jmax (0, internalH), -120.0f);
+            else
+                std::fill (columnScratch.begin(), columnScratch.end(), -120.0f);
+
+            // Keep smoothers at floor so the next audible frame doesn't smear up from noise.
+            if ((int) columnDb.size() >= numBins)
+                std::fill (columnDb.begin(), columnDb.begin() + numBins, -120.0f);
+            if (! columnDbLf.empty())
+                std::fill (columnDbLf.begin(), columnDbLf.end(), -120.0f);
+            if (! columnDbMid.empty())
+                std::fill (columnDbMid.begin(), columnDbMid.end(), -120.0f);
+
+            havePrevPhase = false;
+            havePrevPhaseLf = false;
+            havePrevPhaseMid = false;
+
+            appendDisplayColumn (columnScratch.data());
+            if (dualHistory)
+                appendHistory3DColumn (columnScratch.data());
+
+            ringReadPos = (ringReadPos + hop) % cap;
+            available -= hop;
+            ++columnsWritten;
+            continue;
+        }
 
         window->multiplyWithWindowingTable (windowed.data(), (size_t) fftSize);
         std::fill (fftWork.begin(), fftWork.end(), 0.0f);
@@ -1392,7 +1430,15 @@ void SpectrogramComponent::timerCallback()
 void SpectrogramComponent::resized()
 {
     // Internal scroll buffer is resolution-setting sized; screen soften tracks component.
-    screenSoftDirty = true;
+    // Only dirty when the on-screen size actually changes (layout thrash used to force
+    // a full soften rebuild every parent resized() even when bounds were unchanged).
+    const int w = getWidth(), h = getHeight();
+    if (w != lastScreenW || h != lastScreenH)
+    {
+        lastScreenW = w;
+        lastScreenH = h;
+        screenSoftDirty = true;
+    }
 }
 
 void SpectrogramComponent::mouseDown (const juce::MouseEvent& e)
@@ -1434,6 +1480,8 @@ void SpectrogramComponent::rebuildScreenSoftened()
 
     // Soften 0..100 → blur radius 0..5 (screen pixels). 0 skips Melatonin path.
     // Compact: no soften — blur + downscale was washing the strip dark.
+    // Apply blur into screenImage itself so paint always draws one stable buffer
+    // (avoids flip-flopping between unblurred screenImage and blur dst).
     const float soften = expanded
                              ? juce::jlimit (0.0f, 100.0f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f))
                              : 0.0f;
@@ -1443,6 +1491,8 @@ void SpectrogramComponent::rebuildScreenSoftened()
     {
         screenBlur.setRadius ((size_t) radius);
         screenBlur.update (screenImage);
+        if (screenBlur.isValid())
+            screenImage = screenBlur.render().createCopy();
     }
 
     screenSoftDirty = false;
@@ -1500,6 +1550,11 @@ void SpectrogramComponent::paint (juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     const auto& theme = colors();
 
+    // Scope / expanded panes must stay fully opaque so parent GL or underlay
+    // repaints cannot flash through between spectrogram frames.
+    if (expanded && ! isOpaque())
+        setOpaque (true);
+
     juce::Path window;
     if (! expanded)
     {
@@ -1544,6 +1599,7 @@ void SpectrogramComponent::paint (juce::Graphics& g)
             }
 
             // Screen-space path: upscale first, then stack blur (Gaussian-like).
+            // Only rebuild when content/size changed — not on every parent repaint.
             if (screenSoftDirty
                 || ! screenImage.isValid()
                 || screenImage.getWidth() != getWidth()
@@ -1552,10 +1608,12 @@ void SpectrogramComponent::paint (juce::Graphics& g)
                 rebuildScreenSoftened();
             }
 
-            if (screenBlur.isValid())
-                g.drawImage (screenBlur.render(), imageBounds);
-            else if (screenImage.isValid())
+            // Prefer the stable pre-blurred screen buffer. Melatonin render() is fine,
+            // but drawing screenImage after update avoids an extra hop when dst is stale.
+            if (screenImage.isValid())
                 g.drawImage (screenImage, imageBounds);
+            else if (screenBlur.isValid())
+                g.drawImage (screenBlur.render(), imageBounds);
         }
     }
 

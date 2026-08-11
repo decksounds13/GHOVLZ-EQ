@@ -696,6 +696,8 @@ public:
     std::function<void (juce::PopupMenu&)> onAugmentContextMenu;
     /** Return true if result was handled. */
     std::function<bool (int)> onContextMenuResult;
+    /** After particle sim (each Spec3D timer) — MainComponent uses this for FRC curve eco. */
+    std::function<void()> onParticleSimTick;
     static constexpr int kContextMenuFullscreenId = 20;
     /** Fired when turntable / zoom-oscillate settings change (persist prefs). */
     std::function<void()> onAutoRotateSettingsChanged;
@@ -1213,7 +1215,7 @@ private:
     ParticleEmitMode particleEmitMode = ParticleEmitMode::continuous;
     ParticleBindingMode particleBindingMode = ParticleBindingMode::spectrogramTrail;
     /** Particles spawned per second (field total). Not a 0–1 scale. */
-    float particleEmission = 1000.0f;
+    float particleEmission = 40000.0f;
     /** World-space spawn scatter. Default > 0 so particles don't stack on exact mesh points. */
     float particleSpawnJitter = kDefaultParticleSpawnJitter;
     float particleInitVelX = 0.0f;
@@ -1235,7 +1237,7 @@ private:
     bool particleForcesEnabled = false;
     bool particleWaterfallLock = true;
     /** CPU default; GPU hybrid integrate when true and compute available. */
-    bool particleGpuSimEnabled = false;
+    bool particleGpuSimEnabled = true; // GPU integrate default when available
     int particleMaxAlive = Spec3DParticleSystem::kDefaultMaxAlive;
     bool particleDebugOverlayEnabled = false;
     std::vector<ParticleForceModule> particleForceStack;

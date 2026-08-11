@@ -17,14 +17,37 @@
 
 namespace
 {
-    // Per-pixel magnitude sampling. Step>1 with hold-fill creates 2-px stair plateaus that the
-    // sum path (one vertex per pixel) draws as visible jaggies; band adaptive downsampling
-    // skipped those flats and looked smoother on the same data.
-    constexpr int responseSampleStep = 1;
-
     juce::Colour bandCurveColour (juce::Colour fill) noexcept
     {
         return fill.withAlpha (0.75f);
+    }
+
+    /** Expand sparse GR samples (indices 0, step, 2*step, …, last) to full width. */
+    void expandSparseDb (const float* sparse, int sparseN, int step, float* dest, int width) noexcept
+    {
+        if (sparse == nullptr || dest == nullptr || width <= 0 || sparseN <= 0)
+            return;
+        step = juce::jmax (1, step);
+        if (sparseN == 1 || step == 1)
+        {
+            for (int i = 0; i < width; ++i)
+                dest[i] = sparse[juce::jmin (step == 1 ? i : i / step, sparseN - 1)];
+            return;
+        }
+        for (int i = 0; i < width; ++i)
+        {
+            const int s0 = juce::jmin (i / step, sparseN - 1);
+            const int s1 = juce::jmin (s0 + 1, sparseN - 1);
+            const int i0 = s0 * step;
+            const int i1 = juce::jmin (width - 1, (s0 + 1) * step);
+            if (s0 == s1 || i1 <= i0)
+            {
+                dest[i] = sparse[s0];
+                continue;
+            }
+            const float t = (float) (i - i0) / (float) (i1 - i0);
+            dest[i] = sparse[s0] + (sparse[s1] - sparse[s0]) * t;
+        }
     }
 
     bool rawBoolParam (juce::AudioProcessorValueTreeState& state, const char* id) noexcept
@@ -48,6 +71,60 @@ namespace
         const float t = expand ? juce::jlimit (0.0f, 1.0f, db / rangeDb)
                                : juce::jlimit (0.0f, 1.0f, -db / rangeDb);
         return t * SpectralDynamics::kMaxSpectralAmount;
+    }
+
+    /**
+        Band handle disk + dual rings + centred label.
+        When legible text is on: fill is nudged vs graph bg; ink is chosen per-fill
+        (so cyan/purple/etc. disks each get readable black or white numbers).
+    */
+    void paintBandHandleChrome (juce::Graphics& g,
+                                float cx, float cy,
+                                float scale,
+                                juce::Colour bandFill,
+                                juce::Colour graphBg,
+                                juce::Colour outlineBase,
+                                juce::Colour labelBase,
+                                const SharedColors& theme,
+                                const juce::String& label,
+                                float outlineThickness = 1.0f,
+                                float outlineThickness2 = 1.0f)
+    {
+        const float handleSize = 12.0f * scale;
+        const float handleOutlineSize = 12.5f * scale;
+        const float innerOutlineSize = 11.0f * scale;
+        const auto fill = theme.legibleHandleFill (bandFill, graphBg);
+        const auto ink = theme.legibleTextOn (labelBase, fill);
+        const auto outer = theme.legibleTextOn (outlineBase, graphBg);
+
+        g.setColour (fill);
+        g.fillEllipse (cx - handleSize * 0.5f, cy - handleSize * 0.5f, handleSize, handleSize);
+
+        g.setColour (outer);
+        g.drawEllipse (cx - handleOutlineSize * 0.5f, cy - handleOutlineSize * 0.5f,
+                       handleOutlineSize, handleOutlineSize, outlineThickness);
+
+        g.setColour (ink);
+        g.drawEllipse (cx - innerOutlineSize * 0.5f, cy - innerOutlineSize * 0.5f,
+                       innerOutlineSize, innerOutlineSize, outlineThickness2);
+
+        if (label.isNotEmpty())
+        {
+            g.setColour (ink);
+            g.setFont (juce::jmax (8.0f, 11.0f * scale));
+            if (label.length() <= 1)
+            {
+                const float textOffset = 3.5f * scale;
+                g.drawText (label, cx - textOffset, cy - textOffset,
+                            7.0f * scale, 7.0f * scale, juce::Justification::centred, false);
+            }
+            else
+            {
+                const float tw = juce::jmax (10.0f, (float) label.length() * 6.0f * scale);
+                g.drawText (label, cx - tw * 0.5f, cy - 4.0f * scale, tw, 9.0f * scale,
+                            juce::Justification::centred, false);
+            }
+        }
     }
 
     /** Dynamic-mode / spectral-amount handle chrome: coloured ring + up/down range arrows. */
@@ -510,6 +587,80 @@ const SharedColors& FrequencyResponseComponent::colors() const noexcept
     return themeColors != nullptr ? themeColors->sharedColors : defaultColors;
 }
 
+void FrequencyResponseComponent::setDisableCumulativeCurve (bool shouldDisable) noexcept
+{
+    if (disableCumulativeCurve == shouldDisable)
+        return;
+    disableCumulativeCurve = shouldDisable;
+    if (! disableCumulativeCurve)
+    {
+        needsUpdateCombined = true;
+        needsUpdateSpectralAmount = true;
+    }
+    else
+    {
+        combinedResponsePath.clear();
+    }
+    syncDynamicCurveTimer();
+    repaint();
+}
+
+void FrequencyResponseComponent::setParticleCurveEco (bool particlesActive, int aliveCount) noexcept
+{
+    aliveCount = juce::jmax (0, aliveCount);
+    if (particleCurveEcoActive == particlesActive && particleCurveEcoAlive == aliveCount)
+        return;
+
+    const int prevStep = resolveMagnitudeSampleStep();
+    particleCurveEcoActive = particlesActive;
+    particleCurveEcoAlive = aliveCount;
+    const int newStep = resolveMagnitudeSampleStep();
+
+    if (newStep != prevStep || newStep != lastResolvedMagStep)
+    {
+        lastResolvedMagStep = newStep;
+        // Quality changed — rebuild so step-up restores full res, step-down applies immediately.
+        needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
+        needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
+        needsUpdateExtended = true;
+        needsUpdateCombined = true;
+        needsUpdateSpectralAmount = true;
+    }
+
+    syncDynamicCurveTimer();
+}
+
+int FrequencyResponseComponent::resolveMagnitudeSampleStep() const noexcept
+{
+    // Full res when idle. Particles active → mild; dense → coarser sum/IIR sampling.
+    if (! particleCurveEcoActive)
+        return 1;
+    if (particleCurveEcoAlive >= 50000)
+        return 8;
+    if (particleCurveEcoAlive >= 20000)
+        return 4;
+    // Particles on (any count): slight downres to free UI CPU for sim/GL.
+    return 2;
+}
+
+int FrequencyResponseComponent::resolveDynamicCurveTimerHz() const noexcept
+{
+    if (shouldSkipCombinedCurveWork() && ! LfoMod::anyActiveRouting (parameters))
+        return 0; // timer not needed — only sum was animating
+    if (! particleCurveEcoActive)
+        return 45;
+    if (particleCurveEcoAlive >= 50000)
+        return 8;
+    if (particleCurveEcoAlive >= 20000)
+        return 12;
+    return 20;
+}
+
+bool FrequencyResponseComponent::shouldSkipCombinedCurveWork() const noexcept
+{
+    return disableCumulativeCurve;
+}
+
 void FrequencyResponseComponent::setThemeColors (SharedResources* r) noexcept
 {
     themeColors = r;
@@ -962,6 +1113,9 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
 
     // Any LFO routed → prefer published F/G/Q so modulation is visible on curves.
     const bool anyLfoRouted = LfoMod::anyActiveRouting (parameters);
+    const bool skipCombined = shouldSkipCombinedCurveWork();
+    const int magStep = resolveMagnitudeSampleStep();
+    lastResolvedMagStep = magStep;
 
     const float eg1 = processor.getBand1EffectiveGainDb();
     const float eg2 = processor.getBand2EffectiveGainDb();
@@ -982,7 +1136,8 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         if (std::abs (want - lastGain) > dynCurveEps)
         {
             dirtyFlag = true;
-            needsUpdateCombined = true;
+            if (! skipCombined)
+                needsUpdateCombined = true;
         }
     };
 
@@ -993,12 +1148,19 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     maybeDirtyLive (anyLfoRouted, egHS, raw ("highShelfGain"), lastDynCurveGainHS, needsUpdateHighShelf);
     maybeDirtyLive (anyLfoRouted, egLS, raw ("lowShelfGain"), lastDynCurveGainLS, needsUpdateLowShelf);
 
+    // When the sum is disabled, ignore combined-only dirties (spectral GR / D sum ticks).
+    const bool combinedDirty = needsUpdateCombined && ! skipCombined;
+
     const bool anyDirty = needsUpdateBand1 || needsUpdateBand2 || needsUpdateBand3 || needsUpdateBand4
                           || needsUpdateHighpass || needsUpdateLowpass || needsUpdateHighShelf || needsUpdateLowShelf
-                          || needsUpdateExtended || needsUpdateCombined || needsUpdateSpectralAmount;
+                          || needsUpdateExtended || combinedDirty || needsUpdateSpectralAmount;
 
     if (! anyDirty)
+    {
+        if (skipCombined)
+            needsUpdateCombined = false;
         return;
+    }
 
     ensureResponseBufferSize (width);
 
@@ -1032,6 +1194,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     //   4) Side Check GR on the SAME grid, then added (sum only)
     //   5) Path build/stroke from responseCombined (in paint)
     // Per-band curves stay static IIR only (band gain is makeup when spectral is on).
+    // Under particle eco, magStep > 1 downsamples IIR + GR eval (linear fill between).
     auto ensureSpectralGrBuffers = [&]()
     {
         if ((int) spectralGrScratch.size() != width)
@@ -1047,13 +1210,37 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         }
     };
 
+    // Sparse GR sample into full-width scratch (step>1), then accumulate.
+    auto sampleGrOntoScratch = [&] (auto&& sampleFn)
+    {
+        if (magStep <= 1)
+        {
+            sampleFn (logFrequencies.data(), spectralGrScratch.data(), width);
+            return;
+        }
+        // One sample every magStep px, always including the last column.
+        const int sparseN = (width + magStep - 1) / magStep;
+        thread_local std::vector<float> sparseFreq, sparseDb;
+        sparseFreq.resize ((size_t) sparseN);
+        sparseDb.resize ((size_t) sparseN);
+        for (int s = 0; s < sparseN; ++s)
+        {
+            const int i = juce::jmin (width - 1, s * magStep);
+            sparseFreq[(size_t) s] = logFrequencies[(size_t) i];
+        }
+        sampleFn (sparseFreq.data(), sparseDb.data(), sparseN);
+        expandSparseDb (sparseDb.data(), sparseN, magStep, spectralGrScratch.data(), width);
+    };
+
     auto accumulateSpectralGr = [&] (int bandIndex, bool spectralOn) -> bool
     {
         if (! spectralOn || (int) responseCombined.size() != width || (int) logFrequencies.size() != width)
             return false;
 
-        // Dense grid first, then GR — never apply sparse BP-centre GR after path resampling.
-        processor.sampleSpectralGrDb (bandIndex, logFrequencies.data(), spectralGrScratch.data(), width);
+        sampleGrOntoScratch ([&] (const float* freqs, float* dest, int n)
+        {
+            processor.sampleSpectralGrDb (bandIndex, freqs, dest, n);
+        });
         for (int i = 0; i < width; ++i)
             spectralGrTarget[(size_t) i] += spectralGrScratch[(size_t) i];
         return true;
@@ -1105,7 +1292,18 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         if ((int) sideCheckGrScratch.size() != width)
             sideCheckGrScratch.resize ((size_t) width);
 
-        processor.sampleSideCheckGrDb (logFrequencies.data(), sideCheckGrScratch.data(), width);
+        if (magStep <= 1)
+        {
+            processor.sampleSideCheckGrDb (logFrequencies.data(), sideCheckGrScratch.data(), width);
+        }
+        else
+        {
+            sampleGrOntoScratch ([&] (const float* freqs, float* dest, int n)
+            {
+                processor.sampleSideCheckGrDb (freqs, dest, n);
+            });
+            sideCheckGrScratch = spectralGrScratch;
+        }
         for (int i = 0; i < width; ++i)
             responseCombined[(size_t) i] += sideCheckGrScratch[(size_t) i];
     };
@@ -1118,7 +1316,18 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         if ((int) matchGrScratch.size() != width)
             matchGrScratch.resize ((size_t) width);
 
-        processor.sampleMatchGrDb (logFrequencies.data(), matchGrScratch.data(), width);
+        if (magStep <= 1)
+        {
+            processor.sampleMatchGrDb (logFrequencies.data(), matchGrScratch.data(), width);
+        }
+        else
+        {
+            sampleGrOntoScratch ([&] (const float* freqs, float* dest, int n)
+            {
+                processor.sampleMatchGrDb (freqs, dest, n);
+            });
+            matchGrScratch = spectralGrScratch;
+        }
         for (int i = 0; i < width; ++i)
             responseCombined[(size_t) i] += matchGrScratch[(size_t) i];
     };
@@ -1134,7 +1343,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         {
             auto stages = FilterType::makeBrickwallStages (
                 sampleRate, f, q, FilterType::isHighpassFamily (type));
-            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, magStep);
         }
         else if (FilterType::isHpLp (type))
         {
@@ -1142,17 +1351,17 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
             auto stages = FilterType::isHighpassFamily (type)
                 ? FilterSlope::makeHighpassCoeffs (sampleRate, f, q, slope)
                 : FilterSlope::makeLowpassCoeffs (sampleRate, f, q, slope);
-            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, magStep);
         }
         else if (FilterType::isMultiStage (type))
         {
             auto stages = FilterType::makeStages (type, sampleRate, f, q, gain);
-            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, responseSampleStep);
+            FilterSlope::fillCascadedMagnitude (stages, logFrequencies, sampleRate, dest, magStep);
         }
         else
         {
             auto coeffs = FilterType::makeCoefficients (type, sampleRate, f, q, gain);
-            fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, dest, responseSampleStep);
+            fillMagnitudeResponse (coeffs, logFrequencies, sampleRate, dest, magStep);
         }
     };
 
@@ -1234,85 +1443,6 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         lastDynCurveGainLS = gain;
     }
 
-    // Sum: reuse per-band buffers unless D/SC is live without LFO (buffers are at target/range).
-    auto addBandToCombined = [&] (bool bandOn, bool dynLive, bool lfoLive,
-                                  int type, float freq, float qBase, float effectiveGain,
-                                  const juce::String& slopeId, const std::vector<float>& bandBuf)
-    {
-        if (! bandOn || (int) bandBuf.size() != width)
-            return;
-
-        const bool sumNeedsEffective = dynLive && ! lfoLive && FilterType::usesGain (type);
-        if (sumNeedsEffective)
-        {
-            fillBandResponse (type, freq, qBase, effectiveGain, slopeId, responseDynSumScratch);
-            for (int i = 0; i < width; ++i)
-                responseCombined[(size_t) i] += responseDynSumScratch[(size_t) i];
-        }
-        else
-        {
-            for (int i = 0; i < width; ++i)
-                responseCombined[(size_t) i] += bandBuf[(size_t) i];
-        }
-    };
-
-    std::fill (responseCombined.begin(), responseCombined.end(), 0.0f);
-
-    {
-        const int type = (int) raw ("band1Type");
-        addBandToCombined (processor.getIsBand1On(), dyn1, anyLfoRouted, type,
-                           live1 ? processor.getPublishedBand1Freq() : raw ("band1Frequency"),
-                           live1 ? processor.getPublishedBand1Q() : raw ("band1Q"),
-                           eg1, "band1Slope", responseBand1);
-    }
-    {
-        const int type = (int) raw ("band2Type");
-        addBandToCombined (processor.getIsBand2On(), dyn2, anyLfoRouted, type,
-                           live2 ? processor.getPublishedBand2Freq() : raw ("band2Frequency"),
-                           live2 ? processor.getPublishedBand2Q() : raw ("band2Q"),
-                           eg2, "band2Slope", responseBand2);
-    }
-    {
-        const int type = (int) raw ("band3Type");
-        addBandToCombined (processor.getIsBand3On(), dyn3, anyLfoRouted, type,
-                           live3 ? processor.getPublishedBand3Freq() : raw ("band3Frequency"),
-                           live3 ? processor.getPublishedBand3Q() : raw ("band3Q"),
-                           eg3, "band3Slope", responseBand3);
-    }
-    {
-        const int type = (int) raw ("band4Type");
-        addBandToCombined (processor.getIsBand4On(), dyn4, anyLfoRouted, type,
-                           live4 ? processor.getPublishedBand4Freq() : raw ("band4Frequency"),
-                           live4 ? processor.getPublishedBand4Q() : raw ("band4Q"),
-                           eg4, "band4Slope", responseBand4);
-    }
-    {
-        const int type = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
-        addBandToCombined (processor.getIsHighpassOn(), dynHP, false, type,
-                           raw ("highpassCutoff"), raw ("highpassQ"),
-                           egHP, "highpassSlope", responseHighpass);
-    }
-    {
-        const int type = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
-        addBandToCombined (processor.getIsLowpassOn(), dynLP, false, type,
-                           raw ("lowpassCutoff"), raw ("lowpassQ"),
-                           egLP, "lowpassSlope", responseLowpass);
-    }
-    {
-        const int type = (int) raw ("highShelfType");
-        addBandToCombined (processor.getIsHighShelfOn(), dynHS, anyLfoRouted, type,
-                           liveHS ? processor.getPublishedHighShelfFreq() : raw ("highShelfFrequency"),
-                           liveHS ? processor.getPublishedHighShelfQ() : raw ("highShelfQ"),
-                           egHS, "highShelfSlope", responseHighShelf);
-    }
-    {
-        const int type = (int) raw ("lowShelfType");
-        addBandToCombined (processor.getIsLowShelfOn(), dynLS, anyLfoRouted, type,
-                           liveLS ? processor.getPublishedLowShelfFreq() : raw ("lowShelfFrequency"),
-                           liveLS ? processor.getPublishedLowShelfQ() : raw ("lowShelfQ"),
-                           egLS, "lowShelfSlope", responseLowShelf);
-    }
-
     // Extended banks 2–8: cache per-band magnitudes for individual curves + sum.
     // Paths are rebuilt in paint while needsUpdateExtended is still true.
     if (needsUpdateExtended)
@@ -1337,32 +1467,119 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         }
     }
 
-    for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
+    // Sum: reuse per-band buffers unless D/SC is live without LFO (buffers are at target/range).
+    // Skipped entirely when Spec3D "Disable Cumulative Curve" is on.
+    auto addBandToCombined = [&] (bool bandOn, bool dynLive, bool lfoLive,
+                                  int type, float freq, float qBase, float effectiveGain,
+                                  const juce::String& slopeId, const std::vector<float>& bandBuf)
     {
-        if (! processor.isGlobalBandOn (global))
-            continue;
+        if (! bandOn || (int) bandBuf.size() != width)
+            return;
 
-        const auto& dest = responseExtended[(size_t) (global - EqBand::kBankSize)];
-        if ((int) dest.size() != width)
-            continue;
+        const bool sumNeedsEffective = dynLive && ! lfoLive && FilterType::usesGain (type);
+        if (sumNeedsEffective)
+        {
+            fillBandResponse (type, freq, qBase, effectiveGain, slopeId, responseDynSumScratch);
+            for (int i = 0; i < width; ++i)
+                responseCombined[(size_t) i] += responseDynSumScratch[(size_t) i];
+        }
+        else
+        {
+            for (int i = 0; i < width; ++i)
+                responseCombined[(size_t) i] += bandBuf[(size_t) i];
+        }
+    };
 
-        const int type = BandChannel::readChoiceIndex (parameters, FilterType::paramIDForGlobal (global), FilterType::bell);
-        const auto dynId = DynamicEq::dynamicParamIDForGlobal (global);
-        const auto scId = BandSidechain::sidechainParamIDForGlobal (global);
-        const bool dynLive = (raw (dynId) > 0.5f) || (raw (scId) > 0.5f);
-        addBandToCombined (true, dynLive, false, type,
-                           raw (EqBand::frequencyParamIDForGlobal (global)),
-                           raw (EqBand::qParamIDForGlobal (global)),
-                           processor.getPublishedEffectiveGainDb (global),
-                           EqBand::slopeParamIDForGlobal (global),
-                           dest);
+    if (! skipCombined)
+    {
+        std::fill (responseCombined.begin(), responseCombined.end(), 0.0f);
+
+        {
+            const int type = (int) raw ("band1Type");
+            addBandToCombined (processor.getIsBand1On(), dyn1, anyLfoRouted, type,
+                               live1 ? processor.getPublishedBand1Freq() : raw ("band1Frequency"),
+                               live1 ? processor.getPublishedBand1Q() : raw ("band1Q"),
+                               eg1, "band1Slope", responseBand1);
+        }
+        {
+            const int type = (int) raw ("band2Type");
+            addBandToCombined (processor.getIsBand2On(), dyn2, anyLfoRouted, type,
+                               live2 ? processor.getPublishedBand2Freq() : raw ("band2Frequency"),
+                               live2 ? processor.getPublishedBand2Q() : raw ("band2Q"),
+                               eg2, "band2Slope", responseBand2);
+        }
+        {
+            const int type = (int) raw ("band3Type");
+            addBandToCombined (processor.getIsBand3On(), dyn3, anyLfoRouted, type,
+                               live3 ? processor.getPublishedBand3Freq() : raw ("band3Frequency"),
+                               live3 ? processor.getPublishedBand3Q() : raw ("band3Q"),
+                               eg3, "band3Slope", responseBand3);
+        }
+        {
+            const int type = (int) raw ("band4Type");
+            addBandToCombined (processor.getIsBand4On(), dyn4, anyLfoRouted, type,
+                               live4 ? processor.getPublishedBand4Freq() : raw ("band4Frequency"),
+                               live4 ? processor.getPublishedBand4Q() : raw ("band4Q"),
+                               eg4, "band4Slope", responseBand4);
+        }
+        {
+            const int type = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
+            addBandToCombined (processor.getIsHighpassOn(), dynHP, false, type,
+                               raw ("highpassCutoff"), raw ("highpassQ"),
+                               egHP, "highpassSlope", responseHighpass);
+        }
+        {
+            const int type = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
+            addBandToCombined (processor.getIsLowpassOn(), dynLP, false, type,
+                               raw ("lowpassCutoff"), raw ("lowpassQ"),
+                               egLP, "lowpassSlope", responseLowpass);
+        }
+        {
+            const int type = (int) raw ("highShelfType");
+            addBandToCombined (processor.getIsHighShelfOn(), dynHS, anyLfoRouted, type,
+                               liveHS ? processor.getPublishedHighShelfFreq() : raw ("highShelfFrequency"),
+                               liveHS ? processor.getPublishedHighShelfQ() : raw ("highShelfQ"),
+                               egHS, "highShelfSlope", responseHighShelf);
+        }
+        {
+            const int type = (int) raw ("lowShelfType");
+            addBandToCombined (processor.getIsLowShelfOn(), dynLS, anyLfoRouted, type,
+                               liveLS ? processor.getPublishedLowShelfFreq() : raw ("lowShelfFrequency"),
+                               liveLS ? processor.getPublishedLowShelfQ() : raw ("lowShelfQ"),
+                               egLS, "lowShelfSlope", responseLowShelf);
+        }
+
+        for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
+        {
+            if (! processor.isGlobalBandOn (global))
+                continue;
+
+            const auto& dest = responseExtended[(size_t) (global - EqBand::kBankSize)];
+            if ((int) dest.size() != width)
+                continue;
+
+            const int type = BandChannel::readChoiceIndex (parameters, FilterType::paramIDForGlobal (global), FilterType::bell);
+            const auto dynId = DynamicEq::dynamicParamIDForGlobal (global);
+            const auto scId = BandSidechain::sidechainParamIDForGlobal (global);
+            const bool dynLive = (raw (dynId) > 0.5f) || (raw (scId) > 0.5f);
+            addBandToCombined (true, dynLive, false, type,
+                               raw (EqBand::frequencyParamIDForGlobal (global)),
+                               raw (EqBand::qParamIDForGlobal (global)),
+                               processor.getPublishedEffectiveGainDb (global),
+                               EqBand::slopeParamIDForGlobal (global),
+                               dest);
+        }
+    }
+    else
+    {
+        needsUpdateCombined = false;
     }
 
     // Spectral Amount curves (second handle): same shape as the band at Amount→dB.
     // Makeup stays on the normal band curve; Amount is visual only (GR still shapes the sum).
     if (needsUpdateSpectralAmount || needsUpdateBand1 || needsUpdateBand2 || needsUpdateBand3 || needsUpdateBand4
         || needsUpdateHighpass || needsUpdateLowpass || needsUpdateHighShelf || needsUpdateLowShelf
-        || needsUpdateCombined)
+        || (needsUpdateCombined && ! skipCombined))
     {
         const float rangeDb = getEqDisplayRangeDb();
         auto fillAmount = [&] (int slot, bool bandOn, bool spectralOn, int type,
@@ -1421,39 +1638,41 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         needsUpdateSpectralAmount = true; // tell paint to rebuild amount paths
     }
 
-    // Spectral processing shapes only the cumulative display curve.
-    // usesGain + current type must match DSP arming (S only on bell / shelves).
-    ensureSpectralGrBuffers();
-    bool anySpectralSampled = false;
-    if (processor.getIsBand1On())
-        anySpectralSampled |= accumulateSpectralGr (0, spec1 && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "band1Type", FilterType::bell)));
-    if (processor.getIsBand2On())
-        anySpectralSampled |= accumulateSpectralGr (1, spec2 && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "band2Type", FilterType::bell)));
-    if (processor.getIsBand3On())
-        anySpectralSampled |= accumulateSpectralGr (2, spec3 && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "band3Type", FilterType::bell)));
-    if (processor.getIsBand4On())
-        anySpectralSampled |= accumulateSpectralGr (3, spec4 && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "band4Type", FilterType::bell)));
-    if (processor.getIsHighpassOn())
-        anySpectralSampled |= accumulateSpectralGr (4, specHP && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass)));
-    if (processor.getIsLowpassOn())
-        anySpectralSampled |= accumulateSpectralGr (5, specLP && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass)));
-    if (processor.getIsHighShelfOn())
-        anySpectralSampled |= accumulateSpectralGr (6, specHS && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "highShelfType", FilterType::highShelf)));
-    if (processor.getIsLowShelfOn())
-        anySpectralSampled |= accumulateSpectralGr (7, specLS && FilterType::usesGain (
-            BandChannel::readChoiceIndex (parameters, "lowShelfType", FilterType::lowShelf)));
-    commitSmoothedSpectralGr (anySpectralSampled);
+    // Spectral / Side Check / Match GR shape the cumulative sum only — skip when disabled.
+    if (! skipCombined)
+    {
+        // usesGain + current type must match DSP arming (S only on bell / shelves).
+        ensureSpectralGrBuffers();
+        bool anySpectralSampled = false;
+        if (processor.getIsBand1On())
+            anySpectralSampled |= accumulateSpectralGr (0, spec1 && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "band1Type", FilterType::bell)));
+        if (processor.getIsBand2On())
+            anySpectralSampled |= accumulateSpectralGr (1, spec2 && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "band2Type", FilterType::bell)));
+        if (processor.getIsBand3On())
+            anySpectralSampled |= accumulateSpectralGr (2, spec3 && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "band3Type", FilterType::bell)));
+        if (processor.getIsBand4On())
+            anySpectralSampled |= accumulateSpectralGr (3, spec4 && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "band4Type", FilterType::bell)));
+        if (processor.getIsHighpassOn())
+            anySpectralSampled |= accumulateSpectralGr (4, specHP && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass)));
+        if (processor.getIsLowpassOn())
+            anySpectralSampled |= accumulateSpectralGr (5, specLP && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass)));
+        if (processor.getIsHighShelfOn())
+            anySpectralSampled |= accumulateSpectralGr (6, specHS && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "highShelfType", FilterType::highShelf)));
+        if (processor.getIsLowShelfOn())
+            anySpectralSampled |= accumulateSpectralGr (7, specLS && FilterType::usesGain (
+                BandChannel::readChoiceIndex (parameters, "lowShelfType", FilterType::lowShelf)));
+        commitSmoothedSpectralGr (anySpectralSampled);
 
-    // Side Check GR after spectral — sum curve only (per-band curves stay static).
-    applySideCheckGrToCombined (raw (SideCheck::enabledParamId()) > 0.5f);
-    applyMatchGrToCombined (raw (MatchEq::enabledParamId()) > 0.5f);
+        applySideCheckGrToCombined (raw (SideCheck::enabledParamId()) > 0.5f);
+        applyMatchGrToCombined (raw (MatchEq::enabledParamId()) > 0.5f);
+    }
 }
 
 //=======================================================================================================//
@@ -1979,10 +2198,10 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
-   // Draw the combined frequency response
+   // Draw the combined frequency response (skipped when Spec3D disables cumulative curve)
 
-
-
+    if (! shouldSkipCombinedCurveWork())
+    {
       // Update combinedResponsePath only if it's marked as dirty
     if (needsUpdateCombined) {
 
@@ -2062,32 +2281,32 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     g.setColour(combinedCurveColor);
     g.strokePath (combinedStrokePath, sumStroke);
-
-
+    } // ! shouldSkipCombinedCurveWork
+    else
+    {
+        needsUpdateCombined = false;
+        combinedResponsePath.clear();
+    }
 
     //=======================================================================================================//
-    juce::Colour outlineColor = theme.graphHandleOutline;
-    juce::Colour outlineColor2 = theme.graphHandleText;
+    // Handle fills are multi-colour (graphBand1–8). Legible text resolves ink per disk.
+    const juce::Colour graphBgForHandles = theme.graphBackground.interpolatedWith (theme.graphBackground2, 0.5f);
     juce::Colour handleColor1 = theme.graphBand1.withAlpha (1.0f);
     juce::Colour handleColor2 = theme.graphBand2.withAlpha (1.0f);
     juce::Colour handleColor3 = theme.graphBand3.withAlpha (1.0f);
     juce::Colour handleColor4 = theme.graphBand4.withAlpha (1.0f);
-   
     juce::Colour handleColor5 = theme.graphBand5.withAlpha (1.0f);
     juce::Colour handleColor6 = theme.graphBand6.withAlpha (1.0f);
-  
     juce::Colour handleColor7 = theme.graphBand7.withAlpha (1.0f);
     juce::Colour handleColor8 = theme.graphBand8.withAlpha (1.0f);
 
-    float outlineThickness2 = 1.0f;  // Half of prior 2.0f (handles at 1/2 size)
-    float outlineThickness = 1.0f;  // Half of prior 2.0f (handles at 1/2 size)
-
-
-
+    auto paintHandle = [&] (float cx, float cy, float scale, juce::Colour bandFill, const juce::String& label)
+    {
+        paintBandHandleChrome (g, cx, cy, scale, bandFill, graphBgForHandles,
+                               theme.graphHandleOutline, theme.graphHandleText, theme, label);
+    };
 
     // Band 1 //
-
-
 
     if (processor.getIsBand1On())
     {
@@ -2117,27 +2336,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX = band1X;
         handleY = band1Y;
 
-        // More scale factor applications
-        float handleOutlineSize = 12.5f * scaleFactor;
-        float innerOutlineSize = 11.0f * scaleFactor;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor1);
-        g.fillEllipse(band1X - handleSize / 2.0f, band1Y - handleSize / 2.0f, handleSize, handleSize);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(band1X - handleOutlineSize / 2.0f, band1Y - handleOutlineSize / 2.0f, handleOutlineSize, handleOutlineSize, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(band1X - innerOutlineSize / 2.0f, band1Y - innerOutlineSize / 2.0f, innerOutlineSize, innerOutlineSize, outlineThickness2);
-
-        // Draw the label for Band 1
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor);  // Apply scale f   actor to font size
-        float textOffset = 3.5f * scaleFactor;  // Apply scale factor to text position
-        g.drawText("3", band1X - textOffset, band1Y - textOffset, 7.0f * scaleFactor, 7.0f * scaleFactor, juce::Justification::centred, false);
+        paintHandle (band1X, band1Y, scaleFactor, handleColor1, "3");
 
         if (rawBoolParam (parameters, "band1Dynamic"))
             paintDynamicRangeHandleDecor (g, band1X, band1Y, handleSize, handleColor1, scaleFactor);
@@ -2181,27 +2380,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX2 = band2X;
         handleY2 = band2Y;
 
-        // More graphical attributes
-        float handleOutlineSize2 = 12.5f * scaleFactor2;
-        float innerOutlineSize2 = 11.0f * scaleFactor2;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor2);
-        g.fillEllipse(band2X - handleSize2 / 2.0f, band2Y - handleSize2 / 2.0f, handleSize2, handleSize2);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(band2X - handleOutlineSize2 / 2.0f, band2Y - handleOutlineSize2 / 2.0f, handleOutlineSize2, handleOutlineSize2, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(band2X - innerOutlineSize2 / 2.0f, band2Y - innerOutlineSize2 / 2.0f, innerOutlineSize2, innerOutlineSize2, outlineThickness2);
-
-        // Draw the label for Band 2
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor2);  // Apply scale factor to font size
-        float textOffset2 = 3.5f * scaleFactor2;  // Apply scale factor to text position
-        g.drawText("4", band2X - textOffset2, band2Y - textOffset2, 7.0f * scaleFactor2, 7.0f * scaleFactor2, juce::Justification::centred, false);
+        paintHandle (band2X, band2Y, scaleFactor2, handleColor2, "4");
 
         if (rawBoolParam (parameters, "band2Dynamic"))
             paintDynamicRangeHandleDecor (g, band2X, band2Y, handleSize2, handleColor2, scaleFactor2);
@@ -2245,28 +2424,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX3 = band3X;
         handleY3 = band3Y;
 
-
-        // More graphical attributes
-        float handleOutlineSize3 = 12.5f * scaleFactor3;
-        float innerOutlineSize3 = 11.0f * scaleFactor3;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor3);
-        g.fillEllipse(band3X - handleSize3 / 2.0f, band3Y - handleSize3 / 2.0f, handleSize3, handleSize3);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(band3X - handleOutlineSize3 / 2.0f, band3Y - handleOutlineSize3 / 2.0f, handleOutlineSize3, handleOutlineSize3, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(band3X - innerOutlineSize3 / 2.0f, band3Y - innerOutlineSize3 / 2.0f, innerOutlineSize3, innerOutlineSize3, outlineThickness2);
-
-        // Draw the label for Band 3
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor3);  // Apply scale factor to font size
-        float textOffset3 = 3.5f * scaleFactor3;  // Apply scale factor to text position
-        g.drawText("5", band3X - textOffset3, band3Y - textOffset3, 7.0f * scaleFactor3, 7.0f * scaleFactor3, juce::Justification::centred, false);
+        paintHandle (band3X, band3Y, scaleFactor3, handleColor3, "5");
 
         if (rawBoolParam (parameters, "band3Dynamic"))
             paintDynamicRangeHandleDecor (g, band3X, band3Y, handleSize3, handleColor3, scaleFactor3);
@@ -2309,28 +2467,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX4 = band4X;
         handleY4 = band4Y;
 
-
-        // More graphical attributes
-        float handleOutlineSize4 = 12.5f * scaleFactor4;
-        float innerOutlineSize4 = 11.0f * scaleFactor4;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor4);
-        g.fillEllipse(band4X - handleSize4 / 2.0f, band4Y - handleSize4 / 2.0f, handleSize4, handleSize4);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(band4X - handleOutlineSize4 / 2.0f, band4Y - handleOutlineSize4 / 2.0f, handleOutlineSize4, handleOutlineSize4, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(band4X - innerOutlineSize4 / 2.0f, band4Y - innerOutlineSize4 / 2.0f, innerOutlineSize4, innerOutlineSize4, outlineThickness2);
-
-        // Draw the label for Band 4
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor4);  // Apply scale factor to font size
-        float textOffset4 = 3.5f * scaleFactor4;  // Apply scale factor to text position
-        g.drawText("6", band4X - textOffset4, band4Y - textOffset4, 7.0f * scaleFactor4, 7.0f * scaleFactor4, juce::Justification::centred, false);
+        paintHandle (band4X, band4Y, scaleFactor4, handleColor4, "6");
 
         if (rawBoolParam (parameters, "band4Dynamic"))
             paintDynamicRangeHandleDecor (g, band4X, band4Y, handleSize4, handleColor4, scaleFactor4);
@@ -2369,27 +2506,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX5 = highpassX;
         handleY5 = highpassY;
 
-        // More graphical attributes
-        float handleOutlineSize5 = 12.5f * scaleFactor5;
-        float innerOutlineSize5 = 11.0f * scaleFactor5;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor5);
-        g.fillEllipse(highpassX - handleSize5 / 2.0f, handleY5 - handleSize5 / 2.0f, handleSize5, handleSize5);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(highpassX - handleOutlineSize5 / 2.0f, handleY5 - handleOutlineSize5 / 2.0f, handleOutlineSize5, handleOutlineSize5, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(highpassX - innerOutlineSize5 / 2.0f, handleY5 - innerOutlineSize5 / 2.0f, innerOutlineSize5, innerOutlineSize5, outlineThickness2);
-
-        // Draw the label for Band 1 (highpass slot)
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor5);  // Apply scale factor to font size
-        float textOffset5 = 3.5f * scaleFactor5;  // Apply scale factor to text position
-        g.drawText("1", highpassX - textOffset5, handleY5 - textOffset5, 7.0f * scaleFactor5, 7.0f * scaleFactor5, juce::Justification::centred, false);
+        paintHandle (highpassX, handleY5, scaleFactor5, handleColor5, "1");
     }
     else
     {
@@ -2425,27 +2542,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX6 = lowpassX;
         handleY6 = lowpassY;
 
-        // More graphical attributes
-        float handleOutlineSize6 = 12.5f * scaleFactor6;
-        float innerOutlineSize6 = 11.0f * scaleFactor6;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor6);
-        g.fillEllipse(lowpassX - handleSize6 / 2.0f, handleY6 - handleSize6 / 2.0f, handleSize6, handleSize6);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(lowpassX - handleOutlineSize6 / 2.0f, handleY6 - handleOutlineSize6 / 2.0f, handleOutlineSize6, handleOutlineSize6, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(lowpassX - innerOutlineSize6 / 2.0f, handleY6 - innerOutlineSize6 / 2.0f, innerOutlineSize6, innerOutlineSize6, outlineThickness2);
-
-        // Draw the label for Band 8 (lowpass slot)
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor6);  // Apply scale factor to font size
-        float textOffset6 = 3.5f * scaleFactor6;  // Apply scale factor to text position
-        g.drawText("8", lowpassX - textOffset6, handleY6 - textOffset6, 7.0f * scaleFactor6, 7.0f * scaleFactor6, juce::Justification::centred, false);
+        paintHandle (lowpassX, handleY6, scaleFactor6, handleColor6, "8");
     }
     else
     {
@@ -2486,27 +2583,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX7 = highShelfX;
         handleY7 = highShelfY;
 
-        // More graphical attributes
-        float handleOutlineSize7 = 12.5f * scaleFactor7;
-        float innerOutlineSize7 = 11.0f * scaleFactor7;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor7);
-        g.fillEllipse(highShelfX - handleSize7 / 2.0f, highShelfY - handleSize7 / 2.0f, handleSize7, handleSize7);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(highShelfX - handleOutlineSize7 / 2.0f, highShelfY - handleOutlineSize7 / 2.0f, handleOutlineSize7, handleOutlineSize7, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(highShelfX - innerOutlineSize7 / 2.0f, highShelfY - innerOutlineSize7 / 2.0f, innerOutlineSize7, innerOutlineSize7, outlineThickness2);
-
-        // Draw the label for High Shelf
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor7);  // Apply scale factor to font size
-        float textOffset7 = 3.5f * scaleFactor7;  // Apply scale factor to text position
-        g.drawText("7", highShelfX - textOffset7, highShelfY - textOffset7, 7.0f * scaleFactor7, 7.0f * scaleFactor7, juce::Justification::centred, false);
+        paintHandle (highShelfX, highShelfY, scaleFactor7, handleColor7, "7");
 
         if (rawBoolParam (parameters, "highShelfDynamic"))
             paintDynamicRangeHandleDecor (g, highShelfX, highShelfY, handleSize7, handleColor7, scaleFactor7);
@@ -2549,28 +2626,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         handleX8 = lowShelfX;
         handleY8 = lowShelfY;
 
-
-        // Apply scale factor
-        float handleOutlineSize8 = 12.5f * scaleFactor8;
-        float innerOutlineSize8 = 11.0f * scaleFactor8;
-
-        // Draw the handle with your existing color
-        g.setColour(handleColor8);
-        g.fillEllipse(lowShelfX - handleSize8 / 2.0f, lowShelfY - handleSize8 / 2.0f, handleSize8, handleSize8);
-
-        // Draw the first outline with your existing color
-        g.setColour(outlineColor);
-        g.drawEllipse(lowShelfX - handleOutlineSize8 / 2.0f, lowShelfY - handleOutlineSize8 / 2.0f, handleOutlineSize8, handleOutlineSize8, outlineThickness);
-
-        // Draw the second outline with your existing color
-        g.setColour(outlineColor2);
-        g.drawEllipse(lowShelfX - innerOutlineSize8 / 2.0f, lowShelfY - innerOutlineSize8 / 2.0f, innerOutlineSize8, innerOutlineSize8, outlineThickness2);
-
-        // Draw the label for Low Shelf
-        g.setColour(theme.graphHandleText);
-        g.setFont(11.0f * scaleFactor8);  // Apply scale factor to font size
-        float textOffset8 = 3.5f * scaleFactor8;  // Apply scale factor to text position
-        g.drawText("2", lowShelfX - textOffset8, lowShelfY - textOffset8, 7.0f * scaleFactor8, 7.0f * scaleFactor8, juce::Justification::centred, false);
+        paintHandle (lowShelfX, lowShelfY, scaleFactor8, handleColor8, "2");
 
         if (rawBoolParam (parameters, "lowShelfDynamic"))
             paintDynamicRangeHandleDecor (g, lowShelfX, lowShelfY, handleSize8, handleColor8, scaleFactor8);
@@ -2643,15 +2699,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             hs.y = hy;
 
             const auto col = specHandleCols[slot];
-            g.setColour (col);
-            g.fillEllipse (hx - handleSize / 2.0f, hy - handleSize / 2.0f, handleSize, handleSize);
-            g.setColour (outlineColor);
-            g.drawEllipse (hx - 12.5f * scale / 2.0f, hy - 12.5f * scale / 2.0f,
-                           12.5f * scale, 12.5f * scale, outlineThickness);
-            g.setColour (outlineColor2);
-            g.drawEllipse (hx - 11.0f * scale / 2.0f, hy - 11.0f * scale / 2.0f,
-                           11.0f * scale, 11.0f * scale, outlineThickness2);
-
+            // No number on spectral amount handles — still use legible fill/rings.
+            paintBandHandleChrome (g, hx, hy, scale, col, graphBgForHandles,
+                                   theme.graphHandleOutline, theme.graphHandleText, theme, {});
             paintDynamicRangeHandleDecor (g, hx, hy, handleSize, col, scale);
         }
     }
@@ -2692,18 +2742,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             hs.y = hy;
 
             const auto col = extColours[EqBand::colourSlotFromGlobal (global)].withAlpha (1.0f);
-            g.setColour (col);
-            g.fillEllipse (hx - handleSize / 2.0f, hy - handleSize / 2.0f, handleSize, handleSize);
-            g.setColour (outlineColor);
-            g.drawEllipse (hx - 12.5f * scale / 2.0f, hy - 12.5f * scale / 2.0f, 12.5f * scale, 12.5f * scale, outlineThickness);
-            g.setColour (outlineColor2);
-            g.drawEllipse (hx - 11.0f * scale / 2.0f, hy - 11.0f * scale / 2.0f, 11.0f * scale, 11.0f * scale, outlineThickness2);
-
-            g.setColour (theme.graphHandleText);
-            g.setFont (juce::jmax (8.0f, 10.0f * scale));
-            const auto label = juce::String (global + 1);
-            const float tw = juce::jmax (10.0f, (float) label.length() * 6.0f * scale);
-            g.drawText (label, hx - tw * 0.5f, hy - 4.0f * scale, tw, 9.0f * scale, juce::Justification::centred, false);
+            paintHandle (hx, hy, scale, col, juce::String (global + 1));
 
             {
                 const auto dynId = DynamicEq::dynamicParamIDForGlobal (global);
@@ -2783,7 +2822,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             const double sr = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : sampleRate;
             if (auto coeffs = FilterType::makeCoefficients (FilterType::bandPass, sr, freq, q, 0.0f))
             {
-                fillMagnitudeResponse (coeffs, logFrequencies, sr, responseAuditionBp, responseSampleStep);
+                fillMagnitudeResponse (coeffs, logFrequencies, sr, responseAuditionBp,
+                                       resolveMagnitudeSampleStep());
                 auditionBandpassPath.clear();
                 auditionBandpassPath = intelligentDownsample (auditionBandpassPath, responseAuditionBp, w, h);
 
@@ -3797,10 +3837,22 @@ int FrequencyResponseComponent::bandIndexForFrequencyZone (float frequencyHz) co
     return 5; // Band 8 — Lowpass
 }
 
-void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequencyHz)
+void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequencyHz,
+                                                                  int typeOverride,
+                                                                  bool preferPeaking)
 {
-    const int preferredBand = bandIndexForFrequencyZone (frequencyHz);
     const float freq = juce::jlimit (20.0f, 20000.0f, frequencyHz);
+    int preferredBand = bandIndexForFrequencyZone (frequencyHz);
+
+    // Harmonic stacking: aim for peaking slots first so we don't steal HP/LP/shelves.
+    if (preferPeaking)
+    {
+        constexpr float kPeakMinHz = 150.0f;
+        constexpr float kPeakMaxHz = 8000.0f;
+        preferredBand = bandIndexForFrequencyZone (
+            juce::jlimit (kPeakMinHz, kPeakMaxHz, freq));
+        preferredBand = juce::jlimit (0, 3, preferredBand);
+    }
 
     auto setFloatParam = [this] (const juce::String& paramID, float value)
     {
@@ -3814,25 +3866,45 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
             param->setValueNotifyingHost (value ? 1.0f : 0.0f);
     };
 
-    auto setTypeParamGlobal = [this] (const juce::String& paramID, int typeIndex)
+    // Choice params: set by index via convertTo0to1 (same path as OptionBox).
+    auto setTypeParamById = [this] (const juce::String& paramID, int typeIndex)
     {
+        if (paramID.isEmpty())
+            return;
         if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
                 processor.treeState.getParameter (paramID)))
-            *choice = typeIndex;
+        {
+            const int clamped = juce::jlimit (0, juce::jmax (0, choice->choices.size() - 1), typeIndex);
+            choice->setValueNotifyingHost (choice->convertTo0to1 ((float) clamped));
+        }
+    };
+
+    auto resolveCreateType = [&] (int bank1InternalOrNeg1, bool isExtended) -> int
+    {
+        if (typeOverride >= 0)
+            return typeOverride;
+        if (isExtended)
+            return FilterType::typeForFrequencyZone (freq);
+        return FilterType::defaultTypeForBandIndex (bank1InternalOrNeg1);
     };
 
     auto activateGlobalBand = [&] (int globalDisplay)
     {
-        const int zoneType = FilterType::typeForFrequencyZone (freq);
+        // Bank 1 slots keep channel-strip defaults (HP/LS/Bell/HS/LP).
+        // Extended slots use frequency-zone type (never Bax — see typeForFrequencyZone).
+        const bool isBank1 = globalDisplay < EqBand::kBankSize;
+        const int createType = isBank1
+            ? resolveCreateType (EqBand::internalFromDisplay (globalDisplay), false)
+            : resolveCreateType (-1, true);
         const int bank = EqBand::bankFromGlobal (globalDisplay);
         processor.ensureBankAvailable (bank);
 
         setFloatParam (EqBand::frequencyParamIDForGlobal (globalDisplay), freq);
         setFloatParam (EqBand::gainParamIDForGlobal (globalDisplay), 0.0f);
-        setTypeParamGlobal (FilterType::paramIDForGlobal (globalDisplay), zoneType);
+        setTypeParamById (FilterType::paramIDForGlobal (globalDisplay), createType);
         setBoolParam (EqBand::onOffParamIDForGlobal (globalDisplay), true);
 
-        if (globalDisplay < EqBand::kBankSize)
+        if (isBank1)
         {
             // Bank 1: keep legacy dirty flags / handle selection via internal index.
             const int internal = EqBand::internalFromDisplay (globalDisplay);
@@ -3931,14 +4003,39 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
         repaint();
     };
 
+    auto findFreePeakingNear = [&] (int peakAnchor) -> int
+    {
+        for (int offset = 0; offset < 4; ++offset)
+        {
+            const int candidates[] = { peakAnchor - offset, peakAnchor + offset };
+            for (int candidate : candidates)
+            {
+                if (candidate < 0 || candidate > 3)
+                    continue;
+                if (offset == 0 && candidate != peakAnchor)
+                    continue;
+                if (! isBandOn (candidate))
+                    return candidate;
+            }
+        }
+        return -1;
+    };
+
     // Prefer the frequency-zone band when it is off. If that zone already has an
-    // active handle, allocate a free neighboring / unused band instead of moving it.
+    // active handle (or preferPeaking for harmonic stack), allocate a free slot.
     int bandIndex = preferredBand;
 
-    if (isBandOn (preferredBand))
+    const bool preferredBusy = isBandOn (preferredBand);
+    const bool needAlternateSlot = preferredBusy || preferPeaking;
+
+    if (preferPeaking && ! preferredBusy && preferredBand >= 0 && preferredBand <= 3)
+    {
+        // Harmonic path: preferred peaking slot is free — take it.
+        bandIndex = preferredBand;
+    }
+    else if (needAlternateSlot)
     {
         int peakAnchor = preferredBand;
-
         if (preferredBand < 0 || preferredBand > 3)
         {
             // HP / LP / shelf already on → borrow a free peaking slot near the click.
@@ -3947,30 +4044,10 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
             peakAnchor = bandIndexForFrequencyZone (juce::jlimit (kPeakMinHz, kPeakMaxHz, freq));
         }
 
-        bandIndex = -1;
+        bandIndex = findFreePeakingNear (peakAnchor);
 
-        for (int offset = 0; offset < 4 && bandIndex < 0; ++offset)
-        {
-            const int candidates[] = { peakAnchor - offset, peakAnchor + offset };
-
-            for (int candidate : candidates)
-            {
-                if (candidate < 0 || candidate > 3)
-                    continue;
-
-                if (offset == 0 && candidate != peakAnchor)
-                    continue;
-
-                if (! isBandOn (candidate))
-                {
-                    bandIndex = candidate;
-                    break;
-                }
-            }
-        }
-
-        // Last resort: any other unused filter band (shelf / HP / LP).
-        if (bandIndex < 0)
+        // Non-harmonic: fall back to shelf / HP / LP. Harmonic: skip to extended.
+        if (bandIndex < 0 && ! preferPeaking)
         {
             constexpr int kFallbackOrder[] = { 7, 6, 4, 5 };
 
@@ -3984,13 +4061,13 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
             }
         }
 
-        // Bank 1 full — allocate an extended slot (grow bank of 8 if needed).
+        // Bank 1 full (or harmonic with no free peaks) — extended slot.
         if (bandIndex < 0)
         {
             const int freeGlobal = processor.findFreeGlobalBand (preferredCreateBank);
             if (freeGlobal < 0)
             {
-                selectBandOnly (preferredBand);
+                selectBandOnly (juce::jlimit (0, 7, preferredBand));
                 if (onBandsFullSoftMax)
                     onBandsFullSoftMax();
                 return;
@@ -4001,71 +4078,66 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
         }
     }
 
-    // Activate an unused band at click Hz / 0 dB; set type from frequency zone.
-    const int zoneType = FilterType::typeForFrequencyZone (freq);
-
-    auto setTypeParam = [this] (const juce::String& paramID, int typeIndex)
-    {
-        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
-                processor.treeState.getParameter (paramID)))
-            *choice = typeIndex;
-    };
+    // Activate unused Bank 1 band at click Hz / 0 dB.
+    // Type follows the slot's channel-strip default (peaks → Bell, LS → Lo Shelf, …),
+    // unless typeOverride is set (e.g. Shift+double harmonic → always Bell).
+    const int createType = resolveCreateType (bandIndex, false);
 
     switch (bandIndex)
     {
         case 0:
             setFloatParam ("band1Frequency", freq);
             setFloatParam ("band1Gain", 0.0f);
-            setTypeParam ("band1Type", zoneType);
+            setTypeParamById ("band1Type", createType);
             setBoolParam ("band1OnOff", true);
             needsUpdateBand1 = true;
             break;
         case 1:
             setFloatParam ("band2Frequency", freq);
             setFloatParam ("band2Gain", 0.0f);
-            setTypeParam ("band2Type", zoneType);
+            setTypeParamById ("band2Type", createType);
             setBoolParam ("band2OnOff", true);
             needsUpdateBand2 = true;
             break;
         case 2:
             setFloatParam ("band3Frequency", freq);
             setFloatParam ("band3Gain", 0.0f);
-            setTypeParam ("band3Type", zoneType);
+            setTypeParamById ("band3Type", createType);
             setBoolParam ("band3OnOff", true);
             needsUpdateBand3 = true;
             break;
         case 3:
             setFloatParam ("band4Frequency", freq);
             setFloatParam ("band4Gain", 0.0f);
-            setTypeParam ("band4Type", zoneType);
+            setTypeParamById ("band4Type", createType);
             setBoolParam ("band4OnOff", true);
             needsUpdateBand4 = true;
             break;
         case 4:
             setFloatParam ("highpassCutoff", freq);
             setFloatParam ("highpassGain", 0.0f);
-            setTypeParam ("highpassType", zoneType);
+            setTypeParamById ("highpassType", createType);
             setBoolParam ("highpassOnOff", true);
             needsUpdateHighpass = true;
             break;
         case 5:
             setFloatParam ("lowpassCutoff", freq);
             setFloatParam ("lowpassGain", 0.0f);
-            setTypeParam ("lowpassType", zoneType);
+            setTypeParamById ("lowpassType", createType);
             setBoolParam ("lowpassOnOff", true);
             needsUpdateLowpass = true;
             break;
         case 6:
             setFloatParam ("highShelfFrequency", freq);
             setFloatParam ("highShelfGain", 0.0f);
-            setTypeParam ("highShelfType", zoneType);
+            setTypeParamById ("highShelfType", createType);
             setBoolParam ("highShelfOnOff", true);
             needsUpdateHighShelf = true;
             break;
         case 7:
             setFloatParam ("lowShelfFrequency", freq);
             setFloatParam ("lowShelfGain", 0.0f);
-            setTypeParam ("lowShelfType", zoneType);
+            setTypeParamById ("lowShelfType", createType);
             setBoolParam ("lowShelfOnOff", true);
             needsUpdateLowShelf = true;
             break;
@@ -4442,66 +4514,94 @@ void FrequencyResponseComponent::mouseDoubleClick (const juce::MouseEvent& event
 {
     constexpr float clickThreshold = 10.0f;
 
-    // Double-click on an existing (active) handle → reset/deactivate that band.
-    if (std::hypot (event.position.x - handleX, event.position.y - handleY) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (0);
-    else if (std::hypot (event.position.x - handleX2, event.position.y - handleY2) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (1);
-    else if (std::hypot (event.position.x - handleX3, event.position.y - handleY3) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (2);
-    else if (std::hypot (event.position.x - handleX4, event.position.y - handleY4) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (3);
-    else if (std::hypot (event.position.x - handleX5, event.position.y - handleY5) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (4);
-    else if (std::hypot (event.position.x - handleX6, event.position.y - handleY6) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (5);
-    else if (std::hypot (event.position.x - handleX7, event.position.y - handleY7) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (6);
-    else if (std::hypot (event.position.x - handleX8, event.position.y - handleY8) <= clickThreshold)
-        resetBandToDefaultsAndDeactivate (7);
-    else
+    auto hitBank1Internal = [&]() -> int
     {
-        bool hitExtended = false;
+        const float x = event.position.x;
+        const float y = event.position.y;
+        if (std::hypot (x - handleX,  y - handleY)  <= clickThreshold) return 0;
+        if (std::hypot (x - handleX2, y - handleY2) <= clickThreshold) return 1;
+        if (std::hypot (x - handleX3, y - handleY3) <= clickThreshold) return 2;
+        if (std::hypot (x - handleX4, y - handleY4) <= clickThreshold) return 3;
+        if (std::hypot (x - handleX5, y - handleY5) <= clickThreshold) return 4;
+        if (std::hypot (x - handleX6, y - handleY6) <= clickThreshold) return 5;
+        if (std::hypot (x - handleX7, y - handleY7) <= clickThreshold) return 6;
+        if (std::hypot (x - handleX8, y - handleY8) <= clickThreshold) return 7;
+        return -1;
+    };
+
+    auto hitExtendedGlobal = [&]() -> int
+    {
         for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
         {
             const auto& hs = extendedHandles[(size_t) (global - EqBand::kBankSize)];
             if (hs.x < 0.0f)
                 continue;
-            if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) <= 10.0f)
-            {
-                // Deactivate extended band and clear dynamic dual-mode memory.
-                auto setF = [this] (const juce::String& id, float v)
-                {
-                    if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter (id)))
-                        param->setValueNotifyingHost (param->convertTo0to1 (v));
-                };
-                auto setB = [this] (const juce::String& id, bool v)
-                {
-                    if (auto* param = processor.treeState.getParameter (id))
-                        param->setValueNotifyingHost (v ? 1.0f : 0.0f);
-                };
-
-                setB (EqBand::onOffParamIDForGlobal (global), false);
-                setB (DynamicEq::dynamicParamIDForGlobal (global), false);
-                setF (EqBand::gainParamIDForGlobal (global), 0.0f);
-                setF (DynamicEq::thresholdParamIDForGlobal (global), -24.0f);
-                setF (DynamicEq::attackMsParamIDForGlobal (global), DynamicEq::attackMs);
-                setF (DynamicEq::releaseMsParamIDForGlobal (global), DynamicEq::releaseMs);
-                processor.clearDynamicModeGainMemory (global);
-                needsUpdateExtended = true;
-                needsUpdateCombined = true;
-                hitExtended = true;
-                repaint();
-                break;
-            }
+            if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) <= clickThreshold)
+                return global;
         }
+        return -1;
+    };
 
-        if (! hitExtended)
-        {
-            // Empty graph double-click → enable a free band at click frequency (0 dB).
-            activateOrSelectBandAtFrequency (xToFrequency (event.position.x));
-        }
+    auto readBandFrequencyHz = [this] (int bank1Internal, int extendedGlobal) -> float
+    {
+        const juce::String id = (extendedGlobal >= 0)
+            ? EqBand::frequencyParamIDForGlobal (extendedGlobal)
+            : EqBand::frequencyParamID (bank1Internal);
+        if (auto* v = parameters.getRawParameterValue (id))
+            return juce::jlimit (20.0f, 20000.0f, v->load());
+        return 1000.0f;
+    };
+
+    const int bank1Hit = hitBank1Internal();
+    const int extendedHit = (bank1Hit < 0) ? hitExtendedGlobal() : -1;
+    const bool hitHandle = (bank1Hit >= 0 || extendedHit >= 0);
+
+    // Shift + double-click handle → spawn empty Bell at 2× frequency (harmonic stack).
+    if (hitHandle && event.mods.isShiftDown())
+    {
+        const float srcHz = readBandFrequencyHz (bank1Hit, extendedHit);
+        const float harmonicHz = juce::jlimit (20.0f, 20000.0f, srcHz * 2.0f);
+        processor.getUndoManager().beginNewTransaction ("Harmonic band");
+        activateOrSelectBandAtFrequency (harmonicHz, FilterType::bell, true);
+        return;
     }
+
+    // Double-click on an existing (active) handle → reset/deactivate that band.
+    if (bank1Hit >= 0)
+    {
+        resetBandToDefaultsAndDeactivate (bank1Hit);
+        return;
+    }
+
+    if (extendedHit >= 0)
+    {
+        // Deactivate extended band and clear dynamic dual-mode memory.
+        auto setF = [this] (const juce::String& id, float v)
+        {
+            if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter (id)))
+                param->setValueNotifyingHost (param->convertTo0to1 (v));
+        };
+        auto setB = [this] (const juce::String& id, bool v)
+        {
+            if (auto* param = processor.treeState.getParameter (id))
+                param->setValueNotifyingHost (v ? 1.0f : 0.0f);
+        };
+
+        setB (EqBand::onOffParamIDForGlobal (extendedHit), false);
+        setB (DynamicEq::dynamicParamIDForGlobal (extendedHit), false);
+        setF (EqBand::gainParamIDForGlobal (extendedHit), 0.0f);
+        setF (DynamicEq::thresholdParamIDForGlobal (extendedHit), -24.0f);
+        setF (DynamicEq::attackMsParamIDForGlobal (extendedHit), DynamicEq::attackMs);
+        setF (DynamicEq::releaseMsParamIDForGlobal (extendedHit), DynamicEq::releaseMs);
+        processor.clearDynamicModeGainMemory (extendedHit);
+        needsUpdateExtended = true;
+        needsUpdateCombined = true;
+        repaint();
+        return;
+    }
+
+    // Empty graph double-click → enable a free band at click frequency (0 dB).
+    activateOrSelectBandAtFrequency (xToFrequency (event.position.x));
 }
 
 //=======================================================================================================//
@@ -6430,19 +6530,30 @@ void FrequencyResponseComponent::markActiveDynamicBandsDirty()
     if (anyLfo && on ("lowShelfOnOff"))
         needsUpdateLowShelf = true;
 
-    needsUpdateCombined = true;
+    if (! shouldSkipCombinedCurveWork())
+        needsUpdateCombined = true;
 }
 
 void FrequencyResponseComponent::syncDynamicCurveTimer()
 {
     if (anyActiveDynamicEq())
     {
+        const int hz = resolveDynamicCurveTimerHz();
+        if (hz <= 0)
+        {
+            // Cumulative disabled and no LFO — nothing on the graph needs 45 Hz rebuilds.
+            if (isTimerRunning())
+                stopTimer();
+            setBufferedToImage (true);
+            return;
+        }
+
         // Buffered paint can blit a stale image even after repaint() while D is moving
         // the curve every block — disable caching for the duration of dynamic animation.
         setBufferedToImage (false);
 
-        if (! isTimerRunning())
-            startTimerHz (45);
+        if (! isTimerRunning() || getTimerInterval() != juce::jmax (1, 1000 / hz))
+            startTimerHz (hz);
 
         // Immediate kick so enabling D doesn't wait a timer period.
         markActiveDynamicBandsDirty();
@@ -6473,6 +6584,18 @@ void FrequencyResponseComponent::timerCallback()
         lastDynCurveGainHS = lastDynCurveGainLS = 1.0e9f;
         return;
     }
+
+    const int hz = resolveDynamicCurveTimerHz();
+    if (hz <= 0)
+    {
+        stopTimer();
+        setBufferedToImage (true);
+        return;
+    }
+
+    // Keep interval in sync if particle density changed while the timer was running.
+    if (getTimerInterval() != juce::jmax (1, 1000 / hz))
+        startTimerHz (hz);
 
     // Every tick while D+On: force magnitude rebuild from published effective gains, then repaint.
     // No gain-delta threshold — small GR changes must still redraw.

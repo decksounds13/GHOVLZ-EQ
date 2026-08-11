@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="zglKbV" name="ParametricEqProject" projectType="audioplug"
+<JUCERPROJECT id="AnlzSu" name="AnalyzerSuite" projectType="audioplug"
               useAppConfig="0" addUsingNamespaceToJuceHeader="0" displaySplashScreen="1"
-              jucerFormatVersion="1" pluginFormats="buildVST3" cppLanguageStandard="20"
+              jucerFormatVersion="1" pluginFormats="buildStandalone" cppLanguageStandard="20"
               headerPath="../../Source/Effects&#10;../../Source" companyName="Decksounds"
-              companyWebsite="www.decksounds.com" pluginName="Decksounds - GHOVLZ! EQ"
-              pluginDesc="Decksounds - GHOVLZ! EQ">
-  <MAINGROUP id="TFwMAc" name="ParametricEqProject">
+              companyWebsite="www.decksounds.com" pluginName="Decksounds Analyzer Suite"
+              pluginDesc="Decksounds Analyzer Suite — Scope modules and spectrum analysis"
+              pluginCode="AnSu" pluginManufacturerCode="DkSd">
+  <MAINGROUP id="TFwMAc" name="AnalyzerSuite">
     <GROUP id="{B7F6F1A6-BAE5-93A9-99C8-E0858B1F883A}" name="Source">
       <GROUP id="{322DB6F1-EAB1-BE0E-B6B2-652D203120C1}" name="Controls">
         <GROUP id="{E70C237F-3677-A219-AD0F-E59A5F96ED42}" name="Categories"/>

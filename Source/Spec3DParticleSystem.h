@@ -301,7 +301,7 @@ public:
     /** Absolute allocator ceiling (settings Max is clamped here). Pool/SSBO grow lazily. */
     static constexpr int kHardCap = 1'048'576;
     /** Default live budget (everyday). Not a runtime throttle. */
-    static constexpr int kDefaultMaxAlive = 8192;
+    static constexpr int kDefaultMaxAlive = 70000;
     static constexpr int kMinMaxAlive = 256;
     /** @deprecated alias — GPU path uses the same hard cap as CPU; settings Max is the real limit. */
     static constexpr int kGpuPathMaxAlive = kHardCap;

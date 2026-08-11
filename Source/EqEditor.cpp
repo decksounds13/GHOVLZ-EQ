@@ -2431,7 +2431,7 @@ void EqEditor::loadUiPrefs()
     bool spec3DParticle = false;
     int spec3DParticleEmitMode = 1; // 0 = slice, 1 = continuous (must stay default)
     int spec3DParticleBinding = 0;  // 0 = trail, 1 = free
-    float spec3DParticleEmission = 1000.0f; // particles/sec
+    float spec3DParticleEmission = 40000.0f; // particles/sec
     float spec3DParticleSpawnJitter = 0.0025f; // must match Spectrogram3DComponent::kDefaultParticleSpawnJitter
     float spec3DParticleSpeed = 1.0f; // legacy → Init vel Y
     float spec3DParticleInitVelX = 0.0f;
@@ -2447,8 +2447,8 @@ void EqEditor::loadUiPrefs()
     float spec3DParticleRough = 0.45f;
     float spec3DParticleMetal = 0.0f;
     float spec3DParticleSpec = 0.35f;
-    bool spec3DParticleGpuSim = false; // CPU integrate default
-    int spec3DParticleMaxAlive = 8192;
+    bool spec3DParticleGpuSim = true; // GPU integrate default (falls back if unavailable)
+    int spec3DParticleMaxAlive = 70000;
     bool spec3DParticleDebugOverlay = false;
     bool spec3DParticleForces = false;
     bool spec3DParticleWaterfallLock = true;
@@ -2757,7 +2757,7 @@ void EqEditor::loadUiPrefs()
                 if (spec3DParticleEmitMode != 0 && spec3DParticleEmitMode != 1)
                     spec3DParticleEmitMode = 1;
                 spec3DParticleBinding = xml->getIntAttribute ("spec3dParticleBinding", 0);
-                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 1000.0);
+                spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 40000.0);
                 // V3: particles/sec. Pre-V3 was a unitless ~0–5 scale (plus older 0–1).
                 if (! xml->hasAttribute ("spec3dParticleEmissionV3"))
                 {
@@ -2786,8 +2786,17 @@ void EqEditor::loadUiPrefs()
                 spec3DParticleRough = (float) xml->getDoubleAttribute ("spec3dParticleRough", 0.45);
                 spec3DParticleMetal = (float) xml->getDoubleAttribute ("spec3dParticleMetal", 0.0);
                 spec3DParticleSpec = (float) xml->getDoubleAttribute ("spec3dParticleSpec", 0.35);
-                spec3DParticleGpuSim = xml->getBoolAttribute ("spec3dParticleGpuSim", false);
-                spec3DParticleMaxAlive = xml->getIntAttribute ("spec3dParticleMaxAlive", 8192);
+                spec3DParticleGpuSim = xml->getBoolAttribute ("spec3dParticleGpuSim", true);
+                spec3DParticleMaxAlive = xml->getIntAttribute ("spec3dParticleMaxAlive", 70000);
+                // One-shot migrate from old factory defaults (8192 / 1000 / CPU).
+                if (! xml->hasAttribute ("spec3dParticleDefaultsV70k")
+                    && spec3DParticleMaxAlive == 8192
+                    && std::abs (spec3DParticleEmission - 1000.0f) < 1.0f)
+                {
+                    spec3DParticleMaxAlive = 70000;
+                    spec3DParticleEmission = 40000.0f;
+                    spec3DParticleGpuSim = true;
+                }
                 spec3DParticleDebugOverlay = xml->getBoolAttribute ("spec3dParticleDebugOverlay", false);
                 spec3DParticleForces = xml->getBoolAttribute ("spec3dParticleForces", false);
                 spec3DParticleWaterfallLock = xml->getBoolAttribute ("spec3dParticleWaterfallLock", true);
@@ -3418,6 +3427,7 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("spec3dParticleEmission", (double) mainComponent->getSpec3DParticleEmission());
         xml->setAttribute ("spec3dParticleEmissionV2", 1);
         xml->setAttribute ("spec3dParticleEmissionV3", 1); // particles/sec
+        xml->setAttribute ("spec3dParticleDefaultsV70k", 1); // 70k max / 40k emission / GPU
         xml->setAttribute ("spec3dParticleSpawnJitter", (double) mainComponent->getSpec3DParticleSpawnJitter());
         xml->setAttribute ("spec3dParticleSpeed", (double) mainComponent->getSpec3DParticleInitVelY()); // legacy
         xml->setAttribute ("spec3dParticleInitVelX", (double) mainComponent->getSpec3DParticleInitVelX());

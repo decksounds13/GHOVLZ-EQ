@@ -32,6 +32,8 @@ public:
     void setParameterTree (juce::AudioProcessorValueTreeState* tree) noexcept { valueTree = tree; }
     void setEnabled (bool shouldEnable) noexcept;
     bool isGoniometerEnabled() const noexcept { return enabled.load (std::memory_order_relaxed); }
+    /** Pause/resume paint timer without changing enabled (Spec3D analyzer bypass). */
+    void setUiTimerRunning (bool shouldRun) noexcept;
 
     /** Full-graph overlay: clicks pass through to EQ handles underneath. */
     void setExpanded (bool shouldExpand) noexcept;
