@@ -296,6 +296,13 @@ private:
         juce::Slider particleEmissionSlider;
         juce::Label particleSpawnJitterLabel;
         juce::Slider particleSpawnJitterSlider;
+        /** Hitch / catch-up tuning (see tooltips). */
+        juce::Label particleEmitCatchupLabel;
+        juce::Slider particleEmitCatchupSlider;
+        juce::Label particleSimCatchupLabel;
+        juce::Slider particleSimCatchupSlider;
+        juce::Label particleSliceBacklogLabel;
+        juce::Slider particleSliceBacklogSlider;
         juce::Label particleInitVelXLabel;
         juce::Slider particleInitVelXSlider;
         juce::Label particleInitVelYLabel;

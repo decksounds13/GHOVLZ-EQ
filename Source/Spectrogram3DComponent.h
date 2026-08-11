@@ -543,6 +543,22 @@ public:
     /** Default world-space spawn scatter (particles don't stack when jitter is unset). */
     static constexpr float kDefaultParticleSpawnJitter = 0.0025f;
 
+    /**
+        Hitch / catch-up tuning (particle sim only).
+        Emit catch-up Hz: max births use dt ≤ 1/hz after a long frame (default 60).
+        Sim catch-up Hz: max integrate/update step ≤ 1/hz (default 30).
+        Slice backlog: max per-bin emission debt in seconds (default 0.25).
+    */
+    void setParticleEmitCatchupHz (float hz) noexcept;
+    float getParticleEmitCatchupHz() const noexcept { return particleEmitCatchupHz; }
+    void setParticleSimCatchupHz (float hz) noexcept;
+    float getParticleSimCatchupHz() const noexcept { return particleSimCatchupHz; }
+    void setParticleSliceBacklogSec (float seconds) noexcept;
+    float getParticleSliceBacklogSec() const noexcept { return particleSliceBacklogSec; }
+    static constexpr float kDefaultParticleEmitCatchupHz = 60.0f;
+    static constexpr float kDefaultParticleSimCatchupHz = 30.0f;
+    static constexpr float kDefaultParticleSliceBacklogSec = 0.25f;
+
     static constexpr int getParticleModSlotCount() noexcept { return kParticleModSlotCount; }
     ParticleModSlot getParticleModSlot (int index) const noexcept;
     void setParticleModSlot (int index, const ParticleModSlot& slot) noexcept;
@@ -1215,16 +1231,19 @@ private:
     ParticleEmitMode particleEmitMode = ParticleEmitMode::continuous;
     ParticleBindingMode particleBindingMode = ParticleBindingMode::spectrogramTrail;
     /** Particles spawned per second (field total). Not a 0–1 scale. */
-    float particleEmission = 40000.0f;
+    float particleEmission = 1000.0f;
     /** World-space spawn scatter. Default > 0 so particles don't stack on exact mesh points. */
     float particleSpawnJitter = kDefaultParticleSpawnJitter;
+    float particleEmitCatchupHz = kDefaultParticleEmitCatchupHz;
+    float particleSimCatchupHz = kDefaultParticleSimCatchupHz;
+    float particleSliceBacklogSec = kDefaultParticleSliceBacklogSec;
     float particleInitVelX = 0.0f;
     float particleInitVelY = 1.0f; // was "rise speed"
     float particleInitVelZ = 0.0f;
     float particleVelRandom = 0.0f;
     float particleLifespan = 0.0f;
     float particleLifespanRandom = 0.0f;
-    float particleSize = 0.008f;
+    float particleSize = 0.001f;
     /** Spawn size scale range (× base particle size). Default 1…1 = no random. */
     float particleSizeRandomMin = 1.0f;
     float particleSizeRandomMax = 1.0f;
@@ -1237,7 +1256,7 @@ private:
     bool particleForcesEnabled = false;
     bool particleWaterfallLock = true;
     /** CPU default; GPU hybrid integrate when true and compute available. */
-    bool particleGpuSimEnabled = true; // GPU integrate default when available
+    bool particleGpuSimEnabled = false;
     int particleMaxAlive = Spec3DParticleSystem::kDefaultMaxAlive;
     bool particleDebugOverlayEnabled = false;
     std::vector<ParticleForceModule> particleForceStack;
