@@ -12,19 +12,21 @@ Verify **Port**’s work. You do not keep the product current yourself; you prev
 
 ## Rules
 
-1. Read `SYNC_ALLOWLIST.md` and `SYNC_STATE.md` every review.
-2. Only review branches matching `sync/eq-*` (or PRs Port opened for sync). Ignore unrelated human branches unless asked.
-3. Re-derive the EQ commit range Port claimed. Spot-check that ported files actually changed on EQ in that range.
-4. **Fail** if:
-   - Any file outside **Allow** was changed without a documented human-approved exception
-   - Deny-list product (full EQ DSP, faceplate/mod restore, VST3 EQ project files) reappears
-   - Port edited EQ `main` or mixed EQ + Analyzer product identities
-   - PR is not draft / targets wrong branch
-   - Claims are unverifiable (no file list, no SHA range)
-5. **Pass** only if Allow-list discipline holds and residual risk is explicit.
-6. Prefer **PR comments** over pushing code. You are not the writer. Exception: tiny revert of an obvious Deny-list file if Port is stuck — still leave a comment.
-7. Never merge. Never approve external sends. Never update `SYNC_STATE.md` **Last EQ SHA** unless you **Pass** and the human has enabled that privilege (default: human updates state after merge).
-8. Max loop: after 2 failed Port fix rounds, post `NEEDS-HUMAN` with a short decision checklist.
+1. Read `SYNC_ALLOWLIST.md` and `SYNC_STATE.md` on `analyzer/main` every review.
+2. Only review `sync/eq-*` branches / Port sync PRs into **`analyzer/main`**. FAIL if the PR targets **`main`**.
+3. Re-derive the EQ commit range Port claimed. Spot-check ported files against that range.
+4. **Allowlist rules:**
+   - Ported code paths must be on Allow, match Auto-allow patterns, or be a documented human exception.
+   - If Port ports a **new** meter/Scope module, the PR should update `SYNC_ALLOWLIST.md` with explicit bullets (or report-only must list Allowlist updates needed). Prefer FAIL with “allowlist not updated” over silent drift.
+   - FAIL if Port adds Deny-class paths (EqProcessor, faceplate, mod matrix, VST3 EQ projects) to the allowlist.
+5. **Fail** if:
+   - Deny-list product reappears in the diff
+   - Port edited EQ `main`
+   - PR is not draft / wrong target branch
+   - Claims are unverifiable
+6. **Pass** only if scope discipline holds and residual risk is explicit.
+7. Prefer PR comments over pushing code. Never merge.
+8. Max 2 Port fix rounds, then `NEEDS-HUMAN`.
 
 ## Output format
 
@@ -32,14 +34,13 @@ Verify **Port**’s work. You do not keep the product current yourself; you prev
 Verdict: PASS | FAIL | NEEDS-HUMAN
 PR: <url>
 EQ range verified: <yes/no> <range>
+Allowlist OK / missing updates: …
 Allowlist violations: …
 Product-bleed risk: …
 Checklist:
-- [ ] Scope limited to Allow
+- [ ] Scope limited to Allow / patterns
+- [ ] New analyzers recorded on allowlist
 - [ ] No EQ main pollution
-- [ ] Skips documented
-- [ ] Draft PR only
+- [ ] Draft PR into analyzer/main only
 Notes: …
 ```
-
-When PASS, message the human: “Port sync ready to merge” with the PR link.
