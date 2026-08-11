@@ -17,36 +17,50 @@ Keep **AnalyzerSuite** (`analyzer/main`) current with analyzer-relevant changes 
 - Sync branches: `sync/eq-<shortsha>` → draft PR **into `analyzer/main` only**
 - Never push or open PRs into **`main`**
 
+## Cadence (required)
+
+Read and follow **Cadence policy** in `SYNC_STATE.md` on `analyzer/main`.
+
+Summary:
+
+| Slot | When |
+|------|------|
+| **Port #1** | First EQ `main` change of the local day, after **≥ 60 min** with no further EQ commits (settle). Max once. |
+| **Port #2** | Only if more EQ commits after Port #1, then again after **≥ 60 min** quiet. Max once. |
+| **Cap** | **2 ports per calendar day** (timezone in SYNC_STATE). Extra dirt → next day. |
+
+**Polling:** every **15–20 minutes** (or hourly off-hours) to detect changes and quiet windows.  
+Polling ≠ porting. Only open a report/PR when a Port slot fires.
+
+Update SYNC_STATE fields after each successful port: Last absorbed SHA, ports today, first-change flag, dirty flag.
+
 ## Rules
 
-1. Read `SYNC_ALLOWLIST.md` and `SYNC_STATE.md` on `analyzer/main` every run. Treat Allow / Auto-allow patterns / Deny as law.
-2. Compare EQ `main` tip to **Last EQ SHA** in `SYNC_STATE.md`.
-3. Classify every changed file: Allow / Allow-candidate (pattern match, not yet listed) / Deny / Gray / Skip.
-4. **Allowlist maintenance (required):**
-   - If EQ adds paths that match **Auto-allow patterns** (new meter/Scope/analyser modules) but are missing from the explicit Allow bullets, treat them as **Allow-candidates**.
-   - In **report-only**: section **Allowlist updates needed** with proposed bullets.
-   - In **draft-pr**: include an update to `SYNC_ALLOWLIST.md` in the same PR that ports the code (promote candidates to explicit Allow bullets).
-   - Never add Deny-class paths to the allowlist.
-5. **Mode `report-only`:** delta report only. No commits.
-6. **Mode `draft-pr`:** branch `sync/eq-<shortsha>`, port Allow + promoted candidates only, open/update **draft** PR into `analyzer/main`. PR body must include:
-   - EQ commit range
-   - Files ported
-   - Allowlist edits (if any)
-   - Files skipped + why
-   - Residual risk
-7. Never merge. Never force-push. Never edit EQ `main`.
-8. Message **Review** when a draft PR (or report) is ready.
-9. After Review fails: max 2 fix rounds, then escalate.
-10. Prefer correct diffs over fake “green build” claims on Windows toolchains you do not have.
+1. Read `SYNC_ALLOWLIST.md` and `SYNC_STATE.md` every run.
+2. Compare EQ `main` tip to Last absorbed / Last observed; update timestamps when tip moves.
+3. If not eligible under cadence → **no changes** / **waiting for quiet** / **daily cap** — do not port.
+4. When eligible: classify files Allow / Allow-candidate / Deny / Gray / Skip.
+5. Allowlist maintenance for new meters (e.g. ThdMeter*).
+6. **Mode `report-only`:** plan only, no commits.
+7. **Mode `draft-pr`:** `sync/eq-<shortsha>` draft PR into `analyzer/main` only.
+8. Never merge. Never edit EQ `main`.
+9. Message **Review** when a non-empty plan or draft PR is ready.
+10. After Review fails: max 2 fix rounds, then escalate.
 
 ## Output format (every run)
 
 ```
-EQ range: <old>..<new>
+Poll: <time TZ>
+EQ tip: <sha>
+Last absorbed: <sha>
+Quiet minutes: <n>
+Ports today: <k>/2
+Eligible: no | port-1 | port-2
+Reason: waiting-quiet | no-delta | daily-cap | first-change-settle | second-batch | ...
 Mode: report-only | draft-pr
-Ported: …
-Allowlist updates: … | none
-Skipped: …
+EQ range: <old>..<new> | n/a
+Ported / plan: …
+Allowlist updates: …
 PR: <url or n/a>
-Next: message Review | wait for EQ | escalate human
+Next: sleep until next poll | message Review | escalate
 ```
