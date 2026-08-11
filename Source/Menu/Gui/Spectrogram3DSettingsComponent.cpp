@@ -660,21 +660,21 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                      "(no cost when disabled).");
     setupLookToggle (particleGpuSimToggle,
                      "Hybrid GPU path: force/age integrate + compact to instance buffer on the GPU "
-                     "(OpenGL 4.3 compute). GPU is the default; CPU always works as fallback. "
-                     "GPU needs a 4.3+ context; if compute fails, motion falls back to CPU automatically. "
+                     "(OpenGL 4.3 compute). CPU is the default and always works. GPU needs a 4.3+ "
+                     "context; if compute fails, motion falls back to CPU automatically. "
                      "Resident GPU sim: positions stay on GPU (no multi-MB readback). "
                      "CPU handles spawn attrs + free-list; integrate/draw on GPU. "
                      "Works well into 100k+ live when compute is healthy.");
-    particleGpuSimToggle.setToggleState (true, juce::dontSendNotification);
+    particleGpuSimToggle.setToggleState (false, juce::dontSendNotification);
     particleMaxAliveLabel.setText ("Max particles", juce::dontSendNotification);
     // Drag range to 250k; type higher if needed (absolute safety hard cap is 1M in engine).
     setupParticleSlider (particleMaxAliveLabel, particleMaxAliveSlider, 256.0, 250000.0, 256.0,
-                         "Live particle budget (default 70000). Drag up to 250k; type higher if needed.\n"
+                         "Live particle budget (default 8192). Drag up to 250k; type higher if needed.\n"
                          "This is the only particle count limit — no hidden GPU/CPU soft caps.\n"
                          "Raising Max does not allocate immediately; pool grows as particles spawn.\n"
                          "At Max: spawn stops and oldest are culled — should not crash.\n"
                          "Emission controls fill rate toward Max.");
-    setSliderActual (particleMaxAliveSlider, 70000.0);
+    setSliderActual (particleMaxAliveSlider, 8192.0);
     setupLookToggle (particleDebugOverlayToggle,
                      "Show live particle stats on the 3D view (alive / budget / pool / "
                      "spawned / culled). Useful when tuning emission without crashing.");
@@ -726,10 +726,10 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     particleEmissionLabel.setText ("Emission rate (particles/s)", juce::dontSendNotification);
     setupParticleSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 100000.0, 1.0,
                          "Particles spawned per second (total across the field). "
-                         "Default 40000; drag 0–100k; type higher if needed. "
+                         "Default 1000; drag 0–100k; type higher if needed. "
                          "Live count ≈ rate × lifespan (until Max particles). "
                          "Continuous and slice modes share this same particles/s budget.");
-    setSliderActual (particleEmissionSlider, 40000.0);
+    setSliderActual (particleEmissionSlider, 1000.0);
     particleSpawnJitterLabel.setText ("Spawn jitter", juce::dontSendNotification);
     setupParticleSlider (particleSpawnJitterLabel, particleSpawnJitterSlider, 0.0, 0.5, 0.001,
                          "Randomize each particle's spawn offset (world units). "
@@ -738,6 +738,27 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                          "Offsets are kept under waterfall lock.");
     setSliderActual (particleSpawnJitterSlider,
                      (double) Spectrogram3DComponent::kDefaultParticleSpawnJitter);
+    particleEmitCatchupLabel.setText ("Emit catch-up (Hz)", juce::dontSendNotification);
+    setupParticleSlider (particleEmitCatchupLabel, particleEmitCatchupSlider, 15.0, 240.0, 1.0,
+                         "After a long frame, births use at most 1/Hz seconds of emission. "
+                         "Lower = smoother (less burst after hitch); higher = keep rate when recovering. "
+                         "Default 60. Does not change steady-state particles/s.");
+    setSliderActual (particleEmitCatchupSlider,
+                     (double) Spectrogram3DComponent::kDefaultParticleEmitCatchupHz);
+    particleSimCatchupLabel.setText ("Sim catch-up (Hz)", juce::dontSendNotification);
+    setupParticleSlider (particleSimCatchupLabel, particleSimCatchupSlider, 10.0, 120.0, 1.0,
+                         "Max integrate/update step = 1/Hz after a stall. "
+                         "Lower = less physics jump after hitch; higher = catch up motion faster. "
+                         "Default 30. Steady frames at 60 Hz are unaffected.");
+    setSliderActual (particleSimCatchupSlider,
+                     (double) Spectrogram3DComponent::kDefaultParticleSimCatchupHz);
+    particleSliceBacklogLabel.setText ("Slice backlog (s)", juce::dontSendNotification);
+    setupParticleSlider (particleSliceBacklogLabel, particleSliceBacklogSlider, 0.02, 2.0, 0.01,
+                         "Slice emit mode only: max per-bin birth debt in seconds of rate. "
+                         "Lower = less column dump after hitch; higher = more catch-up. "
+                         "Default 0.25. Continuous mode ignores this.");
+    setSliderActual (particleSliceBacklogSlider,
+                     (double) Spectrogram3DComponent::kDefaultParticleSliceBacklogSec);
     particleInitVelXLabel.setText ("Init vel X", juce::dontSendNotification);
     setupParticleSlider (particleInitVelXLabel, particleInitVelXSlider, -10.0, 10.0, 0.01,
                          "Initial velocity X (world units / second).");
@@ -777,9 +798,12 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                          "Randomize lifetime at spawn (+/- fraction of Lifespan).");
     setSliderActual (particleLifespanRandomSlider, 0.0);
     particleSizeLabel.setText ("Particle size", juce::dontSendNotification);
-    setupParticleSlider (particleSizeLabel, particleSizeSlider, 0.001, 0.08, 0.0005,
-                         "Particle radius / mesh scale in world units.");
-    setSliderActual (particleSizeSlider, 0.008);
+    // World-unit radius: ~0.005 is already large on the Spec3D mesh; keep drag range tiny.
+    setupParticleSlider (particleSizeLabel, particleSizeSlider, 0.00005, 0.005, 0.00005,
+                         "Particle radius / mesh scale in world units. "
+                         "Default 0.001; ~0.005 is large for this sim. "
+                         "Type beyond the slider for extreme tests.");
+    setSliderActual (particleSizeSlider, 0.001);
     particleSizeRandomLabel.setText ("Random Size", juce::dontSendNotification);
     styleLabel (particleSizeRandomLabel);
     // Match other Look rows: same track/thumb/text colours as styleSlider, dual thumbs.
@@ -1461,6 +1485,12 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (particleEmissionSlider, particleOn);
     setLookChildVisible (particleSpawnJitterLabel, particleOn);
     setLookChildVisible (particleSpawnJitterSlider, particleOn);
+    setLookChildVisible (particleEmitCatchupLabel, particleOn);
+    setLookChildVisible (particleEmitCatchupSlider, particleOn);
+    setLookChildVisible (particleSimCatchupLabel, particleOn);
+    setLookChildVisible (particleSimCatchupSlider, particleOn);
+    setLookChildVisible (particleSliceBacklogLabel, particleOn);
+    setLookChildVisible (particleSliceBacklogSlider, particleOn);
     setLookChildVisible (particleInitVelXLabel, particleOn);
     setLookChildVisible (particleInitVelXSlider, particleOn);
     setLookChildVisible (particleInitVelYLabel, particleOn);
@@ -2041,6 +2071,9 @@ void Spectrogram3DSettingsComponent::Content::syncControlsFromMain()
     particleEmitModeCombo.setSelectedId (main->getSpec3DParticleEmitMode() + 1, juce::dontSendNotification);
     setSliderActual (particleEmissionSlider, main->getSpec3DParticleEmission());
     setSliderActual (particleSpawnJitterSlider, main->getSpec3DParticleSpawnJitter());
+    setSliderActual (particleEmitCatchupSlider, main->getSpec3DParticleEmitCatchupHz());
+    setSliderActual (particleSimCatchupSlider, main->getSpec3DParticleSimCatchupHz());
+    setSliderActual (particleSliceBacklogSlider, main->getSpec3DParticleSliceBacklogSec());
     setSliderActual (particleInitVelXSlider, main->getSpec3DParticleInitVelX());
     setSliderActual (particleInitVelYSlider, main->getSpec3DParticleInitVelY());
     setSliderActual (particleInitVelZSlider, main->getSpec3DParticleInitVelZ());

@@ -193,12 +193,17 @@ void Spec3DParticleSystem::ensurePool()
         emitAccum.assign ((size_t) bins, 0.0f);
 
     const int budget = juce::jmin (kHardCap, juce::jmax (kMinMaxAlive, maxAliveBudget));
-    // Grow toward the user Max as spawn needs slots (chunked for OOM safety, not a soft cap).
-    const int headroom = juce::jlimit (1024, 16384, juce::jmax (1024, budget / 16));
-    const int want = juce::jmin (budget,
-                                 juce::jmax (kMinMaxAlive,
-                                             juce::jmax ((int) pool.size(),
-                                                         aliveCount + headroom)));
+    // Grow toward Max as spawn needs slots. Double (min +8k) so we do not reallocate
+    // every few thousand births — each grow was a multi-ms hitch (CPU + GPU SSBO).
+    const int headroom = juce::jlimit (2048, 32768, juce::jmax (2048, budget / 8));
+    int want = juce::jmax (kMinMaxAlive, aliveCount + headroom);
+    if (want > (int) pool.size())
+    {
+        const int doubled = juce::jmax (want, juce::jmax ((int) pool.size() * 2, (int) pool.size() + 8192));
+        want = juce::jmin (budget, doubled);
+    }
+    else
+        want = (int) pool.size();
 
     if ((int) pool.size() < want)
     {
@@ -1581,11 +1586,18 @@ void Spec3DParticleSystem::update (float dtSeconds)
 
     const double t0 = juce::Time::getMillisecondCounterHiRes();
 
-    // Cap catch-up to one 30 Hz step so a hitch cannot dump multi-frame work.
+    // Cap catch-up so a hitch cannot dump multi-frame work (settings-tunable).
     // Sub-frame dt is fine (60 Hz timer); ignore microscopic residual calls.
-    dtSeconds = juce::jlimit (0.0f, 1.0f / 30.0f, dtSeconds);
+    const float simHz = juce::jmax (10.0f, owner.particleSimCatchupHz);
+    const float emitHz = juce::jmax (15.0f, owner.particleEmitCatchupHz);
+    const float maxSimDt = 1.0f / simHz;
+    const float maxEmitDt = 1.0f / emitHz;
+    dtSeconds = juce::jlimit (0.0f, maxSimDt, dtSeconds);
     if (dtSeconds < 1.0e-4f)
         return;
+
+    // Emission uses a tighter (or equal) dt cap than sim after a long frame.
+    const float emitDt = juce::jmin (dtSeconds, maxEmitDt);
 
     const juce::ScopedLock sl (simLock);
 
@@ -1675,7 +1687,7 @@ void Spec3DParticleSystem::update (float dtSeconds)
             for (auto& a : emitAccum)
                 a = 0.0f;
 
-            emitGlobal += totalRate * dtSeconds;
+            emitGlobal += totalRate * emitDt;
             // Do not accumulate more debt than remaining Max slots (settings only).
             if (emitGlobal > (float) spawnBudget)
                 emitGlobal = (float) spawnBudget;
@@ -1709,8 +1721,12 @@ void Spec3DParticleSystem::update (float dtSeconds)
             for (int bin = 0; bin < bins && lastSpawnedCount < spawnBudget
                               && aliveCount < maxAliveBudget; ++bin)
             {
-                emitAccum[(size_t) bin] += perBin * dtSeconds;
-                // No per-bin debt ceiling — only remaining Max slots limit births.
+                emitAccum[(size_t) bin] += perBin * emitDt;
+                // Soft per-bin backlog (default ~0.25s at full rate) — settings-tunable.
+                const float backlogSec = juce::jmax (0.02f, owner.particleSliceBacklogSec);
+                const float maxBinDebt = juce::jmax (4.0f, perBin * backlogSec);
+                if (emitAccum[(size_t) bin] > maxBinDebt)
+                    emitAccum[(size_t) bin] = maxBinDebt;
                 int failStreak = 0;
                 while (emitAccum[(size_t) bin] >= 1.0f && lastSpawnedCount < spawnBudget
                        && aliveCount < maxAliveBudget)
@@ -1806,7 +1822,8 @@ void Spec3DParticleSystem::update (float dtSeconds)
     if (useGpuIntegrate)
     {
         // Cap deferred GPU dt the same way (no multi-frame pile-up).
-        pendingIntegrateDt = juce::jmin (1.0f / 30.0f, pendingIntegrateDt + dtSeconds);
+        const float maxPend = 1.0f / juce::jmax (10.0f, owner.particleSimCatchupHz);
+        pendingIntegrateDt = juce::jmin (maxPend, pendingIntegrateDt + dtSeconds);
         pendingForceScales = forceScales;
         pendingFreeMode = freeMode;
         // Do NOT clear gpuInstancesValid here — if GL skips a frame, last compact is better
@@ -1814,7 +1831,8 @@ void Spec3DParticleSystem::update (float dtSeconds)
     }
     else
     {
-        const float dt = juce::jmin (1.0f / 30.0f, dtSeconds + pendingIntegrateDt);
+        const float maxPend = 1.0f / juce::jmax (10.0f, owner.particleSimCatchupHz);
+        const float dt = juce::jmin (maxPend, dtSeconds + pendingIntegrateDt);
         pendingIntegrateDt = 0.0f;
         cpuIntegrateAll (dt, forceScales, freeMode);
         if (aliveCount > maxAliveBudget || loadLevel >= 2)
@@ -1916,7 +1934,9 @@ void Spec3DParticleSystem::integrateOnGlThread()
     if (pendingIntegrateDt <= 1.0e-8f || pool.empty())
         return;
 
-    const float dt = juce::jlimit (0.0f, 0.1f, pendingIntegrateDt);
+    // Match CPU update / settings sim catch-up cap.
+    const float maxDt = 1.0f / juce::jmax (10.0f, owner.particleSimCatchupHz);
+    const float dt = juce::jlimit (0.0f, maxDt, pendingIntegrateDt);
     pendingIntegrateDt = 0.0f;
     const auto scales = pendingForceScales;
     const bool freeMode = pendingFreeMode;
@@ -3056,33 +3076,47 @@ void Spec3DParticleSystem::gpuIntegrateAndCompact (float dt, const ForceModScale
         }
     };
 
-    // Grow particle SSBO without wiping live data (readback + rewrite when expanding).
+    // Grow particle SSBO without CPU readback (was a multi-MB glGetBufferSubData stall
+    // every pool expand — felt like random stutters even when average FPS was fine).
     if ((size_t) particleBytes > gpuParticleSsboCap)
     {
         const size_t oldCap = gpuParticleSsboCap;
         const size_t grown = juce::jmax ((size_t) particleBytes,
-                                         oldCap + oldCap / 2 + (size_t) (4096 * sizeof (GpuSimParticle)));
-        std::vector<std::uint8_t> oldData;
-        if (oldCap > 0 && gpuPoolResident)
+                                         oldCap + oldCap / 2 + (size_t) (8192 * sizeof (GpuSimParticle)));
+        GLuint newSsbo = 0;
+        glGenBuffers (1, &newSsbo);
+        if (newSsbo != 0)
         {
-            try
+            glBindBuffer (GL_COPY_WRITE_BUFFER, newSsbo);
+            glBufferData (GL_COPY_WRITE_BUFFER, (GLsizeiptr) grown, nullptr, GL_DYNAMIC_COPY);
+            if (oldCap > 0 && particleSsbo != 0 && gpuPoolResident)
             {
-                oldData.resize (oldCap);
-                glBindBuffer (GL_SHADER_STORAGE_BUFFER, particleSsbo);
-                glGetBufferSubData (GL_SHADER_STORAGE_BUFFER, 0, (GLsizeiptr) oldCap, oldData.data());
+                glBindBuffer (GL_COPY_READ_BUFFER, particleSsbo);
+                glCopyBufferSubData (GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER,
+                                     0, 0, (GLsizeiptr) oldCap);
+                glBindBuffer (GL_COPY_READ_BUFFER, 0);
             }
-            catch (...)
+            else if (oldCap > 0 && ! gpuPoolResident)
             {
-                oldData.clear();
+                // No live GPU data to preserve.
+            }
+            glBindBuffer (GL_COPY_WRITE_BUFFER, 0);
+            if (particleSsbo != 0)
+                glDeleteBuffers (1, &particleSsbo);
+            particleSsbo = newSsbo;
+            gpuParticleSsboCap = grown;
+            if (oldCap == 0 || ! gpuPoolResident)
+            {
+                gpuPoolResident = false;
+                gpuResidentCapacity = 0;
             }
         }
-        glBindBuffer (GL_SHADER_STORAGE_BUFFER, particleSsbo);
-        glBufferData (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr) grown, nullptr, GL_DYNAMIC_COPY);
-        if (! oldData.empty())
-            glBufferSubData (GL_SHADER_STORAGE_BUFFER, 0, (GLsizeiptr) oldCap, oldData.data());
-        gpuParticleSsboCap = grown;
-        if (oldData.empty())
+        else
         {
+            // Fallback: orphan grow (lose resident; re-seed from CPU next block).
+            glBindBuffer (GL_SHADER_STORAGE_BUFFER, particleSsbo);
+            glBufferData (GL_SHADER_STORAGE_BUFFER, (GLsizeiptr) grown, nullptr, GL_DYNAMIC_COPY);
+            gpuParticleSsboCap = grown;
             gpuPoolResident = false;
             gpuResidentCapacity = 0;
         }
