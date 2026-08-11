@@ -69,6 +69,7 @@ If a new analyzer needs a file outside patterns (e.g. a shared `AudioAnalysisFif
 - `Source/ScopePaneChrome.h`
 - `Source/VerticalGradientMeter.cpp` / `.h`
 - `Source/FramedFloatingScopeWindow.cpp` / `.h`
+- `Source/ThdMeterComponent.cpp` / `.h` (broadband Scope THD)
 - `Source/ColourRamp/**` (Spec3D ramps used by analyzers)
 
 ### Menu / analyzer prefs (narrow)
