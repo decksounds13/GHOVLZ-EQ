@@ -37,5 +37,8 @@ See the Analyzer Suite fork plan in the Grok session / team notes:
 
 ### Keeping Analyzer current (Port + Review bots)
 
-See `docs/BOT_SYNC_SETUP.md`, `SYNC_ALLOWLIST.md`, and `SYNC_STATE.md`.  
-Do not push Analyzer-only work onto EQ `main` until git topology is split (separate remote or `analyzer/main`).
+See `docs/BOT_SYNC_SETUP.md`, `SYNC_ALLOWLIST.md`, and `SYNC_STATE.md`.
+
+**Git:** this product lives on branch **`analyzer/main`** of `decksounds13/GHOVLZ-EQ`.  
+EQ shipping product stays on **`main`**. Never merge Analyzer renames into `main`.  
+Sync PRs: `sync/eq-*` → `analyzer/main` only.

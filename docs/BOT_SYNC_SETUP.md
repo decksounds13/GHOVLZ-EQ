@@ -2,55 +2,32 @@
 
 This is the runbook to keep **AnalyzerSuite** current with analyzer-relevant **GHOVLZ EQ** changes, using two Grok Bots, **without** loading work into your interactive Grok Build coding session.
 
-## Current repo reality (important)
+## Current topology (Option B — done)
 
-As of setup scaffolding:
+| Tree | Path | Branch | Remote |
+|------|------|--------|--------|
+| EQ | `…/ParametricEqProject` | `main` | `decksounds13/GHOVLZ-EQ` |
+| Analyzer | `…/AnalyzerSuite` | `analyzer/main` | same repo |
 
-| Tree | Path | Git remote | Notes |
-|------|------|------------|--------|
-| EQ | `…/ParametricEqProject` | `decksounds13/GHOVLZ-EQ` | Product `main`; often ahead with WIP |
-| Analyzer | `…/AnalyzerSuite` | **same** `GHOVLZ-EQ` | Dirty fork on older SHA; Standalone rename **not** a separate remote yet |
+- **EQ product** = `main` only.
+- **Analyzer product** = `analyzer/main` (and `sync/eq-*` working branches).
+- AnalyzerSuite checkout is configured so a bare `git push` only updates `analyzer/main` (not `main`).
+- Port draft PRs must target **`analyzer/main`**, never `main`.
 
-**Bots must not push Analyzer work to EQ `main`.**  
-Complete **Step 1** before enabling `draft-pr` mode.
+Optional later upgrade: split into a separate `GHOVLZ-AnalyzerSuite` repo (Option A).
 
 ---
 
 ## Step 0 — Prerequisites
 
-1. **Grok Bot access** (early beta): SuperGrok Heavy / Cursor Ultra / Cursor Teams Premium per [xAI Grok Bot](https://x.ai/news/introducing-grok-bot). Desktop app installed and signed in.
-2. **GitHub** connected in Grok Bot (**Settings → Plugins**): grant access to the EQ repo and the future Analyzer repo.
-3. You can message Bots from desktop/iOS; laptop can be closed while routines run on the cloud computer.
-4. Keep **Grok Build** for human EQ coding only — do not add “also sync Analyzer” to that session.
+1. **Grok Bot** app with GitHub connected (token with access to `GHOVLZ-EQ`).
+2. Keep **Grok Build** for human EQ coding only — do not run Analyzer sync inside that session.
 
 ---
 
-## Step 1 — Fix git topology (do this first)
+## Step 1 — Git topology
 
-Pick **one**:
-
-### Option A — Separate GitHub repo (recommended)
-
-1. Create e.g. `decksounds13/GHOVLZ-AnalyzerSuite` (private is fine).
-2. In `AnalyzerSuite`:
-   ```powershell
-   cd C:\Users\jerem\Desktop\DecksoundsParametricEq\AnalyzerSuite
-   # Commit or stash intentional fork work first
-   git remote rename origin eq-upstream
-   git remote add origin https://github.com/decksounds13/GHOVLZ-AnalyzerSuite.git
-   git push -u origin main
-   ```
-3. Put EQ remote URL + Analyzer remote URL into `SYNC_STATE.md`.
-4. Port Bot: **read** EQ repo, **write** Analyzer repo only.
-
-### Option B — Same repo, long-lived branch
-
-1. On `GHOVLZ-EQ`, create `analyzer/main` from a known Analyzer baseline.
-2. Commit AnalyzerSuite product files only on `analyzer/main` / `sync/eq-*`.
-3. Protect `main` (EQ only). Protect `analyzer/main` (PR + review required).
-4. Port opens PRs: `sync/eq-*` → `analyzer/main`, never → `main`.
-
-Until A or B is done, keep mode **`report-only`** in `SYNC_STATE.md`.
+**Done:** `analyzer/main` on `https://github.com/decksounds13/GHOVLZ-EQ` holds the AnalyzerSuite fork + bot policy files.
 
 ---
 
