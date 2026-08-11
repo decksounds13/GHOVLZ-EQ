@@ -8,11 +8,11 @@
 | Analyzer remote | same repo (`origin`) |
 | Analyzer default branch | `analyzer/main` |
 | Analyzer sync branch pattern | `sync/eq-<shortsha>` → PR into `analyzer/main` |
-| Last EQ SHA Port claimed to absorb | `314f5c32fd05b075f9c95c9180b0e906305be125` |
-| Last EQ SHA Port observed (any poll) | _(Port fills)_ |
-| Last EQ change time (UTC) | _(Port fills when main tip moves)_ |
-| Ports completed today (date + count) | _(Port fills)_ |
-| First-change-of-day port done | no |
+| Last EQ SHA Port claimed to absorb | `df4e49c7011c507c8098a66a4e9c6c9e5ffd6f95` |
+| Last EQ SHA Port observed (any poll) | `df4e49c7011c507c8098a66a4e9c6c9e5ffd6f95` |
+| Last EQ change time (UTC) | `2026-08-08T02:01:15Z` |
+| Ports completed today (date + count) | `2026-08-11: 1` |
+| First-change-of-day port done | yes |
 | Dirty after last port | no |
 | **Mode** | **`auto`** (poll → port → Review → merge on PASS) |
 | Timezone for “day” | `America/Chicago` |
