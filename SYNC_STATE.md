@@ -11,53 +11,51 @@
 | Last EQ SHA Port claimed to absorb | `314f5c32fd05b075f9c95c9180b0e906305be125` |
 | Last EQ SHA Port observed (any poll) | _(Port fills)_ |
 | Last EQ change time (UTC) | _(Port fills when main tip moves)_ |
-| Ports completed today (date + count) | _(Port fills, e.g. 2026-08-11: 0)_ |
+| Ports completed today (date + count) | _(Port fills)_ |
 | First-change-of-day port done | no |
 | Dirty after last port | no |
-| Mode | `report-only` (switch to `draft-pr` when ready to open PRs) |
-| Timezone for “day” | `America/Chicago` (adjust if needed) |
+| **Mode** | **`auto`** (poll → port → Review → merge on PASS) |
+| Timezone for “day” | `America/Chicago` |
+| Human notify | **Always** — success **and** failure (app/OS notification + message in this group) |
 
-## Cadence policy (max 2 ports per calendar day)
+## Automation level (`auto`)
 
-Port may produce at most **two** Analyzer updates per local calendar day (timezone above).  
-An “update” = one report (report-only) **or** one draft PR (draft-pr mode) that advances **Last EQ SHA** absorbed.
+Unattended path (no human click required for normal Allow-list ports):
 
-### When EQ `main` moves
+1. Poll EQ `main` (cadence below).  
+2. When a port slot fires → Port applies Allow / Allow-candidate files on `sync/eq-<shortsha>`.  
+3. Port opens a PR into **`analyzer/main`** (draft or ready — prefer **ready to merge** if GitHub allows bot merge).  
+4. Review runs checklist.  
+5. **On Review PASS** → Review (or Port if Review cannot merge) **merges** the PR into `analyzer/main`, updates this file (Last absorbed, ports today, dirty).  
+6. **Ping human: success** with PR URL + short file list.  
+7. **On Review FAIL / NEEDS-HUMAN** → **do not merge**; **ping human: failure** with blockers.  
+8. **Never** merge to EQ **`main`**. Never force-push `analyzer/main` history rewrites.
 
-1. Record **Last EQ SHA observed** and **Last EQ change time**.
-2. Set **Dirty after last port** = yes if tip ≠ Last absorbed SHA.
+### Still escalate (no auto-merge)
 
-### Port #1 — first change of the day
+- Any Deny-class file in the PR  
+- Whole-file overwrite of `MainComponent` / `EqProcessor` / gray shell without extract-only justification  
+- Conflict that cannot be resolved cleanly  
+- Port #2 already used today and still dirty (defer message only — still ping “deferred”)  
+- Missing GitHub write permission / merge blocked by branch protection  
 
-- Eligible when: calendar day has **0** ports so far, and EQ `main` has advanced at least once today vs yesterday’s absorbed tip (or vs Last absorbed).
-- **Do not** port on the first poll the instant a commit lands if you can wait for settle — prefer:  
-  **quiet ≥ 60 minutes** since **Last EQ change time**, then run Port #1 for the full delta since Last absorbed.  
-- If the day is almost over and quiet never hits 60m but there is dirty work, you may run Port #1 in the last poll window of the day (fallback).
+If branch protection requires a human review on GitHub, configure **one** of: allow the bot account to merge, or lower protection on `analyzer/main` only (keep `main` protected).
 
-### Port #2 — second batch (same day)
+## Cadence (max 2 ports per calendar day)
 
-- Eligible only if: Port #1 already done today, **and** more EQ commits landed **after** Port #1 (Dirty), **and** **quiet ≥ 60 minutes** since Last EQ change time, **and** ports today &lt; 2.
-- Port the delta since Last absorbed only.
+| Slot | When |
+|------|------|
+| **Port #1** | First EQ `main` change of the local day, after **≥ 60 min** quiet (no new main commits) |
+| **Port #2** | More commits after Port #1, then **≥ 60 min** quiet again |
+| **Cap** | **2** auto ports/day; leftover dirt → next day + success-style ping “deferred to tomorrow” |
 
-### Hard caps
+**Poll** every **15–20 minutes** (detect change + quiet). Polling is not a port.
 
-- **Never more than 2 ports per day.**
-- If still dirty after Port #2: note “deferred to next day” in the report; do not open a third.
-- Poll often enough to notice quiet windows (e.g. every **15–20 minutes** during work hours, or hourly 24/7). Polling is free; **updates** are capped.
-
-### Empty polls
-
-- If no new EQ commits and not eligible for a port: reply **no changes** (or silent if routine prefers) and stop.
-- Do not burn a daily port slot on empty work.
+**Manual override:** human says “manual port now” → ignore quiet timer once; still counts toward daily cap; still Review + auto-merge + success ping.
 
 ## Hard rules
 
-1. **Never push Analyzer product work to `main`.** `main` is GHOVLZ EQ only.
-2. Port writes only to `sync/eq-*` and draft PRs **into `analyzer/main`**.
-3. Review never merges.
-4. Human merges after Review PASS (unless you later authorize auto-merge).
-
-## Notes
-
-- AnalyzerSuite working copy: branch `analyzer/main`.
-- This tree’s `git push` is restricted to `analyzer/main` only.
+1. **Never** push Analyzer product work to **`main`**.  
+2. Sync PRs **only** into **`analyzer/main`**.  
+3. Human is notified on **every** completed port outcome (pass or fail), not only failures.  
+4. Prefer small, Allow-list-only commits so auto-merge stays safe.
