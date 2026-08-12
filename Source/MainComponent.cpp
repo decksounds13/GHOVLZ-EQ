@@ -6544,6 +6544,8 @@ void MainComponent::randomizeColourRamps()
     mask[(int) ColourRampBank::Target::spectrogram] = c.randomizeRampSpectrogram;
     mask[(int) ColourRampBank::Target::spectrogram3D] = c.randomizeRampSpectrogram3D;
     mask[(int) ColourRampBank::Target::spectrumFill] = c.randomizeRampSpectrumFill;
+    mask[(int) ColourRampBank::Target::meterPeak] = c.randomizeRampLevelMeters;
+    mask[(int) ColourRampBank::Target::meterRms] = c.randomizeRampLevelMeters;
     colourRamps.randomizeRamps (c, mask, (int) ColourRampBank::Target::numTargets);
     applyColourRampsToMeters();
     persistSessionUiTheme();
@@ -6601,7 +6603,8 @@ void MainComponent::runDiceRandomize()
     const auto& c = sharedResources.sharedColors;
     const bool anyUi = c.randomizeFaceplateMod || c.randomizeGraphModule || c.randomizeMenuModule;
     const bool anyRamp = c.randomizeRampFftBars || c.randomizeRampSpectrogram
-                         || c.randomizeRampSpectrogram3D || c.randomizeRampSpectrumFill;
+                         || c.randomizeRampSpectrogram3D || c.randomizeRampSpectrumFill
+                         || c.randomizeRampLevelMeters;
 
     if (anyUi)
         randomizeUiTheme();
@@ -6625,6 +6628,7 @@ void MainComponent::showRandomizeDiceMenu()
     menu.addItem (5, "Spectrogram (2D)", true, scopes.randomizeRampSpectrogram);
     menu.addItem (6, "Spectrogram 3D", true, scopes.randomizeRampSpectrogram3D);
     menu.addItem (7, "Spectrum Fill", true, scopes.randomizeRampSpectrumFill);
+    menu.addItem (11, "Level Meters", true, scopes.randomizeRampLevelMeters);
     menu.addSeparator();
     menu.addSectionHeader ("Ramp randomize mode");
     menu.addItem (9, "Ordered gradation", true, scopes.orderedRampGradation);
@@ -6650,11 +6654,12 @@ void MainComponent::showRandomizeDiceMenu()
                             else if (result == 5) { s.randomizeRampSpectrogram = ! s.randomizeRampSpectrogram; keepOpen = true; }
                             else if (result == 6) { s.randomizeRampSpectrogram3D = ! s.randomizeRampSpectrogram3D; keepOpen = true; }
                             else if (result == 7) { s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill; keepOpen = true; }
+                            else if (result == 11) { s.randomizeRampLevelMeters = ! s.randomizeRampLevelMeters; keepOpen = true; }
                             else if (result == 8) safe->disableCustomColourRamps();
                             else if (result == 9)  { safe->setOrderedRampGradation (true, true); keepOpen = true; }
                             else if (result == 10) { safe->setOrderedRampGradation (false, true); keepOpen = true; }
 
-                            if (result >= 1 && result <= 7)
+                            if ((result >= 1 && result <= 7) || result == 11)
                                 safe->editor.requestSaveUiPrefs();
 
                             if (keepOpen)

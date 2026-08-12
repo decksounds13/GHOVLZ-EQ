@@ -166,6 +166,8 @@ public:
     bool randomizeRampSpectrogram = true;
     bool randomizeRampSpectrogram3D = true;
     bool randomizeRampSpectrumFill = true;
+    /** Peak + RMS meter bar ramps (both targets). */
+    bool randomizeRampLevelMeters = true;
 
     /**
         When randomizing ramps: pick H/S/V endpoint spans (within Appearance limits)

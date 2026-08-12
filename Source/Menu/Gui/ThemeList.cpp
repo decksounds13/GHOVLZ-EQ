@@ -448,6 +448,7 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
     const bool keepRampSpec = live.randomizeRampSpectrogram;
     const bool keepRampSpec3D = live.randomizeRampSpectrogram3D;
     const bool keepRampFill = live.randomizeRampSpectrumFill;
+    const bool keepRampMeters = live.randomizeRampLevelMeters;
     const bool keepOrdered = live.orderedRampGradation;
     const bool keepLegible = live.enforceLegibleText;
     const float keepContrast = live.textContrastAmount;
@@ -469,6 +470,7 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
     live.randomizeRampSpectrogram = keepRampSpec;
     live.randomizeRampSpectrogram3D = keepRampSpec3D;
     live.randomizeRampSpectrumFill = keepRampFill;
+    live.randomizeRampLevelMeters = keepRampMeters;
     live.orderedRampGradation = keepOrdered;
     live.enforceLegibleText = keepLegible;
     live.textContrastAmount = keepContrast;

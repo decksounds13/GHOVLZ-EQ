@@ -1957,6 +1957,7 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
     const bool keepRampSpec = live.randomizeRampSpectrogram;
     const bool keepRampSpec3D = live.randomizeRampSpectrogram3D;
     const bool keepRampFill = live.randomizeRampSpectrumFill;
+    const bool keepRampMeters = live.randomizeRampLevelMeters;
     const bool keepOrdered = live.orderedRampGradation;
     const bool keepLegible = live.enforceLegibleText;
     const float keepContrast = live.textContrastAmount;
@@ -1978,6 +1979,7 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
     live.randomizeRampSpectrogram = keepRampSpec;
     live.randomizeRampSpectrogram3D = keepRampSpec3D;
     live.randomizeRampSpectrumFill = keepRampFill;
+    live.randomizeRampLevelMeters = keepRampMeters;
     live.orderedRampGradation = keepOrdered;
     live.enforceLegibleText = keepLegible;
     live.textContrastAmount = keepContrast;
@@ -2330,6 +2332,7 @@ void EqEditor::loadUiPrefs()
     std::vector<ScopeModuleId> scopeModules = ScopeModules::defaultEnabledOrder();
     bool randFaceplate = true, randGraph = true, randMenu = true;
     bool randRampFft = true, randRampSpec = true, randRampSpec3D = true, randRampFill = true;
+    bool randRampMeters = true;
     bool orderedRampGradation = true;
     // Accessibility - on by default globally (Appearance can still toggle).
     bool enforceLegibleText = true;
@@ -2586,6 +2589,7 @@ void EqEditor::loadUiPrefs()
                 randRampSpec = xml->getBoolAttribute ("randRampSpec", true);
                 randRampSpec3D = xml->getBoolAttribute ("randRampSpec3D", true);
                 randRampFill = xml->getBoolAttribute ("randRampFill", true);
+                randRampMeters = xml->getBoolAttribute ("randRampMeters", true);
                 orderedRampGradation = xml->getBoolAttribute ("orderedRampGradation", true);
                 enforceLegibleText = xml->getBoolAttribute ("enforceLegibleText", true);
                 textContrastAmount = (float) xml->getDoubleAttribute ("textContrastAmount", 0.55);
@@ -3215,6 +3219,7 @@ void EqEditor::loadUiPrefs()
         c.randomizeRampSpectrogram = randRampSpec;
         c.randomizeRampSpectrogram3D = randRampSpec3D;
         c.randomizeRampSpectrumFill = randRampFill;
+        c.randomizeRampLevelMeters = randRampMeters;
         c.orderedRampGradation = orderedRampGradation;
         c.enforceLegibleText = enforceLegibleText;
         c.textContrastAmount = textContrastAmount;
@@ -3286,6 +3291,7 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("randRampSpec", c.randomizeRampSpectrogram);
         xml->setAttribute ("randRampSpec3D", c.randomizeRampSpectrogram3D);
         xml->setAttribute ("randRampFill", c.randomizeRampSpectrumFill);
+        xml->setAttribute ("randRampMeters", c.randomizeRampLevelMeters);
         xml->setAttribute ("orderedRampGradation", c.orderedRampGradation);
         xml->setAttribute ("enforceLegibleText", c.enforceLegibleText);
         xml->setAttribute ("textContrastAmount", (double) c.textContrastAmount);
