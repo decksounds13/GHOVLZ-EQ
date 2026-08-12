@@ -543,8 +543,6 @@ void SpectrumComponent::Content::resized()
 
     layoutComboRow (area, blockSizeLabel, blockSizeCombo);
 
-    // Wider than default combo row so "Lattice (zero latency)" never ellipsizes.
-    {
     layoutSliderRow (area, refreshLabel, refreshSlider);
     layoutSliderRow (area, avgLabel, avgSlider);
     layoutComboRow (area, curveSmoothLabel, curveSmoothCombo);
