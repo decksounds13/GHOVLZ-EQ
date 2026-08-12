@@ -89,16 +89,20 @@ If a new analyzer needs a file outside patterns (e.g. a shared `AudioAnalysisFif
 ---
 
 
-### Spectral / FFT (ported from EQ main)
-- `Source/Spectral/SpectralFftEngine.cpp` / `.h`
-- `Source/Spectral/SpectralMethod.h`
-- `Source/Spectral/SpectralDynamicsProcessor.cpp` / `.h`
+### Spectrum / meters UI (Analyzer display — not EQ spectral dynamics)
 - `Source/SpectrogramReassignment.cpp` / `.h`
-- `Source/Menu/Gui/SpectrumComponent.cpp` / `.h`
+- `Source/Menu/Gui/SpectrumComponent.cpp` / `.h` (display/settings only; no Lattice|FFT GR method)
 - `Source/Menu/Gui/SpectrogramSettingsComponent.cpp` / `.h` (if present)
 - `Source/Menu/Gui/LevelMetersComponent.cpp` / `.h`
+- `Source/Menu/Gui/ParticleForceStackComponent.cpp` / `.h` — Spec3D particle force stack settings only (no EQ DSP / no GR)
 - `Source/ParticleEmitterTypes.h`
 - `Source/ParticleForceModule.h`
+
+### Deny (spectral dynamics — never port)
+- `Source/Spectral/SpectralDynamicsProcessor.*` — post-EQ GR engine
+- `Source/Spectral/SpectralFftEngine.*` — STFT magnitude GR (EQ-chain / dynamics backend)
+- `Source/Spectral/SpectralMethod.h` — Lattice|FFT dynamics method selector
+- Related lattice/binning helpers used only by the above GR path
 
 ## Deny (never port into AnalyzerSuite)
 
