@@ -424,6 +424,12 @@
               file="Source/Spectral/SpectralDynamicsProcessor.h"/>
         <FILE id="SpDynC" name="SpectralDynamicsProcessor.cpp" compile="1"
               resource="0" file="Source/Spectral/SpectralDynamicsProcessor.cpp"/>
+        <FILE id="SpMetH" name="SpectralMethod.h" compile="0" resource="0"
+              file="Source/Spectral/SpectralMethod.h"/>
+        <FILE id="SpFftH" name="SpectralFftEngine.h" compile="0" resource="0"
+              file="Source/Spectral/SpectralFftEngine.h"/>
+        <FILE id="SpFftC" name="SpectralFftEngine.cpp" compile="1" resource="0"
+              file="Source/Spectral/SpectralFftEngine.cpp"/>
       </GROUP>
       <GROUP id="SplitGrp" name="StructuralSplit">
         <FILE id="SsSetH" name="StructuralSplitSettings.h" compile="0" resource="0"

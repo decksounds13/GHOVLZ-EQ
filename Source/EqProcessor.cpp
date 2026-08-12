@@ -17,6 +17,7 @@
 #include "DynamicEq.h"
 #include "Menu/AnalyserDefaults.h"
 #include "FactoryDefaultsState.h"
+#include "Spectral/SpectralMethod.h"
 #include <JuceHeader.h>
 
 juce::Image EqProcessor::darkKnob4_StitchedImage;
@@ -1262,6 +1263,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_MULTICOLOR_BAND_FILL_ID", "MulticolorBandFill",
         analyserDefaults.getBool ("EQ_MULTICOLOR_BAND_FILL_ID", true)));
+    // Spectral S method: Lattice (default, zero latency) or FFT (STFT, reports latency).
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        SpectralMethod::paramId(), "SpectralMethod",
+        SpectralMethod::choiceNames(),
+        analyserDefaults.getInt (SpectralMethod::paramId(), 0)));
     // Faceplate power rings + knob glow arcs follow graph handle multicolours (default off).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_BAND_CHROME_MATCH_HANDLES_ID", "BandChromeMatchHandles",
@@ -4130,6 +4136,19 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         return globalSpectralResHz;
     };
     spectralEngine.setPerBandLatticeEnabled (perBandLattice);
+
+    // Spectral method (Lattice default — never breaks existing S behaviour).
+    {
+        int methodChoice = 0;
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                treeState.getParameter (SpectralMethod::paramId())))
+            methodChoice = choice->getIndex();
+        const auto kind = SpectralMethod::fromChoiceIndex (methodChoice);
+        const int prevLatency = spectralEngine.getLatencySamples();
+        spectralEngine.setMethod (kind);
+        if (spectralEngine.getLatencySamples() != prevLatency)
+            setLatencySamples (computeProcessingLatencySamples());
+    }
 
     spectralEngine.clearBands();
     // Match + per-band Spectral can run together (Match shapes globally; S sculpts per band).

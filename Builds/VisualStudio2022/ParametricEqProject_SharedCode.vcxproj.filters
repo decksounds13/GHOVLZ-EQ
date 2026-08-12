@@ -1213,6 +1213,9 @@
     <ClCompile Include="..\..\Source\Spectral\SpectralDynamicsProcessor.cpp">
       <Filter>ParametricEqProject\Source\Spectral</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\Spectral\SpectralFftEngine.cpp">
+      <Filter>ParametricEqProject\Source\Spectral</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\StructuralSplit\StructuralSplitEngine.cpp">
       <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
     </ClCompile>
@@ -5128,6 +5131,12 @@
       <Filter>ParametricEqProject\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralDynamicsProcessor.h">
+      <Filter>ParametricEqProject\Source\Spectral</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Spectral\SpectralFftEngine.h">
+      <Filter>ParametricEqProject\Source\Spectral</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Spectral\SpectralMethod.h">
       <Filter>ParametricEqProject\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitSettings.h">

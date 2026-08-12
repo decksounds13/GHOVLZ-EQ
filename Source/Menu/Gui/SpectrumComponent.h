@@ -73,6 +73,11 @@ private:
         juce::ComboBox blockSizeCombo;
         std::unique_ptr<ComboBoxAttachment> blockSizeAttachment;
 
+        /** Lattice (default, zero latency) or FFT spectral dynamics. */
+        juce::Label spectralMethodLabel;
+        juce::ComboBox spectralMethodCombo;
+        std::unique_ptr<ComboBoxAttachment> spectralMethodAttachment;
+
         juce::Label refreshLabel;
         juce::Slider refreshSlider;
         std::unique_ptr<SliderAttachment> refreshAttachment;

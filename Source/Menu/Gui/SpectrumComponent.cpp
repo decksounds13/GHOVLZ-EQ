@@ -3,6 +3,7 @@
 #include "../../EqEditor.h"
 #include "../../MainComponent.h"
 #include "../../ModuleLookPresets.h"
+#include "../../Spectral/SpectralMethod.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
 
@@ -61,6 +62,22 @@ SpectrumComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (blockSizeLabel);
     addAndMakeVisible (blockSizeCombo);
     blockSizeAttachment = std::make_unique<ComboBoxAttachment> (treeState, "BLOCK_ID", blockSizeCombo);
+
+    spectralMethodLabel.setText ("Spectral Method", juce::dontSendNotification);
+    styleSettingsCombo (spectralMethodCombo);
+    {
+        const auto names = SpectralMethod::choiceNames();
+        for (int i = 0; i < names.size(); ++i)
+            spectralMethodCombo.addItem (names[i], i + 1);
+    }
+    spectralMethodCombo.setTooltip (
+        "Lattice: zero-latency IIR bandpass bank (default). "
+        "FFT: STFT magnitude GR with reported latency (~2048 samples). "
+        "Does not change Match or Side Check.");
+    addAndMakeVisible (spectralMethodLabel);
+    addAndMakeVisible (spectralMethodCombo);
+    spectralMethodAttachment = std::make_unique<ComboBoxAttachment> (
+        treeState, SpectralMethod::paramId(), spectralMethodCombo);
 
     refreshLabel.setText ("Refresh", juce::dontSendNotification);
     styleSlider (refreshSlider);
@@ -262,6 +279,7 @@ SpectrumComponent::Content::Content (SharedResources& resources,
 
     styleLabel (titleLabel);
     styleLabel (blockSizeLabel);
+    styleLabel (spectralMethodLabel);
     styleLabel (refreshLabel);
     styleLabel (avgLabel);
     styleLabel (curveSmoothLabel);
@@ -324,6 +342,7 @@ SpectrumComponent::Content::Content (SharedResources& resources,
 SpectrumComponent::Content::~Content()
 {
     blockSizeCombo.setLookAndFeel (nullptr);
+    spectralMethodCombo.setLookAndFeel (nullptr);
     curveSmoothCombo.setLookAndFeel (nullptr);
     treeState.removeParameterListener ("SPECTRUM_RESOLUTION_ID", this);
 }
@@ -494,14 +513,14 @@ void SpectrumComponent::Content::syncGradientFromBank()
 
 int SpectrumComponent::Content::getPreferredHeight() const
 {
-    // title + show bins + enable + block/refresh/avg + curve smooth
+    // title + show bins + enable + block + spectral method + refresh/avg + curve smooth
     // + multicolor + band chrome match + crosshair + layers + scale
     // + opacity/fill/path/band/sum + sumGlow toggle + 3 sum glow + postGlow toggle + 3 post glow + hold + gradient
     return kSpectrumPadY * 2
            + 24 + 8
            + 22 + 6
            + 22 + 6
-           + (4 * (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap))
+           + (5 * (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap))
            + 22 + 6
            + 22 + 6   // multicolor
            + 22 + 6   // match power/glow to band colours
@@ -541,6 +560,16 @@ void SpectrumComponent::Content::resized()
     area.removeFromTop (6);
 
     layoutComboRow (area, blockSizeLabel, blockSizeCombo);
+
+    // Wider than default combo row so "Lattice (zero latency)" never ellipsizes.
+    {
+        spectralMethodLabel.setBounds (area.removeFromTop (kSpectrumLabelH));
+        area.removeFromTop (kSpectrumLabelGap);
+        spectralMethodCombo.setBounds (
+            area.removeFromTop (kSpectrumSliderH).removeFromLeft (juce::jmin (320, area.getWidth())));
+        area.removeFromTop (kSpectrumRowGap);
+    }
+
     layoutSliderRow (area, refreshLabel, refreshSlider);
     layoutSliderRow (area, avgLabel, avgSlider);
     layoutComboRow (area, curveSmoothLabel, curveSmoothCombo);

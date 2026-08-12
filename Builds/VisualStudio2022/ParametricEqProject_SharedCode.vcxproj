@@ -239,6 +239,7 @@
     <ClCompile Include="..\..\Source\BandNumberButton.cpp"/>
     <ClCompile Include="..\..\Source\OptionBoxMenu.cpp"/>
     <ClCompile Include="..\..\Source\Spectral\SpectralDynamicsProcessor.cpp"/>
+    <ClCompile Include="..\..\Source\Spectral\SpectralFftEngine.cpp"/>
     <ClCompile Include="..\..\Source\StructuralSplit\StructuralSplitEngine.cpp"/>
     <ClCompile Include="..\..\Source\Match\MatchProcessor.cpp"/>
     <ClCompile Include="..\..\Source\Learn\BiquadMagnitude.cpp"/>
@@ -3631,6 +3632,8 @@
     <ClInclude Include="..\..\Source\Spectral\SpectralBinning.h"/>
     <ClInclude Include="..\..\Source\Spectral\SpectralBandSettings.h"/>
     <ClInclude Include="..\..\Source\Spectral\SpectralDynamicsProcessor.h"/>
+    <ClInclude Include="..\..\Source\Spectral\SpectralFftEngine.h"/>
+    <ClInclude Include="..\..\Source\Spectral\SpectralMethod.h"/>
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitSettings.h"/>
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitEngine.h"/>
     <ClInclude Include="..\..\Source\Match\MatchSettings.h"/>

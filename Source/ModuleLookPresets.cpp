@@ -232,7 +232,9 @@ juce::StringArray parameterIdsForKind (Kind k)
                 "SPECTRUM_OPACITY_ID", "SPECTRUM_FILL_OPACITY_ID", "SPECTRUM_PATH_WIDTH_ID",
                 "SPECTRUM_RESOLUTION_ID", "SPECTRUM_CURVE_RES_ID", "SPECTRUM_FFT_BINS_ID",
                 "SPECTRUM_GLOW_ENABLE_ID", "SPECTRUM_GLOW_RADIUS_ID",
-                "SPECTRUM_GLOW_SPREAD_ID", "SPECTRUM_GLOW_OPACITY_ID"
+                "SPECTRUM_GLOW_SPREAD_ID", "SPECTRUM_GLOW_OPACITY_ID",
+                "SPECTRAL_METHOD_ID", "EQ_MULTICOLOR_BAND_FILL_ID",
+                "EQ_BAND_CHROME_MATCH_HANDLES_ID", "EQ_SHOW_CROSSHAIR_ID"
             };
         case Kind::fft:
             return {

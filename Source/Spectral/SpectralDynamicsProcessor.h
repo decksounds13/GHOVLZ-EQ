@@ -7,20 +7,25 @@
 #include "SpectralBandSettings.h"
 #include "SpectralBinning.h"
 #include "SpectralPerBandLattice.h"
+#include "SpectralMethod.h"
+#include "SpectralFftEngine.h"
 
 /**
     Shared spectral dynamics engine (Pro-Q-style Spectral).
 
     Architecture
     ------------
-    - ONE coarse IIR bandpass bank for all active S bands (not per-band STFT).
+    - Method: Lattice (default) or FFT — selected by SPECTRAL_METHOD_ID.
+      Lattice path is unchanged; FFT never mutates the IIR bank.
+    - Lattice: ONE coarse IIR bandpass bank for all active S bands.
+    - FFT: clean-room STFT (SpectralFftEngine) magnitude GR + OLA.
     - Runs once at the end of the EQ chain: GR is applied to the post-EQ signal.
     - Sidechain detect is pre-EQ / dry so resonance detection is independent of
       static band gain (makeup boost does not fight the detector).
       Per-slot detectFromSidechain switches that detect to the plugin Sidechain
       bus (external source) instead of the main track.
     - Hard bypass (zero filter cost) when no S band is enabled.
-    - No FFT in the audio path; no allocations on the audio thread.
+    - Lattice: no FFT in the audio path; no allocations on the audio thread.
 
     Model
     -----
@@ -72,12 +77,16 @@ public:
         Optional sandboxed local lattices (SpectralPerBandLattice).
         Off (default) = existing global 20 Hz…maxHz shared budget — unchanged.
         On = each S band tiles only its Q influence range.
-        Side Check is unaffected.
+        Side Check is unaffected. Lattice method only.
     */
     void setPerBandLatticeEnabled (bool enabled) noexcept;
 
+    /** Lattice (default, zero latency) or FFT spectral. */
+    void setMethod (SpectralMethod::Kind method) noexcept;
+    SpectralMethod::Kind getMethod() const noexcept { return method; }
+
     /** True if at least one S band is armed for the next process() call. */
-    bool hasActiveBands() const noexcept { return activeBandCount > 0; }
+    bool hasActiveBands() const noexcept;
 
     /**
         Last-block runtime counters (audio thread publishes; UI may sample).
@@ -108,8 +117,8 @@ public:
                   const float* scDetectL = nullptr,
                   const float* scDetectR = nullptr);
 
-    /** IIR path reports no algorithmic latency. */
-    int getLatencySamples() const noexcept { return 0; }
+    /** Lattice = 0; FFT = STFT frame latency. */
+    int getLatencySamples() const noexcept;
 
     /**
         Sample published spectral GR (dB, signed) for a UI bandIndex onto an arbitrary
@@ -217,6 +226,9 @@ private:
 
     /** Off = legacy global lattice; on = SpectralPerBandLattice local placement. */
     bool perBandLatticeEnabled = false;
+
+    SpectralMethod::Kind method = SpectralMethod::Kind::lattice;
+    SpectralFftEngine fftEngine;
 
     int publishBlockCounter = 0;
     bool wasActive = false;
