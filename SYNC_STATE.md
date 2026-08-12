@@ -9,8 +9,8 @@
 | Analyzer default branch | `analyzer/main` |
 | Analyzer sync branch pattern | `sync/eq-<shortsha>` → PR into `analyzer/main` |
 | Last EQ SHA Port claimed to absorb | `df4e49c7011c507c8098a66a4e9c6c9e5ffd6f95` |
-| Last EQ SHA Port observed (any poll) | `e76833c3bb60a4a2295bc9dcb64096bff2fdbccb` |
-| Last EQ change time (UTC) | `2026-08-12T19:11:42Z` |
+| Last EQ SHA Port observed (any poll) | `e4c1a4288c6ff0e4b3c3114c3351f8285826c8e8` |
+| Last EQ change time (UTC) | `2026-08-12T19:27:53Z` |
 | Ports completed today (date + count) | `2026-08-12: 0` |
 | First-change-of-day port done | no |
 | Dirty after last port | yes |
