@@ -5,6 +5,7 @@
 #include "EqProcessor.h"
 #include "Match/MatchSettings.h"
 #include "KnobThemeHelpers.h"
+#include "Spectral/SpectralMethod.h"
 
 namespace
 {
@@ -248,8 +249,8 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     spectralBandwidthSlider.setSliderStyle (juce::Slider::LinearVertical);
     spectralBandwidthSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     spectralBandwidthSlider.setTooltip (
-        "Res - bandpass density. Global lattice: denser shared grid. "
-        "With per-band lattice on: about 4 filters (broad) up to 128 (surgical) inside each band's Q.");
+        "Res - spectral density (Lattice BP count, or FFT log-neighbour resolution). "
+        "Coarse = broader, fine = more surgical. Same control for both methods.");
     spectralBandwidthSlider.setColour (juce::Slider::backgroundColourId, juce::Colour::fromRGBA (40, 35, 28, 255));
     spectralBandwidthSlider.setColour (juce::Slider::trackColourId, juce::Colour::fromRGBA (180, 150, 55, 220));
     spectralBandwidthSlider.setColour (juce::Slider::thumbColourId, juce::Colour::fromRGBA (220, 200, 120, 255));
@@ -274,7 +275,9 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
         label.setFont (juce::Font ("Lato Black", 10.0f, juce::Font::plain));
         label.setJustificationType (juce::Justification::centred);
         label.setColour (juce::Label::textColourId, colors().optionText);
-        // Never ellipsize "Res"/"Amt" to "..." — width is sized to the string in resized().
+        // Never ellipsize "Res"/"Amt" to "..." — zero border (default 5px sides
+        // ate the measured width) + size-to-string in resized().
+        label.setBorderSize ({});
         label.setMinimumHorizontalScale (1.0f);
         label.setInterceptsMouseClicks (false, false);
         addChildComponent (label);
@@ -315,6 +318,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     bool isDraggable = true;
 
     treeState.addParameterListener (SpectralPerBandLattice::enabledParamId(), this);
+    treeState.addParameterListener (SpectralMethod::paramId(), this);
     treeState.addParameterListener (BandSaturation::spectralSatParamId(), this);
     treeState.addParameterListener (MatchEq::enabledParamId(), this);
     treeState.addParameterListener ("EQ_BAND_CHROME_MATCH_HANDLES_ID", this);
@@ -327,6 +331,7 @@ OptionBoxMenu::~OptionBoxMenu()
 {
     stopTimer();
     treeState.removeParameterListener (SpectralPerBandLattice::enabledParamId(), this);
+    treeState.removeParameterListener (SpectralMethod::paramId(), this);
     treeState.removeParameterListener (BandSaturation::spectralSatParamId(), this);
     treeState.removeParameterListener (MatchEq::enabledParamId(), this);
     treeState.removeParameterListener ("EQ_BAND_CHROME_MATCH_HANDLES_ID", this);
@@ -458,6 +463,11 @@ void OptionBoxMenu::applyThemeToChildControls()
     styleLabel (releaseLabel);
     styleLabel (spectralResLabel);
     styleLabel (spectralAmountLabel);
+    // Re-assert zero border after theme style (default Label border → "..." on "Res"/"Amt").
+    spectralResLabel.setBorderSize ({});
+    spectralAmountLabel.setBorderSize ({});
+    spectralResLabel.setMinimumHorizontalScale (1.0f);
+    spectralAmountLabel.setMinimumHorizontalScale (1.0f);
 
     auto styleChrome = [&] (juce::TextButton& b)
     {
@@ -854,15 +864,17 @@ void OptionBoxMenu::resized()
     auto labelWFor = [] (const juce::Label& lab, int minW) -> int
     {
         const float tw = juce::GlyphArrangement::getStringWidth (lab.getFont(), lab.getText());
-        return juce::jmax (minW, (int) std::ceil (tw) + 4);
+        // +2px padding; border is zero so this is the full drawable width.
+        return juce::jmax (minW, (int) std::ceil (tw) + 2);
     };
-    const int resLabelW = labelWFor (spectralResLabel, sliderColW + 4);
-    const int amtLabelW = labelWFor (spectralAmountLabel, sliderColW + 4);
+    const int resLabelW = labelWFor (spectralResLabel, 22);
+    const int amtLabelW = labelWFor (spectralAmountLabel, 22);
+    const int labelH = juce::jmax (sliderLabelH, 13);
 
-    spectralResLabel.setBounds (resX + (sliderColW - resLabelW) / 2, sliderTop, resLabelW, sliderLabelH);
+    spectralResLabel.setBounds (resX + (sliderColW - resLabelW) / 2, sliderTop, resLabelW, labelH);
     spectralBandwidthSlider.setBounds (resX, sliderTrackY, sliderColW, sliderH);
 
-    spectralAmountLabel.setBounds (amountX + (sliderColW - amtLabelW) / 2, sliderTop, amtLabelW, sliderLabelH);
+    spectralAmountLabel.setBounds (amountX + (sliderColW - amtLabelW) / 2, sliderTop, amtLabelW, labelH);
     spectralAmountSlider.setBounds (amountX, sliderTrackY, sliderColW, sliderH);
 
     // Post-spectral drive under Res when enabled from the S right-click menu.
@@ -1394,6 +1406,14 @@ void OptionBoxMenu::parameterChanged (const juce::String& parameterID, float new
             safe->updateDynamicControlsVisibility();
         });
     }
+    else if (parameterID == SpectralMethod::paramId())
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
+        {
+            if (safe != nullptr)
+                safe->updateDynamicControlsVisibility();
+        });
+    }
     else if (parameterID == BandSaturation::spectralSatParamId())
     {
         juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
@@ -1568,9 +1588,28 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
         spectralAmountSlider.setTooltip (spectralExpandButton.getToggleState()
             ? "Amount - pull down for more spectral resonance expansion"
             : "Amount - pull down for more spectral resonance attenuation");
-        spectralBandwidthSlider.setTooltip (isPerBandLatticeEnabled()
-            ? "Res (this band) - independent per-band density: about 4 BPs coarse (broad) up to 128 fine (surgical) inside this band's Q"
-            : "Res (global / linked) - one density for every S band on the shared lattice. Enable per-band lattice from the S right-click menu for per-band Res");
+
+        const bool fftMethod = [&]()
+        {
+            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                    treeState.getParameter (SpectralMethod::paramId())))
+                return choice->getIndex() == SpectralMethod::toChoiceIndex (SpectralMethod::Kind::fft);
+            return false;
+        }();
+
+        if (fftMethod)
+        {
+            spectralBandwidthSlider.setTooltip (
+                isPerBandLatticeEnabled()
+                    ? "Res (this band) - FFT spectral density: coarse = broader peak detection, fine = more surgical log-neighbour resolution (same Res control as Lattice)"
+                    : "Res (global / linked) - FFT spectral density for all S bands. Coarse = broader, fine = surgical. Same slider as Lattice method.");
+        }
+        else
+        {
+            spectralBandwidthSlider.setTooltip (isPerBandLatticeEnabled()
+                ? "Res (this band) - independent per-band density: about 4 BPs coarse (broad) up to 128 fine (surgical) inside this band's Q"
+                : "Res (global / linked) - one density for every S band on the shared lattice. Enable per-band lattice from the S right-click menu for per-band Res");
+        }
     }
 
     syncSatControls();

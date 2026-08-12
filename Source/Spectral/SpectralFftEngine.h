@@ -13,6 +13,8 @@
 
     - Hann + 75% OLA, magnitude-only GR, phase preserved.
     - Band f/Q soft-mask + prominence vs log-neighbours (same philosophy as lattice).
+    - Res (bandwidthHz) → same BP-budget curve as lattice; sets log-neighbour step.
+    - Attack / release smooth detect envelope and per-bin GR (same param IDs as Lattice).
     - Mid detect (dry or SC); linked GR on L/R wet.
     - Not a port of any third-party plugin source.
 */
@@ -82,6 +84,11 @@ private:
     float bandMask (float frequencyHz, const SpectralDynamics::BandSettings& settings) const noexcept;
     float binFrequencyHz (int bin) const noexcept;
     float safeMaxCenterHz() const noexcept;
+    /** Log-neighbour spacing (nats) from Res / lattice BP budget. */
+    float logNeighbourStep (float bandwidthHz) const noexcept;
+    /** Linear-interpolate envelope at frequency (detect bins). */
+    static float sampleEnvAtHz (const float* envDb, int numBins, float frequencyHz,
+                                double sampleRate, int fftSize) noexcept;
 
     double sampleRate = 48000.0;
     int numChannels = 2;
@@ -107,6 +114,8 @@ private:
 
     /** Per-slot bin envelopes (detect path). */
     std::array<std::array<float, kNumBins>, SpectralDynamics::kNumSlots> envDbSlot {};
+    /** Per-slot smoothed GR (dB) so A/R knobs control engage/recover of cuts. */
+    std::array<std::array<float, kNumBins>, SpectralDynamics::kNumSlots> grDbSmoothSlot {};
     std::array<float, kNumBins> grDbBin {};
     std::array<float, kNumBins> grLinBin {};
 
