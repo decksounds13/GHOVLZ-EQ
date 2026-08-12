@@ -42,6 +42,7 @@ ColourRampBank::ColourRampBank()
             { 0.0f, juce::Colour::fromRGBA (58, 42, 32, 180) },
             { 1.0f, juce::Colour::fromRGBA (187, 219, 132, 200) }
         };
+        r.enabled = true; // product default: spectrum fill gradient on out of the box
         ramps[(int) Target::spectrumFill] = std::move (r);
     }
     {
@@ -370,11 +371,12 @@ void ColourRampBank::applyFromValueTree (const juce::ValueTree& tree, bool force
         return;
 
     // Disk load: keep stops, but never silently override built-in colour schemes
-    // (FFT/Spec/…). Level meters have no alternate scheme — leave Use as loaded
-    // (or constructor default on when the child was missing from colour_ramps.xml).
+    // (FFT/Spec/…). Spectrum fill + level meters keep Use as loaded (constructor
+    // default is on when the child was missing from colour_ramps.xml).
     for (int ti = 0; ti < (int) Target::numTargets; ++ti)
     {
-        if (ti == (int) Target::meterPeak || ti == (int) Target::meterRms)
+        if (ti == (int) Target::meterPeak || ti == (int) Target::meterRms
+            || ti == (int) Target::spectrumFill)
             continue;
 
         if (ramps[ti].enabled)
