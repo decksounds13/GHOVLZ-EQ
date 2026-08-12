@@ -127,6 +127,8 @@ struct Spec3DRampSequence
 
     juce::ValueTree toValueTree() const;
     static Spec3DRampSequence fromValueTree (const juce::ValueTree& tree);
+    /** Replace all fields from a snapshot (undo / redo). */
+    void applyValueTree (const juce::ValueTree& tree);
     /** Migrate + hydrate ramps from store when only preset names exist. */
     void hydrateFromStore (const RampPresetStore& store);
 

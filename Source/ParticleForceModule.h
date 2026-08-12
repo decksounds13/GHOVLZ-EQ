@@ -60,7 +60,7 @@ enum class ParticleMeshShape : int
 {
     sphere = 0,
     cube = 1,
-    billboard = 2 // legacy soft sprite
+    billboard = 2
 };
 
 inline ParticleForceModule makeDefaultForceModule (ParticleForceType t, uint32_t uid) noexcept

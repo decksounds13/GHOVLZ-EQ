@@ -10,7 +10,14 @@
 
 class ColourRampBank;
 
-/** Spec3D sequencer: Ramp lane + optional lighting automation lanes. */
+/**
+    Spec3D sequencer: Ramp lane + optional lighting automation lanes.
+
+    Expanded layout exposes NLE-style tools (Premiere / Resolve conventions):
+      V — Selection (move / trim / reorder)
+      C — Razor (blade: click clip to cut at mouse)
+      Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z — undo / redo sequence edits
+*/
 class Spec3DRampTimelineComponent : public juce::Component,
                                     private juce::Timer
 {
@@ -27,15 +34,15 @@ public:
     float getPlayheadSec() const noexcept { return playheadSec; }
     std::function<float()> playheadProvider;
 
+    /** Host UndoManager (EQ chrome Ctrl+Z). If null, uses an internal stack. */
+    void setUndoManager (juce::UndoManager* um) noexcept;
+    juce::UndoManager& getUndoManager() noexcept;
+
     void setThemeColors (SharedResources* r) noexcept { theme = r != nullptr ? r : &resources; repaint(); }
 
     std::function<void()> onSequenceChanged;
     std::function<void()> onRequestExpand;
     std::function<void()> onEnabledChanged;
-    /**
-        Offline export of the selected timeline region (video + DAW audio).
-        Host (MainComponent) runs Spec3DExportJob.
-    */
     std::function<void (const Spec3DExportSettings&)> onExportRegionOffline;
 
     bool hasRegionSelection() const noexcept { return regionValid; }
@@ -51,8 +58,15 @@ public:
     void mouseUp (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
+    bool keyPressed (const juce::KeyPress& key) override;
 
     int getPreferredHeight() const noexcept;
+
+    enum class EditTool
+    {
+        select = 0, // V — select / move / trim
+        razor       // C — blade cut at click
+    };
 
 private:
     void timerCallback() override;
@@ -98,17 +112,40 @@ private:
     void openClipRampEditor (int clipIndex);
     void closeClipRampEditor (bool persist);
     void showAddLaneMenu();
-    /** autoIdx < 0 = Ramp colour lane; else autoLanes[autoIdx]. */
     void showLaneLabelMenu (int autoIdx, juce::Point<int> screenPos);
     void toggleLaneEnabled (int autoIdx);
     void showKeyInterpMenu (int autoIdx, int keyIdx, bool isColour, juce::Point<int> screenPos);
     void beginEditFloatKeyValue (int autoIdx, int keyIdx);
     void openColourKeyPicker (int autoIdx, int keyIdx);
 
+    // ── NLE edit tools + undo ──────────────────────────────────────────────
+    int findClipIndexAtTime (float timeSec) const noexcept;
+    bool canSplitAtTime (float timeSec) const noexcept;
+    bool splitClipAtTime (float timeSec); // returns true if cut applied
+    void duplicateSelectedClip();
+    void moveSelectedClip (int delta);
+    void deleteSelectedClip();
+    void setEditTool (EditTool t);
+    void updateEditToolEnabled();
+    void updateToolButtonToggles();
+    void refreshAfterUndoRedo();
+
+    /** Snapshot before a discrete edit; pair with commitEdit. */
+    void beginEditSnapshot();
+    /** Push undo action if state changed; always notifies. */
+    void commitEdit (const juce::String& name);
+    /** Continuous drag: snapshot once at down, commit on up. */
+    void commitDragEdit (const juce::String& name);
+
     SharedResources& resources;
     SharedResources* theme = nullptr;
     ColourRampBank& bank;
     Spec3DRampSequence& sequence;
+
+    juce::UndoManager ownedUndo { 50 };
+    juce::UndoManager* undoManager = &ownedUndo;
+    juce::ValueTree editSnapshotBefore;
+    bool editSnapshotValid = false;
 
     bool expandedLayout = false;
     bool showExpandButton = true;
@@ -116,6 +153,7 @@ private:
     int selectedClip = -1;
     int selectedAutoLane = -1;
     int selectedKey = -1;
+    EditTool editTool = EditTool::select;
 
     enum class DragMode
     {
@@ -135,7 +173,6 @@ private:
     float dragStartKeyT = 0.0f;
     float dragStartKeyV = 0.0f;
 
-    // Selected export region (sequence seconds). Drag empty track to set; RMB Export.
     bool regionValid = false;
     float regionInSec = 0.0f;
     float regionOutSec = 0.0f;
@@ -147,15 +184,23 @@ private:
     std::vector<ClipCache> clipCaches;
     std::vector<Spec3DRampSequence::LaidOutClip> layout;
 
-    juce::TextButton enableButton { "Seq" };
+    // Square graphic toolbar (UE5 Sequencer / Premiere style — icons, not text labels).
+    std::unique_ptr<juce::Button> enableButton;
     juce::Slider lengthSlider;
     juce::Label lengthLabel;
-    juce::TextButton addButton { "+" };
-    juce::TextButton removeButton { "-" };
-    juce::TextButton addLaneButton { "+Lane" };
-    juce::TextButton expandButton { "Exp" };
 
-    // Inline clip editor (expanded/pop-out preferred)
+    std::unique_ptr<juce::Button> selectToolButton;
+    std::unique_ptr<juce::Button> razorToolButton;
+    std::unique_ptr<juce::Button> undoToolButton;
+    std::unique_ptr<juce::Button> redoToolButton;
+    std::unique_ptr<juce::Button> dupButton;
+    std::unique_ptr<juce::Button> deleteButton;
+    std::unique_ptr<juce::Button> moveLeftButton;
+    std::unique_ptr<juce::Button> moveRightButton;
+    std::unique_ptr<juce::Button> addButton;
+    std::unique_ptr<juce::Button> addLaneButton;
+    std::unique_ptr<juce::Button> expandButton;
+
     std::unique_ptr<GradientStripEditor> clipEditor;
     int clipEditorIndex = -1;
     std::unique_ptr<RampColorPickerPanel> colourKeyPicker;

@@ -116,6 +116,15 @@ void RampPresetStore::seedFactoryPresets()
         { 0.00f, rgb (5, 15, 20) }, { 0.40f, rgb (20, 70, 70) },
         { 0.70f, rgb (80, 180, 140) }, { 1.00f, rgb (210, 255, 220) } }));
 
+    // Level-meter friendly factory looks.
+    addFactory (presets, "Blue Orange", makeRamp ({
+        { 0.00f, rgb (15, 40, 160) }, { 0.45f, rgb (40, 120, 220) },
+        { 0.72f, rgb (240, 150, 40) }, { 1.00f, rgb (255, 95, 20) } }));
+    addFactory (presets, "Meter VU", makeRamp ({
+        { 0.00f, rgb (18, 130, 50) }, { 0.50f, rgb (200, 195, 35) },
+        { 0.75f, rgb (235, 125, 25) }, { 0.90f, rgb (230, 55, 30) },
+        { 1.00f, rgb (200, 20, 25) } }));
+
     // Full-spectrum rainbow: start at blue, then every hue at max saturation / brightness.
     {
         GradientRamp rainbow;

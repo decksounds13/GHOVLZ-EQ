@@ -429,20 +429,21 @@ void HistogramComponent::paintScale (juce::Graphics& g, juce::Rectangle<float> a
 void HistogramComponent::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    const auto bg = themeColors != nullptr ? themeColors->sharedColors.oscBackground
-                                           : juce::Colour::fromRGB (16, 14, 12);
-    g.setColour (bg);
-    g.fillRoundedRectangle (bounds, 3.0f);
+    // Opaque fill (maximize / F11 / Scope cards — no bleed from underneath).
+    const auto bg = themeColors != nullptr ? themeColors->sharedColors.oscBackground.darker (0.08f)
+                                           : juce::Colour::fromRGB (14, 12, 10);
+    g.fillAll (bg);
 
-    const auto readoutText = themeColors != nullptr ? themeColors->sharedColors.meterReadoutText
+    const auto readoutSeed = themeColors != nullptr ? themeColors->sharedColors.meterReadoutText
                                                     : juce::Colours::whitesmoke.withAlpha (0.92f);
+    const auto readoutText = themeColors != nullptr
+                                 ? themeColors->sharedColors.legibleTextOn (readoutSeed, bg)
+                                 : readoutSeed;
     const auto textCol = readoutText;
 
     auto area = getLocalBounds().reduced (4);
-    const int titleH = 12;
     const int legendH = 14;
     const int scaleW = 26;
-    area.removeFromTop (titleH);
     auto legend = area.removeFromBottom (legendH);
     auto scaleArea = area.removeFromRight (scaleW).toFloat();
     area.removeFromRight (3);

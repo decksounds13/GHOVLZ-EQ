@@ -88,6 +88,18 @@ If a new analyzer needs a file outside patterns (e.g. a shared `AudioAnalysisFif
 
 ---
 
+
+### Spectral / FFT (ported from EQ main)
+- `Source/Spectral/SpectralFftEngine.cpp` / `.h`
+- `Source/Spectral/SpectralMethod.h`
+- `Source/Spectral/SpectralDynamicsProcessor.cpp` / `.h`
+- `Source/SpectrogramReassignment.cpp` / `.h`
+- `Source/Menu/Gui/SpectrumComponent.cpp` / `.h`
+- `Source/Menu/Gui/SpectrogramSettingsComponent.cpp` / `.h` (if present)
+- `Source/Menu/Gui/LevelMetersComponent.cpp` / `.h`
+- `Source/ParticleEmitterTypes.h`
+- `Source/ParticleForceModule.h`
+
 ## Deny (never port into AnalyzerSuite)
 
 - EQ band DSP and channel processing beyond dry pass-through  

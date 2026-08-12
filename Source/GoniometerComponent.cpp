@@ -464,10 +464,22 @@ void GoniometerComponent::paint (juce::Graphics& g)
                                          loadFloatParam (expanded ? "GON_EXPANDED_GLOW_SPREAD_ID" : "GON_GLOW_SPREAD_ID",
                                                          expanded ? 2.0f : 1.0f));
 
-    g.setColour (theme.oscBackground.withAlpha (expanded ? 90.0f / 255.0f : 210.0f / 255.0f));
-    g.fillRoundedRectangle (plot, expanded ? 2.0f : 3.0f);
-    g.setColour (theme.oscBackground2.withAlpha (180.0f / 255.0f));
-    g.drawRoundedRectangle (plot.reduced (0.5f), expanded ? 2.0f : 3.0f, 1.0f);
+    // Expanded / maximize / F11: solid opaque plot. Compact: self-contained fill.
+    if (expanded)
+    {
+        g.fillAll (theme.oscBackground);
+        g.setColour (theme.oscBackground.darker (0.08f));
+        g.fillRoundedRectangle (plot, 4.0f);
+        g.setColour (theme.scopeDropOutline.withAlpha (0.14f));
+        g.drawRoundedRectangle (plot.reduced (0.5f), 4.0f, 1.0f);
+    }
+    else
+    {
+        g.setColour (theme.oscBackground.withAlpha (210.0f / 255.0f));
+        g.fillRoundedRectangle (plot, 3.0f);
+        g.setColour (theme.oscBackground2.withAlpha (180.0f / 255.0f));
+        g.drawRoundedRectangle (plot.reduced (0.5f), 3.0f, 1.0f);
+    }
 
     {
         const auto c = plot.getCentre();
@@ -507,7 +519,8 @@ void GoniometerComponent::paint (juce::Graphics& g)
     {
         const float fontH = expanded ? 11.0f : 8.0f;
         g.setFont (juce::FontOptions().withHeight (fontH));
-        g.setColour (theme.graphAxisText.withAlpha (0.55f));
+        const auto plotBg = expanded ? theme.oscBackground : theme.oscBackground.withAlpha (1.0f);
+        g.setColour (theme.legibleTextOn (theme.graphAxisText, plotBg).withAlpha (0.75f));
         g.drawText ("M",
                     juce::Rectangle<float> (plot.getCentreX() - 8.0f, plot.getY() + 2.0f, 16.0f, fontH + 2.0f),
                     juce::Justification::centred, false);
@@ -549,7 +562,8 @@ void GoniometerComponent::paint (juce::Graphics& g)
         if (expanded)
         {
             g.setFont (juce::FontOptions().withHeight (10.0f));
-            g.setColour (theme.graphAxisText.withAlpha (0.75f));
+            g.setColour (theme.legibleTextOn (theme.graphAxisText, theme.oscBackground)
+                             .withAlpha (0.88f));
             g.drawText ("+1", corr.withHeight (12.0f).translated (0.0f, 2.0f),
                         juce::Justification::centred, false);
             g.drawText ("0",

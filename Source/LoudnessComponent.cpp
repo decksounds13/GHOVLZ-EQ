@@ -179,10 +179,11 @@ void LoudnessComponent::timerCallback()
 void LoudnessComponent::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    const auto bg = themeColors != nullptr ? themeColors->sharedColors.oscBackground
-                                           : juce::Colour::fromRGB (16, 14, 12);
-    g.setColour (bg);
-    g.fillRoundedRectangle (bounds, 3.0f);
+    juce::ignoreUnused (bounds);
+    // Opaque fill (maximize / F11 / Scope — no bleed from underneath).
+    const auto bg = themeColors != nullptr ? themeColors->sharedColors.oscBackground.darker (0.08f)
+                                           : juce::Colour::fromRGB (14, 12, 10);
+    g.fillAll (bg);
 
     const float target = loadFloatParam ("LOUDNESS_TARGET_ID", -14.0f);
     const float m = momentaryLufs.load (std::memory_order_relaxed);
@@ -198,18 +199,12 @@ void LoudnessComponent::paint (juce::Graphics& g)
 
     auto area = getLocalBounds().reduced (4);
     const int footerH = juce::jmax (14, juce::roundToInt ((float) area.getHeight() * 0.12f));
-    const int titleH = juce::jmax (12, juce::roundToInt ((float) area.getHeight() * 0.12f));
     auto footer = area.removeFromBottom (footerH);
-    auto titleArea = area.removeFromTop (titleH);
 
     const float numH = juce::jlimit (12.0f, 28.0f, (float) area.getHeight() * 0.22f);
     const float labelH = juce::jlimit (9.0f, 14.0f, numH * 0.62f);
     auto numFont = juce::Font (juce::FontOptions (numH).withName ("Lato Black"));
     auto labelFont = juce::Font (juce::FontOptions (labelH));
-    auto titleFont = juce::Font (juce::FontOptions (juce::jmax (9.0f, labelH)));
-
-    // Module title is drawn by ScopeArrangeOverlay (Loudness-style, −5 px).
-    juce::ignoreUnused (titleArea, titleFont);
 
     const juce::String labels[3] = { "Mom.", "Short", "Int." };
     const juce::String shortTags[3] = { "M", "S", "I" };
@@ -244,8 +239,11 @@ void LoudnessComponent::paint (juce::Graphics& g)
     area.removeFromLeft (kMeterPad);
     auto meterCol = area;
 
-    const auto readoutText = themeColors != nullptr ? themeColors->sharedColors.meterReadoutText
+    const auto readoutSeed = themeColors != nullptr ? themeColors->sharedColors.meterReadoutText
                                                     : juce::Colours::whitesmoke.withAlpha (0.92f);
+    const auto readoutText = themeColors != nullptr
+                                 ? themeColors->sharedColors.legibleTextOn (readoutSeed, bg)
+                                 : readoutSeed;
 
     // Pack Mom./Short/Int. toward the vertical middle (less empty padding between rows).
     const int rowH = juce::jmax ((int) (numH + labelH * 0.15f) + 2, (int) (numH + 4.0f));
@@ -281,7 +279,7 @@ void LoudnessComponent::paint (juce::Graphics& g)
         static constexpr float ticks[] = { 0.0f, -10.0f, -20.0f, -30.0f, -40.0f, -50.0f, -60.0f, -70.0f };
         const float fontH = juce::jlimit (7.0f, 9.0f, scaleArea.getWidth() * 0.42f);
         g.setFont (juce::Font (juce::FontOptions (fontH)));
-        g.setColour (juce::Colours::whitesmoke.withAlpha (0.5f));
+        g.setColour (readoutText.withAlpha (0.55f));
         for (float tick : ticks)
         {
             const float norm = lufsToMeterNorm (tick, minLufs, maxLufs);
@@ -331,7 +329,7 @@ void LoudnessComponent::paint (juce::Graphics& g)
                 juce::Rectangle<int> (meterCol.getX(), tagRow.getY(), kScaleW, tagH),
                 juce::Justification::centred, false);
 
-    g.setFont (titleFont);
+    g.setFont (labelFont);
     g.setColour (juce::Colours::whitesmoke.withAlpha (0.65f));
     g.drawText ("Target " + juce::String (target, 0) + " LUFS",
                 footer, juce::Justification::centred, false);

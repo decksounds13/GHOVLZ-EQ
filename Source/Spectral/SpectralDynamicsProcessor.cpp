@@ -7,6 +7,8 @@ void SpectralDynamicsProcessor::prepare (double newSampleRate, int maximumBlockS
     numChannels = juce::jmax (1, channels);
     maxBlockSize = juce::jmax (1, maximumBlockSize);
 
+    fftEngine.prepare (sampleRate, maxBlockSize, numChannels);
+
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
     spec.maximumBlockSize = (juce::uint32) maxBlockSize;
@@ -54,6 +56,8 @@ void SpectralDynamicsProcessor::prepare (double newSampleRate, int maximumBlockS
 
 void SpectralDynamicsProcessor::reset()
 {
+    fftEngine.reset();
+
     for (auto& unit : bank)
     {
         unit.filterL.reset();
@@ -97,6 +101,35 @@ void SpectralDynamicsProcessor::clearBands() noexcept
         band.active = false;
         band.settings.enabled = false;
     }
+
+    // Keep FFT slot list in sync (always; process only runs one engine).
+    fftEngine.clearBands();
+}
+
+void SpectralDynamicsProcessor::setMethod (SpectralMethod::Kind newMethod) noexcept
+{
+    if (method == newMethod)
+        return;
+    method = newMethod;
+    // Fresh state when switching engines (avoid stale FIFOs / IIR).
+    if (method == SpectralMethod::Kind::fft)
+        fftEngine.reset();
+    else
+        bankDirty = true;
+}
+
+bool SpectralDynamicsProcessor::hasActiveBands() const noexcept
+{
+    if (method == SpectralMethod::Kind::fft)
+        return fftEngine.hasActiveBands();
+    return activeBandCount > 0;
+}
+
+int SpectralDynamicsProcessor::getLatencySamples() const noexcept
+{
+    if (method == SpectralMethod::Kind::fft)
+        return fftEngine.getLatencySamples();
+    return 0;
 }
 
 float SpectralDynamicsProcessor::safeMaxCenterHz() const noexcept
@@ -169,6 +202,9 @@ void SpectralDynamicsProcessor::setPerBandLatticeEnabled (bool enabled) noexcept
 
 void SpectralDynamicsProcessor::setBand (int slot, const SpectralDynamics::BandSettings& settings) noexcept
 {
+    // Always feed FFT engine so method switches mid-session stay hot.
+    fftEngine.setBand (slot, settings);
+
     if (slot < 0 || slot >= SpectralDynamics::kNumSlots)
         return;
 
@@ -856,6 +892,12 @@ void SpectralDynamicsProcessor::publishGrCurves() noexcept
 void SpectralDynamicsProcessor::samplePublishedGrDb (int bandIndex, const float* frequenciesHz,
                                                     float* destDb, int numPoints) const
 {
+    if (method == SpectralMethod::Kind::fft)
+    {
+        fftEngine.samplePublishedGrDb (bandIndex, frequenciesHz, destDb, numPoints);
+        return;
+    }
+
     if (frequenciesHz == nullptr || destDb == nullptr || numPoints <= 0)
         return;
 
@@ -947,6 +989,9 @@ void SpectralDynamicsProcessor::samplePublishedGrDb (int bandIndex, const float*
 
 bool SpectralDynamicsProcessor::hasActiveGr (int bandIndex) const noexcept
 {
+    if (method == SpectralMethod::Kind::fft)
+        return fftEngine.hasActiveGr (bandIndex);
+
     const int slot = SpectralDynamics::slotForBandIndex (bandIndex);
     if (slot < 0)
         return false;
@@ -955,6 +1000,9 @@ bool SpectralDynamicsProcessor::hasActiveGr (int bandIndex) const noexcept
 
 float SpectralDynamicsProcessor::getPublishedPeakGrDb (int bandIndex) const noexcept
 {
+    if (method == SpectralMethod::Kind::fft)
+        return fftEngine.getPublishedPeakGrDb (bandIndex);
+
     const int slot = SpectralDynamics::slotForBandIndex (bandIndex);
     if (slot < 0)
         return 0.0f;
@@ -963,6 +1011,17 @@ float SpectralDynamicsProcessor::getPublishedPeakGrDb (int bandIndex) const noex
 
 SpectralDynamicsProcessor::RuntimeStats SpectralDynamicsProcessor::getRuntimeStats() const noexcept
 {
+    if (method == SpectralMethod::Kind::fft)
+    {
+        const auto fs = fftEngine.getRuntimeStats();
+        RuntimeStats s;
+        s.armedSlots = fs.armedSlots;
+        s.bankedBandpasses = fs.bankedBandpasses;
+        s.gatedBandpasses = fs.gatedBandpasses;
+        s.processingBandpasses = fs.processingBandpasses;
+        return s;
+    }
+
     RuntimeStats s;
     s.armedSlots = publishedArmedSlots.load (std::memory_order_relaxed);
     s.bankedBandpasses = publishedBankedBandpasses.load (std::memory_order_relaxed);
@@ -977,6 +1036,18 @@ void SpectralDynamicsProcessor::process (juce::dsp::AudioBlock<float>& block,
                                          const float* scDetectL,
                                          const float* scDetectR)
 {
+    // FFT path: never touch lattice bank/process.
+    // Always runs (full STFT or delay-only) so reported latency matches audio.
+    if (method == SpectralMethod::Kind::fft)
+    {
+        if (block.getNumSamples() == 0)
+            return;
+        fftEngine.process (block, detectL, detectR, scDetectL, scDetectR);
+        wasActive = fftEngine.hasActiveBands();
+        return;
+    }
+
+    // ---- Lattice path (unchanged behaviour) ----
     // Hard bypass: zero bandpass cost when no S bands are on.
     if (activeBandCount == 0 || block.getNumSamples() == 0)
     {

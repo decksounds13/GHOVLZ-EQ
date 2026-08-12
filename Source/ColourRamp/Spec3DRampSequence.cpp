@@ -304,6 +304,7 @@ void Spec3DRampSequence::clamp() noexcept
     for (auto& c : clips)
     {
         c.weight = juce::jmax (kMinWeight, c.weight);
+        // Upper bound applied in buildLayout from laid-out body (full clip length).
         c.crossfadeOutSec = juce::jmax (0.0f, c.crossfadeOutSec);
         if (c.ramp.stops.size() >= 2)
             c.ramp.enabled = true;
@@ -413,6 +414,12 @@ Spec3DRampSequence Spec3DRampSequence::fromValueTree (const juce::ValueTree& tre
     return s;
 }
 
+void Spec3DRampSequence::applyValueTree (const juce::ValueTree& tree)
+{
+    *this = fromValueTree (tree);
+    clamp();
+}
+
 void Spec3DRampSequence::hydrateFromStore (const RampPresetStore& store)
 {
     for (auto& c : clips)
@@ -462,11 +469,9 @@ void Spec3DRampSequence::buildLayout (std::vector<LaidOutClip>& out) const
 
     for (int i = 0; i < n; ++i)
     {
-        const int next = (i + 1) % n;
+        // Fade may span the full clip body (Ableton-style). No 50% / neighbour half cap.
         const float body = juce::jmax (1.0e-4f, out[(size_t) i].endSec - out[(size_t) i].startSec);
-        const float nextBody = juce::jmax (1.0e-4f, out[(size_t) next].endSec - out[(size_t) next].startSec);
-        const float maxFade = juce::jmin (body * 0.5f, nextBody * 0.5f);
-        out[(size_t) i].fadeOutSec = juce::jlimit (0.0f, maxFade, clips[(size_t) i].crossfadeOutSec);
+        out[(size_t) i].fadeOutSec = juce::jlimit (0.0f, body, clips[(size_t) i].crossfadeOutSec);
     }
 }
 

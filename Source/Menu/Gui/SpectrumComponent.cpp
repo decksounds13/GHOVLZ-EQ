@@ -1,7 +1,9 @@
 ﻿#include "SpectrumComponent.h"
 
+#include "../../EqEditor.h"
 #include "../../MainComponent.h"
 #include "../../ModuleLookPresets.h"
+#include "../../Spectral/SpectralMethod.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
 
@@ -61,6 +63,22 @@ SpectrumComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (blockSizeCombo);
     blockSizeAttachment = std::make_unique<ComboBoxAttachment> (treeState, "BLOCK_ID", blockSizeCombo);
 
+    spectralMethodLabel.setText ("Spectral Method", juce::dontSendNotification);
+    styleSettingsCombo (spectralMethodCombo);
+    {
+        const auto names = SpectralMethod::choiceNames();
+        for (int i = 0; i < names.size(); ++i)
+            spectralMethodCombo.addItem (names[i], i + 1);
+    }
+    spectralMethodCombo.setTooltip (
+        "Lattice: zero-latency IIR bandpass bank (default). "
+        "FFT: STFT magnitude GR with reported latency (~2048 samples). "
+        "Does not change Match or Side Check.");
+    addAndMakeVisible (spectralMethodLabel);
+    addAndMakeVisible (spectralMethodCombo);
+    spectralMethodAttachment = std::make_unique<ComboBoxAttachment> (
+        treeState, SpectralMethod::paramId(), spectralMethodCombo);
+
     refreshLabel.setText ("Refresh", juce::dontSendNotification);
     styleSlider (refreshSlider);
     refreshSlider.setTextValueSuffix (" ms");
@@ -88,9 +106,51 @@ SpectrumComponent::Content::Content (SharedResources& resources,
 
     multicolorBandFillToggle.setClickingTogglesState (true);
     styleToggle (multicolorBandFillToggle);
+    multicolorBandFillToggle.setTooltip (
+        "When on, EQ band fills and handles use Graph Band 1-8 colours. "
+        "When off, bands use neutral golden boost/cut fills.");
     addAndMakeVisible (multicolorBandFillToggle);
     multicolorBandFillAttachment = std::make_unique<ButtonAttachment> (
         treeState, "EQ_MULTICOLOR_BAND_FILL_ID", multicolorBandFillToggle);
+
+    bandChromeMatchHandlesToggle.setClickingTogglesState (true);
+    styleToggle (bandChromeMatchHandlesToggle);
+    bandChromeMatchHandlesToggle.setTooltip (
+        "When on, faceplate power rings and knob glow arcs use the same multicolour "
+        "as that band's graph handle. When off, they share the theme Knob Arc colour.");
+    addAndMakeVisible (bandChromeMatchHandlesToggle);
+    bandChromeMatchHandlesAttachment = std::make_unique<ButtonAttachment> (
+        treeState, "EQ_BAND_CHROME_MATCH_HANDLES_ID", bandChromeMatchHandlesToggle);
+
+    bandMinSatEnableToggle.setClickingTogglesState (true);
+    styleToggle (bandMinSatEnableToggle);
+    bandMinSatEnableToggle.setTooltip (
+        "When on, Graph Band colours (and matching faceplate power rings / knob glows) "
+        "never drop below Band min sat. Default on at 25%.");
+    bandMinSatEnableToggle.onClick = [this] { applyBandMinSatFromControls(); };
+    addAndMakeVisible (bandMinSatEnableToggle);
+
+    styleLabel (bandMinSatLabel);
+    bandMinSatLabel.setText ("Min sat", juce::dontSendNotification);
+    bandMinSatLabel.setMinimumHorizontalScale (1.0f);
+    addAndMakeVisible (bandMinSatLabel);
+
+    styleSlider (bandMinSatSlider);
+    bandMinSatSlider.setRange (0.0, 1.0, 0.01);
+    bandMinSatSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    bandMinSatSlider.setTooltip (
+        "Minimum saturation for Graph Band 1-8 when randomizing, and for faceplate "
+        "power/glow when Match power/glow is on. Default 25%.");
+    bandMinSatSlider.onValueChange = [this] { applyBandMinSatFromControls(); };
+    addAndMakeVisible (bandMinSatSlider);
+
+    bandMinSatPercentLabel.setJustificationType (juce::Justification::centredRight);
+    bandMinSatPercentLabel.setMinimumHorizontalScale (1.0f);
+    bandMinSatPercentLabel.setInterceptsMouseClicks (false, false);
+    styleLabel (bandMinSatPercentLabel);
+    addAndMakeVisible (bandMinSatPercentLabel);
+
+    syncBandMinSatControlsFromShared();
 
     showCrosshairToggle.setClickingTogglesState (true);
     styleToggle (showCrosshairToggle);
@@ -219,6 +279,7 @@ SpectrumComponent::Content::Content (SharedResources& resources,
 
     styleLabel (titleLabel);
     styleLabel (blockSizeLabel);
+    styleLabel (spectralMethodLabel);
     styleLabel (refreshLabel);
     styleLabel (avgLabel);
     styleLabel (curveSmoothLabel);
@@ -281,6 +342,7 @@ SpectrumComponent::Content::Content (SharedResources& resources,
 SpectrumComponent::Content::~Content()
 {
     blockSizeCombo.setLookAndFeel (nullptr);
+    spectralMethodCombo.setLookAndFeel (nullptr);
     curveSmoothCombo.setLookAndFeel (nullptr);
     treeState.removeParameterListener ("SPECTRUM_RESOLUTION_ID", this);
 }
@@ -373,6 +435,49 @@ void SpectrumComponent::Content::saveAnalyserDefaults()
     });
 }
 
+void SpectrumComponent::Content::syncBandMinSatControlsFromShared()
+{
+    auto& c = sharedResources.sharedColors;
+    bandMinSatEnableToggle.setToggleState (c.graphBandRandomMinSatEnabled, juce::dontSendNotification);
+    bandMinSatSlider.setValue (c.graphBandRandomMinSaturation, juce::dontSendNotification);
+    const int pct = juce::roundToInt (c.graphBandRandomMinSaturation * 100.0f);
+    bandMinSatPercentLabel.setText (juce::String (pct) + "%", juce::dontSendNotification);
+    const bool en = c.graphBandRandomMinSatEnabled;
+    bandMinSatLabel.setEnabled (en);
+    bandMinSatSlider.setEnabled (en);
+    bandMinSatPercentLabel.setEnabled (en);
+}
+
+void SpectrumComponent::Content::applyBandMinSatFromControls()
+{
+    auto& c = sharedResources.sharedColors;
+    c.graphBandRandomMinSatEnabled = bandMinSatEnableToggle.getToggleState();
+    c.graphBandRandomMinSaturation = juce::jlimit (0.0f, 1.0f, (float) bandMinSatSlider.getValue());
+    const int pct = juce::roundToInt (c.graphBandRandomMinSaturation * 100.0f);
+    bandMinSatPercentLabel.setText (juce::String (pct) + "%", juce::dontSendNotification);
+    const bool en = c.graphBandRandomMinSatEnabled;
+    bandMinSatLabel.setEnabled (en);
+    bandMinSatSlider.setEnabled (en);
+    bandMinSatPercentLabel.setEnabled (en);
+
+    // Refresh faceplate power/glow and graph handles/fills that use the floor.
+    if (auto* ed = findParentComponentOfClass<EqEditor>())
+        ed->applyFaceplateBandChrome();
+    if (auto* main = findParentComponentOfClass<MainComponent>())
+    {
+        main->getSharedResources().makeActive();
+        main->getFrequencyResponseComponent().repaint();
+    }
+
+    notifyHostSaveUiPrefs();
+}
+
+void SpectrumComponent::Content::notifyHostSaveUiPrefs()
+{
+    if (auto* ed = findParentComponentOfClass<EqEditor>())
+        ed->requestSaveUiPrefs();
+}
+
 void SpectrumComponent::Content::layoutSliderRow (juce::Rectangle<int>& area, juce::Label& label, juce::Slider& slider)
 {
     label.setBounds (area.removeFromTop (kSpectrumLabelH));
@@ -408,14 +513,18 @@ void SpectrumComponent::Content::syncGradientFromBank()
 
 int SpectrumComponent::Content::getPreferredHeight() const
 {
-    // title + show bins + enable + block/refresh/avg + curve smooth + multicolor + crosshair + layers + scale
+    // title + show bins + enable + block + spectral method + refresh/avg + curve smooth
+    // + multicolor + band chrome match + crosshair + layers + scale
     // + opacity/fill/path/band/sum + sumGlow toggle + 3 sum glow + postGlow toggle + 3 post glow + hold + gradient
     return kSpectrumPadY * 2
            + 24 + 8
            + 22 + 6
            + 22 + 6
-           + (4 * (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap))
+           + (5 * (kSpectrumLabelH + kSpectrumLabelGap + kSpectrumSliderH + kSpectrumRowGap))
            + 22 + 6
+           + 22 + 6   // multicolor
+           + 22 + 6   // match power/glow to band colours
+           + 22 + 6   // band min sat enable + slider row
            + 22 + 8
            + kSpectrumLabelH + kSpectrumLabelGap
            + (3 * (kSpectrumToggleH + 4)) + kSpectrumRowGap
@@ -451,11 +560,54 @@ void SpectrumComponent::Content::resized()
     area.removeFromTop (6);
 
     layoutComboRow (area, blockSizeLabel, blockSizeCombo);
+
+    // Wider than default combo row so "Lattice (zero latency)" never ellipsizes.
+    {
+        spectralMethodLabel.setBounds (area.removeFromTop (kSpectrumLabelH));
+        area.removeFromTop (kSpectrumLabelGap);
+        spectralMethodCombo.setBounds (
+            area.removeFromTop (kSpectrumSliderH).removeFromLeft (juce::jmin (320, area.getWidth())));
+        area.removeFromTop (kSpectrumRowGap);
+    }
+
     layoutSliderRow (area, refreshLabel, refreshSlider);
     layoutSliderRow (area, avgLabel, avgSlider);
     layoutComboRow (area, curveSmoothLabel, curveSmoothCombo);
 
-    multicolorBandFillToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
+    multicolorBandFillToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (320, area.getWidth())));
+    area.removeFromTop (6);
+
+    // Full plain caption — measure width so it never ships as "..."
+    {
+        const juce::Font tfont (juce::FontOptions (14.0f));
+        const int tw = juce::jmax (220, (int) std::ceil (
+            juce::GlyphArrangement::getStringWidth (tfont, bandChromeMatchHandlesToggle.getButtonText())) + 36);
+        bandChromeMatchHandlesToggle.setBounds (
+            area.removeFromTop (22).removeFromLeft (juce::jmin (tw, area.getWidth())));
+    }
+    area.removeFromTop (6);
+
+    {
+        auto row = area.removeFromTop (22);
+        const juce::Font tfont (juce::FontOptions (14.0f));
+        const int enW = juce::jmax (100, (int) std::ceil (
+            juce::GlyphArrangement::getStringWidth (tfont, "Band min sat")) + 36);
+        bandMinSatEnableToggle.setBounds (row.removeFromLeft (juce::jmin (enW, row.getWidth())));
+        row.removeFromLeft (8);
+        const int pctW = juce::jmax (36, (int) std::ceil (
+            juce::GlyphArrangement::getStringWidth (tfont, "100%")) + 6);
+        const int labW = juce::jmax (52, (int) std::ceil (
+            juce::GlyphArrangement::getStringWidth (tfont, "Min sat")) + 8);
+        bandMinSatPercentLabel.setBounds (row.removeFromRight (pctW));
+        row.removeFromRight (4);
+        bandMinSatLabel.setBounds (row.removeFromLeft (labW));
+        row.removeFromLeft (4);
+        bandMinSatSlider.setBounds (row);
+        const bool en = bandMinSatEnableToggle.getToggleState();
+        bandMinSatLabel.setEnabled (en);
+        bandMinSatSlider.setEnabled (en);
+        bandMinSatPercentLabel.setEnabled (en);
+    }
     area.removeFromTop (6);
 
     showCrosshairToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
