@@ -5039,6 +5039,13 @@ void MainComponent::applyColourRampsToMeters()
     const auto* stereoRamp = &colourRamps.get (ColourRampBank::Target::stereogram);
     const auto* histRamp = &colourRamps.get (ColourRampBank::Target::histogram);
 
+    verticalGradientMeterL.setColourRamps (&colourRamps);
+    verticalGradientMeterR.setColourRamps (&colourRamps);
+    verticalGradientMeterPostL.setColourRamps (&colourRamps);
+    verticalGradientMeterPostR.setColourRamps (&colourRamps);
+    levelMeterIn.setColourRamps (&colourRamps);
+    levelMeterOut.setColourRamps (&colourRamps);
+
     m_visualizer.setBinOverlayColourRamp (fftRamp->isUsable() ? fftRamp : nullptr);
     m_visualizer.setSpectrumFillRamp (fillRamp->isUsable() ? fillRamp : nullptr);
     spectrogram.setCustomColourRamp (specRamp->isUsable() ? specRamp : nullptr);

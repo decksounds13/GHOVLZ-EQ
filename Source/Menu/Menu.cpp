@@ -46,7 +46,7 @@ Menu::Menu (SharedResources& resources,
     addOwnedTab ("Spectrogram", new SpectrogramSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("3D Spectrogram", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
-    addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state));
+    addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state, colourRamps));
     addOwnedTab ("Loudness", new LoudnessSettingsComponent (resources, state));
     addOwnedTab ("Stereogram", new StereogramSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Histogram", new HistogramSettingsComponent (resources, state, colourRamps));

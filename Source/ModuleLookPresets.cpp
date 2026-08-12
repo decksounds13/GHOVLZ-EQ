@@ -262,7 +262,11 @@ juce::StringArray parameterIdsForKind (Kind k)
         case Kind::levelMeters:
             return {
                 "METER_MODE_ID", "METER_CHANNEL_MODE_ID", "METER_READOUT_INTEGRATION_ID",
-                "METER_FALL_ID", "METER_PEAK_HOLD_ID", "METER_CLIP_HOLD_ID", "METER_CLIP_THRESHOLD_ID"
+                "METER_FALL_ID", "METER_PEAK_HOLD_ID", "METER_CLIP_HOLD_ID", "METER_CLIP_THRESHOLD_ID",
+                "METER_PEAK_GLOW_ENABLE_ID", "METER_PEAK_GLOW_THRESHOLD_ID",
+                "METER_PEAK_GLOW_RADIUS_ID", "METER_PEAK_GLOW_SPREAD_ID", "METER_PEAK_GLOW_OPACITY_ID",
+                "METER_RMS_GLOW_ENABLE_ID", "METER_RMS_GLOW_THRESHOLD_ID",
+                "METER_RMS_GLOW_RADIUS_ID", "METER_RMS_GLOW_SPREAD_ID", "METER_RMS_GLOW_OPACITY_ID"
             };
         case Kind::loudness:
             return { "LOUDNESS_TARGET_ID" };

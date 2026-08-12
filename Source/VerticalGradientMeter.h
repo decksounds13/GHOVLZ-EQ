@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <functional>
 #include "Menu/SharedResources.h"
+#include "ColourRamp/ColourRampBank.h"
 
 /** Shared clip / peak-hold state for a stereo meter pair (L+R or M/S). */
 struct MeterClipState
@@ -22,7 +23,7 @@ struct MeterClipState
 /**
  * Vertical level meter with dB readout.
  * Peak / RMS / Peak+RMS modes and ballistics come from APVTS (Level Meters menu).
- * Channel label (L/R or M/S) follows METER_CHANNEL_MODE_ID.
+ * Optional per-lane colour ramps (Peak / RMS) + glow (threshold / radius / opacity).
  */
 class VerticalGradientMeter : public juce::Component,
                               public juce::Timer
@@ -44,6 +45,7 @@ public:
     void timerCallback() override;
 
     void setThemeColors (SharedResources* r) noexcept;
+    void setColourRamps (ColourRampBank* bank) noexcept;
 
     /** When false, meter bar fills the component (no peak readout / channel label). */
     void setTextChromeVisible (bool shouldShow) noexcept;
@@ -61,12 +63,22 @@ private:
     bool isMsChannelMode() const;
     juce::String getChannelLabel() const;
     float getParamFloat (const char* id, float fallback) const;
+    bool getParamBool (const char* id, bool fallback) const;
     static float dbToY (float db, float height) noexcept;
     juce::Rectangle<float> getMeterBodyBounds() const;
     juce::Rectangle<float> getClipIndicatorBounds() const;
     juce::Rectangle<float> getReadoutBounds() const;
     juce::Rectangle<float> getChannelLabelBounds() const;
     void rebuildPeakGradient();
+    juce::ColourGradient makeRampGradient (const GradientRamp& ramp,
+                                           juce::Rectangle<float> body,
+                                           float alphaMul) const;
+    void paintBarGlow (juce::Graphics& g,
+                       juce::Rectangle<float> bar,
+                       juce::Colour colour,
+                       float radiusPx,
+                       float spreadPx,
+                       float opacity01) const;
 
     const SharedColors& colors() const noexcept;
 
@@ -76,6 +88,7 @@ private:
     MeterClipState& clipState;
     int slot = 0;
     SharedResources* themeColors = nullptr;
+    ColourRampBank* colourRamps = nullptr;
     bool textChromeVisible = true;
 
     juce::ColourGradient gradient2{};

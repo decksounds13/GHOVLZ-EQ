@@ -129,6 +129,12 @@ void ScopeLevelMeterModule::setTap (Tap t) noexcept
     repaint();
 }
 
+void ScopeLevelMeterModule::setColourRamps (ColourRampBank* bank) noexcept
+{
+    meterL.setColourRamps (bank);
+    meterR.setColourRamps (bank);
+}
+
 void ScopeLevelMeterModule::setThemeColors (SharedResources* r) noexcept
 {
     theme = r;

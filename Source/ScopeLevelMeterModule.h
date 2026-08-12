@@ -4,6 +4,7 @@
 #include <functional>
 #include "VerticalGradientMeter.h"
 #include "Menu/SharedResources.h"
+#include "ColourRamp/ColourRampBank.h"
 
 class EqProcessor;
 
@@ -28,6 +29,7 @@ public:
     void setTap (Tap t) noexcept;
     Tap getTap() const noexcept { return tap; }
     void setThemeColors (SharedResources* r) noexcept;
+    void setColourRamps (ColourRampBank* bank) noexcept;
 
     /** Tiled vs strip: same left-readout / full-height meter layout; sizes scale with bounds. */
     void setTiledPresentation (bool shouldUseTiled) noexcept;

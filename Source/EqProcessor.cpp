@@ -1355,6 +1355,46 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         juce::NormalisableRange<float> (-3.0f, 0.0f, 0.1f),
         analyserDefaults.getFloat ("METER_CLIP_THRESHOLD_ID", 0.0f))); // dBFS
 
+    // Peak / RMS bar glow (visible only when enabled in Level Meters settings).
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "METER_PEAK_GLOW_ENABLE_ID", "MeterPeakGlowEnable",
+        analyserDefaults.getBool ("METER_PEAK_GLOW_ENABLE_ID", false)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_PEAK_GLOW_THRESHOLD_ID", "MeterPeakGlowThreshold",
+        juce::NormalisableRange<float> (-60.0f, 6.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_PEAK_GLOW_THRESHOLD_ID", -18.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_PEAK_GLOW_RADIUS_ID", "MeterPeakGlowRadius",
+        juce::NormalisableRange<float> (0.0f, 48.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_PEAK_GLOW_RADIUS_ID", 12.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_PEAK_GLOW_SPREAD_ID", "MeterPeakGlowSpread",
+        juce::NormalisableRange<float> (0.0f, 24.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_PEAK_GLOW_SPREAD_ID", 4.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_PEAK_GLOW_OPACITY_ID", "MeterPeakGlowOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_PEAK_GLOW_OPACITY_ID", 70.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "METER_RMS_GLOW_ENABLE_ID", "MeterRmsGlowEnable",
+        analyserDefaults.getBool ("METER_RMS_GLOW_ENABLE_ID", false)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_RMS_GLOW_THRESHOLD_ID", "MeterRmsGlowThreshold",
+        juce::NormalisableRange<float> (-60.0f, 6.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_RMS_GLOW_THRESHOLD_ID", -18.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_RMS_GLOW_RADIUS_ID", "MeterRmsGlowRadius",
+        juce::NormalisableRange<float> (0.0f, 48.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_RMS_GLOW_RADIUS_ID", 10.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_RMS_GLOW_SPREAD_ID", "MeterRmsGlowSpread",
+        juce::NormalisableRange<float> (0.0f, 24.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_RMS_GLOW_SPREAD_ID", 3.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "METER_RMS_GLOW_OPACITY_ID", "MeterRmsGlowOpacity",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
+        analyserDefaults.getFloat ("METER_RMS_GLOW_OPACITY_ID", 65.0f)));
+
     // Master output gain after all EQ bands (matches band gain range).
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "outputGain", "Output Gain",

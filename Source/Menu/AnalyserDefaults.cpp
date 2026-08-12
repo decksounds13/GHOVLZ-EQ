@@ -127,7 +127,17 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "METER_FALL_ID",
         "METER_PEAK_HOLD_ID",
         "METER_CLIP_HOLD_ID",
-        "METER_CLIP_THRESHOLD_ID"
+        "METER_CLIP_THRESHOLD_ID",
+        "METER_PEAK_GLOW_ENABLE_ID",
+        "METER_PEAK_GLOW_THRESHOLD_ID",
+        "METER_PEAK_GLOW_RADIUS_ID",
+        "METER_PEAK_GLOW_SPREAD_ID",
+        "METER_PEAK_GLOW_OPACITY_ID",
+        "METER_RMS_GLOW_ENABLE_ID",
+        "METER_RMS_GLOW_THRESHOLD_ID",
+        "METER_RMS_GLOW_RADIUS_ID",
+        "METER_RMS_GLOW_SPREAD_ID",
+        "METER_RMS_GLOW_OPACITY_ID"
     };
 }
 
