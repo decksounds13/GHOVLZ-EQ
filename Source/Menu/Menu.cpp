@@ -44,8 +44,8 @@ Menu::Menu (SharedResources& resources,
     addOwnedTab ("Oscilloscope", new OscilloscopeSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Goniometer", new GoniometerSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Spectrogram", new SpectrogramSettingsComponent (resources, state, colourRamps));
-    addOwnedTab ("Spec3D", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
-    addOwnedTab ("Spec3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
+    addOwnedTab ("3D Spectrogram", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
+    addOwnedTab ("3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
     addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state));
     addOwnedTab ("Loudness", new LoudnessSettingsComponent (resources, state));
     addOwnedTab ("Stereogram", new StereogramSettingsComponent (resources, state, colourRamps));

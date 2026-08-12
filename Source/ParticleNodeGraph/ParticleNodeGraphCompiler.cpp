@@ -707,7 +707,18 @@ CompileResult compileGraph (const GraphModel& model, uint32_t forceUidSeed)
     r.emission = rateE.hasF ? rateE.f : out->param ("defaultRate", 4000.0f);
     r.lifespan = lifeE.hasF ? lifeE.f : out->param ("defaultLife", 2.0f);
     r.size = sizeE.hasF ? sizeE.f : out->param ("defaultSize", 0.02f);
-    r.particleModeEnabled = enE.hasB ? enE.b : true;
+    // Enabled pin only — do not default true (that forced particle mode whenever the
+    // node graph applied / opened, and blocked Look → Particle mode off).
+    if (enE.hasB)
+    {
+        r.particleModeEnabled = enE.b;
+        r.particleModeSpecified = true;
+    }
+    else
+    {
+        r.particleModeSpecified = false;
+        r.particleModeEnabled = false;
+    }
 
     // Particle stream: particles pin + legacy emitter pin
     {
@@ -785,7 +796,10 @@ void applyCompileResult (Spectrogram3DComponent& spec3d, const CompileResult& r)
     if (! r.ok)
         return;
 
-    spec3d.setParticleModeEnabled (r.particleModeEnabled);
+    // Particle mode is owned by Look → "Particle mode" unless the graph has
+    // Simulation Output → Enabled wired explicitly.
+    if (r.particleModeSpecified)
+        spec3d.setParticleModeEnabled (r.particleModeEnabled);
     spec3d.setParticleEmission (r.emission);
     spec3d.setParticleLifespan (r.lifespan);
     spec3d.setParticleSize (r.size);

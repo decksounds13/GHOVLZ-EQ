@@ -5790,12 +5790,21 @@ void Spectrogram3DComponent::ensureParticleSystem()
 
 void Spectrogram3DComponent::setParticleModeEnabled (bool shouldEnable) noexcept
 {
-    if (particleModeEnabled == shouldEnable) return;
+    if (particleModeEnabled == shouldEnable)
+    {
+        // Still clear when forcing off (toggle / prefs) so a stuck cloud cannot linger.
+        if (! shouldEnable && particleSystem != nullptr)
+            particleSystem->clear();
+        return;
+    }
     particleModeEnabled = shouldEnable;
     syncSpec3DTimerRate();
     if (particleModeEnabled)
         ensureParticleSystem();
+    else if (particleSystem != nullptr)
+        particleSystem->clear();
     markLookDirty();
+    markSoftContentDirty();
 }
 
 void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcept

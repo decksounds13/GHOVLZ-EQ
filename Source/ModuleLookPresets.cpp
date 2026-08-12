@@ -29,7 +29,7 @@ const char* kindDisplayName (Kind k) noexcept
         case Kind::oscilloscope:  return "Oscilloscope";
         case Kind::goniometer:    return "Goniometer";
         case Kind::spectrogram:   return "Spectrogram";
-        case Kind::spectrogram3D: return "Spectrogram 3D";
+        case Kind::spectrogram3D: return "3D Spectrogram";
         case Kind::spectrum:      return "Spectrum";
         case Kind::fft:           return "FFT Bars";
         case Kind::histogram:     return "Histogram";

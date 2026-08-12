@@ -657,7 +657,9 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
 
     setupLookToggle (particleToggle,
                      "Replace the mesh with a playhead particle field. Off by default "
-                     "(no cost when disabled).");
+                     "(no cost when disabled). Turning off restores the 3D mesh and clears "
+                     "live particles. Node-graph Apply does not force this on unless "
+                     "Simulation Output → Enabled is wired.");
     setupLookToggle (particleGpuSimToggle,
                      "Hybrid GPU path: force/age integrate + compact to instance buffer on the GPU "
                      "(OpenGL 4.3 compute). GPU is the default; CPU always works as fallback. "

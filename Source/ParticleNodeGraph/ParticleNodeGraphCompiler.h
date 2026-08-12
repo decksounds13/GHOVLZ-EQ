@@ -27,7 +27,9 @@ struct CompileResult
     juce::String message;
     std::vector<CompileLogLine> log;
 
-    bool particleModeEnabled = true;
+    /** Only applied when particleModeSpecified (Enabled pin wired). Never force-on. */
+    bool particleModeEnabled = false;
+    bool particleModeSpecified = false;
     bool forcesEnabled = true;
     float emission = 4000.0f;
     float lifespan = 2.0f;
