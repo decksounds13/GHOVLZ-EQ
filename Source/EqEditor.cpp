@@ -101,11 +101,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
     addAndMakeVisible(*mainComponent);
 
-    modSection = std::make_unique<ModSectionComponent> (audioProcessor);
-    addChildComponent (*modSection);
-    modSection->setVisible (false);
-
-    // Minimize ▲/▼ lives on FrequencyResponseComponent (graph top-left), not the faceplate.
+    // Analyzer Suite: no mod section / faceplate product (stripped).
 
 
     //frequencyResponseComponent->addMouseListener(this, true);
@@ -361,7 +357,9 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     sideCheckButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     sideCheckButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
     sideCheckButton.setPaintingIsUnclipped (true);
-    addAndMakeVisible (sideCheckButton);
+    // Analyzer Suite: no SideCheck DSP chrome
+    addChildComponent (sideCheckButton);
+    sideCheckButton.setVisible (false);
     sideCheckAttachment = std::make_unique<ButtonAttachment> (
         audioProcessor.treeState, SideCheck::enabledParamId(), sideCheckButton);
 
@@ -370,11 +368,11 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     scopeModeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
     scopeModeButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
     scopeModeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-    scopeModeButton.onClick = [this]
-    {
-        if (mainComponent != nullptr)
-            mainComponent->setScopeMode (scopeModeButton.getToggleState(), true);
-    };
+    // Analyzer Suite is always Scope — button opens module menu only (no mode toggle off).
+    scopeModeButton.setClickingTogglesState (false);
+    scopeModeButton.setButtonText ("Scope");
+    scopeModeButton.setToggleState (true, juce::dontSendNotification);
+    scopeModeButton.onClick = [this] { showScopeTapMenu(); };
     scopeModeButton.onPopupMenu = [this] { showScopeTapMenu(); };
     scopeModeButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
     scopeModeButton.setPaintingIsUnclipped (true);
@@ -506,27 +504,18 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     addAndMakeVisible (helpTooltipsButton);
 
     // Bottom chrome: Phase / Processing Mode (preset-style popup, not ComboBox).
-    phaseModeCombo.setTooltip ("Phase - Minimum Phase is zero-latency IIR EQ. Linear Phase matches the EQ magnitude with constant group delay (higher latency).");
-    addAndMakeVisible (phaseModeCombo);
+    phaseModeCombo.setTooltip ("Phase (unused in Analyzer Suite — DSP stripped)");
+    addChildComponent (phaseModeCombo);
+    phaseModeCombo.setVisible (false);
 
     loadUiPrefs();
     // Host setState often runs before the editor; if it already stored UiSession, loadUiPrefs
     // restored it. If setState runs later, EqProcessor will call loadUiPrefs again.
     applyTooltipsEnabled();
 
-    // Faceplate bank pager: chevron left of band 1, right of band 8 (no readout).
-    faceplateBankPrevButton.setTooltip ("Previous band bank");
-    faceplateBankNextButton.setTooltip ("Next band bank");
-    faceplateBankPrevButton.onClick = [this] { setFaceplateBank (faceplateBank - 1); };
-    faceplateBankNextButton.onClick = [this]
-    {
-        const int maxBank = audioProcessor.getFaceplateBankCount() - 1;
-        if (faceplateBank >= maxBank && faceplateBank + 1 < EqBand::kMaxBanks)
-            audioProcessor.ensureBankAvailable (faceplateBank + 1);
-        setFaceplateBank (faceplateBank + 1);
-    };
-    addAndMakeVisible (faceplateBankPrevButton);
-    addAndMakeVisible (faceplateBankNextButton);
+    // Faceplate bank pager removed from Analyzer product (no faceplate).
+    faceplateBankPrevButton.setVisible (false);
+    faceplateBankNextButton.setVisible (false);
 
     bandsFullToastLabel.setJustificationType (juce::Justification::centred);
     bandsFullToastLabel.setColour (juce::Label::textColourId, juce::Colour (218, 165, 32));
@@ -869,489 +858,42 @@ void EqEditor::paint(juce::Graphics& g)
 
 void EqEditor::resized()
 {
-    // Keep horizontal spacing proportional to the 1200 design width; height is free.
-    const float scale = (float) getWidth() / (float) designWidth;
-    auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
+    // Analyzer Suite: full-bleed Scope host — no faceplate / mod / graph stack.
+    const bool scopeOn = true;
+    const bool scopeStrip = mainComponent != nullptr && mainComponent->isScopeStripLayout();
 
-    const bool scopeOn = isScopeModeActive();
-    const bool scopeStrip = scopeOn && mainComponent != nullptr
-                            && mainComponent->isScopeStripLayout();
-
-    // Track Scope window size continuously so leave/re-enter restores host or edge resizes.
     if (holdingSizeBeforeScope && scopeOn)
     {
         appliedScopeStrip = scopeStrip;
         captureCurrentScopeWindowSize();
     }
 
-    // Compact UI, or Scope strip: MainComponent owns the full editor (no faceplate stack / black void).
-    if (uiCompact || scopeStrip)
-    {
-        int mainH = getHeight();
-        int modH = 0;
-        if (! scopeStrip && modPanelOpen && modSection != nullptr)
-        {
-            modH = getModPanelHeightForGraphHeight (0);
-            mainH = juce::jmax (120, getHeight() - modH);
-        }
+    if (mainComponent != nullptr)
+        mainComponent->setBounds (0, 0, getWidth(), getHeight());
 
-        if (mainComponent != nullptr)
-            mainComponent->setBounds (0, 0, getWidth(), mainH);
-
-        if (modSection != nullptr)
-        {
-            // Mod panel stays off the strip Scope window.
-            const bool showMod = modPanelOpen && ! scopeStrip;
-            modSection->setVisible (showMod);
-            if (showMod)
-            {
-                // Use the fixed mod height (not leftover), so resize can't stretch the LFO panel.
-                modSection->setBounds (0, mainH, getWidth(), modH);
-                // Above faceplate leftovers / chrome siblings so matrix combos stay clickable.
-                modSection->toFront (false);
-            }
-        }
-
-        // Graph-only: hide + park faceplate controls so none can paint over the spectrum.
-        setFaceplateVisible (false);
-        juce::Slider* faceplateKnobs[] = {
-            &knob1, &knobHpGain, &knob2,
-            &knob3, &knobLpGain, &knob4,
-            &knob5, &knob6, &knob7,
-            &knob8, &knob9, &knob10,
-            &knob11, &knob12, &knob13,
-            &knob14, &knob15, &knob16,
-            &knob17, &knob18, &knob19,
-            &knob20, &knob21, &knob22,
-            &outputGainKnob
-        };
-        for (auto* k : faceplateKnobs)
-            k->setBounds ({});
-
-        layoutBrandWordmark (-1);
-        layoutHelpTooltipsButton();
-        layoutPhaseModeCombo();
-        layoutSideCheckButton();
-        layoutScopeModeButton();
-        return;
-    }
-
-    // Padding between groups and rows
-    const int padding = px (10.0f);
-
-    // Stack: graph (fills leftover) → mod (optional, 3/4 faceplate) → faceplate → bottom trim.
-    // Scope mode suppresses the faceplate strip (knobs parked); bottom chrome stays.
-    const int graphTop = getTopBandHeight();
-    const int trimH = getBottomTrimHeight();
-    const int faceplateTopTrimH = getTopBandHeight(); // painted trim strip above knobs
-    const bool suppressFaceplate = isFaceplateSuppressed();
-    const int faceplateStripH = suppressFaceplate ? 0 : getFaceplateHeightForWidth (getWidth());
-    const int modStripH = modPanelOpen ? getModPanelHeightForGraphHeight (0) : 0;
-    const int availableBelowTop = juce::jmax (1, getHeight() - graphTop - trimH);
-    int graphH = availableBelowTop - faceplateStripH - modStripH;
-    int faceplateH = faceplateStripH;
-    int modHForLayout = modStripH;
-    if (graphH < 180)
-    {
-        graphH = 180;
-        const int remaining = juce::jmax (1, availableBelowTop - graphH);
-        if (modPanelOpen)
-        {
-            faceplateH = suppressFaceplate ? 0 : juce::jmax (1, (remaining * 4) / 7);
-            modHForLayout = juce::jmax (1, remaining - faceplateH);
-        }
-        else
-        {
-            faceplateH = suppressFaceplate ? 0 : remaining;
-            modHForLayout = 0;
-        }
-    }
-    const int faceplateMinTop = graphTop + graphH + modHForLayout;
-    const int bottomLimit = getHeight() - trimH - 2;
-    if (suppressFaceplate)
-        faceplateH = 0;
-    else
-        faceplateH = juce::jmax (1, juce::jmin (faceplateH, bottomLimit - faceplateMinTop));
-    const int faceplateBottom = faceplateMinTop + faceplateH;
-
-    const int totalWidth = getWidth();
-    // Integer groupWidth leaves a remainder that used to sit entirely on the right
-    // (colX1 = 0), so the faceplate looked left-heavy / Band 1 clipped. Reserve a
-    // small side margin, then centre the used block so left/right padding match.
-    const int sideMargin = px (5.0f);
-    int availableWidth = juce::jmax (1, totalWidth - (7 * padding) - 2 * sideMargin);
-    int groupWidth = availableWidth / 8;
-    const int usedWidth = 8 * groupWidth + 7 * padding;
-    int faceplateOriginX = juce::jmax (sideMargin, (totalWidth - usedWidth) / 2);
-
-    // Power buttons sit 10px below the faceplate top trim; knobs 5px below power.
-    const int onOffButtonSize = juce::jmax (12, groupWidth / 3);
-    const int powerBelowTrim = px (10.0f);
-    const int knobsBelowPower = px (5.0f);
-    const int onOffY = faceplateMinTop + faceplateTopTrimH + powerBelowTrim;
-    const int topKnobY = onOffY + onOffButtonSize + knobsBelowPower;
-
-    // Label spacing under knobs (must match placeLabelUnderKnob below).
-    const int labelGap = juce::jmax (2, juce::roundToInt (4.0f * scale));
-    const int labelGapReserve = labelGap;
-    const int belowLabelPad = px (2.5f); // under Gain label / under HP-LP Q label
-    int contentBelowTopKnob = juce::jmax (1, faceplateBottom - topKnobY);
-    int rowHeight = juce::jmax (1, contentBelowTopKnob / 2);
-
-    // Faceplate image knobs must stay 1:1 — never stretch W/H independently.
-    int largeSide = juce::jmin ((int) (groupWidth * 0.7f), (int) (rowHeight * 0.85f));
-    int smallSide = juce::jmin (groupWidth / 2, (int) (rowHeight * 0.55f));
-    int gainSide = juce::jmax (1, juce::roundToInt ((float) largeSide * 1.2f)); // gain knobs +20%
-
-    // Visual centre sits a bit left; shift the whole cluster right by ~½ Freq/Q knob.
-    faceplateOriginX += juce::jlimit (5, 10, smallSide / 2);
-
-    // Shelf/band Freq+Q: under Gain label + 2.5px.
-    // HP/LP stack centres on the same gain column as the middle bands.
-    int bandLargeXOff = px (23.0f);
-    int gainLabelH = juce::jmax (10, juce::roundToInt ((float) gainSide * 0.45f));
-    int qLabelH = juce::jmax (10, juce::roundToInt ((float) largeSide * 0.45f));
-    // Middle 6 bands: Freq/Q under Gain label + 2.5px, then nudged up 2.5px.
-    int bandSmallY = topKnobY + gainSide + labelGap + gainLabelH + belowLabelPad - px (2.5f);
-    int hpLpBottomY = topKnobY + largeSide + labelGap + qLabelH + belowLabelPad;
-
-    const int labelHReserve = juce::jmax (10, juce::roundToInt ((float) smallSide * 0.45f));
-
-    auto contentBottomAt = [&]()
-    {
-        return juce::jmax (hpLpBottomY + largeSide,
-                           bandSmallY + smallSide)
-               + labelGapReserve + labelHReserve;
+    setFaceplateVisible (false);
+    juce::Slider* faceplateKnobs[] = {
+        &knob1, &knobHpGain, &knob2,
+        &knob3, &knobLpGain, &knob4,
+        &knob5, &knob6, &knob7,
+        &knob8, &knob9, &knob10,
+        &knob11, &knob12, &knob13,
+        &knob14, &knob15, &knob16,
+        &knob17, &knob18, &knob19,
+        &knob20, &knob21, &knob22,
+        &outputGainKnob
     };
+    for (auto* k : faceplateKnobs)
+        k->setBounds ({});
 
-    // Pack into the faceplate strip if anything would spill into the trim.
-    if (contentBottomAt() > faceplateBottom)
-    {
-        const int blockTop = topKnobY;
-        const int needed = juce::jmax (1, contentBottomAt() - blockTop);
-        const int available = juce::jmax (1, faceplateBottom - blockTop);
+    faceplateBankPrevButton.setBounds ({});
+    faceplateBankNextButton.setBounds ({});
+    phaseModeCombo.setBounds ({});
+    sideCheckButton.setBounds ({});
 
-        if (available < needed)
-        {
-            const float fit = (float) available / (float) needed;
-            auto scaleI = [fit] (int v) { return juce::jmax (1, juce::roundToInt ((float) v * fit)); };
-
-            largeSide = scaleI (largeSide);
-            smallSide = scaleI (smallSide);
-            gainSide = juce::jmax (1, juce::roundToInt ((float) largeSide * 1.2f));
-            gainLabelH = juce::jmax (8, juce::roundToInt ((float) gainSide * 0.45f));
-            qLabelH = juce::jmax (8, juce::roundToInt ((float) largeSide * 0.45f));
-            bandSmallY = topKnobY + gainSide + labelGap + gainLabelH + belowLabelPad - px (2.5f);
-            hpLpBottomY = topKnobY + largeSide + labelGap + qLabelH + belowLabelPad;
-        }
-    }
-
-    auto typeIsHpLpForGlobal = [this] (int globalDisplay, int fallbackType) -> bool
-    {
-        const auto typeId = FilterType::paramIDForGlobal (globalDisplay);
-        const int t = BandChannel::readChoiceIndex (audioProcessor.treeState, typeId, fallbackType);
-        return FilterType::isHpLp (t);
-    };
-
-    const int g0 = EqBand::globalFromBankSlot (faceplateBank, 0);
-    const int g1 = EqBand::globalFromBankSlot (faceplateBank, 1);
-    const int g2 = EqBand::globalFromBankSlot (faceplateBank, 2);
-    const int g3 = EqBand::globalFromBankSlot (faceplateBank, 3);
-    const int g4 = EqBand::globalFromBankSlot (faceplateBank, 4);
-    const int g5 = EqBand::globalFromBankSlot (faceplateBank, 5);
-    const int g6 = EqBand::globalFromBankSlot (faceplateBank, 6);
-    const int g7 = EqBand::globalFromBankSlot (faceplateBank, 7);
-
-    const bool band1HpLp = typeIsHpLpForGlobal (g0, FilterType::highpass);
-    const bool band2HpLp = typeIsHpLpForGlobal (g1, FilterType::lowShelf);
-    const bool band3HpLp = typeIsHpLpForGlobal (g2, FilterType::bell);
-    const bool band4HpLp = typeIsHpLpForGlobal (g3, FilterType::bell);
-    const bool band5HpLp = typeIsHpLpForGlobal (g4, FilterType::bell);
-    const bool band6HpLp = typeIsHpLpForGlobal (g5, FilterType::bell);
-    const bool band7HpLp = typeIsHpLpForGlobal (g6, FilterType::highShelf);
-    const bool band8HpLp = typeIsHpLpForGlobal (g7, FilterType::lowpass);
-
-    // Place shelf/band Freq (left) and Q (right) equally spaced about the gain centre.
-    // Does not advance startX — caller controls column X (keeps bands 2–7 fixed).
-    auto placeBandFreqQAroundGainAt = [&] (int colX,
-                                           juce::Component& freqKnob,
-                                           juce::Component& qKnob,
-                                           juce::Component& gainKnob)
-    {
-        const int gainX = colX + bandLargeXOff;
-        gainKnob.setBounds (gainX, topKnobY, gainSide, gainSide);
-
-        const int gainCentreX = gainX + gainSide / 2;
-        const int preferredHalfPitch = gainSide / 2 + smallSide / 2 + px (4.0f);
-        const int maxLeft = gainCentreX - (colX + smallSide / 2);
-        const int maxRight = (colX + groupWidth - smallSide / 2) - gainCentreX;
-        const int halfPitch = juce::jmax (1, juce::jmin (preferredHalfPitch, maxLeft, maxRight));
-
-        freqKnob.setBounds (gainCentreX - halfPitch - smallSide / 2, bandSmallY, smallSide, smallSide);
-        qKnob.setBounds (gainCentreX + halfPitch - smallSide / 2, bandSmallY, smallSide, smallSide);
-    };
-
-    // Classic HP/LP: large Q on top, large Freq under Q label — same size/orientation as before.
-    // Column X uses the same gain-centre alignment as the middle bands (brings 1 & 8 in a bit).
-    auto placeHpLpVerticalAt = [&] (int colX,
-                                    juce::Component& freqKnob,
-                                    juce::Component& qKnob,
-                                    juce::Component& gainKnob)
-    {
-        gainKnob.setBounds ({}); // parked — not used in 2-knob mode
-        const int stackX = colX + bandLargeXOff
-                           + (gainSide - largeSide) / 2; // centre stack on gain column
-        qKnob.setBounds (stackX, topKnobY, largeSide, largeSide);
-        freqKnob.setBounds (stackX, hpLpBottomY, largeSide, largeSide);
-    };
-
-    auto placeBandColumn = [&] (int colX, bool hpLp,
-                                juce::Component& freqKnob,
-                                juce::Component& qKnob,
-                                juce::Component& gainKnob)
-    {
-        if (hpLp)
-            placeHpLpVerticalAt (colX, freqKnob, qKnob, gainKnob);
-        else
-            placeBandFreqQAroundGainAt (colX, freqKnob, qKnob, gainKnob);
-    };
-
-    const int colPitch = groupWidth + padding;
-    // Even pitch grid, centred in the editor (see faceplateOriginX above).
-    const int colX1 = faceplateOriginX;
-    const int colX2 = faceplateOriginX + colPitch;
-    const int colX3 = faceplateOriginX + colPitch * 2;
-    const int colX4 = faceplateOriginX + colPitch * 3;
-    const int colX5 = faceplateOriginX + colPitch * 4;
-    const int colX6 = faceplateOriginX + colPitch * 5;
-    const int colX7 = faceplateOriginX + colPitch * 6;
-    const int colX8 = faceplateOriginX + colPitch * 7;
-
-    // All 8 columns: HP/LP → vertical 2-knob; otherwise 3-knob with gain.
-    placeBandColumn (colX1, band1HpLp, knob1,  knob2,  knobHpGain);
-    placeBandColumn (colX2, band2HpLp, knob8,  knob10, knob9);
-    placeBandColumn (colX3, band3HpLp, knob11, knob13, knob12);
-    placeBandColumn (colX4, band4HpLp, knob14, knob16, knob15);
-    placeBandColumn (colX5, band5HpLp, knob17, knob19, knob18);
-    placeBandColumn (colX6, band6HpLp, knob20, knob22, knob21);
-    placeBandColumn (colX7, band7HpLp, knob5,  knob7,  knob6);
-    placeBandColumn (colX8, band8HpLp, knob3,  knob4,  knobLpGain);
-
-    updateBandFaceplateGainVisibility();
-
-    // Output gain — small knob centered in the lighter bottom faceplate trim strip
-    int outClusterLeftX = getWidth();
-    {
-        const int outTrimH = trimH;
-        const int trimTop = getHeight() - outTrimH;
-
-        // Previous bottom-right size/center (keep same horizontal region, ~1/3 scale)
-        const int prevSize = juce::jmax (px (52.0f), (int) (groupWidth * 0.55f));
-        const int prevX = getWidth() - prevSize - px (18.0f);
-        const int centerX = prevX + prevSize / 2;
-
-        // ~1/3 prior size, capped a few px under trim height so it sits inside the band
-        const int outSize = juce::jlimit (1, outTrimH - 4, prevSize / 3);
-        const int outX = centerX - outSize / 2;
-        const int outY = trimTop + (outTrimH - outSize) / 2;
-        outputGainKnob.setBounds (outX, outY, outSize, outSize);
-
-        // Layout: [A] [Out] [knob] — button a few px under trim height
-        const int btnSize = juce::jlimit (16, outTrimH - 6, outSize);
-        const int labelW = px (28.0f);
-        const int labelH = juce::jmin (px (18.0f), outTrimH - 2);
-        const int gap = px (2.0f);
-
-        const int labelX = outX - labelW - gap;
-        const int labelY = trimTop + (outTrimH - labelH) / 2;
-        borderOutputGain.setBounds (labelX, labelY, labelW, labelH);
-
-        const int btnX = labelX - btnSize - gap;
-        const int btnY = trimTop + (outTrimH - btnSize) / 2;
-        autoGainButton.setBounds (btnX, btnY, btnSize, btnSize);
-
-        outClusterLeftX = btnX;
-    }
-
-    layoutBrandWordmark (outClusterLeftX);
+    layoutBrandWordmark (-1);
     layoutHelpTooltipsButton();
-    layoutPhaseModeCombo();
-    layoutSideCheckButton();
     layoutScopeModeButton();
-
-    int parentWidth = getWidth();
-    int componentWidth = parentWidth;
-    // Use the same stack metrics computed above (graph fills leftover height).
-    const int componentHeight = graphH;
-    const int modH = modHForLayout;
-    const int xPos = (parentWidth - componentWidth) / 2;
-
-    mainComponent->setBounds (xPos, graphTop, componentWidth, componentHeight);
-
-    if (modSection != nullptr)
-    {
-        modSection->setVisible (modPanelOpen);
-        if (modPanelOpen)
-        {
-            modSection->setBounds (xPos, graphTop + componentHeight, componentWidth, modH);
-            // Stay above faceplate knobs/borders that can overlap the matrix hit-test area.
-            modSection->toFront (false);
-        }
-    }
-    //mainComponent->setBounds(getLocalBounds());
-   
-    //frequencyResponseComponent->setBounds(0, 0, getWidth(), getHeight() / 2);
- 
-    //m_visualizer.setBounds(0, getHeight() / 2, getWidth(), getHeight() / 2);
-
-
-    // Labels sit just under their knobs (design spacing), clamped above the bottom trim.
-    // Width can be wider than the knob (centered) so longer words like "Freq" don't become "...".
-    const int labelBottomLimit = bottomLimit;
-    auto placeLabelUnderKnob = [labelBottomLimit, labelGap, totalWidth] (juce::GroupComponent& label,
-                                                                        const juce::Component& knob,
-                                                                        float heightFracOfKnob,
-                                                                        int minWidth)
-    {
-        const auto kb = knob.getBounds();
-        if (kb.isEmpty())
-            return;
-
-        int h = juce::jmax (10, juce::roundToInt ((float) kb.getHeight() * heightFracOfKnob));
-        int y = kb.getBottom() + labelGap;
-
-        // Keep fully above the trim; shrink height if the window is very tight.
-        if (y + h > labelBottomLimit)
-        {
-            h = juce::jmax (8, labelBottomLimit - y);
-            if (h < 8)
-            {
-                h = 8;
-                y = juce::jmax (0, labelBottomLimit - h);
-            }
-        }
-
-        const int w = juce::jmax (kb.getWidth(), minWidth);
-        int x = kb.getCentreX() - w / 2;
-        x = juce::jlimit (0, juce::jmax (0, totalWidth - w), x);
-        label.setBounds (x, y, w, h);
-    };
-
-    // Freq needs a bit more width than the small knobs provide when scaled down.
-    const int freqLabelMinW = juce::jmax (groupWidth / 2, px (44.0f));
-    const int gainLabelMinW = juce::jmax (groupWidth, px (48.0f));
-    const int qLabelMinW = juce::jmax (groupWidth / 2, px (28.0f));
-
-    // Freq labels
-    placeLabelUnderKnob (border1, knob1, 0.45f, freqLabelMinW);
-    placeLabelUnderKnob (border2, knob8, 0.45f, freqLabelMinW);
-    placeLabelUnderKnob (border3, knob11, 0.45f, freqLabelMinW);
-    placeLabelUnderKnob (border4, knob14, 0.45f, freqLabelMinW);
-    placeLabelUnderKnob (border5, knob17, 0.45f, freqLabelMinW);
-    placeLabelUnderKnob (border6, knob20, 0.45f, freqLabelMinW);
-    placeLabelUnderKnob (border7, knob5, 0.45f, freqLabelMinW);
-    placeLabelUnderKnob (border8, knob3, 0.45f, freqLabelMinW);
-
-    // Q labels
-    placeLabelUnderKnob (border9, knob2, 0.45f, qLabelMinW);
-    placeLabelUnderKnob (border10, knob10, 0.45f, qLabelMinW);
-    placeLabelUnderKnob (border11, knob13, 0.45f, qLabelMinW);
-    placeLabelUnderKnob (border12, knob16, 0.45f, qLabelMinW);
-    placeLabelUnderKnob (border13, knob19, 0.45f, qLabelMinW);
-    placeLabelUnderKnob (border14, knob22, 0.45f, qLabelMinW);
-    placeLabelUnderKnob (border15, knob7, 0.45f, qLabelMinW);
-    placeLabelUnderKnob (border16, knob4, 0.45f, qLabelMinW);
-
-    // Gain labels — only when that column is in 3-knob (gain) mode.
-    auto placeGainLabel = [&] (juce::GroupComponent& label, juce::Component& gainKnob, bool hpLp)
-    {
-        if (hpLp)
-            label.setBounds ({});
-        else
-            placeLabelUnderKnob (label, gainKnob, 0.45f, gainLabelMinW);
-    };
-    placeGainLabel (border17, knob9, band2HpLp);
-    placeGainLabel (border18, knob12, band3HpLp);
-    placeGainLabel (border19, knob15, band4HpLp);
-    placeGainLabel (border20, knob18, band5HpLp);
-    placeGainLabel (border21, knob21, band6HpLp);
-    placeGainLabel (border22, knob6, band7HpLp);
-
-    // Power buttons: evenly spaced on the same centres as Gain (3-knob) or top Q (HP/LP stack).
-    auto placeOnOffCentered = [onOffY, onOffButtonSize] (juce::Component& btn, const juce::Component& anchor)
-    {
-        btn.setBounds (anchor.getBounds().getCentreX() - onOffButtonSize / 2,
-                       onOffY,
-                       onOffButtonSize,
-                       onOffButtonSize);
-    };
-
-    placeOnOffCentered (*onOffButton1, band1HpLp ? static_cast<juce::Component&> (knob2)  : knobHpGain);
-    placeOnOffCentered (*onOffButton4, band2HpLp ? static_cast<juce::Component&> (knob10) : knob9);
-    placeOnOffCentered (*onOffButton5, band3HpLp ? static_cast<juce::Component&> (knob13) : knob12);
-    placeOnOffCentered (*onOffButton6, band4HpLp ? static_cast<juce::Component&> (knob16) : knob15);
-    placeOnOffCentered (*onOffButton7, band5HpLp ? static_cast<juce::Component&> (knob19) : knob18);
-    placeOnOffCentered (*onOffButton8, band6HpLp ? static_cast<juce::Component&> (knob22) : knob21);
-    placeOnOffCentered (*onOffButton3, band7HpLp ? static_cast<juce::Component&> (knob7)  : knob6);
-    placeOnOffCentered (*onOffButton2, band8HpLp ? static_cast<juce::Component&> (knob4)  : knobLpGain);
-
-    // Bank pager: centre each arrow in the gap between window edge and end power buttons.
-    {
-        const int pagerW = juce::jmax (18, px (20.0f));
-        const int pagerH = juce::jmax (18, juce::jmin (onOffButtonSize, px (22.0f)));
-        const int pagerY = onOffY + (onOffButtonSize - pagerH) / 2;
-        const int edgePad = 2;
-
-        if (onOffButton1 != nullptr)
-        {
-            const int gapStart = edgePad;
-            const int gapEnd = onOffButton1->getX();
-            const int gap = juce::jmax (pagerW, gapEnd - gapStart);
-            const int prevX = gapStart + (gap - pagerW) / 2;
-            faceplateBankPrevButton.setBounds (prevX, pagerY, pagerW, pagerH);
-        }
-        if (onOffButton2 != nullptr)
-        {
-            const int gapStart = onOffButton2->getRight();
-            const int gapEnd = getWidth() - edgePad;
-            const int gap = juce::jmax (pagerW, gapEnd - gapStart);
-            const int nextX = gapStart + (gap - pagerW) / 2;
-            faceplateBankNextButton.setBounds (nextX, pagerY, pagerW, pagerH);
-        }
-
-        faceplateBankPrevButton.setVisible (true);
-        faceplateBankNextButton.setVisible (true);
-        updateFaceplateBankChrome();
-    }
-
-    // Scope under band 6 once power buttons have final bounds (avoids logo overlap).
-    layoutScopeModeButton();
-
-    if (suppressFaceplate)
-    {
-        setFaceplateVisible (false);
-        juce::Slider* faceplateKnobs[] = {
-            &knob1, &knobHpGain, &knob2,
-            &knob3, &knobLpGain, &knob4,
-            &knob5, &knob6, &knob7,
-            &knob8, &knob9, &knob10,
-            &knob11, &knob12, &knob13,
-            &knob14, &knob15, &knob16,
-            &knob17, &knob18, &knob19,
-            &knob20, &knob21, &knob22,
-            &outputGainKnob
-        };
-        for (auto* k : faceplateKnobs)
-            k->setBounds ({});
-    }
-
-    if (bandsFullToastLabel.isVisible())
-    {
-        const int tw = juce::jmax (120, px (140.0f));
-        const int th = juce::jmax (22, px (24.0f));
-        bandsFullToastLabel.setBounds ((getWidth() - tw) / 2, graphTop + px (8.0f), tw, th);
-        bandsFullToastLabel.toFront (false);
-    }
 }
 
 void EqEditor::updateBandFaceplateGainVisibility()
@@ -1988,24 +1530,19 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
 
 void EqEditor::syncScopeModeButton()
 {
-    const bool scopeOn = mainComponent != nullptr && mainComponent->isScopeMode();
-    const bool tapPost = mainComponent != nullptr && mainComponent->isScopeTapPost();
-    scopeModeButton.setToggleState (scopeOn, juce::dontSendNotification);
-
-    juce::String tip = "Scope - quad metering view (Gon / Spectrum / Oscilloscope / Spectrogram).";
-    tip << " Right-click for Pre/Post tap.";
-    tip << (tapPost ? " Scope · Post (EQ DSP on)." : " Scope · Pre (analyzer, DSP off).");
-    scopeModeButton.setTooltip (tip);
+    scopeModeButton.setToggleState (true, juce::dontSendNotification);
+    scopeModeButton.setButtonText ("Scope");
+    scopeModeButton.setTooltip ("Scope modules and layout (Analyzer Suite — always Scope).");
 }
 
 bool EqEditor::isScopeModeActive() const noexcept
 {
-    return mainComponent != nullptr && mainComponent->isScopeMode();
+    return true;
 }
 
 bool EqEditor::isFaceplateSuppressed() const noexcept
 {
-    return uiCompact || isScopeModeActive();
+    return true; // Analyzer Suite: no faceplate product
 }
 
 int EqEditor::getScopeStripWindowHeight (int width) const
@@ -2185,14 +1722,10 @@ void EqEditor::showScopeTapMenu()
     if (mainComponent == nullptr)
         return;
 
-    const bool tapPost = mainComponent->isScopeTapPost();
     const bool stripOn = mainComponent->isScopeStripLayout();
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
-    menu.addSectionHeader ("Scope tap");
-    menu.addItem (1, "Pre (analyzer / DSP off)", true, ! tapPost);
-    menu.addItem (2, "Post (EQ DSP on)", true, tapPost);
-    menu.addSeparator();
+    // Analyzer Suite: no Pre/Post EQ DSP (DSP stripped). Arrange + modules only.
     menu.addSectionHeader ("Arrange");
     menu.addItem (3, "Tiled (quad / grid)", true, ! stripOn);
     menu.addItem (4, "Strip (side-by-side)", true, stripOn);
@@ -2238,11 +1771,7 @@ void EqEditor::showScopeTapMenu()
                             if (safe == nullptr || safe->mainComponent == nullptr || result <= 0)
                                 return;
 
-                            if (result == 1)
-                                safe->mainComponent->setScopeTapPost (false, true);
-                            else if (result == 2)
-                                safe->mainComponent->setScopeTapPost (true, true);
-                            else if (result == 3)
+                            if (result == 3)
                                 safe->mainComponent->setScopeStripLayout (false, true);
                             else if (result == 4)
                                 safe->mainComponent->setScopeStripLayout (true, true);
@@ -2917,9 +2446,10 @@ void EqEditor::loadUiPrefs()
         if (scopeFractionsStr.isNotEmpty())
             mainComponent->setScopeStripFractions (
                 ScopeLayoutPresets::decodeFractions (scopeFractionsStr, (int) scopeModules.size()));
-        // Restore Scope mode as last left (geometry above already applied).
-        mainComponent->setScopeMode (scopeModeOnLoad, false);
-        mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (pianoDisplayOnLoad, false);
+        // Analyzer Suite: always Scope, tiled default, no piano strip.
+        mainComponent->setScopeStripLayout (false, false);
+        mainComponent->setScopeMode (true, false);
+        mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (false, false);
         mainComponent->setSpec3DMeshQuality (
             spec3DMeshQuality <= 0 ? Spectrogram3DComponent::MeshQuality::low
                                   : (spec3DMeshQuality == 1 ? Spectrogram3DComponent::MeshQuality::medium
@@ -4136,8 +3666,7 @@ void EqEditor::setThemeColors (SharedResources* r) noexcept
     applyKnob (sideCheckHpKnob);
     applyKnob (sideCheckLpKnob);
 
-    if (modSection != nullptr)
-        modSection->setThemeColors (r);
+
 
     applyFaceplateTheme();
     repaint();
@@ -4145,16 +3674,15 @@ void EqEditor::setThemeColors (SharedResources* r) noexcept
 
 void EqEditor::toggleModPanel()
 {
-    modPanelOpen = ! modPanelOpen;
-    applyCompactUi();
+    // Analyzer Suite: mod section removed.
+    modPanelOpen = false;
     if (mainComponent != nullptr)
-        mainComponent->getFrequencyResponseComponent().syncModButton (modPanelOpen);
-    requestSaveUiPrefs();
+        mainComponent->getFrequencyResponseComponent().syncModButton (false);
 }
 
-void EqEditor::syncModButton (bool isOpen)
+void EqEditor::syncModButton (bool /*isOpen*/)
 {
-    modPanelOpen = isOpen;
+    modPanelOpen = false;
 }
 
 int EqEditor::getTopBandHeight() const
@@ -4202,12 +3730,14 @@ int EqEditor::getExpandedEditorHeight (int width, bool includeModPanel) const
     return graphTop + graphH + getPianoWindowExtra() + modH + stripH + trimH;
 }
 
-void EqEditor::setFaceplateVisible (bool shouldShow)
+void EqEditor::setFaceplateVisible (bool /*shouldShow*/)
 {
+    // Analyzer Suite: faceplate always off — park all faceplate controls.
+    constexpr bool shouldShow = false;
     auto setVis = [shouldShow] (juce::Component& c) { c.setVisible (shouldShow); };
 
     setVis (knob1);  setVis (knob2);  setVis (knob3);  setVis (knob4);
-    setVis (knobHpGain); setVis (knobLpGain); // were missing — leaked onto graph in compact UI
+    setVis (knobHpGain); setVis (knobLpGain);
     setVis (knob5);  setVis (knob6);  setVis (knob7);  setVis (knob8);
     setVis (knob9);  setVis (knob10); setVis (knob11); setVis (knob12);
     setVis (knob13); setVis (knob14); setVis (knob15); setVis (knob16);
@@ -4291,8 +3821,7 @@ void EqEditor::applyCompactUi()
     // Absolute setSize paths must keep the delta-grow flag in sync with reality.
     pianoStripWindowApplied = (pianoExtra > 0);
 
-    if (modSection != nullptr)
-        modSection->setVisible (modPanelOpen);
+
 
     resized();
     repaint();

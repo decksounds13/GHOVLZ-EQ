@@ -28,6 +28,7 @@
 #if SPEC3D_EXPORT_ENABLED
 #include "Export/ExportAudioRingBuffer.h"
 #endif
+#include "../../Shared/AnalyzerLinkShm.h"
 
 class FrequencyResponseComponent;
 class OscilloscopeComponent;
@@ -48,6 +49,12 @@ public:
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+
+    /** True when Decksounds Analyzer Link VST3 is feeding this Standalone. */
+    bool isAnalyzerLinkLive() const noexcept
+    {
+        return analyzerLinkLive.load (std::memory_order_relaxed);
+    }
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override;
@@ -583,6 +590,9 @@ private:
     float postTruePeakHistSide[3] {};
 
     Analyser m_analyser;
+
+    decksounds::analyzer_link::SharedMemory analyzerLinkShm;
+    std::atomic<bool> analyzerLinkLive { false };
 
     std::atomic<OscilloscopeComponent*> oscilloscopeTarget { nullptr };
     std::atomic<GoniometerComponent*> goniometerTarget { nullptr };

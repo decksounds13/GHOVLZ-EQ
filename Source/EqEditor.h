@@ -17,7 +17,7 @@
 #include "BinaryData.h"
 #include "BrandWordmark.h"
 #include "PhaseMode.h"
-#include "ModSectionComponent.h"
+// ModSection stripped from Analyzer Suite product
 #include "ComboBoxLookAndFeel.h"
 #include "Menu/SharedResources.h"
 #include "GraphOverlayButtonLookAndFeel.h"
@@ -493,7 +493,6 @@ private:
     void applyTiledScopeWindowSize();
 
     bool modPanelOpen = false;
-    std::unique_ptr<ModSectionComponent> modSection;
 
     /** True after editor height has been grown for the piano strip. */
     bool pianoStripWindowApplied = false;

@@ -4442,61 +4442,31 @@ void MainComponent::setEcoMode (bool shouldEnable, bool notifyPrefs)
         editor.requestSaveUiPrefs();
 }
 
-void MainComponent::applyScopeMode (bool shouldEnable)
+void MainComponent::applyScopeMode (bool /*shouldEnable*/)
 {
-    scopeModeEnabled = shouldEnable;
-    processor.setScopeMode (shouldEnable);
+    // Analyzer Suite is Scope-only product — never enter EQ graph mode.
+    scopeModeEnabled = true;
+    processor.setScopeMode (true);
 
-    if (shouldEnable)
-    {
-        if (ecoEnabled)
-            setEcoMode (false, false);
+    setOscExpanded (false);
+    setGonExpanded (false);
+    setSpecExpanded (false);
+    scopeFullscreenModule.reset();
 
-        setOscExpanded (false);
-        setGonExpanded (false);
-        setSpecExpanded (false);
-        scopeFullscreenModule.reset();
+    oscilloscope.setExpanded (true);
+    goniometer.setExpanded (true);
+    spectrogram.setExpanded (true);
 
-        oscButton.setToggleState (true, juce::dontSendNotification);
-        oscilloscope.setEnabled (true);
-        applyGoniometerActive (true);
-        applySpectrogramActive (true);
+    syncScopeModuleEnabledStates();
 
-        // Richer drawing in large panes (not the fullscreen overlay path).
-        oscilloscope.setExpanded (true);
-        goniometer.setExpanded (true);
-        spectrogram.setExpanded (true);
-
-        syncScopeModuleEnabledStates();
-
-        frequencyResponseComponent.setOptionBoxVisible (false);
-        // Scope mode never shows the EQ band graph (quad or strip).
-        frequencyResponseComponent.setVisible (false);
-        scopeSplitOverlay.setVisible (! scopeStripLayout);
-        scopeArrangeOverlay.setVisible (true);
-        arrangeButton.setToggleState (scopeStripLayout, juce::dontSendNotification);
-        arrangeButton.setGlyph (scopeStripLayout ? OscToolButton::Glyph::StripLayout
-                                                 : OscToolButton::Glyph::GridLayout);
-    }
-    else
-    {
-        scopeFullscreenModule.reset();
-        oscilloscope.setExpanded (oscExpanded);
-        goniometer.setExpanded (gonExpanded);
-        spectrogram.setExpanded (specExpanded);
-        loudnessMeter.setEnabled (false);
-        stereogram.setEnabled (false);
-        histogram.setEnabled (false);
-        levelMeterIn.setVisible (false);
-        levelMeterOut.setVisible (false);
-        loudnessMeter.setVisible (false);
-        stereogram.setVisible (false);
-        histogram.setVisible (false);
-        frequencyResponseComponent.setVisible (true);
-        scopeSplitOverlay.setVisible (false);
-        scopeArrangeOverlay.setVisible (false);
-        arrangeButton.setVisible (false);
-    }
+    frequencyResponseComponent.setOptionBoxVisible (false);
+    frequencyResponseComponent.setVisible (false);
+    frequencyResponseComponent.setPianoDisplayOn (false, false);
+    scopeSplitOverlay.setVisible (! scopeStripLayout);
+    scopeArrangeOverlay.setVisible (true);
+    arrangeButton.setToggleState (scopeStripLayout, juce::dontSendNotification);
+    arrangeButton.setGlyph (scopeStripLayout ? OscToolButton::Glyph::StripLayout
+                                             : OscToolButton::Glyph::GridLayout);
 
     syncOscToolButtons();
     syncGonToolButtons();
@@ -5377,15 +5347,16 @@ void MainComponent::applyScopePaneReorder (int fromSlot, int toSlot, bool insert
     resized();
 }
 
-void MainComponent::setScopeMode (bool shouldEnable, bool notifyPrefs)
+void MainComponent::setScopeMode (bool /*shouldEnable*/, bool notifyPrefs)
 {
-    if (shouldEnable == scopeModeEnabled)
+    // Always Scope — ignore attempts to leave.
+    if (scopeModeEnabled)
     {
         editor.syncScopeModeButton();
         return;
     }
 
-    applyScopeMode (shouldEnable);
+    applyScopeMode (true);
     editor.syncScopeModeButton();
     editor.syncScopeModeLayout();
 

@@ -1061,7 +1061,7 @@ private:
     OscToolButton arrangeButton { OscToolButton::Glyph::GridLayout };
 
     bool ecoEnabled = false;
-    bool scopeModeEnabled = false;
+    bool scopeModeEnabled = true; // Analyzer Suite: always Scope
     /** false = 2×2 quad (when N==4) or grid; true = horizontal strip (EQ graph hidden). */
     bool scopeStripLayout = false;
     std::vector<ScopeModuleId> scopeEnabledOrder = ScopeModules::defaultEnabledOrder();

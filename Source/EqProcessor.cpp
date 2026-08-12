@@ -2684,6 +2684,42 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const int numSamples = buffer.getNumSamples();
     // Main bus only — sidechain channels must not be EQ'd / metered as program audio.
     auto mainBuffer = getBusBuffer (buffer, true, 0);
+
+    // Prefer live feed from Decksounds Analyzer Link (DAW VST3) when available.
+    {
+        if (! analyzerLinkShm.isOpen())
+            analyzerLinkShm.open (false);
+
+        bool live = false;
+        if (analyzerLinkShm.isOpen() && mainBuffer.getNumChannels() > 0 && numSamples > 0)
+        {
+            const auto* hdr = analyzerLinkShm.header();
+            const bool senderUp = analyzerLinkShm.senderSeemsAlive();
+            const uint32_t avail = hdr != nullptr
+                                       ? decksounds::analyzer_link::framesAvailable (*hdr)
+                                       : 0;
+            if (senderUp && avail > 0)
+            {
+                float* L = mainBuffer.getWritePointer (0);
+                float* R = mainBuffer.getNumChannels() > 1 ? mainBuffer.getWritePointer (1) : nullptr;
+                const int got = analyzerLinkShm.read (L, R, numSamples);
+                if (got < numSamples)
+                {
+                    for (int i = got; i < numSamples; ++i)
+                    {
+                        L[i] = 0.0f;
+                        if (R != nullptr)
+                            R[i] = 0.0f;
+                    }
+                }
+                // Mirror to extra main channels
+                for (int c = 2; c < mainBuffer.getNumChannels(); ++c)
+                    mainBuffer.copyFrom (c, 0, mainBuffer, c % 2, 0, numSamples);
+                live = got > 0;
+            }
+        }
+        analyzerLinkLive.store (live, std::memory_order_relaxed);
+    }
     const float* scL = nullptr;
     const float* scR = nullptr;
     if (getBusCount (true) > 1)
@@ -2720,13 +2756,12 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         }
     }
 
-    const bool bypassed = bypassParam != nullptr && bypassParam->get();
-    // Scope + Pre = analyzer (dry). Scope + Post keeps DSP on; Bypass always dry.
-    const bool scopeAnalyzerOnly = scopeMode.load (std::memory_order_acquire)
-                                   && ! scopeTapPost.load (std::memory_order_acquire);
-    const bool meteringOnly = bypassed || scopeAnalyzerOnly;
+    // Analyzer Suite product: never run EQ DSP / saturation / mod graph.
+    // Bypass = monitoring off (mute + no analyser/scope feed).
+    const bool monitoringOff = bypassParam != nullptr && bypassParam->get();
+    const bool meteringOnly = true;
 
-    // Advance smoothers even while bypassed so un-bypass doesn't zipper.
+    // Advance smoothers so dead EQ params stay quiet if reintroduced later.
     auto take = [numSamples] (juce::LinearSmoothedValue<float>& s) -> float
     {
         s.skip (numSamples);
@@ -2750,12 +2785,26 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             take (smoothExtGain[(size_t) ei]);
         }
 
-        // Keep host PDC unchanged vs active processing (Linear Phase ~512 samples).
-        // Zeroing latency on bypass forces Ableton/etc. to rebuffer → skip/stutter.
         updateReportedLatency();
+
+        if (monitoringOff)
+        {
+            mainBuffer.clear();
+            analyzerLinkLive.store (false, std::memory_order_relaxed);
+            inputPeakDbLeft.store (-100.0f);
+            inputPeakDbRight.store (-100.0f);
+            inputRmsDbLeft.store (-100.0f);
+            inputRmsDbRight.store (-100.0f);
+            postPeakDbLeft.store (-100.0f);
+            postPeakDbRight.store (-100.0f);
+            postRmsDbLeft.store (-100.0f);
+            postRmsDbRight.store (-100.0f);
+            return;
+        }
+
         applyBypassLatencyCompensation (mainBuffer, getLatencySamples());
 
-        // Bypass: dry delayed to match reported latency. Meter what leaves the plugin.
+        // Passthrough + analyse: meter what leaves the plugin.
         auto storeChannelMeters = [&] (int channel,
                                        std::atomic<float>& peakOut,
                                        std::atomic<float>& rmsOut,
@@ -5405,6 +5454,8 @@ void EqProcessor::releaseResources()
     for (auto& sat : bandSatEngines)
         sat.releaseResources();
     spectralSatEngine.releaseResources();
+    analyzerLinkLive.store (false, std::memory_order_relaxed);
+    analyzerLinkShm.close();
 }
 
 void EqProcessor::sampleSpectralGrDb (int bandIndex, const float* frequenciesHz, float* destDb, int numPoints) const
