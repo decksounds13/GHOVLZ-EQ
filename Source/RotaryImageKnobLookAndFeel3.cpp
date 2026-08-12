@@ -73,8 +73,8 @@ void RotaryImageKnobLookAndFeel3::drawRotarySlider(juce::Graphics& g, int x, int
 
         // Define colors
         const bool bandHighlight = KnobBandHighlight::isActive (slider);
-        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight);
-        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight);
+        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight, &slider);
+        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight, &slider);
         juce::Colour brightGreen = KnobBandHighlight::intensify (juce::Colour(140, 50, 20), bandHighlight);
 
         // Normalize the parameter value to a 0-1 range

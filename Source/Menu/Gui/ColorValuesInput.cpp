@@ -89,10 +89,12 @@ void ColorValuesInput::sliderValueChanged(juce::Slider* slider)
 
 void ColorValuesInput::setColor(const juce::Colour& color)
 {
-    colorSliders[0]->setValue(color.getRed());
-    colorSliders[1]->setValue(color.getGreen());
-    colorSliders[2]->setValue(color.getBlue());
-    colorSliders[3]->setValue(color.getAlpha());
+    // dontSendNotification — setValue defaults to sendNotification, which re-entered
+    // directColorUpdate during SV-pad drag and froze the ring / HSB live updates.
+    colorSliders[0]->setValue (color.getRed(), juce::dontSendNotification);
+    colorSliders[1]->setValue (color.getGreen(), juce::dontSendNotification);
+    colorSliders[2]->setValue (color.getBlue(), juce::dontSendNotification);
+    colorSliders[3]->setValue (color.getAlpha(), juce::dontSendNotification);
 }
 
 void ColorValuesInput::createSliderAndLabel(const juce::String& shortLabel, const juce::String& fullLabel, float minValue, float maxValue)

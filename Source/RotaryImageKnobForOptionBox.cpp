@@ -2,21 +2,10 @@
 #include "RotaryImageKnobForOptionBox.h"
 #include "KnobThemeHelpers.h"
 
-namespace
-{
-    void showKnobValueText (juce::Slider& slider, bool show, SharedResources* themeColors)
-    {
-        const int boxW = juce::jmax (28, juce::jmin (45, slider.getWidth() > 0 ? slider.getWidth() : 45));
-        const int boxH = (slider.getWidth() > 0 && slider.getWidth() < 40) ? 14 : 20;
-        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, boxW, boxH);
-        KnobTheme::applyValuePopupColours (slider, show, KnobTheme::colors (themeColors));
-    }
-}
-
 RotaryImageKnobForOptionBox::RotaryImageKnobForOptionBox()
 {
     setSliderStyle(Slider::SliderStyle::RotaryHorizontalVerticalDrag);
-    setTextBoxStyle(Slider::TextBoxBelow, false, 45, 20);
+    setTextBoxStyle(Slider::TextBoxBelow, false, 56, 18);
     setTextBoxIsEditable(true);
     setRange(0.36, 0.80, .01);
     
@@ -28,7 +17,16 @@ RotaryImageKnobForOptionBox::RotaryImageKnobForOptionBox()
     float endAngleDegrees = 320.0;
     setRotaryParameters(juce::degreesToRadians(startAngleDegrees), juce::degreesToRadians(endAngleDegrees), true);
 
-    showKnobValueText (*this, false, themeColors);
+    // Keep value box sized to full number string while scrubbing (never "...").
+    onValueChange = [this]
+    {
+        if (compactNoValueBox)
+            return;
+        if (isMouseOverOrDragging() || hasKeyboardFocus (true))
+            refreshValuePopup (true);
+    };
+
+    KnobTheme::showValueTextBox (*this, false, themeColors);
     repaint();
 }
 
@@ -47,7 +45,7 @@ void RotaryImageKnobForOptionBox::setThemeColors (SharedResources* r) noexcept
 
 void RotaryImageKnobForOptionBox::refreshValuePopup (bool show)
 {
-    showKnobValueText (*this, show, themeColors);
+    KnobTheme::showValueTextBox (*this, show, themeColors);
 }
 
 void RotaryImageKnobForOptionBox::paint(juce::Graphics& g)

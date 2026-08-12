@@ -36,6 +36,7 @@ class SpectrogramComponent;
 class LoudnessComponent;
 class StereogramComponent;
 class HistogramComponent;
+class ThdMeterComponent;
 
 class EqProcessor : public juce::AudioProcessor, public juce::AudioProcessorValueTreeState::Listener//, public juce::Timer 
 
@@ -88,6 +89,10 @@ public:
     /** Optional level histogram (Scope UI). Audio thread pushes when non-null and enabled. */
     void setHistogramTarget (class HistogramComponent* target) noexcept;
     HistogramComponent* getHistogramTarget() const noexcept;
+
+    /** Optional broadband THD meter (Scope UI). Audio thread pushes when non-null and enabled. */
+    void setThdTarget (class ThdMeterComponent* target) noexcept;
+    ThdMeterComponent* getThdTarget() const noexcept;
 
 #if SPEC3D_EXPORT_ENABLED
     /** Continuous plugin output capture for Spec3D offline video export (DAW audio). */
@@ -450,6 +455,36 @@ public:
     /** Last-block Side Check GR (dB, negative when pulling Side down). */
     float getSideCheckGrDb() const noexcept { return sideCheck.getPublishedGrDb(); }
 
+    /** Global EQ depth scale 0..2 (default 1 = 100%). Scales band gains + Match amount. */
+    float getEqScale() const noexcept
+    {
+        if (auto* v = treeState.getRawParameterValue ("eqScale"))
+            return juce::jlimit (0.0f, 2.0f, v->load());
+        return 1.0f;
+    }
+
+    /**
+        Smoothed mean transient weight from StructuralSplitEngine (0 = sustain, 1 = transient).
+        Updated only while Learn is capturing stats, or when Split DSP is already armed.
+    */
+    float getPublishedTransientRatio() const noexcept
+    {
+        return publishedTransientRatio.load (std::memory_order_relaxed);
+    }
+
+    /**
+        Learn capture/detect: enable lightweight T/S gain compute for source detection.
+        Off by default — must not leave StructuralSplit running every block.
+    */
+    void setLearnTransientStatsCapture (bool shouldEnable) noexcept
+    {
+        learnTransientStatsCapture.store (shouldEnable, std::memory_order_relaxed);
+    }
+    bool isLearnTransientStatsCapture() const noexcept
+    {
+        return learnTransientStatsCapture.load (std::memory_order_relaxed);
+    }
+
     /**
         Message-thread helpers for Match activation.
         disableActiveBands: store OnOff map and turn all bands off (restored by restoreMatchBandDisable).
@@ -598,6 +633,7 @@ private:
     std::atomic<LoudnessComponent*> loudnessTarget { nullptr };
     std::atomic<StereogramComponent*> stereogramTarget { nullptr };
     std::atomic<HistogramComponent*> histogramTarget { nullptr };
+    std::atomic<ThdMeterComponent*> thdTarget { nullptr };
 
 #if SPEC3D_EXPORT_ENABLED
     ExportAudioRingBuffer exportAudioRing;
@@ -709,6 +745,8 @@ private:
     juce::AudioBuffer<float> splitDryBuffer;
     juce::AudioBuffer<float> splitTGainBuffer; // 1 ch: transient gains
     juce::AudioBuffer<float> splitSGainBuffer; // 1 ch: sustain gains
+    std::atomic<float> publishedTransientRatio { 0.3f };
+    std::atomic<bool> learnTransientStatsCapture { false };
 
     /** Global Side Check (S<=M): post-Spectral BP-lattice Mid/Side balance. */
     SideCheck::Processor sideCheck;

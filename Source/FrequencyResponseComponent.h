@@ -4,6 +4,7 @@
 #include "OptionBoxMenu.h"
 #include "Menu/SharedResources.h"
 #include "RotaryImageKnobForOptionBox.h"
+#include "Learn/EqLearnController.h"
 #include <JuceHeader.h>
 #include "BinaryData.h"
 #include "MelatoninBlur/melatonin/shadows.h"
@@ -70,7 +71,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PianoIconButton)
 };
 
-/** Match freeze toggle — large centered snowflake glyph. */
+/** Match freeze toggle - large centered snowflake glyph. */
 class MatchFreezeButton : public juce::TextButton
 {
 public:
@@ -169,6 +170,43 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OutputGainScrubber)
 };
 
+/**
+    Plain-text EQ scale scrubber (0-200%, default 100%).
+    No chrome box - click-drag vertically. Scales band gains + Match amount.
+*/
+class EqScaleScrubber : public juce::Component,
+                        public juce::SettableTooltipClient,
+                        private juce::AudioProcessorValueTreeState::Listener
+{
+public:
+    EqScaleScrubber (juce::AudioProcessorValueTreeState& state, juce::UndoManager* undoMgr);
+    ~EqScaleScrubber() override;
+
+    void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    void mouseEnter (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
+
+private:
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
+    void refreshText();
+    void beginGesture();
+    void endGesture();
+    float readScale() const noexcept;
+
+    juce::AudioProcessorValueTreeState& treeState;
+    juce::UndoManager* undoManager = nullptr;
+    juce::String displayText { "100%" };
+    float dragStartScale = 1.0f;
+    bool gestureActive = false;
+    bool hovered = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EqScaleScrubber)
+};
+
 class FrequencyResponseComponent : public juce::Component,
     public juce::AudioProcessorValueTreeState::Listener,
     public juce::ComponentListener,
@@ -210,15 +248,27 @@ public:
     /** Open / focus OptionBox for a band using its current handle position (faceplate clicks). */
     void showOptionBoxForBand (int bandIndex);
     void showHandleModMenu (int bandIndex);
+    /** Bank1 internal 0-7, or global display 8-63. Turns off and restores factory defaults. */
     void resetBandToDefaultsAndDeactivate (int bandIndex);
+    /** Reset every bank (1-64) to defaults and deactivate. Undoable. */
+    void resetAllBandsToDefaults();
+    /**
+        Graph right-click menu. When hitBandInternalOrGlobal < 0 (empty graph),
+        includes Create band at this frequency (filter-type submenu) using clickHz.
+    */
+    void showGraphContextMenu (juce::Point<int> screenPos,
+                               int hitBandInternalOrGlobal = -1,
+                               float clickHz = 1000.0f);
     /**
         Enable a free band at frequencyHz with 0 dB gain.
         @param typeOverride  If >= 0, force this FilterType index; else use slot/zone defaults.
         @param preferPeaking Prefer free peaking slots first (harmonic stacking).
+        @param slopeOverride If >= 0, set HP/LP slope choice after create (FilterSlope index).
     */
     void activateOrSelectBandAtFrequency (float frequencyHz,
                                           int typeOverride = -1,
-                                          bool preferPeaking = false);
+                                          bool preferPeaking = false,
+                                          int slopeOverride = -1);
     int bandIndexForFrequencyZone (float frequencyHz) const;
     float xToFrequency (float x) const;
     void updateAuditionBandpassFromMouse (const juce::MouseEvent& event);
@@ -226,21 +276,21 @@ public:
 
     OptionBoxMenu* getOptionBoxMenu() noexcept { return optionBoxMenu.get(); }
     void setOptionBoxVisible (bool shouldBeVisible);
-    /** True while OptionBox is open on this band (Bank1 0–7 or global 8–63). */
+    /** True while OptionBox is open on this band (Bank1 0-7 or global 8-63). */
     bool isOptionBoxSelectingBand (int bandIndex) const noexcept;
 
-    /** Called with band index (Bank1 internal 0–7, or global display 8–63); -1 to clear. */
+    /** Called with band index (Bank1 internal 0-7, or global display 8-63); -1 to clear. */
     std::function<void(int)> onBandManipulationHighlight;
     /** Fired when the OptionBox is shown/hidden so the host can fix overlay z-order. */
     std::function<void()> onOptionBoxVisibilityChanged;
     /** Jump faceplate pager to this bank (0-based) after create/grow. */
     std::function<void(int)> onFaceplateBankJump;
-    /** Soft-max (64) reached — show brief UI feedback. */
+    /** Soft-max (64) reached - show brief UI feedback. */
     std::function<void()> onBandsFullSoftMax;
     /** Faceplate bank used as preferred create target (banks 2+). */
     void setPreferredCreateBank (int bank) noexcept { preferredCreateBank = juce::jlimit (0, EqBand::kMaxBanks - 1, bank); }
 
-    /** Sync ▲/▼ minimize control with editor compact state (lives on the graph, not faceplate). */
+    /** Sync ^/v minimize control with editor compact state (lives on the graph, not faceplate). */
     void syncUiModeButton (bool isCompact);
     void syncModButton (bool isOpen);
 
@@ -279,10 +329,10 @@ public:
     int getPianoStripHeight() const noexcept;
     /**
         Height of Match / Mod / P chrome row above the piano (margin + button).
-        OpenGL expanded Spec must stay clear of this — native peers ignore z-order.
+        OpenGL expanded Spec must stay clear of this - native peers ignore z-order.
     */
     int getBottomGraphChromeHeight() const noexcept;
-    /** Graph / handle / curve height — excludes piano strip so enabling piano does not rescale the EQ. */
+    /** Graph / handle / curve height - excludes piano strip so enabling piano does not rescale the EQ. */
     int getPlotHeight() const noexcept;
     bool isPianoDisplayOn() const noexcept { return pianoDisplayOn; }
     void setPianoDisplayOn (bool shouldShow, bool savePrefs = true);
@@ -482,7 +532,7 @@ private:
     float lastDynCurveGainHS = 1.0e9f;
     float lastDynCurveGainLS = 1.0e9f;
 
-    /** True when any on band has Dynamic (D) or Spectral (S), or Side Check is on — drives the curve animation timer. */
+    /** True when any on band has Dynamic (D) or Spectral (S), or Side Check is on - drives the curve animation timer. */
     bool anyActiveDynamicEq() const;
     bool anyStructuralSplitArmed() const;
     void syncStructuralSplitChrome();
@@ -494,6 +544,11 @@ private:
     void disableMatch();
     void showMatchCurveMenu();
     void updateLiveMatchCaptureIfNeeded();
+    void layoutLearnChrome();
+    void syncLearnChrome();
+    void startLearnWithCurrentSettings();
+    void showLearnMenu();
+    void updateLearnButtonLabel();
     /** While any D/S+On band is active: disable image buffer, run ~45 Hz force-rebuild timer.
         When idle: restore buffering and stop the timer. */
     void syncDynamicCurveTimer();
@@ -503,7 +558,7 @@ private:
 
     /** Magnitude eval stride for IIR / GR grids (1 = full res). */
     int resolveMagnitudeSampleStep() const noexcept;
-    /** D/S animation timer rate — lower under particle load. */
+    /** D/S animation timer rate - lower under particle load. */
     int resolveDynamicCurveTimerHz() const noexcept;
     /** True when sum curve should not be rebuilt or drawn. */
     bool shouldSkipCombinedCurveWork() const noexcept;
@@ -529,7 +584,7 @@ private:
     std::array<juce::Path, EqBand::kMaxBands - EqBand::kBankSize> extendedResponsePaths {};
     bool needsUpdateExtended = true;
 
-    /** Spectral Amount visualization (second curve/handle when S is on). Slot = DSP 0–7. */
+    /** Spectral Amount visualization (second curve/handle when S is on). Slot = DSP 0-7. */
     static constexpr int kNumSpectralSlots = SpectralDynamics::kNumSlots;
     std::array<std::vector<float>, kNumSpectralSlots> responseSpectralAmount {};
     std::array<juce::Path, kNumSpectralSlots> spectralAmountPaths {};
@@ -582,9 +637,16 @@ private:
                                        std::vector<float>& outDb,
                                        int step);
 
-    float getEqDisplayRangeDb() const; // 6, 12, 24, or 36
+    /** Target display range from APVTS (6 / 12 / 24 / 36). */
+    float getEqDisplayRangeDb() const;
+    /** Smoothed range used for plot mapping (morphs between steps). */
+    float getEqDisplayRangeDbVisual() const noexcept { return eqDisplayRangeDbVisual; }
     float dbToY (float db, float height) const; // jmap db from -r..r to height..0
     float yToDb (float y, float height) const; // inverse
+    bool isEqDisplayRangeMorphing() const noexcept;
+    /** Advance visual range toward target; returns true if still morphing. */
+    bool tickEqDisplayRangeMorph (float deltaSeconds) noexcept;
+    void ensureEqDisplayRangeMorphTimer() noexcept;
     float getBandPathWidth() const; // from EQ_BAND_PATH_WIDTH_ID, default 3
     float getSumPathWidth() const; // from EQ_SUM_PATH_WIDTH_ID, default 3
     bool isMulticolorBandFill() const; // EQ_MULTICOLOR_BAND_FILL_ID, default true
@@ -596,6 +658,20 @@ private:
 
     void syncEqRangeControls();
     void adjustEqDisplayRange (int delta);
+    /**
+        While dragging a band handle to the top/bottom of the plot, step the
+        display range up (6->12->24->36) so |gainDb| still fits on-screen.
+        @return true if the range index changed
+    */
+    bool expandEqDisplayRangeToFitDb (float gainDb);
+    /**
+        When EQ Scale (%) grows display gains past the current dB range edge,
+        step the range the same way handle-drag auto-zoom does (one or more steps).
+        @return true if the range index changed
+    */
+    bool ensureEqDisplayRangeFitsScaledBands();
+    /** Handle Y -> gain dB; auto-expands display range at the top/bottom margin. */
+    float gainDbFromHandleY (float y, float height);
 
     juce::Path intelligentDownsample(
         const juce::Path& originalPath,
@@ -629,8 +705,8 @@ private:
     /** Close an open magnitude curve to the 0 dB centreline for fill (stroke stays open). */
     juce::Path closeShelfFillPath (const juce::Path& curvePath, float height) const;
 
-    // Internal indices → Band 1–8 display names (see EqBand.h).
-    // 0–3 peaking = Band 3–6; 4 HP = Band 1; 5 LP = Band 8; 6 HS = Band 7; 7 LS = Band 2.
+    // Internal indices -> Band 1-8 display names (see EqBand.h).
+    // 0-3 peaking = Band 3-6; 4 HP = Band 1; 5 LP = Band 8; 6 HS = Band 7; 7 LS = Band 2.
     std::string arrayBandName[8] = { "Band 3", "Band 4", "Band 5", "Band 6", "Band 1", "Band 8", "Band 7", "Band 2" };
     std::string currentBandName;
 
@@ -638,7 +714,7 @@ private:
     int activeBand = -1; // Initialize it to -1 to indicate no active band at the start
 
     // Multi-select band handles (marquee + group drag).
-    // Bits 0–7 = Bank1 internal indices; bits 8–63 = extended global display indices.
+    // Bits 0-7 = Bank1 internal indices; bits 8-63 = extended global display indices.
     std::bitset<EqBand::kMaxBands> multiSelectedBands;
     bool marqueeSelecting = false;
     juce::Point<float> marqueeStart {};
@@ -737,14 +813,17 @@ private:
     int lastOptionBoxBandIndex = -1;
     bool lastHandlePopupWasOptionBox = false;
 
-    juce::TextButton uiModeButton { juce::CharPointer_UTF8 ("\xe2\x96\xb2") }; // ▲ when full
+    juce::TextButton uiModeButton { "^" }; // collapse when full
     juce::TextButton eqRangeMinusButton { "-" };
     juce::TextButton eqRangePlusButton { "+" };
     juce::Label eqRangeLabel;
+    /** Animated +/-dB scale for smooth zoom (lerps toward getEqDisplayRangeDb()). */
+    float eqDisplayRangeDbVisual = 24.0f;
     juce::TextButton modButton { "Mod" };
     juce::TextButton proportionalQButton { "P" };
     juce::TextButton autoGainButton { "A" };
-    /** Graph-bottom Match cluster: Match | v | AMT | HP | LP | freeze. */
+    EqScaleScrubber eqScaleScrubber;
+    /** Graph-bottom Match cluster: Match | v | AMT | HP | LP | freeze | Learn. */
     juce::TextButton matchButton { "Match" };
     juce::TextButton matchCurveButton { "v" };
     MatchFreezeButton matchFreezeButton;
@@ -754,6 +833,13 @@ private:
     RotaryImageKnobForOptionBox matchLpKnob;
     juce::Label matchHpLabel;
     juce::Label matchLpLabel;
+    juce::TextButton learnButton { "Learn" };
+    /** Always-visible Learn status / source class (e.g. "Vocals 68%", "1.2 s", "Applied 5"). */
+    juce::Label learnStatusLabel;
+    int matchChromeLearnStatusW = 72;
+    std::unique_ptr<EqLearn::Controller> learnController;
+    /** One-shot: only force curve rebuild when Learn apply serial advances. */
+    int lastHandledLearnApplySerial = 0;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchAmountAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchHpAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> matchLpAttachment;
@@ -762,10 +848,11 @@ private:
     bool matchHpLpGapGuard = false;
     void enforceMatchHpLpGap (juce::Slider* changed);
     void showMatchHpLpSlopeMenu (bool forHp);
-    /** Anchor for Match left edge X (Y ignored — Match uses Mod/P bottom chrome row). */
+    /** Anchor for Match left edge X (Y ignored - Match uses Mod/P bottom chrome row). */
     juce::Point<int> matchChromeLeftTop {};
     int matchChromeBtnH = 18;
     int matchChromeMatchW = 48;
+    int matchChromeLearnW = 48;
     bool matchChromeHasAnchor = false;
     juce::Rectangle<int> matchChromeBounds {};
 

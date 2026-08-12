@@ -38,13 +38,14 @@ Menu::Menu (SharedResources& resources,
         allTabs.push_back ({ name, ownedTabContents.back().get() });
     };
 
+    // Full plain labels — widths measured in CustomTabBarLookAndFeel (never ellipsized).
     addOwnedTab ("Spectrum", new SpectrumComponent (resources, state, colourRamps));
     addOwnedTab ("FFT", new FftComponent (resources, state, colourRamps));
     addOwnedTab ("Oscilloscope", new OscilloscopeSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Goniometer", new GoniometerSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Spectrogram", new SpectrogramSettingsComponent (resources, state, colourRamps));
-    addOwnedTab ("3D Spectrogram", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
-    addOwnedTab ("3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
+    addOwnedTab ("Spec3D", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
+    addOwnedTab ("Spec3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
     addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state));
     addOwnedTab ("Loudness", new LoudnessSettingsComponent (resources, state));
     addOwnedTab ("Stereogram", new StereogramSettingsComponent (resources, state, colourRamps));
@@ -54,20 +55,18 @@ Menu::Menu (SharedResources& resources,
     appearanceComponentRef = dynamic_cast<AppearanceComponent*> (allTabs.back().content);
 
     tabBar.setLookAndFeel (&customTabBarLookAndFeel);
-    tabBar.setTabBarDepth (35);
-    // No content outline — the old 4px grey frame looked like a nested border,
+    tabBar.setTabBarDepth (36);
+    // No content outline - the old 4px grey frame looked like a nested border,
     // especially once the Settings panel was resized wider than the page.
     juce::ignoreUnused (menuBorderColor);
     tabBar.setOutline (0.0f);
     tabBar.setColour (juce::TabbedComponent::outlineColourId, juce::Colours::transparentBlack);
-    // Never compress into JUCE's "+" extras menu — we page instead.
+    // Never compress into JUCE's "+" extras menu - we page instead.
     tabBar.getTabbedButtonBar().setMinimumTabScaleFactor (1.0);
 
     contentPanel.setSize (kContentWidth, kContentHeight);
     contentPanel.addAndMakeVisible (tabBar);
 
-    tabPrevButton.setTooltip ("Previous tab page");
-    tabNextButton.setTooltip ("Next tab page");
     tabPrevButton.onClick = [this] { setTabPage (tabPageIndex - 1); };
     tabNextButton.onClick = [this] { setTabPage (tabPageIndex + 1); };
     contentPanel.addAndMakeVisible (tabPrevButton);
@@ -100,8 +99,8 @@ Menu::Menu (SharedResources& resources,
     borderResizer->setBorderThickness ({ 5, 5, 5, 5 });
     addAndMakeVisible (*borderResizer);
 
-    // Title-bar close — Settings hamburger sits under the panel when open.
-    closeButton.setButtonText (juce::String::charToString ((juce::juce_wchar) 0x00D7)); // ×
+    // Title-bar close - plain ASCII (no missing-glyph / ellipsis risk).
+    closeButton.setButtonText ("X");
     closeButton.setTooltip ("Close settings");
     closeButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     closeButton.onClick = [this]
@@ -205,6 +204,11 @@ void Menu::rebuildTabsForCurrentPage()
     tabNextButton.setEnabled (tabPageIndex + 1 < pages);
     tabPrevButton.setVisible (pages > 1);
     tabNextButton.setVisible (pages > 1);
+    // Hover: "Page 1 of 3" (1-based index).
+    const juce::String pageTip = "Page " + juce::String (tabPageIndex + 1)
+                                 + " of " + juce::String (pages);
+    tabPrevButton.setTooltip (pageTip);
+    tabNextButton.setTooltip (pageTip);
     tabPrevButton.toFront (false);
     tabNextButton.toFront (false);
 }
@@ -224,9 +228,11 @@ void Menu::styleCloseButton() noexcept
     const auto ink = sharedResources.sharedColors.menuLabelTextColor1;
     closeButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     closeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
-    closeButton.setColour (juce::TextButton::textColourOffId, ink.withAlpha (0.85f));
+    closeButton.setColour (juce::TextButton::textColourOffId, ink.withAlpha (0.9f));
     closeButton.setColour (juce::TextButton::textColourOnId, ink);
     closeButton.setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
+    // Never let JUCE squeeze the single glyph into ellipsis.
+    closeButton.setLookAndFeel (nullptr);
 }
 
 void Menu::layoutCloseButton() noexcept
@@ -292,6 +298,11 @@ void Menu::syncScrollBarColours()
     const auto ink = sharedResources.sharedColors.menuLabelTextColor1;
     tabPrevButton.setChromeColours (fill, ink);
     tabNextButton.setChromeColours (fill, ink);
+
+    // Theme-driven tab strip (no hardcoded whitesmoke).
+    customTabBarLookAndFeel.setTabColours (ink, ink.withAlpha (0.14f));
+    tabBar.getTabbedButtonBar().repaint();
+    styleCloseButton();
 }
 
 void Menu::layoutScrollBars()
@@ -374,17 +385,22 @@ void Menu::paint (juce::Graphics& g)
     g.setGradientFill (gradient);
     g.fillPath (panelPath);
 
-    // Drag bar
+    // Drag / title bar — exact height only (do not bleed into the tab strip).
+    // Extending past kDragBarHeight made tabs look like they clipped the title.
     auto bar = getLocalBounds().removeFromTop (kDragBarHeight).toFloat();
-    g.setColour (c1.brighter (0.08f).withAlpha (0.9f));
+    g.setColour (c1.brighter (0.08f).withAlpha (0.95f));
     g.fillRoundedRectangle (bar.getX() + 1.0f, bar.getY() + 1.0f,
-                            bar.getWidth() - 2.0f, bar.getHeight() + 8.0f, 12.0f);
+                            bar.getWidth() - 2.0f, bar.getHeight() - 1.0f, 12.0f);
+    // Hard separator so tabs cannot visually collide with the title.
+    g.setColour (sharedResources.sharedColors.menuTabBarBorderColor.withAlpha (0.45f));
+    g.fillRect (0.0f, (float) kDragBarHeight - 1.0f, (float) getWidth(), 1.0f);
 
-    g.setColour (sharedResources.sharedColors.menuLabelTextColor1.withAlpha (0.9f));
-    g.setFont (juce::FontOptions().withHeight (13.0f).withStyle ("Bold"));
+    g.setColour (sharedResources.sharedColors.menuLabelTextColor1.withAlpha (0.92f));
+    g.setFont (juce::Font (juce::FontOptions (13.0f).withStyle ("Bold")));
     // Leave room for the title-bar close (X) on the right.
     auto titleArea = getLocalBounds().removeFromTop (kDragBarHeight).reduced (10, 0);
-    titleArea.removeFromRight (28);
+    titleArea.removeFromRight (30);
+    // Full title - no ellipsis (width is enough for this short string).
     g.drawText ("Settings", titleArea, juce::Justification::centredLeft, false);
 
     g.setColour (sharedResources.sharedColors.menuTabBarBorderColor.withAlpha (0.55f));
@@ -393,7 +409,7 @@ void Menu::paint (juce::Graphics& g)
 
 int Menu::getActiveTabPreferredContentHeight() const
 {
-    constexpr int tabBarDepth = 35;
+    constexpr int tabBarDepth = 36;
     auto* c = tabBar.getCurrentContentComponent();
     if (c == nullptr)
         return kContentHeight - tabBarDepth;
@@ -444,7 +460,7 @@ void Menu::disableSliderScrollWheelRecursive (juce::Component& root)
 
 void Menu::refreshContentPanelSize (bool preserveScrollPosition)
 {
-    constexpr int tabBarDepth = 35;
+    constexpr int tabBarDepth = 36;
 
     // Shrinking contentPanel for the provisional measure clamps the viewport to (0,0).
     // Capture first so toggles that grow/shrink Look rows don't kick the user to the top.
@@ -459,7 +475,7 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
     // the user / MainComponent layout; content lays out into the viewport.
     layoutScrollBars();
 
-    // Content fills the panel viewport. Wider Settings → wider content; never
+    // Content fills the panel viewport. Wider Settings -> wider content; never
     // forces the outer frame wider (that used to shove the right edge off-screen).
     const int panelContentW = juce::jmax (1, viewport.getWidth());
 
@@ -468,7 +484,7 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
     tabBar.setBounds (contentPanel.getLocalBounds());
     if (auto* c = tabBar.getCurrentContentComponent())
     {
-        // Spec3D Look rows depend on prefs — sync before measuring preferred height
+        // Spec3D Look rows depend on prefs - sync before measuring preferred height
         // so the scrollbar range is correct without a manual resize.
         if (auto* s3d = dynamic_cast<Spectrogram3DSettingsComponent*> (c))
             s3d->syncFromMain();

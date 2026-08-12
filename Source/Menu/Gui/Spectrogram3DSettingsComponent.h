@@ -27,7 +27,7 @@ public:
     void resized() override;
 
     int getPreferredContentHeight() const { return content.getPreferredHeight(); }
-    /** Content lays out into the Settings panel width — does not force the frame wider. */
+    /** Content lays out into the Settings panel width - does not force the frame wider. */
     int getPreferredContentWidth() const { return content.getPreferredWidth(); }
     /** Sync Look toggles from Main before Menu measures scroll height. */
     void syncFromMain() { content.syncControlsFromMain(); }
@@ -288,7 +288,7 @@ private:
         juce::Label particleMaxAliveLabel;
         juce::Slider particleMaxAliveSlider;
         juce::ToggleButton particleDebugOverlayToggle { "Show particle count (debug)" };
-        juce::TextButton particleNodeGraphButton { "Open Particle Node Graph…" };
+        juce::TextButton particleNodeGraphButton { "Open Particle Node Graph..." };
         juce::TextButton particleClearButton { "Clear particles" };
         juce::Label particleBindingLabel;
         juce::ComboBox particleBindingCombo;
@@ -382,7 +382,7 @@ private:
             juce::ComboBox dest;
             juce::ComboBox op;
             ParticleModCurveEditor curve;
-            /** Single dual-thumb range (min←→max arrows), not two separate sliders. */
+            /** Single dual-thumb range (min<-->max arrows), not two separate sliders. */
             juce::Slider rangeSlider;
             juce::Label rangeMinReadout, rangeMaxReadout; // 3 d.p. labels beside the bar
             juce::ToggleButton invertToggle { "Inv" };

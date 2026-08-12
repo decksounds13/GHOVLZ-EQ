@@ -8,7 +8,11 @@
 #include "BandChannel.h"
 #include "DynamicEq.h"
 #include "Match/MatchSettings.h"
+#include "Learn/EqLearnController.h"
+#include "Learn/EqLearnSettings.h"
 #include "BandSidechain.h"
+#include "BandSaturation.h"
+#include "Spectral/SpectralBandSettings.h"
 #include "EqBand.h"
 #include "LfoMod.h"
 #include "ComboBoxLookAndFeel.h"
@@ -22,7 +26,7 @@ namespace
         return fill.withAlpha (0.75f);
     }
 
-    /** Expand sparse GR samples (indices 0, step, 2*step, …, last) to full width. */
+    /** Expand sparse GR samples (indices 0, step, 2*step, ..., last) to full width. */
     void expandSparseDb (const float* sparse, int sparseN, int step, float* dest, int width) noexcept
     {
         if (sparse == nullptr || dest == nullptr || width <= 0 || sparseN <= 0)
@@ -57,19 +61,26 @@ namespace
         return false;
     }
 
-    /** Map Spectral Amount (0…max) onto the EQ display dB axis (pull down = more cut). */
-    float spectralAmountToDisplayDb (float amount, bool expand, float rangeDb) noexcept
+    /**
+        Map Spectral Amount (0...max) onto the EQ display dB axis (pull down = more cut).
+        @param eqScale  Global EQ % (0..2) - lessens/exaggerates handle + curve like band gains.
+    */
+    float spectralAmountToDisplayDb (float amount, bool expand, float rangeDb, float eqScale = 1.0f) noexcept
     {
         const float t = juce::jlimit (0.0f, 1.0f, amount / SpectralDynamics::kMaxSpectralAmount);
-        return expand ? (t * rangeDb) : (-t * rangeDb);
+        const float db = expand ? (t * rangeDb) : (-t * rangeDb);
+        return db * juce::jlimit (0.0f, 2.0f, eqScale);
     }
 
-    float displayDbToSpectralAmount (float db, bool expand, float rangeDb) noexcept
+    /** Inverse of spectralAmountToDisplayDb (display dB includes eqScale). */
+    float displayDbToSpectralAmount (float db, bool expand, float rangeDb, float eqScale = 1.0f) noexcept
     {
         if (rangeDb <= 1.0e-3f)
             return 0.0f;
-        const float t = expand ? juce::jlimit (0.0f, 1.0f, db / rangeDb)
-                               : juce::jlimit (0.0f, 1.0f, -db / rangeDb);
+        const float s = juce::jmax (1.0e-4f, juce::jlimit (0.0f, 2.0f, eqScale));
+        const float unscaledDb = db / s;
+        const float t = expand ? juce::jlimit (0.0f, 1.0f, unscaledDb / rangeDb)
+                               : juce::jlimit (0.0f, 1.0f, -unscaledDb / rangeDb);
         return t * SpectralDynamics::kMaxSpectralAmount;
     }
 
@@ -139,7 +150,7 @@ namespace
         g.setColour (bandColour.brighter (0.35f).withAlpha (0.95f));
         g.drawEllipse (cx - ringRadius, cy - ringRadius, ringSize, ringSize, 2.0f * scale);
 
-        // 2× prior arrow size; sit just outside the ring with ~2 px padding.
+        // 2x prior arrow size; sit just outside the ring with ~2 px padding.
         const float arrowHalf = 7.2f * scale;
         const float arrowH = 10.0f * scale;
         const float gap = 2.0f * scale;
@@ -175,7 +186,7 @@ namespace
         if (parameterID == "lowpassDynamic") return 5;
         if (parameterID == "highShelfDynamic") return 6;
         if (parameterID == "lowShelfDynamic") return 7;
-        // Extended: eqB09Dynamic … eqB64Dynamic
+        // Extended: eqB09Dynamic ... eqB64Dynamic
         if (parameterID.startsWith ("eqB") && parameterID.endsWith ("Dynamic"))
         {
             const auto mid = parameterID.substring (3, parameterID.length() - 8);
@@ -197,8 +208,8 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     onOffButton6(std::make_unique<OnOffButton1>(parameters, "band2OnOff")),
     onOffButton7(std::make_unique<OnOffButton1>(parameters, "band3OnOff")),
     onOffButton8(std::make_unique<OnOffButton1>(parameters, "band4OnOff")),
-    outputGainScrubber (processor.treeState, &processor.getUndoManager())
-
+    outputGainScrubber (processor.treeState, &processor.getUndoManager()),
+    eqScaleScrubber (processor.treeState, &processor.getUndoManager())
 {
     // FRC sits transparent over the Visualizer. Without a paint cache, every
     // analyser Graph::repaint() also re-runs this (heavy) EQ paint path.
@@ -214,6 +225,9 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     
     logMin = std::log10(20);
     logMax = std::log10(20000);
+
+    // Match visual scale to param before first paint (no morph on open).
+    eqDisplayRangeDbVisual = getEqDisplayRangeDb();
 
 
     addAndMakeVisible(infoLabel);
@@ -329,6 +343,8 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     parameters.addParameterListener(SideCheck::hpHzParamId(), this);
     parameters.addParameterListener(SideCheck::lpHzParamId(), this);
     parameters.addParameterListener(SideCheck::modeParamId(), this);
+    // Global EQ depth: must dirty all band/sum magnitude caches when this moves.
+    parameters.addParameterListener ("eqScale", this);
 
     for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
     {
@@ -372,11 +388,14 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
 
     auto styleRangeButton = [this] (juce::TextButton& button)
     {
+        const auto& c = colors();
+        const auto offInk = c.legibleTextOn (c.pluginButtonText, c.pluginButtonBackground);
+        const auto onInk = c.legibleTextOn (juce::Colours::black, c.pluginButtonAccent);
         button.setClickingTogglesState (false);
-        button.setColour (juce::TextButton::buttonColourId, colors().pluginButtonBackground);
-        button.setColour (juce::TextButton::buttonOnColourId, colors().pluginButtonAccent);
-        button.setColour (juce::TextButton::textColourOffId, colors().pluginButtonText.withAlpha (0.85f));
-        button.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        button.setColour (juce::TextButton::buttonColourId, c.pluginButtonBackground);
+        button.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
+        button.setColour (juce::TextButton::textColourOffId, offInk.withAlpha (0.92f));
+        button.setColour (juce::TextButton::textColourOnId, onInk);
     };
 
     styleRangeButton (eqRangeMinusButton);
@@ -513,6 +532,49 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     processor.syncMatchFactoryTargetFromParam();
     syncMatchChrome();
 
+    styleRangeButton (learnButton);
+    learnButton.setClickingTogglesState (false);
+    learnButton.setTooltip (
+        "Learn - capture spectrum, match a source/reference curve (Match-style), bake into editable bands (max 10). "
+        "(Pink / Flat / Match / Auto-detect / source templates). "
+        "Right-click for options. Undo or Revert undoes.");
+    learnButton.onClick = [this] { startLearnWithCurrentSettings(); };
+    // Right-click menu via mouse listener on this component for learnButton
+    learnButton.addMouseListener (this, false);
+    addAndMakeVisible (learnButton);
+
+    learnStatusLabel.setText ("-", juce::dontSendNotification);
+    learnStatusLabel.setFont (juce::Font (11.0f));
+    learnStatusLabel.setJustificationType (juce::Justification::centredLeft);
+    learnStatusLabel.setColour (juce::Label::textColourId, colors().graphAxisText.withAlpha (0.90f));
+    learnStatusLabel.setInterceptsMouseClicks (false, false);
+    learnStatusLabel.setTooltip ("Detected source / Learn status");
+    addAndMakeVisible (learnStatusLabel);
+
+    learnController = std::make_unique<EqLearn::Controller> (processor);
+    learnController->onStateChanged = [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this)]
+    {
+        if (safe == nullptr)
+            return;
+
+        // Learn timer already runs on the message thread - call directly.
+        // callAsync here flooded the queue (30 Hz) and freezes/crashes Ableton when
+        // Spec (or other UI) also lays out on the same thread.
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        if (mm != nullptr && mm->isThisTheMessageThread())
+        {
+            safe->syncLearnChrome();
+            return;
+        }
+
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr)
+                safe->syncLearnChrome();
+        });
+    };
+    syncLearnChrome();
+
     styleRangeButton (splitSoloTButton);
     styleRangeButton (splitSoloSButton);
     splitSoloTButton.setClickingTogglesState (true);
@@ -576,6 +638,12 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     addChildComponent (outputGainScrubber); // visible only in compact UI
     outputGainScrubber.setVisible (false);
 
+    eqScaleScrubber.setTooltip (
+        "EQ Scale - multiplies band gains (cuts and boosts), Spectral Amount, Dynamic EQ depth, "
+        "and Match amount. 0% = flat, 100% = as dialed, 200% = exaggerated. "
+        "Affects audio and the EQ / amount curves. Double-click resets to 100%.");
+    addAndMakeVisible (eqScaleScrubber);
+
     syncDynamicCurveTimer();
     applyThemeToChildControls();
     repaint();
@@ -619,7 +687,7 @@ void FrequencyResponseComponent::setParticleCurveEco (bool particlesActive, int 
     if (newStep != prevStep || newStep != lastResolvedMagStep)
     {
         lastResolvedMagStep = newStep;
-        // Quality changed — rebuild so step-up restores full res, step-down applies immediately.
+        // Quality changed - rebuild so step-up restores full res, step-down applies immediately.
         needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
         needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
         needsUpdateExtended = true;
@@ -632,7 +700,7 @@ void FrequencyResponseComponent::setParticleCurveEco (bool particlesActive, int 
 
 int FrequencyResponseComponent::resolveMagnitudeSampleStep() const noexcept
 {
-    // Full res when idle. Particles active → mild; dense → coarser sum/IIR sampling.
+    // Full res when idle. Particles active -> mild; dense -> coarser sum/IIR sampling.
     if (! particleCurveEcoActive)
         return 1;
     if (particleCurveEcoAlive >= 50000)
@@ -646,14 +714,16 @@ int FrequencyResponseComponent::resolveMagnitudeSampleStep() const noexcept
 int FrequencyResponseComponent::resolveDynamicCurveTimerHz() const noexcept
 {
     if (shouldSkipCombinedCurveWork() && ! LfoMod::anyActiveRouting (parameters))
-        return 0; // timer not needed — only sum was animating
+        return 0; // timer not needed - only sum was animating
+    // Match Spec/osc display cadence (~60 Hz) so D/S sum animation tracks audio
+    // GR as tightly as the spectrum / scopes instead of lagging a 45 Hz UI tick.
     if (! particleCurveEcoActive)
-        return 45;
+        return 60;
     if (particleCurveEcoAlive >= 50000)
-        return 8;
-    if (particleCurveEcoAlive >= 20000)
         return 12;
-    return 20;
+    if (particleCurveEcoAlive >= 20000)
+        return 20;
+    return 30;
 }
 
 bool FrequencyResponseComponent::shouldSkipCombinedCurveWork() const noexcept
@@ -671,13 +741,17 @@ void FrequencyResponseComponent::setThemeColors (SharedResources* r) noexcept
 void FrequencyResponseComponent::applyThemeToChildControls()
 {
     const auto& c = colors();
+    const auto graphBg = c.graphBackground.interpolatedWith (c.graphBackground2, 0.5f);
+    const auto offInk = c.legibleTextOn (c.pluginButtonText, c.pluginButtonBackground);
+    const auto onInk = c.legibleTextOn (juce::Colours::black, c.pluginButtonAccent);
+    const auto axisInk = c.legibleTextOn (c.graphAxisText, graphBg);
 
-    auto styleRangeButton = [&c] (juce::TextButton& button)
+    auto styleRangeButton = [&] (juce::TextButton& button)
     {
         button.setColour (juce::TextButton::buttonColourId, c.pluginButtonBackground);
         button.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
-        button.setColour (juce::TextButton::textColourOffId, c.pluginButtonText.withAlpha (0.85f));
-        button.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        button.setColour (juce::TextButton::textColourOffId, offInk.withAlpha (0.92f));
+        button.setColour (juce::TextButton::textColourOnId, onInk);
     };
 
     styleRangeButton (eqRangeMinusButton);
@@ -692,18 +766,20 @@ void FrequencyResponseComponent::applyThemeToChildControls()
 
     splitSeparationKnob.setColour (juce::Slider::rotarySliderFillColourId, c.pluginButtonAccent);
     splitSeparationKnob.setColour (juce::Slider::rotarySliderOutlineColourId, c.pluginButtonBackground);
-    splitSeparationKnob.setColour (juce::Slider::thumbColourId, c.pluginButtonText);
+    splitSeparationKnob.setColour (juce::Slider::thumbColourId, offInk);
     matchAmountKnob.setThemeColors (themeColors);
     matchHpKnob.setThemeColors (themeColors);
     matchLpKnob.setThemeColors (themeColors);
-    matchAmountLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
-    matchHpLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
-    matchLpLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
+    matchAmountLabel.setColour (juce::Label::textColourId, axisInk.withAlpha (0.85f));
+    matchHpLabel.setColour (juce::Label::textColourId, axisInk.withAlpha (0.85f));
+    matchLpLabel.setColour (juce::Label::textColourId, axisInk.withAlpha (0.85f));
     styleRangeButton (matchButton);
     styleRangeButton (matchCurveButton);
     styleRangeButton (matchFreezeButton);
+    styleRangeButton (learnButton);
+    learnStatusLabel.setColour (juce::Label::textColourId, axisInk.withAlpha (0.92f));
 
-    eqRangeLabel.setColour (juce::Label::textColourId, c.graphAxisText.withAlpha (0.75f));
+    eqRangeLabel.setColour (juce::Label::textColourId, axisInk.withAlpha (0.85f));
 
     if (optionBoxMenu != nullptr)
         optionBoxMenu->setThemeColors (themeColors);
@@ -711,8 +787,7 @@ void FrequencyResponseComponent::applyThemeToChildControls()
 
 void FrequencyResponseComponent::syncUiModeButton (bool isCompact)
 {
-    uiModeButton.setButtonText (isCompact ? juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbc"))  // ▼
-                                          : juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb2"))); // ▲
+    uiModeButton.setButtonText (isCompact ? "v" : "^");
     uiModeButton.setTooltip (isCompact ? "Expand to full UI" : "Collapse to graph-only view");
     outputGainScrubber.setVisible (isCompact);
     autoGainButton.setVisible (isCompact);
@@ -798,6 +873,13 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener (MatchEq::curveParamId(), this);
     parameters.removeParameterListener (MatchEq::frozenParamId(), this);
     matchFreezeButton.removeMouseListener (this);
+    learnButton.removeMouseListener (this);
+    if (learnController != nullptr)
+    {
+        learnController->onStateChanged = nullptr;
+        learnController->cancelLearn();
+    }
+    learnController.reset();
     matchAmountAttachment.reset();
     matchHpAttachment.reset();
     matchLpAttachment.reset();
@@ -853,6 +935,7 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener(SideCheck::hpHzParamId(), this);
     parameters.removeParameterListener(SideCheck::lpHzParamId(), this);
     parameters.removeParameterListener(SideCheck::modeParamId(), this);
+    parameters.removeParameterListener ("eqScale", this);
 
     for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
     {
@@ -885,14 +968,58 @@ float FrequencyResponseComponent::getEqDisplayRangeDb() const
 
 float FrequencyResponseComponent::dbToY (float db, float height) const
 {
-    const float r = getEqDisplayRangeDb();
+    // Use smoothed range so curves/handles/grid morph between 6/12/24/36 steps.
+    const float r = juce::jmax (1.0f, getEqDisplayRangeDbVisual());
     return juce::jmap (db, -r, r, height, 0.0f);
 }
 
 float FrequencyResponseComponent::yToDb (float y, float height) const
 {
-    const float r = getEqDisplayRangeDb();
+    const float r = juce::jmax (1.0f, getEqDisplayRangeDbVisual());
     return juce::jmap (y, height, 0.0f, -r, r);
+}
+
+bool FrequencyResponseComponent::isEqDisplayRangeMorphing() const noexcept
+{
+    return std::abs (eqDisplayRangeDbVisual - getEqDisplayRangeDb()) > 0.04f;
+}
+
+bool FrequencyResponseComponent::tickEqDisplayRangeMorph (float deltaSeconds) noexcept
+{
+    const float target = getEqDisplayRangeDb();
+    const float err = target - eqDisplayRangeDbVisual;
+    if (std::abs (err) <= 0.04f)
+    {
+        if (eqDisplayRangeDbVisual != target)
+            eqDisplayRangeDbVisual = target;
+        return false;
+    }
+
+    // ~220 ms time constant -> smooth zoom, not a hard snap.
+    const float dt = juce::jlimit (1.0e-4f, 0.05f, deltaSeconds);
+    const float alpha = 1.0f - std::exp (-dt / 0.22f);
+    eqDisplayRangeDbVisual += err * alpha;
+
+    if (std::abs (target - eqDisplayRangeDbVisual) <= 0.04f)
+        eqDisplayRangeDbVisual = target;
+
+    // Paths/handles depend on dB->Y; force rebuild while morphing.
+    needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
+    needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
+    needsUpdateExtended = true;
+    needsUpdateCombined = true;
+    return true;
+}
+
+void FrequencyResponseComponent::ensureEqDisplayRangeMorphTimer() noexcept
+{
+    if (! isEqDisplayRangeMorphing())
+        return;
+
+    setBufferedToImage (false);
+    // Prefer existing dynamic timer rate; otherwise run a dedicated morph rate.
+    if (! isTimerRunning())
+        startTimerHz (anyActiveDynamicEq() ? juce::jmax (30, resolveDynamicCurveTimerHz()) : 60);
 }
 
 float FrequencyResponseComponent::getBandPathWidth() const
@@ -946,7 +1073,7 @@ bool FrequencyResponseComponent::bandGainIsBoost (const juce::String& gainParamI
     }
 
     if (gainParamId.isEmpty())
-        return false; // HP/LP and unknown → cut-style mono fill
+        return false; // HP/LP and unknown -> cut-style mono fill
 
     if (auto* gainRaw = parameters.getRawParameterValue (gainParamId))
         return gainRaw->load() >= 0.0f;
@@ -957,7 +1084,7 @@ bool FrequencyResponseComponent::bandGainIsBoost (const juce::String& gainParamI
 juce::Colour FrequencyResponseComponent::resolveBandFillColour (juce::Colour multicolorFill, bool isBoostOrPass) const
 {
     if (isMulticolorBandFill())
-        return multicolorFill;
+        return colors().applyGraphBandMinSaturation (multicolorFill);
 
     const auto& c = colors();
     if (isBoostOrPass)
@@ -996,6 +1123,99 @@ void FrequencyResponseComponent::adjustEqDisplayRange (int delta)
     choice->beginChangeGesture();
     choice->setValueNotifyingHost (choice->convertTo0to1 (static_cast<float> (newIndex)));
     choice->endChangeGesture();
+    // Morph starts via parameterChanged (EQ_DISPLAY_RANGE_ID).
+}
+
+bool FrequencyResponseComponent::expandEqDisplayRangeToFitDb (float gainDb)
+{
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (parameters.getParameter ("EQ_DISPLAY_RANGE_ID"));
+    if (choice == nullptr)
+        return false;
+
+    // Index 0..3 -> +/-6, +/-12, +/-24, +/-36 dB - one step per call (drag keeps expanding).
+    static constexpr float kRanges[4] = { 6.0f, 12.0f, 24.0f, 36.0f };
+    const float need = std::abs (gainDb);
+    const int idx = juce::jlimit (0, 3, choice->getIndex());
+
+    // Expand when |gain| hits the current scale edge (handle at top/bottom margin).
+    if (idx >= 3 || need < kRanges[idx] * 0.97f)
+        return false;
+
+    const int newIdx = idx + 1;
+
+    // No undo spam mid-drag - host still gets the automated param change.
+    // Visual range keeps its current value and morphs toward the new target.
+    choice->setValueNotifyingHost (choice->convertTo0to1 (static_cast<float> (newIdx)));
+    syncEqRangeControls();
+    needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
+    needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
+    needsUpdateExtended = true;
+    needsUpdateCombined = true;
+    ensureEqDisplayRangeMorphTimer();
+    return true;
+}
+
+bool FrequencyResponseComponent::ensureEqDisplayRangeFitsScaledBands()
+{
+    // Display gain = stored gain * eqScale (same mapping as band handles / curves).
+    // When % pushes a handle past the plot edge, expand the dB range like drag does.
+    const float eqScale = processor.getEqScale();
+    if (eqScale <= 1.0e-6f)
+        return false;
+
+    float maxAbsDisplayDb = 0.0f;
+    for (int global = 0; global < EqBand::kMaxBands; ++global)
+    {
+        if (! processor.isGlobalBandOn (global))
+            continue;
+
+        const int type = BandChannel::readChoiceIndex (
+            processor.treeState, FilterType::paramIDForGlobal (global), FilterType::bell);
+        if (! FilterType::usesGain (type))
+            continue;
+
+        const auto gainId = EqBand::gainParamIDForGlobal (global);
+        if (auto* g = processor.treeState.getRawParameterValue (gainId))
+            maxAbsDisplayDb = juce::jmax (maxAbsDisplayDb, std::abs (g->load() * eqScale));
+    }
+
+    if (maxAbsDisplayDb <= 0.0f)
+        return false;
+
+    // One step per call (same as handle drag); loop so a large % jump can climb 6->12->24->36.
+    bool any = false;
+    for (int step = 0; step < 4; ++step)
+    {
+        if (! expandEqDisplayRangeToFitDb (maxAbsDisplayDb))
+            break;
+        any = true;
+    }
+    return any;
+}
+
+/** Map handle Y -> gain dB; auto-zoom display range when the handle is at the scale edge. */
+float FrequencyResponseComponent::gainDbFromHandleY (float y, float height)
+{
+    height = juce::jmax (1.0f, height);
+    y = juce::jlimit (0.0f, height, y);
+
+    // Edge detect against the *target* scale so we expand when the user hits the edge,
+    // even if the visual range is still mid-morph.
+    //
+    // Paint clamps handles to ~12px inset (see handle paint). Match that inset so a full
+    // cut (bottom) or boost (top) still counts as "at edge" - a thinner 2% band left
+    // cut handles stuck just outside the zone, so only boosts felt like they auto-zoomed.
+    const float rTarget = juce::jmax (1.0f, getEqDisplayRangeDb());
+    const float gainAtTargetScale = juce::jmap (y, height, 0.0f, -rTarget, rTarget);
+    const float edgePx = juce::jmax (12.0f, height * 0.03f);
+    const bool atTopEdge = y <= edgePx;
+    const bool atBotEdge = y >= height - edgePx;
+    // Slightly looser than expand's 0.97 so paint-clamped Y (≈0.94 of full scale) still expands.
+    if ((atTopEdge || atBotEdge) && std::abs (gainAtTargetScale) >= rTarget * 0.90f)
+        expandEqDisplayRangeToFitDb (gainAtTargetScale);
+
+    // Write gain from the *visual* scale so continuous drag tracks the morph.
+    return juce::jlimit (-24.0f, 24.0f, yToDb (y, height));
 }
 
 void FrequencyResponseComponent::ensureResponseBufferSize (int width)
@@ -1052,7 +1272,7 @@ void FrequencyResponseComponent::fillMagnitudeResponse (const juce::dsp::IIR::Co
     if ((w - 1) % stride != 0)
         outDb[(size_t) (w - 1)] = evalDb (w - 1);
 
-    // Linear interpolate between evaluated samples (never hold-fill — that creates stair-steps).
+    // Linear interpolate between evaluated samples (never hold-fill - that creates stair-steps).
     if (stride > 1)
     {
         for (int i = 0; i + stride < w; i += stride)
@@ -1111,7 +1331,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     const bool specHS = raw ("highShelfSpectral") > 0.5f;
     const bool specLS = raw ("lowShelfSpectral") > 0.5f;
 
-    // Any LFO routed → prefer published F/G/Q so modulation is visible on curves.
+    // Any LFO routed -> prefer published F/G/Q so modulation is visible on curves.
     const bool anyLfoRouted = LfoMod::anyActiveRouting (parameters);
     const bool skipCombined = shouldSkipCombinedCurveWork();
     const int magStep = resolveMagnitudeSampleStep();
@@ -1126,13 +1346,17 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     const float egHS = processor.getHighShelfEffectiveGainDb();
     const float egLS = processor.getLowShelfEffectiveGainDb();
 
+    // 0 = mute EQ depth, 1 = dialed gains, 2 = exaggerate (same for cuts and boosts).
+    const float eqScale = processor.getEqScale();
+
     // Secondary catch for paints that weren't kicked by the animation timer.
-    // LFO dirties per-band paths; D/SC sum animation is driven by the 45 Hz timer.
-    constexpr float dynCurveEps = 0.05f;
+    // LFO dirties per-band paths; D/SC sum animation is driven by the live D/S timer.
+    // Compare against scaled gains - last* stores displayGain (includes eqScale).
+    constexpr float dynCurveEps = 0.02f;
     auto maybeDirtyLive = [&] (bool trackEffective, float effectiveGain, float staticGain,
                                float& lastGain, bool& dirtyFlag)
     {
-        const float want = trackEffective ? effectiveGain : staticGain;
+        const float want = (trackEffective ? effectiveGain : staticGain) * eqScale;
         if (std::abs (want - lastGain) > dynCurveEps)
         {
             dirtyFlag = true;
@@ -1175,9 +1399,10 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
 
     // Per-band curves: LFO uses published post-mod F/G/Q; D/SC keep target/range (handle).
     // Cumulative curve: D/SC/LFO use published effective gain (rebuilt below when needed).
+    // eqScale: 0..1 lessens cuts+boosts, 1..2 exaggerates (matches DSP).
     auto displayGain = [&] (bool liveGain, float staticGain, float effectiveGain) -> float
     {
-        return liveGain ? effectiveGain : staticGain;
+        return (liveGain ? effectiveGain : staticGain) * eqScale;
     };
 
     const bool live1 = anyLfoRouted;
@@ -1188,9 +1413,9 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     const bool liveLS = anyLfoRouted;
 
     // Display pipeline (DSP untouched):
-    //   1) Dense log-f grid (logFrequencies — one sample per pixel)
-    //   2) Static IIR magnitudes on that grid → sum into responseCombined
-    //   3) Spectral GR evaluated on the SAME grid → UI temporal smooth → add
+    //   1) Dense log-f grid (logFrequencies - one sample per pixel)
+    //   2) Static IIR magnitudes on that grid -> sum into responseCombined
+    //   3) Spectral GR evaluated on the SAME grid -> UI temporal smooth -> add
     //   4) Side Check GR on the SAME grid, then added (sum only)
     //   5) Path build/stroke from responseCombined (in paint)
     // Per-band curves stay static IIR only (band gain is makeup when spectral is on).
@@ -1262,8 +1487,14 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
             return;
         }
 
-        // ~30 ms toward publish at 45 Hz (~0.35/tick). Audio already has 8 ms GR smooth.
-        constexpr float kSpectralUiSmoothAlpha = 0.35f;
+        // Light UI smooth only — audio already has ~8 ms GR smooth. Old 0.35/tick
+        // at 45 Hz (~30 ms tau) stacked lag so the sum trailed the spectrum badly.
+        // ~10 ms tau at the live D/S timer rate keeps the sum tight without zippering.
+        const float dt = isTimerRunning()
+                             ? juce::jlimit (1.0e-3f, 0.05f, (float) getTimerInterval() * 0.001f)
+                             : (1.0f / 60.0f);
+        constexpr float kSpectralUiTauSec = 0.010f;
+        const float alpha = 1.0f - std::exp (-dt / kSpectralUiTauSec);
 
         if (! spectralGrSmoothedValid)
         {
@@ -1275,8 +1506,12 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
             for (int i = 0; i < width; ++i)
             {
                 const float t = spectralGrTarget[(size_t) i];
-                const float s = spectralGrSmoothed[(size_t) i];
-                spectralGrSmoothed[(size_t) i] = s + (t - s) * kSpectralUiSmoothAlpha;
+                float s = spectralGrSmoothed[(size_t) i];
+                s += (t - s) * alpha;
+                // Snap residual noise so the sum settles with the analyser.
+                if (std::abs (t - s) < 0.02f)
+                    s = t;
+                spectralGrSmoothed[(size_t) i] = s;
             }
         }
 
@@ -1328,6 +1563,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
             });
             matchGrScratch = spectralGrScratch;
         }
+        // Match GR is already measured with eqScale applied to amount in the audio path.
         for (int i = 0; i < width; ++i)
             responseCombined[(size_t) i] += matchGrScratch[(size_t) i];
     };
@@ -1410,7 +1646,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const int type = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
         const float freq = clampFreq (raw ("highpassCutoff"));
         const float q = clampQ (raw ("highpassQ"));
-        const float gain = FilterType::usesGain (type) ? raw ("highpassGain") : 0.0f;
+        const float gain = FilterType::usesGain (type) ? raw ("highpassGain") * eqScale : 0.0f;
         fillBandResponse (type, freq, q, gain, "highpassSlope", responseHighpass);
     }
 
@@ -1419,7 +1655,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const int type = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
         const float freq = clampFreq (raw ("lowpassCutoff"));
         const float q = clampQ (raw ("lowpassQ"));
-        const float gain = FilterType::usesGain (type) ? raw ("lowpassGain") : 0.0f;
+        const float gain = FilterType::usesGain (type) ? raw ("lowpassGain") * eqScale : 0.0f;
         fillBandResponse (type, freq, q, gain, "lowpassSlope", responseLowpass);
     }
 
@@ -1443,7 +1679,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         lastDynCurveGainLS = gain;
     }
 
-    // Extended banks 2–8: cache per-band magnitudes for individual curves + sum.
+    // Extended banks 2-8: cache per-band magnitudes for individual curves + sum.
     // Paths are rebuilt in paint while needsUpdateExtended is still true.
     if (needsUpdateExtended)
     {
@@ -1462,7 +1698,9 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
             const int type = BandChannel::readChoiceIndex (parameters, FilterType::paramIDForGlobal (global), FilterType::bell);
             const float freq = clampFreq (raw (EqBand::frequencyParamIDForGlobal (global)));
             const float qBase = clampQ (raw (EqBand::qParamIDForGlobal (global)));
-            const float gain = FilterType::usesGain (type) ? raw (EqBand::gainParamIDForGlobal (global)) : 0.0f;
+            const float gain = FilterType::usesGain (type)
+                                   ? raw (EqBand::gainParamIDForGlobal (global)) * eqScale
+                                   : 0.0f;
             fillBandResponse (type, freq, qBase, gain, EqBand::slopeParamIDForGlobal (global), dest);
         }
     }
@@ -1479,7 +1717,8 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         const bool sumNeedsEffective = dynLive && ! lfoLive && FilterType::usesGain (type);
         if (sumNeedsEffective)
         {
-            fillBandResponse (type, freq, qBase, effectiveGain, slopeId, responseDynSumScratch);
+            // Published dyn gains are pre-scale; match audio with eqScale.
+            fillBandResponse (type, freq, qBase, effectiveGain * eqScale, slopeId, responseDynSumScratch);
             for (int i = 0; i < width; ++i)
                 responseCombined[(size_t) i] += responseDynSumScratch[(size_t) i];
         }
@@ -1575,13 +1814,13 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         needsUpdateCombined = false;
     }
 
-    // Spectral Amount curves (second handle): same shape as the band at Amount→dB.
-    // Makeup stays on the normal band curve; Amount is visual only (GR still shapes the sum).
+    // Spectral Amount curves (second handle): same shape as the band at Amount->dB.
+    // Makeup stays on the normal band curve; Amount depth follows eqScale (0-200%).
     if (needsUpdateSpectralAmount || needsUpdateBand1 || needsUpdateBand2 || needsUpdateBand3 || needsUpdateBand4
         || needsUpdateHighpass || needsUpdateLowpass || needsUpdateHighShelf || needsUpdateLowShelf
         || (needsUpdateCombined && ! skipCombined))
     {
-        const float rangeDb = getEqDisplayRangeDb();
+        const float rangeDb = getEqDisplayRangeDbVisual();
         auto fillAmount = [&] (int slot, bool bandOn, bool spectralOn, int type,
                                float freq, float qBase, const juce::String& slopeId,
                                const juce::String& amountId, const juce::String& expandId)
@@ -1598,7 +1837,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
 
             const float amount = raw (amountId);
             const bool expand = raw (expandId) > 0.5f;
-            const float gainDb = spectralAmountToDisplayDb (amount, expand, rangeDb);
+            const float gainDb = spectralAmountToDisplayDb (amount, expand, rangeDb, eqScale);
             fillBandResponse (type, freq, qBase, gainDb, slopeId, dest);
         };
 
@@ -1638,7 +1877,7 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
         needsUpdateSpectralAmount = true; // tell paint to rebuild amount paths
     }
 
-    // Spectral / Side Check / Match GR shape the cumulative sum only — skip when disabled.
+    // Spectral / Side Check / Match GR shape the cumulative sum only - skip when disabled.
     if (! skipCombined)
     {
         // usesGain + current type must match DSP arming (S only on bell / shelves).
@@ -1710,6 +1949,8 @@ void FrequencyResponseComponent::paintGraphChromeShadows (juce::Graphics& g)
     shadowRounded (matchButton);
     shadowRounded (matchCurveButton);
     shadowRounded (matchFreezeButton);
+    shadowRounded (learnButton);
+    // learnStatusLabel is flat text (no chrome shadow)
     // Match AMT/HP/LP image knobs draw their own Melatonin disc shadow.
 
     shadowRounded (splitSoloTButton);
@@ -1810,8 +2051,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     // Draw horizontal grid lines and dB labels for the current EQ display range.
     // Labels sit at the left edge of the window (~5px padding).
+    // Use visual range so axis ticks morph with the zoom animation.
     {
-        const int rangeInt = juce::roundToInt (getEqDisplayRangeDb());
+        const int rangeInt = juce::jmax (6, juce::roundToInt (getEqDisplayRangeDbVisual()));
         const int step = (rangeInt <= 6) ? 1 : (rangeInt <= 12) ? 2 : (rangeInt <= 24) ? 3 : 6;
         const float plotH = (float) getPlotHeight();
 
@@ -1964,7 +2206,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         if (processor.getIsHighpassOn() && ! compositeResponse6.empty())
         {
             // Corner-tether paths are only for real HP/LP slopes; bells/shelves use the
-            // same mid-line close as the other bands (avoids Q→bottom corner glitches).
+            // same mid-line close as the other bands (avoids Q->bottom corner glitches).
             const int hpType = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
             if (hpType == FilterType::highpass)
                 highpassResponsePath = intelligentDownsampleHighpass (highpassResponsePath, compositeResponse6, w, h);
@@ -2079,7 +2321,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
-    // Spectral Amount curves (second curve when S is on — Amount as display-dB shape)
+    // Spectral Amount curves (second curve when S is on - Amount as display-dB shape)
     {
         const juce::Colour specCols[8] = {
             theme.graphBand1, theme.graphBand2, theme.graphBand3, theme.graphBand4,
@@ -2133,7 +2375,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
-    // Extended bands (Band 9–64) — individual fill + stroke (colour wraps Bank 1 palette)
+    // Extended bands (Band 9-64) - individual fill + stroke (colour wraps Bank 1 palette)
     {
         const juce::Colour extColours[8] = {
             theme.graphBand1, theme.graphBand2, theme.graphBand3, theme.graphBand4,
@@ -2235,7 +2477,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                                                  juce::PathStrokeType::curved,
                                                  juce::PathStrokeType::rounded);
 
-    // Optional Melatonin glow for the cumulative sum curve (off by default — Post Glow is the main one).
+    // Optional Melatonin glow for the cumulative sum curve (off by default - Post Glow is the main one).
     {
         bool glowEnabled = false;
         if (SharedResources::glowShadowEffectsEnabled())
@@ -2289,16 +2531,17 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
-    // Handle fills are multi-colour (graphBand1–8). Legible text resolves ink per disk.
+    // Handle fills are multi-colour (graphBand1-8). Legible text resolves ink per disk.
+    // Optional Spectrum "Band min sat" floor so handles match faceplate power/glow.
     const juce::Colour graphBgForHandles = theme.graphBackground.interpolatedWith (theme.graphBackground2, 0.5f);
-    juce::Colour handleColor1 = theme.graphBand1.withAlpha (1.0f);
-    juce::Colour handleColor2 = theme.graphBand2.withAlpha (1.0f);
-    juce::Colour handleColor3 = theme.graphBand3.withAlpha (1.0f);
-    juce::Colour handleColor4 = theme.graphBand4.withAlpha (1.0f);
-    juce::Colour handleColor5 = theme.graphBand5.withAlpha (1.0f);
-    juce::Colour handleColor6 = theme.graphBand6.withAlpha (1.0f);
-    juce::Colour handleColor7 = theme.graphBand7.withAlpha (1.0f);
-    juce::Colour handleColor8 = theme.graphBand8.withAlpha (1.0f);
+    juce::Colour handleColor1 = theme.applyGraphBandMinSaturation (theme.graphBand1.withAlpha (1.0f));
+    juce::Colour handleColor2 = theme.applyGraphBandMinSaturation (theme.graphBand2.withAlpha (1.0f));
+    juce::Colour handleColor3 = theme.applyGraphBandMinSaturation (theme.graphBand3.withAlpha (1.0f));
+    juce::Colour handleColor4 = theme.applyGraphBandMinSaturation (theme.graphBand4.withAlpha (1.0f));
+    juce::Colour handleColor5 = theme.applyGraphBandMinSaturation (theme.graphBand5.withAlpha (1.0f));
+    juce::Colour handleColor6 = theme.applyGraphBandMinSaturation (theme.graphBand6.withAlpha (1.0f));
+    juce::Colour handleColor7 = theme.applyGraphBandMinSaturation (theme.graphBand7.withAlpha (1.0f));
+    juce::Colour handleColor8 = theme.applyGraphBandMinSaturation (theme.graphBand8.withAlpha (1.0f));
 
     auto paintHandle = [&] (float cx, float cy, float scale, juce::Colour bandFill, const juce::String& label)
     {
@@ -2319,6 +2562,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         const int band1Type = (int) processor.treeState.getRawParameterValue ("band1Type")->load();
         float band1Gain = FilterType::usesGain (band1Type)
                             ? processor.treeState.getRawParameterValue("band1Gain")->load()
+                              * processor.getEqScale()
                             : 0.0f;
 
         // Calculate the x and y coordinates for the circle
@@ -2362,7 +2606,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float band2Frequency = processor.treeState.getRawParameterValue("band2Frequency")->load();
         const int band2Type = (int) processor.treeState.getRawParameterValue ("band2Type")->load();
         float band2Gain = FilterType::usesGain (band2Type)
-                            ? processor.treeState.getRawParameterValue("band2Gain")->load()
+                            ? processor.treeState.getRawParameterValue("band2Gain")->load() * processor.getEqScale()
                             : 0.0f;
 
         // Calculate the x and y coordinates for the circle
@@ -2406,7 +2650,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float band3Frequency = processor.treeState.getRawParameterValue("band3Frequency")->load();
         const int band3Type = (int) processor.treeState.getRawParameterValue ("band3Type")->load();
         float band3Gain = FilterType::usesGain (band3Type)
-                            ? processor.treeState.getRawParameterValue("band3Gain")->load()
+                            ? processor.treeState.getRawParameterValue("band3Gain")->load() * processor.getEqScale()
                             : 0.0f;
 
         // Calculate the x and y coordinates for the circle
@@ -2449,7 +2693,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float band4Frequency = processor.treeState.getRawParameterValue("band4Frequency")->load();
         const int band4Type = (int) processor.treeState.getRawParameterValue ("band4Type")->load();
         float band4Gain = FilterType::usesGain (band4Type)
-                            ? processor.treeState.getRawParameterValue("band4Gain")->load()
+                            ? processor.treeState.getRawParameterValue("band4Gain")->load() * processor.getEqScale()
                             : 0.0f;
 
         // Calculate the x and y coordinates for the circle
@@ -2492,7 +2736,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float highpassCutoff = processor.treeState.getRawParameterValue("highpassCutoff")->load();
         const int hpType = BandChannel::readChoiceIndex (processor.treeState, "highpassType", FilterType::highpass);
         const float hpGain = FilterType::usesGain (hpType)
-                               ? processor.treeState.getRawParameterValue ("highpassGain")->load()
+                               ? processor.treeState.getRawParameterValue ("highpassGain")->load() * processor.getEqScale()
                                : 0.0f;
 
         float highpassX = (getWidth() - 1) * (std::log10(highpassCutoff) - logMin) / (logMax - logMin);
@@ -2528,7 +2772,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float lowpassCutoff = processor.treeState.getRawParameterValue("lowpassCutoff")->load();
         const int lpType = BandChannel::readChoiceIndex (processor.treeState, "lowpassType", FilterType::lowpass);
         const float lpGain = FilterType::usesGain (lpType)
-                               ? processor.treeState.getRawParameterValue ("lowpassGain")->load()
+                               ? processor.treeState.getRawParameterValue ("lowpassGain")->load() * processor.getEqScale()
                                : 0.0f;
 
         float lowpassX = (getWidth() - 1) * (std::log10(lowpassCutoff) - logMin) / (logMax - logMin);
@@ -2564,7 +2808,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float highShelfFrequency = processor.treeState.getRawParameterValue("highShelfFrequency")->load();
         const int highShelfType = (int) processor.treeState.getRawParameterValue ("highShelfType")->load();
         float highShelfGain = FilterType::usesGain (highShelfType)
-                                ? processor.treeState.getRawParameterValue("highShelfGain")->load()
+                                ? processor.treeState.getRawParameterValue("highShelfGain")->load() * processor.getEqScale()
                                 : 0.0f;
 
         // Calculate the x and y coordinates for the circle
@@ -2608,7 +2852,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         float lowShelfFrequency = processor.treeState.getRawParameterValue("lowShelfFrequency")->load();
         const int lowShelfType = (int) processor.treeState.getRawParameterValue ("lowShelfType")->load();
         float lowShelfGain = FilterType::usesGain (lowShelfType)
-                               ? processor.treeState.getRawParameterValue("lowShelfGain")->load()
+                               ? processor.treeState.getRawParameterValue("lowShelfGain")->load() * processor.getEqScale()
                                : 0.0f;
 
         // Calculate the x and y coordinates for the circle
@@ -2671,7 +2915,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             "highpassSpectralExpand", "lowpassSpectralExpand",
             "highShelfSpectralExpand", "lowShelfSpectralExpand"
         };
-        const float rangeDb = getEqDisplayRangeDb();
+        const float rangeDb = getEqDisplayRangeDbVisual();
+        const float eqScaleVis = processor.getEqScale();
 
         for (int slot = 0; slot < kNumSpectralSlots; ++slot)
         {
@@ -2687,7 +2932,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             const float fHz = juce::jmax (20.0f, processor.treeState.getRawParameterValue (freqIds[slot])->load());
             const float amount = processor.treeState.getRawParameterValue (amountIds[slot])->load();
             const bool expand = rawBoolParam (parameters, expandIds[slot]);
-            const float amountDb = spectralAmountToDisplayDb (amount, expand, rangeDb);
+            const float amountDb = spectralAmountToDisplayDb (amount, expand, rangeDb, eqScaleVis);
 
             const float scale = (hs.hovering || hs.dragging || activeSpectralAmountSlot == slot) ? 1.25f : 1.0f;
             float hx = (getWidth() - 1) * (std::log10 (fHz) - logMin) / (logMax - logMin);
@@ -2699,7 +2944,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             hs.y = hy;
 
             const auto col = specHandleCols[slot];
-            // No number on spectral amount handles — still use legible fill/rings.
+            // No number on spectral amount handles - still use legible fill/rings.
             paintBandHandleChrome (g, hx, hy, scale, col, graphBgForHandles,
                                    theme.graphHandleOutline, theme.graphHandleText, theme, {});
             paintDynamicRangeHandleDecor (g, hx, hy, handleSize, col, scale);
@@ -2707,7 +2952,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
-    // Extended bands (Band 9–64) — all on slots across banks
+    // Extended bands (Band 9-64) - all on slots across banks
     {
         const juce::Colour extColours[8] = {
             theme.graphBand1, theme.graphBand2, theme.graphBand3, theme.graphBand4,
@@ -2729,6 +2974,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             const int type = BandChannel::readChoiceIndex (processor.treeState, FilterType::paramIDForGlobal (global), FilterType::bell);
             const float gainDb = FilterType::usesGain (type)
                                      ? processor.treeState.getRawParameterValue (EqBand::gainParamIDForGlobal (global))->load()
+                                       * processor.getEqScale()
                                      : 0.0f;
 
             const float scale = (hs.hovering || hs.dragging || activeExtendedGlobal == global
@@ -2754,7 +3000,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
     //=======================================================================================================//
-    // Match target curve overlay — only while Match is enabled.
+    // Match target curve overlay - only while Match is enabled.
     {
         const bool matchOn = parameters.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
                              && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
@@ -2898,7 +3144,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     juce::String readoutHz = isAnyHandleMouseOver ? juce::String(displayFreq, 2) + " Hz" : cursorReadoutHz;
     juce::String readoutQ = "Q: " + (isAnyHandleMouseOver ? juce::String(displayQ) : "N/A");
 
-    // Hover / cursor readout — band hover and free-cursor both +40% vs prior 5 / 7.5
+    // Hover / cursor readout - band hover and free-cursor both +40% vs prior 5 / 7.5
     float labelY = cursorY - 20;
     float labelX = cursorX + 30;
     const float fontSize = isAnyHandleMouseOver ? 9.8f : 10.5f;
@@ -3001,7 +3247,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     // Multi-select chrome last inside clip so it sits above curves/handles.
     paintMultiSelectRings (g);
     paintMarqueeSelection (g);
-    } // clipScope — restore full-component clip for chrome shadows
+    } // clipScope - restore full-component clip for chrome shadows
 
     // Also draw marquee outside the inset clip so edge selection never gets cropped.
     paintMarqueeSelection (g);
@@ -3226,7 +3472,7 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
         {
             const int hpType = BandChannel::readChoiceIndex (processor.treeState, "highpassType", FilterType::highpass);
             arrayCurrentBandGain[4] = FilterType::usesGain (hpType)
-                                         ? processor.treeState.getRawParameterValue ("highpassGain")->load()
+                                         ? processor.treeState.getRawParameterValue ("highpassGain")->load() * processor.getEqScale()
                                          : 0.0f;
         }
 
@@ -3263,7 +3509,7 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
         {
             const int lpType = BandChannel::readChoiceIndex (processor.treeState, "lowpassType", FilterType::lowpass);
             arrayCurrentBandGain[5] = FilterType::usesGain (lpType)
-                                         ? processor.treeState.getRawParameterValue ("lowpassGain")->load()
+                                         ? processor.treeState.getRawParameterValue ("lowpassGain")->load() * processor.getEqScale()
                                          : 0.0f;
             currentLowpassGain = arrayCurrentBandGain[5];
         }
@@ -3405,7 +3651,7 @@ void FrequencyResponseComponent::setOptionBoxVisible (bool shouldBeVisible)
     const bool wasVisible = optionBoxMenu->isVisible();
     optionBoxMenu->setVisible (shouldBeVisible);
 
-    // Band headphones monitor is OptionBox-scoped — clear when the box closes.
+    // Band headphones monitor is OptionBox-scoped - clear when the box closes.
     if (! shouldBeVisible && wasVisible)
         optionBoxMenu->setBandListening (false);
 
@@ -3429,6 +3675,9 @@ void FrequencyResponseComponent::showOptionBoxForHandle (int bandIndex, float ha
 
     const bool wasVisible = optionBoxMenu->isVisible();
     const int previousBand = optionBoxMenu->getCurrentBandIndex();
+
+    // Always scale against the graph, never the EqEditor host parent.
+    optionBoxMenu->setUiScaleReferenceWidth ((float) getWidth());
 
     optionBoxMenu->setCurrentBandIndex (bandIndex, arrayBandName);
 
@@ -3539,7 +3788,7 @@ void FrequencyResponseComponent::showHandleModMenu (int bandIndex)
         for (const auto& t : targeting)
         {
             const juce::String label = sourceNames[juce::jlimit (0, sourceNames.size() - 1, t.source)]
-                                       + " → " + LfoMod::shortDestinationLabel (t.dest);
+                                       + " -> " + LfoMod::shortDestinationLabel (t.dest);
             // Checkable: active = enabled. Toggle on select.
             menu.addItem (1000 + t.slot, label, true, t.enabled);
         }
@@ -3553,7 +3802,7 @@ void FrequencyResponseComponent::showHandleModMenu (int bandIndex)
         {
             const juce::String label = "Remove "
                                        + sourceNames[juce::jlimit (0, sourceNames.size() - 1, t.source)]
-                                       + " → " + LfoMod::shortDestinationLabel (t.dest);
+                                       + " -> " + LfoMod::shortDestinationLabel (t.dest);
             menu.addItem (2000 + t.slot, label);
         }
 
@@ -3655,142 +3904,243 @@ void FrequencyResponseComponent::setOptionBoxInteractionFaded (bool shouldFade)
 //=======================================================================================================//
 void FrequencyResponseComponent::resetBandToDefaultsAndDeactivate (int bandIndex)
 {
+    // Accept Bank1 internal 0-7 or global display 8-63.
+    const bool isExtended = bandIndex >= EqBand::kBankSize;
+    const int global = isExtended ? bandIndex
+                                  : (bandIndex >= 0 && bandIndex < EqBand::kBankSize
+                                         ? EqBand::displayFromInternal (bandIndex)
+                                         : -1);
+    const int internal = isExtended ? -1
+                                    : (bandIndex >= 0 && bandIndex < EqBand::kBankSize ? bandIndex : -1);
+    if (global < 0 && internal < 0)
+        return;
+
     auto setFloatParam = [this] (const juce::String& paramID, float value)
     {
+        if (paramID.isEmpty())
+            return;
         if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter (paramID)))
             param->setValueNotifyingHost (param->convertTo0to1 (value));
     };
 
     auto setBoolParam = [this] (const juce::String& paramID, bool value)
     {
+        if (paramID.isEmpty())
+            return;
         if (auto* param = processor.treeState.getParameter (paramID))
             param->setValueNotifyingHost (value ? 1.0f : 0.0f);
     };
 
-    switch (bandIndex)
+    auto setChoiceParam = [this] (const juce::String& paramID, int index)
     {
-        case 0:
-            setFloatParam ("band1Frequency", 300.0f);
-            setFloatParam ("band1Gain", 0.0f);
-            setFloatParam ("band1Q", 0.67f);
-            setFloatParam ("band1DynThreshold", -24.0f);
-            setFloatParam ("band1AttackMs", DynamicEq::attackMs);
-            setFloatParam ("band1ReleaseMs", DynamicEq::releaseMs);
-            setBoolParam ("band1OnOff", false);
-            setBoolParam ("band1Dynamic", false);
-            setBoolParam ("band1Spectral", false);
-            processor.clearDynamicModeGainMemory (0);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band1Type")))
-                *p = FilterType::bell;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band1Channel")))
-                *p = BandChannel::stereo;
-            break;
-        case 1:
-            setFloatParam ("band2Frequency", 1000.0f);
-            setFloatParam ("band2Gain", 0.0f);
-            setFloatParam ("band2Q", 0.67f);
-            setFloatParam ("band2DynThreshold", -24.0f);
-            setFloatParam ("band2AttackMs", DynamicEq::attackMs);
-            setFloatParam ("band2ReleaseMs", DynamicEq::releaseMs);
-            setBoolParam ("band2OnOff", false);
-            setBoolParam ("band2Dynamic", false);
-            setBoolParam ("band2Spectral", false);
-            processor.clearDynamicModeGainMemory (1);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band2Type")))
-                *p = FilterType::bell;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band2Channel")))
-                *p = BandChannel::stereo;
-            break;
-        case 2:
-            setFloatParam ("band3Frequency", 4000.0f);
-            setFloatParam ("band3Gain", 0.0f);
-            setFloatParam ("band3Q", 0.67f);
-            setFloatParam ("band3DynThreshold", -24.0f);
-            setFloatParam ("band3AttackMs", DynamicEq::attackMs);
-            setFloatParam ("band3ReleaseMs", DynamicEq::releaseMs);
-            setBoolParam ("band3OnOff", false);
-            setBoolParam ("band3Dynamic", false);
-            setBoolParam ("band3Spectral", false);
-            processor.clearDynamicModeGainMemory (2);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band3Type")))
-                *p = FilterType::bell;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band3Channel")))
-                *p = BandChannel::stereo;
-            break;
-        case 3:
-            setFloatParam ("band4Frequency", 8000.0f);
-            setFloatParam ("band4Gain", 0.0f);
-            setFloatParam ("band4Q", 0.67f);
-            setFloatParam ("band4DynThreshold", -24.0f);
-            setFloatParam ("band4AttackMs", DynamicEq::attackMs);
-            setFloatParam ("band4ReleaseMs", DynamicEq::releaseMs);
-            setBoolParam ("band4OnOff", false);
-            setBoolParam ("band4Dynamic", false);
-            setBoolParam ("band4Spectral", false);
-            processor.clearDynamicModeGainMemory (3);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band4Type")))
-                *p = FilterType::bell;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("band4Channel")))
-                *p = BandChannel::stereo;
-            break;
-        case 4:
-            setFloatParam ("highpassCutoff", 20.0f);
-            setFloatParam ("highpassQ", 0.5f);
-            setBoolParam ("highpassOnOff", false);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("highpassSlope")))
-                *p = FilterSlope::db12;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("highpassChannel")))
-                *p = BandChannel::stereo;
-            break;
-        case 5:
-            setFloatParam ("lowpassCutoff", 20000.0f);
-            setFloatParam ("lowpassQ", 0.5f);
-            setBoolParam ("lowpassOnOff", false);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("lowpassSlope")))
-                *p = FilterSlope::db12;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("lowpassChannel")))
-                *p = BandChannel::stereo;
-            break;
-        case 6:
-            setFloatParam ("highShelfFrequency", 5500.0f);
-            setFloatParam ("highShelfGain", 0.0f);
-            setFloatParam ("highShelfQ", 0.5f);
-            setFloatParam ("highShelfDynThreshold", -24.0f);
-            setFloatParam ("highShelfAttackMs", DynamicEq::attackMs);
-            setFloatParam ("highShelfReleaseMs", DynamicEq::releaseMs);
-            setBoolParam ("highShelfOnOff", false);
-            setBoolParam ("highShelfDynamic", false);
-            setBoolParam ("highShelfSpectral", false);
-            processor.clearDynamicModeGainMemory (6);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("highShelfType")))
-                *p = FilterType::highShelf;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("highShelfChannel")))
-                *p = BandChannel::stereo;
-            break;
-        case 7:
-            setFloatParam ("lowShelfFrequency", 100.0f);
-            setFloatParam ("lowShelfGain", 0.0f);
-            setFloatParam ("lowShelfQ", 0.5f);
-            setFloatParam ("lowShelfDynThreshold", -24.0f);
-            setFloatParam ("lowShelfAttackMs", DynamicEq::attackMs);
-            setFloatParam ("lowShelfReleaseMs", DynamicEq::releaseMs);
-            setBoolParam ("lowShelfOnOff", false);
-            setBoolParam ("lowShelfDynamic", false);
-            setBoolParam ("lowShelfSpectral", false);
-            processor.clearDynamicModeGainMemory (7);
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("lowShelfType")))
-                *p = FilterType::lowShelf;
-            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter ("lowShelfChannel")))
-                *p = BandChannel::stereo;
-            break;
-        default:
-            break;
+        if (paramID.isEmpty())
+            return;
+        if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (processor.treeState.getParameter (paramID)))
+        {
+            const int maxIdx = juce::jmax (0, p->choices.size() - 1);
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) juce::jlimit (0, maxIdx, index)));
+            p->endChangeGesture();
+        }
+    };
+
+    const int g = isExtended ? global : EqBand::displayFromInternal (internal);
+
+    const float defFreq = isExtended
+        ? EqBand::defaultFrequencyHzForGlobal (global)
+        : EqBand::defaultFrequencyHz (internal);
+
+    int defType = FilterType::bell;
+    float defQ = 0.67f;
+    if (! isExtended)
+    {
+        switch (internal)
+        {
+            case 4: defType = FilterType::highpass;  defQ = 0.5f; break;
+            case 5: defType = FilterType::lowpass;   defQ = 0.5f; break;
+            case 6: defType = FilterType::highShelf; defQ = 0.5f; break;
+            case 7: defType = FilterType::lowShelf;  defQ = 0.5f; break;
+            default: defType = FilterType::bell;     defQ = 0.67f; break;
+        }
+    }
+
+    setFloatParam (EqBand::frequencyParamIDForGlobal (g), defFreq);
+    setFloatParam (EqBand::gainParamIDForGlobal (g), 0.0f);
+    setFloatParam (EqBand::qParamIDForGlobal (g), defQ);
+    setBoolParam (EqBand::onOffParamIDForGlobal (g), false);
+    setChoiceParam (EqBand::typeParamIDForGlobal (g), defType);
+    setChoiceParam (EqBand::channelParamIDForGlobal (g), BandChannel::stereo);
+    setChoiceParam (EqBand::slopeParamIDForGlobal (g), FilterSlope::db12);
+
+    setBoolParam (DynamicEq::dynamicParamIDForGlobal (g), false);
+    setFloatParam (DynamicEq::thresholdParamIDForGlobal (g), -24.0f);
+    setFloatParam (DynamicEq::attackMsParamIDForGlobal (g), DynamicEq::attackMs);
+    setFloatParam (DynamicEq::releaseMsParamIDForGlobal (g), DynamicEq::releaseMs);
+
+    // Spectral S
+    setBoolParam (SpectralDynamics::spectralParamIDForGlobal (g), false);
+    setFloatParam (SpectralDynamics::spectralAmountParamIDForGlobal (g),
+                   SpectralDynamics::kDefaultSpectralDepth);
+    setBoolParam (SpectralDynamics::spectralExpandParamIDForGlobal (g), false);
+
+    // Saturation
+    setBoolParam (BandSaturation::satParamIDForGlobal (g), false);
+    setChoiceParam (BandSaturation::satModelParamIDForGlobal (g), 0);
+    setBoolParam (BandSaturation::satPostParamIDForGlobal (g), false);
+    setFloatParam (BandSaturation::satDriveDbParamIDForGlobal (g), BandSaturation::kDefaultSatDriveDb);
+
+    // Sidechain / MIDI
+    setBoolParam (BandSidechain::sidechainParamIDForGlobal (g), false);
+    setBoolParam (BandSidechain::midiParamIDForGlobal (g), false);
+
+    processor.clearDynamicModeGainMemory (isExtended ? global : internal);
+
+    setOptionBoxVisible (false);
+    multiSelectedBands.reset();
+
+    needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
+    needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
+    needsUpdateExtended = true;
+    needsUpdateCombined = true;
+    repaint();
+}
+
+void FrequencyResponseComponent::resetAllBandsToDefaults()
+{
+    processor.getUndoManager().beginNewTransaction ("Reset all bands");
+
+    for (int internal = 0; internal < EqBand::kBankSize; ++internal)
+        resetBandToDefaultsAndDeactivate (internal);
+
+    for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
+    {
+        // Only touch slots that exist in the layout / state
+        if (processor.treeState.getParameter (EqBand::onOffParamIDForGlobal (global)) == nullptr)
+            continue;
+        resetBandToDefaultsAndDeactivate (global);
     }
 
     setOptionBoxVisible (false);
-
+    multiSelectedBands.reset();
     needsUpdateCombined = true;
     repaint();
+}
+
+void FrequencyResponseComponent::showGraphContextMenu (juce::Point<int> screenPos,
+                                                       int hitBandInternalOrGlobal,
+                                                       float clickHz)
+{
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+
+    if (hitBandInternalOrGlobal >= 0)
+    {
+        menu.addItem (1, "Reset this band");
+        menu.addItem (2, "Band controls");
+        menu.addSeparator();
+    }
+    else
+    {
+        // Empty graph: create a free band at the click frequency with a chosen filter type.
+        const bool canCreate = processor.findFreeGlobalBand (preferredCreateBank) >= 0;
+        juce::PopupMenu createMenu;
+        const auto typeNames = FilterType::getChoiceNames();
+        const auto slopeNames = FilterSlope::getChoiceNames();
+
+        // Same hierarchy as OptionBox type menu (IDs: 100+type, 200+slope HP, 299 brick HP,
+        // 300+slope LP, 399 brick LP).
+        for (int t = 0; t < FilterType::numChoices; ++t)
+        {
+            if (! FilterType::isTopLevelMenuType (t))
+                continue;
+
+            if (t == FilterType::tiltShelf)
+            {
+                juce::PopupMenu hp;
+                for (int s = 0; s < FilterSlope::numChoices; ++s)
+                    hp.addItem (200 + s, slopeNames[s], canCreate, false);
+                hp.addSeparator();
+                hp.addItem (299, "Brickwall", canCreate, false);
+                createMenu.addSubMenu ("Highpass", hp, canCreate);
+
+                juce::PopupMenu lp;
+                for (int s = 0; s < FilterSlope::numChoices; ++s)
+                    lp.addItem (300 + s, slopeNames[s], canCreate, false);
+                lp.addSeparator();
+                lp.addItem (399, "Brickwall", canCreate, false);
+                createMenu.addSubMenu ("Lowpass", lp, canCreate);
+            }
+
+            createMenu.addItem (100 + t, typeNames[t], canCreate, false);
+        }
+
+        menu.addSubMenu ("Create band at this frequency", createMenu, canCreate);
+        menu.addSeparator();
+    }
+
+    menu.addItem (3, "Reset all bands");
+
+    const float createHz = juce::jlimit (20.0f, 20000.0f, clickHz);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+                            juce::Rectangle<int> (screenPos.x, screenPos.y, 1, 1)),
+        [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this),
+         hitBandInternalOrGlobal, createHz] (int result)
+        {
+            if (safe == nullptr || result == 0)
+                return;
+
+            if (result == 1 && hitBandInternalOrGlobal >= 0)
+            {
+                safe->processor.getUndoManager().beginNewTransaction ("Reset band");
+                safe->resetBandToDefaultsAndDeactivate (hitBandInternalOrGlobal);
+            }
+            else if (result == 2 && hitBandInternalOrGlobal >= 0)
+            {
+                safe->showOptionBoxForBand (hitBandInternalOrGlobal);
+            }
+            else if (result == 3)
+            {
+                safe->resetAllBandsToDefaults();
+            }
+            else if (hitBandInternalOrGlobal < 0)
+            {
+                // Create band at click frequency with chosen filter type (and optional HP/LP slope).
+                int type = -1;
+                int slope = -1;
+
+                if (result >= 200 && result < 200 + FilterSlope::numChoices)
+                {
+                    type = FilterType::highpass;
+                    slope = result - 200;
+                }
+                else if (result == 299)
+                {
+                    type = FilterType::brickwallHighpass;
+                }
+                else if (result >= 300 && result < 300 + FilterSlope::numChoices)
+                {
+                    type = FilterType::lowpass;
+                    slope = result - 300;
+                }
+                else if (result == 399)
+                {
+                    type = FilterType::brickwallLowpass;
+                }
+                else if (result >= 100 && result < 100 + FilterType::numChoices)
+                {
+                    const int t = result - 100;
+                    if (FilterType::isTopLevelMenuType (t))
+                        type = t;
+                }
+
+                if (type < 0)
+                    return;
+
+                safe->processor.getUndoManager().beginNewTransaction ("Create band");
+                safe->activateOrSelectBandAtFrequency (createHz, type, false, slope);
+            }
+        });
 }
 
 float FrequencyResponseComponent::xToFrequency (float x) const
@@ -4018,7 +4368,16 @@ void FrequencyResponseComponent::updateGroupDrag (const juce::MouseEvent& event)
 
         if (a.usesGain)
         {
-            const float newGain = juce::jlimit (-24.0f, 24.0f, a.gainDb + dDb);
+            float newGain = juce::jlimit (-24.0f, 24.0f, a.gainDb + dDb);
+            // Auto-zoom when multi-select drag hits the current dB scale edge (boost or cut).
+            // Use abs need via expandEqDisplayRangeToFitDb; recompute delta after expand.
+            if (std::abs (newGain) >= getEqDisplayRangeDb() * 0.97f
+                && expandEqDisplayRangeToFitDb (newGain))
+            {
+                // Recompute delta under the new scale so remaining bands stay in sync.
+                const float dDb2 = yToDb (groupDragOrigin.y + dY, h) - yToDb (groupDragOrigin.y, h);
+                newGain = juce::jlimit (-24.0f, 24.0f, a.gainDb + dDb2);
+            }
             if (auto* paramG = dynamic_cast<juce::RangedAudioParameter*> (
                     processor.treeState.getParameter (gainParamIdForBandKey (a.bandKey))))
                 paramG->setValueNotifyingHost (paramG->convertTo0to1 (newGain));
@@ -4107,7 +4466,7 @@ void FrequencyResponseComponent::updateAuditionBandpassFromMouse (const juce::Mo
 {
     const float freq = xToFrequency (event.position.x);
     const float h = juce::jmax (1.0f, (float) getPlotHeight());
-    // Top of graph = tight Q, bottom = wide (avoids whistling via processor clamp 0.55–8).
+    // Top of graph = tight Q, bottom = wide (avoids whistling via processor clamp 0.55-8).
     const float t = 1.0f - juce::jlimit (0.0f, 1.0f, event.position.y / h);
     const float q = juce::jmap (t, 0.55f, 8.0f);
     auditionBandpassDragging = true;
@@ -4117,8 +4476,8 @@ void FrequencyResponseComponent::updateAuditionBandpassFromMouse (const juce::Mo
 
 int FrequencyResponseComponent::bandIndexForFrequencyZone (float frequencyHz) const
 {
-    // Zones: HP <50 | LS 50–150 | 4 bells (log) 150–8k | HS 8–12k | LP 12–20k
-    // Internal indices: 4=HP(Band1), 7=LS(Band2), 0–3=Bells(Band3–6), 6=HS(Band7), 5=LP(Band8)
+    // Zones: HP <50 | LS 50-150 | 4 bells (log) 150-8k | HS 8-12k | LP 12-20k
+    // Internal indices: 4=HP(Band1), 7=LS(Band2), 0-3=Bells(Band3-6), 6=HS(Band7), 5=LP(Band8)
     constexpr float kHpMaxHz = 50.0f;
     constexpr float kLsMaxHz = 150.0f;
     constexpr float kPeakMinHz = 150.0f;
@@ -4128,10 +4487,10 @@ int FrequencyResponseComponent::bandIndexForFrequencyZone (float frequencyHz) co
     const float f = juce::jlimit (20.0f, 20000.0f, frequencyHz);
 
     if (f < kHpMaxHz)
-        return 4; // Band 1 — Highpass
+        return 4; // Band 1 - Highpass
 
     if (f < kLsMaxHz)
-        return 7; // Band 2 — Low shelf
+        return 7; // Band 2 - Low shelf
 
     if (f < kPeakMaxHz)
     {
@@ -4142,14 +4501,15 @@ int FrequencyResponseComponent::bandIndexForFrequencyZone (float frequencyHz) co
     }
 
     if (f < kHsMaxHz)
-        return 6; // Band 7 — High shelf
+        return 6; // Band 7 - High shelf
 
-    return 5; // Band 8 — Lowpass
+    return 5; // Band 8 - Lowpass
 }
 
 void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequencyHz,
                                                                   int typeOverride,
-                                                                  bool preferPeaking)
+                                                                  bool preferPeaking,
+                                                                  int slopeOverride)
 {
     const float freq = juce::jlimit (20.0f, 20000.0f, frequencyHz);
     int preferredBand = bandIndexForFrequencyZone (frequencyHz);
@@ -4177,14 +4537,14 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
     };
 
     // Choice params: set by index via convertTo0to1 (same path as OptionBox).
-    auto setTypeParamById = [this] (const juce::String& paramID, int typeIndex)
+    auto setChoiceParamById = [this] (const juce::String& paramID, int choiceIndex)
     {
         if (paramID.isEmpty())
             return;
         if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
                 processor.treeState.getParameter (paramID)))
         {
-            const int clamped = juce::jlimit (0, juce::jmax (0, choice->choices.size() - 1), typeIndex);
+            const int clamped = juce::jlimit (0, juce::jmax (0, choice->choices.size() - 1), choiceIndex);
             choice->setValueNotifyingHost (choice->convertTo0to1 ((float) clamped));
         }
     };
@@ -4198,10 +4558,17 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
         return FilterType::defaultTypeForBandIndex (bank1InternalOrNeg1);
     };
 
+    auto applySlopeIfNeeded = [&] (int globalDisplay)
+    {
+        if (slopeOverride < 0)
+            return;
+        setChoiceParamById (FilterSlope::paramIDForGlobal (globalDisplay), slopeOverride);
+    };
+
     auto activateGlobalBand = [&] (int globalDisplay)
     {
         // Bank 1 slots keep channel-strip defaults (HP/LS/Bell/HS/LP).
-        // Extended slots use frequency-zone type (never Bax — see typeForFrequencyZone).
+        // Extended slots use frequency-zone type (never Bax - see typeForFrequencyZone).
         const bool isBank1 = globalDisplay < EqBand::kBankSize;
         const int createType = isBank1
             ? resolveCreateType (EqBand::internalFromDisplay (globalDisplay), false)
@@ -4211,7 +4578,8 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
 
         setFloatParam (EqBand::frequencyParamIDForGlobal (globalDisplay), freq);
         setFloatParam (EqBand::gainParamIDForGlobal (globalDisplay), 0.0f);
-        setTypeParamById (FilterType::paramIDForGlobal (globalDisplay), createType);
+        setChoiceParamById (FilterType::paramIDForGlobal (globalDisplay), createType);
+        applySlopeIfNeeded (globalDisplay);
         setBoolParam (EqBand::onOffParamIDForGlobal (globalDisplay), true);
 
         if (isBank1)
@@ -4340,7 +4708,7 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
 
     if (preferPeaking && ! preferredBusy && preferredBand >= 0 && preferredBand <= 3)
     {
-        // Harmonic path: preferred peaking slot is free — take it.
+        // Harmonic path: preferred peaking slot is free - take it.
         bandIndex = preferredBand;
     }
     else if (needAlternateSlot)
@@ -4348,7 +4716,7 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
         int peakAnchor = preferredBand;
         if (preferredBand < 0 || preferredBand > 3)
         {
-            // HP / LP / shelf already on → borrow a free peaking slot near the click.
+            // HP / LP / shelf already on -> borrow a free peaking slot near the click.
             constexpr float kPeakMinHz = 300.0f;
             constexpr float kPeakMaxHz = 11999.0f;
             peakAnchor = bandIndexForFrequencyZone (juce::jlimit (kPeakMinHz, kPeakMaxHz, freq));
@@ -4371,7 +4739,7 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
             }
         }
 
-        // Bank 1 full (or harmonic with no free peaks) — extended slot.
+        // Bank 1 full (or harmonic with no free peaks) - extended slot.
         if (bandIndex < 0)
         {
             const int freeGlobal = processor.findFreeGlobalBand (preferredCreateBank);
@@ -4389,65 +4757,66 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
     }
 
     // Activate unused Bank 1 band at click Hz / 0 dB.
-    // Type follows the slot's channel-strip default (peaks → Bell, LS → Lo Shelf, …),
-    // unless typeOverride is set (e.g. Shift+double harmonic → always Bell).
+    // Type follows the slot's channel-strip default (peaks -> Bell, LS -> Lo Shelf, ...),
+    // unless typeOverride is set (e.g. Shift+double harmonic -> always Bell).
     const int createType = resolveCreateType (bandIndex, false);
+    const int createGlobal = EqBand::displayFromInternal (bandIndex);
 
     switch (bandIndex)
     {
         case 0:
             setFloatParam ("band1Frequency", freq);
             setFloatParam ("band1Gain", 0.0f);
-            setTypeParamById ("band1Type", createType);
+            setChoiceParamById ("band1Type", createType);
             setBoolParam ("band1OnOff", true);
             needsUpdateBand1 = true;
             break;
         case 1:
             setFloatParam ("band2Frequency", freq);
             setFloatParam ("band2Gain", 0.0f);
-            setTypeParamById ("band2Type", createType);
+            setChoiceParamById ("band2Type", createType);
             setBoolParam ("band2OnOff", true);
             needsUpdateBand2 = true;
             break;
         case 2:
             setFloatParam ("band3Frequency", freq);
             setFloatParam ("band3Gain", 0.0f);
-            setTypeParamById ("band3Type", createType);
+            setChoiceParamById ("band3Type", createType);
             setBoolParam ("band3OnOff", true);
             needsUpdateBand3 = true;
             break;
         case 3:
             setFloatParam ("band4Frequency", freq);
             setFloatParam ("band4Gain", 0.0f);
-            setTypeParamById ("band4Type", createType);
+            setChoiceParamById ("band4Type", createType);
             setBoolParam ("band4OnOff", true);
             needsUpdateBand4 = true;
             break;
         case 4:
             setFloatParam ("highpassCutoff", freq);
             setFloatParam ("highpassGain", 0.0f);
-            setTypeParamById ("highpassType", createType);
+            setChoiceParamById ("highpassType", createType);
             setBoolParam ("highpassOnOff", true);
             needsUpdateHighpass = true;
             break;
         case 5:
             setFloatParam ("lowpassCutoff", freq);
             setFloatParam ("lowpassGain", 0.0f);
-            setTypeParamById ("lowpassType", createType);
+            setChoiceParamById ("lowpassType", createType);
             setBoolParam ("lowpassOnOff", true);
             needsUpdateLowpass = true;
             break;
         case 6:
             setFloatParam ("highShelfFrequency", freq);
             setFloatParam ("highShelfGain", 0.0f);
-            setTypeParamById ("highShelfType", createType);
+            setChoiceParamById ("highShelfType", createType);
             setBoolParam ("highShelfOnOff", true);
             needsUpdateHighShelf = true;
             break;
         case 7:
             setFloatParam ("lowShelfFrequency", freq);
             setFloatParam ("lowShelfGain", 0.0f);
-            setTypeParamById ("lowShelfType", createType);
+            setChoiceParamById ("lowShelfType", createType);
             setBoolParam ("lowShelfOnOff", true);
             needsUpdateLowShelf = true;
             break;
@@ -4455,6 +4824,7 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
             break;
     }
 
+    applySlopeIfNeeded (createGlobal);
     selectBandOnly (bandIndex);
 }
 
@@ -4463,6 +4833,14 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
 {
     if (handlePianoMouseDown (event))
         return;
+
+    // Learn chrome owns its clicks - do not treat as graph handle / selection work.
+    if (event.eventComponent == &learnButton)
+    {
+        if (event.mods.isPopupMenu())
+            showLearnMenu();
+        return;
+    }
 
     if (event.eventComponent == &matchFreezeButton && event.mods.isPopupMenu())
     {
@@ -4593,11 +4971,11 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
         lastHandlePopupWasOptionBox = false;
     }
 
-    // Clicks inside the option box are for its controls — don't start handle drags.
+    // Clicks inside the option box are for its controls - don't start handle drags.
     if (clickInsideOptionBox)
         return;
 
-    // Resolve primary band key for multi-select (Bank1 internal 0–7, extended global 8+).
+    // Resolve primary band key for multi-select (Bank1 internal 0-7, extended global 8+).
     // Spectral amount handles are excluded from multi-select.
     int hitBandKey = -1;
     if (! preferSpectralAmount)
@@ -4651,6 +5029,58 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
         return;
     }
 
+    // Right-click a handle: context menu (reset / controls).
+    if (event.mods.isPopupMenu() && clickedAnyHandle && ! anyHandleDragging)
+    {
+        int band = -1;
+        if (clickedHandle1)      band = 0;
+        else if (clickedHandle2) band = 1;
+        else if (clickedHandle3) band = 2;
+        else if (clickedHandle4) band = 3;
+        else if (clickedHandle5) band = 4;
+        else if (clickedHandle6) band = 5;
+        else if (clickedHandle7) band = 6;
+        else if (clickedHandle8) band = 7;
+
+        if (band >= 0)
+            showGraphContextMenu (event.getScreenPosition(), band);
+        else if (clickedExtendedGlobal >= 0)
+            showGraphContextMenu (event.getScreenPosition(), clickedExtendedGlobal);
+        return;
+    }
+
+    // Right-click empty graph -> create band / reset-all context menu.
+    if (event.mods.isPopupMenu() && ! clickedAnyHandle && ! anyHandleDragging)
+    {
+        showGraphContextMenu (event.getScreenPosition(), -1, xToFrequency (event.position.x));
+        return;
+    }
+
+    // Double-click handle: full reset + deactivate (before any drag starts).
+    if (event.getNumberOfClicks() >= 2 && clickedAnyHandle && ! event.mods.isPopupMenu())
+    {
+        int band = -1;
+        if (clickedHandle1)      band = 0;
+        else if (clickedHandle2) band = 1;
+        else if (clickedHandle3) band = 2;
+        else if (clickedHandle4) band = 3;
+        else if (clickedHandle5) band = 4;
+        else if (clickedHandle6) band = 5;
+        else if (clickedHandle7) band = 6;
+        else if (clickedHandle8) band = 7;
+
+        processor.getUndoManager().beginNewTransaction ("Reset band");
+        if (band >= 0)
+            resetBandToDefaultsAndDeactivate (band);
+        else if (clickedExtendedGlobal >= 0)
+            resetBandToDefaultsAndDeactivate (clickedExtendedGlobal);
+        return;
+    }
+
+    // Double-click empty graph is handled in mouseDoubleClick (create band).
+    if (event.getNumberOfClicks() >= 2)
+        return;
+
     if (preferSpectralAmount && ! anyHandleDragging)
     {
         static const char* kFreqIds[8] = {
@@ -4699,51 +5129,6 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
         processor.treeState.getParameter (EqBand::gainParamIDForGlobal (clickedExtendedGlobal))->beginChangeGesture();
         return;
     }
-
-    // Right-click a handle: first opens OptionBox; second (same handle) opens mod source menu.
-    if (event.mods.isPopupMenu() && clickedAnyHandle && ! anyHandleDragging)
-    {
-        int band = -1;
-        if (clickedHandle1)      band = 0;
-        else if (clickedHandle2) band = 1;
-        else if (clickedHandle3) band = 2;
-        else if (clickedHandle4) band = 3;
-        else if (clickedHandle5) band = 4;
-        else if (clickedHandle6) band = 5;
-        else if (clickedHandle7) band = 6;
-        else if (clickedHandle8) band = 7;
-
-        if (band >= 0)
-        {
-            const bool optionVisible = optionBoxMenu != nullptr && optionBoxMenu->isVisible();
-            const bool sameBandAsOption = optionVisible
-                                          && optionBoxMenu->getCurrentBandIndex() == band
-                                          && lastOptionBoxBandIndex == band
-                                          && lastHandlePopupWasOptionBox;
-
-            if (sameBandAsOption)
-            {
-                showHandleModMenu (band);
-            }
-            else
-            {
-                float hx = handleX, hy = handleY;
-                if (band == 1) { hx = handleX2; hy = handleY2; }
-                else if (band == 2) { hx = handleX3; hy = handleY3; }
-                else if (band == 3) { hx = handleX4; hy = handleY4; }
-                else if (band == 4) { hx = handleX5; hy = handleY5; }
-                else if (band == 5) { hx = handleX6; hy = handleY6; }
-                else if (band == 6) { hx = handleX7; hy = handleY7; }
-                else if (band == 7) { hx = handleX8; hy = handleY8; }
-                showOptionBoxForHandle (band, hx, hy);
-            }
-        }
-        return;
-    }
-
-    // Double-click is handled in mouseDoubleClick (deactivate + reset).
-    if (event.getNumberOfClicks() >= 2)
-        return;
 
     if (clickedHandle1 && ! anyHandleDragging)
     {
@@ -4920,7 +5305,7 @@ void FrequencyResponseComponent::mouseDoubleClick (const juce::MouseEvent& event
     const int extendedHit = (bank1Hit < 0) ? hitExtendedGlobal() : -1;
     const bool hitHandle = (bank1Hit >= 0 || extendedHit >= 0);
 
-    // Shift + double-click handle → spawn empty Bell at 2× frequency (harmonic stack).
+    // Shift + double-click handle -> spawn empty Bell at 2x frequency (harmonic stack).
     if (hitHandle && event.mods.isShiftDown())
     {
         const float srcHz = readBandFrequencyHz (bank1Hit, extendedHit);
@@ -4930,41 +5315,22 @@ void FrequencyResponseComponent::mouseDoubleClick (const juce::MouseEvent& event
         return;
     }
 
-    // Double-click on an existing (active) handle → reset/deactivate that band.
+    // Handle double-click is handled on mouseDown (full reset). Keep this path as backup.
     if (bank1Hit >= 0)
     {
+        processor.getUndoManager().beginNewTransaction ("Reset band");
         resetBandToDefaultsAndDeactivate (bank1Hit);
         return;
     }
 
     if (extendedHit >= 0)
     {
-        // Deactivate extended band and clear dynamic dual-mode memory.
-        auto setF = [this] (const juce::String& id, float v)
-        {
-            if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter (id)))
-                param->setValueNotifyingHost (param->convertTo0to1 (v));
-        };
-        auto setB = [this] (const juce::String& id, bool v)
-        {
-            if (auto* param = processor.treeState.getParameter (id))
-                param->setValueNotifyingHost (v ? 1.0f : 0.0f);
-        };
-
-        setB (EqBand::onOffParamIDForGlobal (extendedHit), false);
-        setB (DynamicEq::dynamicParamIDForGlobal (extendedHit), false);
-        setF (EqBand::gainParamIDForGlobal (extendedHit), 0.0f);
-        setF (DynamicEq::thresholdParamIDForGlobal (extendedHit), -24.0f);
-        setF (DynamicEq::attackMsParamIDForGlobal (extendedHit), DynamicEq::attackMs);
-        setF (DynamicEq::releaseMsParamIDForGlobal (extendedHit), DynamicEq::releaseMs);
-        processor.clearDynamicModeGainMemory (extendedHit);
-        needsUpdateExtended = true;
-        needsUpdateCombined = true;
-        repaint();
+        processor.getUndoManager().beginNewTransaction ("Reset band");
+        resetBandToDefaultsAndDeactivate (extendedHit);
         return;
     }
 
-    // Empty graph double-click → enable a free band at click frequency (0 dB).
+    // Empty graph double-click -> enable a free band at click frequency (0 dB).
     activateOrSelectBandAtFrequency (xToFrequency (event.position.x));
 }
 
@@ -5013,7 +5379,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 
     }
 
-    // Spectral Amount handle drag (Y → Amount, X → shared band frequency)
+    // Spectral Amount handle drag (Y -> Amount, X -> shared band frequency)
     if (activeSpectralAmountSlot >= 0
         && activeSpectralAmountSlot < kNumSpectralSlots
         && spectralAmountHandles[(size_t) activeSpectralAmountSlot].dragging)
@@ -5044,7 +5410,10 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         const float newFreq = std::pow (10.0f, (float) (logMinHz + (logMaxHz - logMinHz) * newX / (float) (w - 1)));
         const bool expand = rawBoolParam (parameters, kExpandIds[activeSpectralAmountSlot]);
         const float amountDb = yToDb (newY, (float) h);
-        const float newAmount = displayDbToSpectralAmount (amountDb, expand, getEqDisplayRangeDb());
+        // Invert eqScale so dragging maps to the stored Amount param (0-max).
+        const float newAmount = displayDbToSpectralAmount (amountDb, expand,
+                                                           getEqDisplayRangeDbVisual(),
+                                                           processor.getEqScale());
 
         if (auto* paramF = dynamic_cast<juce::RangedAudioParameter*> (
                 processor.treeState.getParameter (kFreqIds[activeSpectralAmountSlot])))
@@ -5076,7 +5445,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         return;
     }
 
-    // Extended-band handle drag (Band 9–64)
+    // Extended-band handle drag (Band 9-64)
     for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
     {
         auto& hs = extendedHandles[(size_t) (global - EqBand::kBankSize)];
@@ -5099,7 +5468,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 
         if (FilterType::usesGain (type))
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newY, (float) h));
+            const float gainDb = gainDbFromHandleY (newY, (float) h);
             if (auto* paramG = dynamic_cast<juce::RangedAudioParameter*> (
                     processor.treeState.getParameter (EqBand::gainParamIDForGlobal (global))))
                 paramG->setValueNotifyingHost (paramG->convertTo0to1 (gainDb));
@@ -5137,9 +5506,9 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         else
             handleY = dbToY (0.0f, static_cast<float> (h));
 
-        // Calculate newBand1Gain based on the Y position (display-range aware)
+        // Calculate newBand1Gain based on the Y position (auto-expands dB range at edges)
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter ("band1Gain")))
                 newBand1Gain = paramGain->convertTo0to1 (gainDb);
             else
@@ -5214,7 +5583,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         // Calculate newBand2Gain based on the Y position (display-range aware)
         float newBand2Gain = 0.0f;
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue2, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue2, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter ("band2Gain")))
                 newBand2Gain = paramGain->convertTo0to1 (gainDb);
             else
@@ -5281,7 +5650,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         // Calculate newBand3Gain based on the Y position (display-range aware)
         float newBand3Gain = 0.0f;
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue3, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue3, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter ("band3Gain")))
                 newBand3Gain = paramGain->convertTo0to1 (gainDb);
             else
@@ -5353,7 +5722,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         // Calculate newBand4Gain based on the Y position (display-range aware)
         float newBand4Gain = 0.0f;
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue4, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue4, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter ("band4Gain")))
                 newBand4Gain = paramGain->convertTo0to1 (gainDb);
             else
@@ -5430,7 +5799,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 
         if (FilterType::usesGain (hpType))
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue5, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue5, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (
                     processor.treeState.getParameter ("highpassGain")))
                 processor.treeState.getParameter ("highpassGain")->setValueNotifyingHost (
@@ -5490,7 +5859,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
 
         if (FilterType::usesGain (lpType))
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue6, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue6, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (
                     processor.treeState.getParameter ("lowpassGain")))
                 processor.treeState.getParameter ("lowpassGain")->setValueNotifyingHost (
@@ -5544,7 +5913,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         // Calculate newHighShelfGain based on the Y position (display-range aware)
         float newHighShelfGain = 0.0f;
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue7, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue7, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter ("highShelfGain")))
                 newHighShelfGain = paramGain->convertTo0to1 (gainDb);
             else
@@ -5616,7 +5985,7 @@ void FrequencyResponseComponent::mouseDrag(const juce::MouseEvent& event)
         // Calculate newLowShelfGain based on the Y position (display-range aware)
         float newLowShelfGain = 0.0f;
         {
-            const float gainDb = juce::jlimit (-24.0f, 24.0f, yToDb (newYValue8, static_cast<float> (h)));
+            const float gainDb = gainDbFromHandleY (newYValue8, static_cast<float> (h));
             if (auto* paramGain = dynamic_cast<juce::RangedAudioParameter*> (processor.treeState.getParameter ("lowShelfGain")))
                 newLowShelfGain = paramGain->convertTo0to1 (gainDb);
             else
@@ -5679,7 +6048,7 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
             juce::jmin (marqueeStart.y, marqueeEnd.y),
             juce::jmax (marqueeStart.x, marqueeEnd.x),
             juce::jmax (marqueeStart.y, marqueeEnd.y));
-        // Tiny drag counts as click → clear selection (already cleared on mouseDown).
+        // Tiny drag counts as click -> clear selection (already cleared on mouseDown).
         if (rect.getWidth() >= 4.0f || rect.getHeight() >= 4.0f)
             setMultiSelectionFromRect (rect);
         else
@@ -5827,7 +6196,7 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
     if (! wasDragging)
         return;
 
-    // Final snap to released parameter values, then freeze — no further curve animation.
+    // Final snap to released parameter values, then freeze - no further curve animation.
     needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
     needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
     needsUpdateCombined = true;
@@ -5903,7 +6272,7 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
         wheelOnBand (distanceToHandle7 <= clickThreshold, 6, "highShelfType", FilterType::highShelf, "highShelfQ", 6, needsUpdateHighShelf);
         wheelOnBand (distanceToHandle8 <= clickThreshold, 7, "lowShelfType",  FilterType::lowShelf,  "lowShelfQ",  7, needsUpdateLowShelf);
 
-        // Extended bands (Band 9–64)
+        // Extended bands (Band 9-64)
         for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
         {
             const auto& hs = extendedHandles[(size_t) (global - EqBand::kBankSize)];
@@ -6009,7 +6378,7 @@ void FrequencyResponseComponent::resized()
     needsUpdateCombined = true;
 
     // Keep handle caches (and a placed OptionBox) proportional to graph size.
-    // Do not snap OptionBox back to the handle — user placement sticks until another band is selected.
+    // Do not snap OptionBox back to the handle - user placement sticks until another band is selected.
     if (previousGraphWidth > 0 && previousGraphHeight > 0 && getWidth() > 0 && getPlotHeight() > 0)
     {
         const float sx = (float) getWidth() / (float) previousGraphWidth;
@@ -6030,7 +6399,12 @@ void FrequencyResponseComponent::resized()
         scaleHandle (handleX7, handleY7);
         scaleHandle (handleX8, handleY8);
 
-        if (optionBoxMenu != nullptr && optionBoxMenu->isVisible())
+        // Only scale placement while the box is still parented to the graph.
+        // When raised onto EqEditor (above mod matrix), getX/Y are editor coords —
+        // multiplying by graph sx/sy teleports the box. Also skip mid-drag.
+        if (optionBoxMenu != nullptr && optionBoxMenu->isVisible()
+            && optionBoxMenu->getParentComponent() == this
+            && ! optionBoxMenu->isDragInProgress())
             optionBoxMenu->setTopLeftPosition (juce::roundToInt ((float) optionBoxMenu->getX() * sx),
                                                juce::roundToInt ((float) optionBoxMenu->getY() * sy));
     }
@@ -6039,9 +6413,14 @@ void FrequencyResponseComponent::resized()
     previousGraphHeight = getPlotHeight();
 
     if (optionBoxMenu != nullptr)
-        optionBoxMenu->updateUiScaleFromParent();
+    {
+        // Pin scale to the graph width even when the box is rehosted on EqEditor.
+        optionBoxMenu->setUiScaleReferenceWidth ((float) getWidth());
+        if (! optionBoxMenu->isDragInProgress())
+            optionBoxMenu->updateUiScaleFromParent();
+    }
 
-    // Minimize / expand — top-left on the graph so it stays usable when the faceplate is hidden.
+    // Minimize / expand - top-left on the graph so it stays usable when the faceplate is hidden.
     {
         constexpr int btn = 22;
         constexpr int margin = 6;
@@ -6049,7 +6428,7 @@ void FrequencyResponseComponent::resized()
         uiModeButton.toFront (false);
     }
 
-    // Proportional Q — bottom-left, above piano strip.
+    // Proportional Q - bottom-left, above piano strip.
     {
         constexpr int btnW = 22;
         constexpr int btnH = 18;
@@ -6064,7 +6443,7 @@ void FrequencyResponseComponent::resized()
         proportionalQButton.toFront (false);
     }
 
-    // Transient / Sustain strip — bottom center between P (left) and Mod/Range (right).
+    // Transient / Sustain strip - bottom center between P (left) and Mod/Range (right).
     syncStructuralSplitChrome();
     layoutStructuralSplitChrome();
 
@@ -6081,6 +6460,9 @@ void FrequencyResponseComponent::resized()
         constexpr int pianoW = 22;
         constexpr int rangeLabelW = 40; // "Range" caption
         constexpr int modBtnW = 34;
+        constexpr int eqScaleW = 40; // "100%" plain label
+        // Taller than the chrome row so hover up/down arrows fit above and below the %.
+        constexpr int eqScaleH = 36;
         auto area = getLocalBounds();
         area.removeFromRight (marginRight);
         area.removeFromBottom (marginBottom);
@@ -6111,14 +6493,26 @@ void FrequencyResponseComponent::resized()
         eqRangeLabel.setBounds (row.removeFromRight (rangeLabelW));
         row.removeFromRight (gap);
         modButton.setBounds (row.removeFromRight (modBtnW));
+        row.removeFromRight (gap);
+        // Left of Mod / Range cluster - plain % scale for EQ + Match depth.
+        // Centre vertically on the chrome row; height extends for hover arrows.
+        {
+            const auto scaleSlot = row.removeFromRight (eqScaleW);
+            const int cy = scaleSlot.getCentreY();
+            eqScaleScrubber.setBounds (scaleSlot.getX(),
+                                       cy - eqScaleH / 2,
+                                       eqScaleW,
+                                       eqScaleH);
+        }
         eqRangePlusButton.toFront (false);
         eqRangeMinusButton.toFront (false);
         eqRangeLabel.toFront (false);
         modButton.toFront (false);
+        eqScaleScrubber.toFront (false);
     }
 
-    // Match — graph bottom, left of Scope (EqEditor refreshes anchor after Scope layout).
-    layoutMatchChrome();
+    // Match - graph bottom, left of Scope (EqEditor refreshes anchor after Scope layout).
+    // layoutMatchChrome is invoked inside syncMatchChrome / syncLearnChrome - avoid triple layout.
     syncMatchChrome();
 
     repaint();
@@ -6330,7 +6724,7 @@ void FrequencyResponseComponent::paintPianoStrip (juce::Graphics& g)
     // FabFilter Pro-Q: highlighted 88-key grand A0..C8 (~27.5 Hz .. 4186 Hz).
     // Each semitone is one column on the log-f axis. White-note columns are full-height
     // white keys; black-note columns are a light key-bed with a shorter black key on top
-    // (never leave black columns as empty dark gaps — those looked like "black white keys").
+    // (never leave black columns as empty dark gaps - those looked like "black white keys").
     const float keyTop = (float) y0 + 2.0f;
     const float keyH = (float) h - 4.0f;
     const float blackH = keyH * 0.58f;
@@ -6513,11 +6907,26 @@ void FrequencyResponseComponent::layoutMatchChrome()
     // Match X from EqEditor anchor; Y always matches Mod / Proportional Q (above piano).
     const int btnH = matchChromeBtnH;
     const int matchW = matchChromeMatchW;
+    // Size Learn + status to full text (no ellipsis) - same height as Match.
+    {
+        const float fontH = juce::jmax (11.0f, (float) btnH * 0.72f);
+        const juce::Font font (fontH);
+        const int learnTextW = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, "Learn"));
+        const int cancelTextW = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, "Cancel"));
+        matchChromeLearnW = juce::jmax (matchW, juce::jmax (learnTextW, cancelTextW) + 14);
+
+        const juce::String statusText = learnStatusLabel.getText();
+        const juce::String measure = statusText.isNotEmpty() ? statusText : "Vocals 100%";
+        const int statusTextW = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, measure));
+        matchChromeLearnStatusW = juce::jmax (56, statusTextW + 10);
+    }
+    const int learnW = matchChromeLearnW;
+    const int learnStatusW = matchChromeLearnStatusW;
     constexpr int curveW = 22;
     constexpr int freezeW = 22;
     // Same size as SideCheck AMT/HP/LP image knobs (chrome button height).
     const int knob = btnH;
-    constexpr int labelW = 20; // HP / LP — same 11 pt as Range
+    constexpr int labelW = 20; // HP / LP - same 11 pt as Range
     constexpr int gap = 4;
     constexpr int marginBottomBase = 18;
     constexpr int marginSide = 8;
@@ -6526,17 +6935,18 @@ void FrequencyResponseComponent::layoutMatchChrome()
                           && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
 
     constexpr int amtLabelW = 28;
-    const int stripW = extrasOn
+    const int matchStripW = extrasOn
         ? (matchW + gap + curveW + gap + amtLabelW + knob
            + gap + labelW + knob + gap + labelW + knob
            + gap + freezeW)
         : matchW;
+    const int stripW = matchStripW + gap + learnW + gap + learnStatusW;
 
     int rightLimit = getWidth() - marginSide;
     if (modButton.isVisible() && modButton.getWidth() > 0)
         rightLimit = juce::jmin (rightLimit, modButton.getX() - gap);
 
-    // Same bottom chrome row as Mod / P — never follow faceplate-trim anchors for Y.
+    // Same bottom chrome row as Mod / P - never follow faceplate-trim anchors for Y.
     const int marginBottom = marginBottomBase + getPianoStripHeight();
     auto chromeArea = getLocalBounds();
     chromeArea.removeFromBottom (marginBottom);
@@ -6577,7 +6987,7 @@ void FrequencyResponseComponent::layoutMatchChrome()
         x += knob + gap;
 
         matchFreezeButton.setBounds (x, btnY, freezeW, btnH);
-        x += freezeW;
+        x += freezeW + gap;
     }
     else
     {
@@ -6591,7 +7001,15 @@ void FrequencyResponseComponent::layoutMatchChrome()
         matchFreezeButton.setBounds ({});
     }
 
-    matchChromeBounds = juce::Rectangle<int> (x0, btnY, juce::jmax (matchW, x - x0), btnH);
+    learnButton.setBounds (x, btnY, learnW, btnH);
+    x += learnW + gap;
+
+    learnStatusLabel.setBounds (x, btnY, learnStatusW, btnH);
+    x += learnStatusW;
+
+    // Clamp so a wide Learn+status strip never goes negative under narrow graph widths.
+    const int stripUsed = juce::jmax (1, x - x0);
+    matchChromeBounds = juce::Rectangle<int> (x0, btnY, stripUsed, btnH);
 
     matchButton.toFront (false);
     if (extrasOn)
@@ -6605,6 +7023,8 @@ void FrequencyResponseComponent::layoutMatchChrome()
         matchLpKnob.toFront (false);
         matchFreezeButton.toFront (false);
     }
+    learnButton.toFront (false);
+    learnStatusLabel.toFront (false);
 }
 
 void FrequencyResponseComponent::syncMatchChrome()
@@ -6627,7 +7047,8 @@ void FrequencyResponseComponent::syncMatchChrome()
                         && parameters.getRawParameterValue (MatchEq::frozenParamId())->load() > 0.5f;
     matchFreezeButton.setToggleState (frozen, juce::dontSendNotification);
 
-    layoutMatchChrome();
+    // Learn owns label text + layoutMatchChrome (avoid layout thrash with Spec resize).
+    syncLearnChrome();
 }
 
 void FrequencyResponseComponent::requestMatchEnable()
@@ -6693,6 +7114,259 @@ void FrequencyResponseComponent::disableMatch()
     syncMatchChrome(); // hides curve / amount / freeze; leaves Match button only
     needsUpdateCombined = true;
     repaint();
+}
+
+void FrequencyResponseComponent::layoutLearnChrome()
+{
+    // Learn is laid out inside layoutMatchChrome (end of Match strip).
+    layoutMatchChrome();
+}
+
+void FrequencyResponseComponent::updateLearnButtonLabel()
+{
+    if (learnController == nullptr)
+    {
+        learnButton.setButtonText ("Learn");
+        learnStatusLabel.setText ("-", juce::dontSendNotification);
+        return;
+    }
+
+    // Button stays "Learn" (or Cancel while capturing) so chrome never ellipsizes status text.
+    if (learnController->isLearning())
+    {
+        learnButton.setButtonText ("Cancel");
+        const float rem = learnController->getCaptureSecondsRemaining();
+        learnStatusLabel.setText (juce::String (rem, 1) + " s", juce::dontSendNotification);
+        return;
+    }
+
+    learnButton.setButtonText ("Learn");
+
+    const auto& result = learnController->getLastResult();
+    const auto& det = learnController->getLastClassification();
+
+    juce::String status = "-";
+    if (result.ok && result.bandsApplied > 0)
+    {
+        if (result.appliedSourceClass != EqLearn::SourceClass::unknown)
+            status = EqLearn::sourceClassName (result.appliedSourceClass)
+                     + " " + juce::String (juce::roundToInt (result.detectConfidence * 100.0f)) + "%";
+        else if (det.label != EqLearn::SourceClass::unknown)
+            status = EqLearn::sourceClassName (det.label)
+                     + " " + juce::String (juce::roundToInt (det.confidence * 100.0f)) + "%";
+        else
+            status = "OK " + juce::String (result.bandsApplied) + "b";
+    }
+    else if (result.message.isNotEmpty() && ! result.ok)
+    {
+        // Compact fail text
+        if (result.message.containsIgnoreCase ("quiet"))
+            status = "Too quiet";
+        else if (result.message.containsIgnoreCase ("Eco"))
+            status = "Eco off?";
+        else if (result.message.containsIgnoreCase ("Play audio"))
+            status = "No audio";
+        else if (result.message.containsIgnoreCase ("cancelled"))
+            status = "Cancelled";
+        else if (result.message.containsIgnoreCase ("error"))
+            status = "No change";
+        else
+            status = "Failed";
+    }
+    else if (det.summary.isNotEmpty())
+    {
+        if (det.label != EqLearn::SourceClass::unknown)
+            status = EqLearn::sourceClassName (det.label)
+                     + " " + juce::String (juce::roundToInt (det.confidence * 100.0f)) + "%";
+        else
+            status = "Unknown";
+    }
+
+    learnStatusLabel.setText (status, juce::dontSendNotification);
+    learnStatusLabel.setMinimumHorizontalScale (1.0f);
+}
+
+void FrequencyResponseComponent::syncLearnChrome()
+{
+    learnButton.setVisible (true);
+    learnButton.setEnabled (true);
+    learnStatusLabel.setVisible (true);
+    updateLearnButtonLabel();
+
+    juce::String tip =
+        "Learn - capture spectrum, match a source/reference curve (Match-style), bake into editable bands (max 10). "
+        "Left-click: start. Right-click: target (incl. Auto-detect / source templates), "
+        "strength, max bands, pre/post, Detect now, Revert.";
+
+    if (learnController != nullptr)
+    {
+        if (learnController->isLearning())
+        {
+            tip = "Capturing spectrum for Learn ("
+                  + juce::String (learnController->getCaptureSecondsRemaining(), 1)
+                  + " s left). Click Cancel to abort.";
+        }
+        else if (learnController->getLastResult().message.isNotEmpty())
+        {
+            tip = learnController->getLastResult().message
+                  + "  |  Right-click for options / Revert.";
+        }
+        else if (learnController->getLastClassification().summary.isNotEmpty())
+        {
+            tip = "Last detect: " + learnController->getLastClassification().summary
+                  + "  |  Right-click for options.";
+        }
+    }
+
+    learnButton.setTooltip (tip);
+    learnStatusLabel.setTooltip (tip);
+    layoutMatchChrome();
+
+    // Force curve rebuild once per successful Learn apply (not on every Spec/resize).
+    if (learnController != nullptr && ! learnController->isLearning())
+    {
+        const int serial = learnController->getLastResult().applySerial;
+        if (learnController->getLastResult().ok
+            && serial > 0
+            && serial != lastHandledLearnApplySerial)
+        {
+            lastHandledLearnApplySerial = serial;
+            needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
+            needsUpdateHighShelf = needsUpdateLowShelf = true;
+            needsUpdateCombined = true;
+            repaint();
+        }
+    }
+}
+
+void FrequencyResponseComponent::startLearnWithCurrentSettings()
+{
+    if (learnController == nullptr)
+        return;
+
+    if (learnController->isLearning())
+    {
+        learnController->cancelLearn();
+        syncLearnChrome();
+        return;
+    }
+
+    if (! learnController->startLearn())
+    {
+        // startLearn already set lastResult.message (eco / no spectrum)
+        syncLearnChrome();
+        return;
+    }
+
+    syncLearnChrome();
+}
+
+void FrequencyResponseComponent::showLearnMenu()
+{
+    if (learnController == nullptr)
+        return;
+
+    auto& s = learnController->getSettings();
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+
+    menu.addSectionHeader ("Target shape");
+    // Pink / Flat / Match (0..2)
+    for (int i = 0; i < 3; ++i)
+        menu.addItem (100 + i, EqLearn::getTargetNames()[i], true, (int) s.target == i);
+
+    menu.addSeparator();
+    menu.addSectionHeader ("Source-aware");
+    // Auto-detect (3) + templates (4..)
+    for (int i = 3; i < (int) EqLearn::Target::numTargets; ++i)
+        menu.addItem (100 + i, EqLearn::getTargetNames()[i], true, (int) s.target == i);
+
+    {
+        const auto& det = learnController->getLastClassification();
+        if (det.summary.isNotEmpty())
+            menu.addItem (4, "Last: " + det.summary, false, false);
+    }
+
+    menu.addSeparator();
+    menu.addSectionHeader ("Strength");
+    const int strengthPcts[] = { 25, 50, 75, 100 };
+    for (int pct : strengthPcts)
+        menu.addItem (200 + pct, juce::String (pct) + "%", true,
+                      juce::roundToInt (s.strength * 100.0f) == pct);
+
+    menu.addSeparator();
+    menu.addSectionHeader ("Max bands");
+    for (int n = 2; n <= 10; ++n)
+        menu.addItem (300 + n, juce::String (n) + " bands", true, s.maxBands == n);
+
+    menu.addSeparator();
+    menu.addItem (400, "Analyse pre-EQ", true, s.usePreEq);
+    menu.addItem (401, "Analyse post-EQ", true, ! s.usePreEq);
+    menu.addItem (402, "Replace mid bells", true, s.replaceMidBells);
+
+    menu.addSeparator();
+    menu.addItem (1, "Start Learn", ! learnController->isLearning());
+    menu.addItem (5, "Detect source now", ! learnController->isLearning());
+    menu.addItem (2, "Cancel Learn", learnController->isLearning());
+    menu.addItem (3, "Revert last Learn", learnController->canRevert());
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&learnButton),
+        [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this)] (int result)
+        {
+            if (safe == nullptr || safe->learnController == nullptr || result == 0)
+                return;
+
+            auto& st = safe->learnController->getSettings();
+
+            if (result >= 100 && result < 100 + (int) EqLearn::Target::numTargets)
+            {
+                st.target = (EqLearn::Target) (result - 100);
+            }
+            else if (result >= 200 && result <= 300)
+            {
+                st.strength = (float) (result - 200) / 100.0f;
+            }
+            else if (result >= 302 && result <= 310)
+            {
+                st.maxBands = result - 300;
+            }
+            else if (result == 400)
+            {
+                st.usePreEq = true;
+            }
+            else if (result == 401)
+            {
+                st.usePreEq = false;
+            }
+            else if (result == 402)
+            {
+                st.replaceMidBells = ! st.replaceMidBells;
+            }
+            else if (result == 1)
+            {
+                safe->startLearnWithCurrentSettings();
+                return;
+            }
+            else if (result == 5)
+            {
+                const auto cls = safe->learnController->detectNow();
+                safe->learnButton.setTooltip ("Detect: " + cls.summary
+                    + "  |  Right-click for options. Choose Auto-detect source then Learn to apply.");
+            }
+            else if (result == 2)
+            {
+                safe->learnController->cancelLearn();
+            }
+            else if (result == 3)
+            {
+                safe->learnController->revertLastLearn();
+                safe->needsUpdateCombined = true;
+                safe->repaint();
+            }
+
+            safe->syncLearnChrome();
+        });
 }
 
 void FrequencyResponseComponent::showMatchCurveMenu()
@@ -6867,7 +7541,7 @@ void FrequencyResponseComponent::updateLiveMatchCaptureIfNeeded()
 
 bool FrequencyResponseComponent::anyActiveDynamicEq() const
 {
-    // Read APVTS directly — processor on/off flags only update in processBlock.
+    // Read APVTS directly - processor on/off flags only update in processBlock.
     auto on = [this] (const char* id) -> bool
     {
         if (auto* v = parameters.getRawParameterValue (id))
@@ -6945,27 +7619,32 @@ void FrequencyResponseComponent::markActiveDynamicBandsDirty()
 
 void FrequencyResponseComponent::syncDynamicCurveTimer()
 {
-    if (anyActiveDynamicEq())
+    const bool morphing = isEqDisplayRangeMorphing();
+    if (anyActiveDynamicEq() || morphing)
     {
-        const int hz = resolveDynamicCurveTimerHz();
+        int hz = resolveDynamicCurveTimerHz();
+        if (hz <= 0 && morphing)
+            hz = 60;
         if (hz <= 0)
         {
-            // Cumulative disabled and no LFO — nothing on the graph needs 45 Hz rebuilds.
-            if (isTimerRunning())
+            // Cumulative disabled and no LFO - nothing on the graph needs D/S rebuilds.
+            if (isTimerRunning() && ! morphing)
                 stopTimer();
-            setBufferedToImage (true);
+            if (! morphing)
+                setBufferedToImage (true);
             return;
         }
 
         // Buffered paint can blit a stale image even after repaint() while D is moving
-        // the curve every block — disable caching for the duration of dynamic animation.
+        // the curve every block - disable caching for the duration of dynamic animation.
         setBufferedToImage (false);
 
         if (! isTimerRunning() || getTimerInterval() != juce::jmax (1, 1000 / hz))
             startTimerHz (hz);
 
         // Immediate kick so enabling D doesn't wait a timer period.
-        markActiveDynamicBandsDirty();
+        if (anyActiveDynamicEq())
+            markActiveDynamicBandsDirty();
         repaint();
     }
     else
@@ -6985,8 +7664,20 @@ void FrequencyResponseComponent::timerCallback()
 {
     updateLiveMatchCaptureIfNeeded();
 
+    const float dt = (float) getTimerInterval() * 0.001f;
+    const bool morphing = tickEqDisplayRangeMorph (dt > 0.0f ? dt : (1.0f / 60.0f));
+
     if (! anyActiveDynamicEq())
     {
+        if (morphing)
+        {
+            setBufferedToImage (false);
+            if (! isTimerRunning() || getTimerInterval() != juce::jmax (1, 1000 / 60))
+                startTimerHz (60);
+            repaint();
+            return;
+        }
+
         stopTimer();
         setBufferedToImage (true);
         lastDynCurveGain1 = lastDynCurveGain2 = lastDynCurveGain3 = lastDynCurveGain4 = 1.0e9f;
@@ -6995,19 +7686,20 @@ void FrequencyResponseComponent::timerCallback()
     }
 
     const int hz = resolveDynamicCurveTimerHz();
-    if (hz <= 0)
+    if (hz <= 0 && ! morphing)
     {
         stopTimer();
         setBufferedToImage (true);
         return;
     }
 
+    const int useHz = hz > 0 ? hz : 60;
     // Keep interval in sync if particle density changed while the timer was running.
-    if (getTimerInterval() != juce::jmax (1, 1000 / hz))
-        startTimerHz (hz);
+    if (getTimerInterval() != juce::jmax (1, 1000 / useHz))
+        startTimerHz (useHz);
 
     // Every tick while D+On: force magnitude rebuild from published effective gains, then repaint.
-    // No gain-delta threshold — small GR changes must still redraw.
+    // No gain-delta threshold - small GR changes must still redraw.
     markActiveDynamicBandsDirty();
     repaint();
 }
@@ -7039,13 +7731,38 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
         || parameterID == MatchEq::smoothParamId()
         || parameterID == MatchEq::resolutionParamId()
         || parameterID == MatchEq::hpHzParamId()
-        || parameterID == MatchEq::lpHzParamId())
+        || parameterID == MatchEq::lpHzParamId()
+        || parameterID == "eqScale")
     {
         if (parameterID == MatchEq::curveParamId())
             processor.syncMatchFactoryTargetFromParam();
-        syncMatchChrome();
+        if (parameterID == MatchEq::enabledParamId()
+            || parameterID == MatchEq::curveParamId()
+            || parameterID == MatchEq::frozenParamId())
+            syncMatchChrome();
+        // Scale changes every band curve, handles, and the cumulative sum (0% flat ... 200% exaggerated).
+        if (parameterID == "eqScale")
+        {
+            needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
+            needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
+            needsUpdateExtended = true;
+            needsUpdateSpectralAmount = true;
+            // Invalidate dyn cache so maybeDirtyLive doesn't skip the next rebuild.
+            lastDynCurveGain1 = lastDynCurveGain2 = lastDynCurveGain3 = lastDynCurveGain4 = 1.0e9f;
+            lastDynCurveGainHS = lastDynCurveGainLS = 1.0e9f;
+            // Same auto-zoom as dragging a handle into the top/bottom plot edge (boosts and cuts).
+            ensureEqDisplayRangeFitsScaledBands();
+        }
         needsUpdateCombined = true;
         repaint();
+    }
+
+    // Faceplate / OptionBox gain changes (not mid-handle-drag): expand dB range for deep
+    // cuts or boosts so handles are not stuck paint-clamped at the plot edge.
+    if (! anyHandleDragging && ! groupDragging
+        && (parameterID.endsWith ("Gain") || parameterID.endsWith ("GainDb")))
+    {
+        ensureEqDisplayRangeFitsScaledBands();
     }
 
     // Static ↔ dynamic-range gain memory when the user toggles D (not Spectral*Dynamic).
@@ -7061,23 +7778,26 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
         || parameterID.endsWith ("SpectralExpand"))
         needsUpdateSpectralAmount = true;
 
-    if (anyHandleDragging)
-        return;
-
+    // Range expands during handle drag - still start the morph (do not early-return past this).
     if (parameterID == "EQ_DISPLAY_RANGE_ID")
     {
+        // Keep eqDisplayRangeDbVisual where it is - timer morphs it toward the new target.
         needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
         needsUpdateHighpass = needsUpdateLowpass = needsUpdateHighShelf = needsUpdateLowShelf = true;
         needsUpdateExtended = true;
         needsUpdateCombined = true;
         syncEqRangeControls();
+        ensureEqDisplayRangeMorphTimer();
         repaint();
         return;
     }
 
+    if (anyHandleDragging)
+        return;
+
     if (parameterID == "PROPORTIONAL_Q_ID")
     {
-        // Peaking shape depends on effective Q when P is on — rebuild all tunable bands.
+        // Peaking shape depends on effective Q when P is on - rebuild all tunable bands.
         needsUpdateBand1 = needsUpdateBand2 = needsUpdateBand3 = needsUpdateBand4 = true;
         needsUpdateExtended = true;
         needsUpdateCombined = true;
@@ -7085,7 +7805,7 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
         return;
     }
 
-    // Split chrome only — never call full resized() here (state restore / OnOff storms were lagging the UI).
+    // Split chrome only - never call full resized() here (state restore / OnOff storms were lagging the UI).
     if (parameterID.endsWith ("SplitMode")
         || parameterID == StructuralSplit::soloParamId()
         || parameterID == StructuralSplit::separationParamId()
@@ -7243,7 +7963,7 @@ juce::Path FrequencyResponseComponent::intelligentDownsampleToBottom(
     if (compositeResponse.empty() || w <= 0)
         return simplifiedPath;
 
-    // One float vertex per display pixel — same x-grid as magnitude buffers.
+    // One float vertex per display pixel - same x-grid as magnitude buffers.
     // Earlier adaptive path (decimationFactor=3 + flat-sample skip) made the sum jaggy;
     // hold-filled magnitude (step=2) made per-pixel tracing look stair-stepped on slopes.
     simplifiedPath.startNewSubPath (0.0f, (float) h);
@@ -7415,6 +8135,151 @@ juce::Path FrequencyResponseComponent::closeShelfFillPath (const juce::Path& cur
 }
 
 //==============================================================================
+EqScaleScrubber::EqScaleScrubber (juce::AudioProcessorValueTreeState& state, juce::UndoManager* undoMgr)
+    : treeState (state), undoManager (undoMgr)
+{
+    setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+    setInterceptsMouseClicks (true, false);
+    treeState.addParameterListener ("eqScale", this);
+    refreshText();
+}
+
+EqScaleScrubber::~EqScaleScrubber()
+{
+    treeState.removeParameterListener ("eqScale", this);
+    endGesture();
+}
+
+float EqScaleScrubber::readScale() const noexcept
+{
+    if (auto* v = treeState.getRawParameterValue ("eqScale"))
+        return juce::jlimit (0.0f, 2.0f, v->load());
+    return 1.0f;
+}
+
+void EqScaleScrubber::refreshText()
+{
+    const int pct = juce::roundToInt (readScale() * 100.0f);
+    displayText = juce::String (pct) + "%";
+    repaint();
+}
+
+void EqScaleScrubber::parameterChanged (const juce::String& parameterID, float newValue)
+{
+    juce::ignoreUnused (parameterID, newValue);
+    refreshText();
+}
+
+void EqScaleScrubber::paint (juce::Graphics& g)
+{
+    // No box - bare percentage text; hover/drag shows up/down arrows as a vertical-scrub affordance.
+    const bool active = hovered || gestureActive;
+    const auto ink = juce::Colours::whitesmoke.withAlpha (active ? 0.95f : 0.78f);
+    g.setColour (ink);
+    g.setFont (juce::Font (11.0f));
+    g.drawText (displayText, getLocalBounds(), juce::Justification::centred, false);
+
+    if (! active)
+        return;
+
+    const auto b = getLocalBounds().toFloat();
+    const float cx = b.getCentreX();
+    // Small filled chevrons above / below the number (not unicode glyphs).
+    const float arrowH = 4.0f;
+    const float arrowW = 6.0f;
+    const float pad = 2.5f;
+
+    juce::Path up;
+    up.addTriangle (cx, pad,
+                    cx - arrowW * 0.5f, pad + arrowH,
+                    cx + arrowW * 0.5f, pad + arrowH);
+
+    const float bot = b.getBottom() - pad;
+    juce::Path down;
+    down.addTriangle (cx, bot,
+                      cx - arrowW * 0.5f, bot - arrowH,
+                      cx + arrowW * 0.5f, bot - arrowH);
+
+    g.setColour (ink.withAlpha (0.88f));
+    g.fillPath (up);
+    g.fillPath (down);
+}
+
+void EqScaleScrubber::beginGesture()
+{
+    if (gestureActive)
+        return;
+    if (auto* p = treeState.getParameter ("eqScale"))
+    {
+        p->beginChangeGesture();
+        gestureActive = true;
+    }
+}
+
+void EqScaleScrubber::endGesture()
+{
+    if (! gestureActive)
+        return;
+    if (auto* p = treeState.getParameter ("eqScale"))
+        p->endChangeGesture();
+    gestureActive = false;
+}
+
+void EqScaleScrubber::mouseDown (const juce::MouseEvent& e)
+{
+    juce::ignoreUnused (e);
+    if (undoManager != nullptr)
+        undoManager->beginNewTransaction ("EQ Scale");
+    dragStartScale = readScale();
+    beginGesture();
+}
+
+void EqScaleScrubber::mouseDrag (const juce::MouseEvent& e)
+{
+    auto* param = dynamic_cast<juce::RangedAudioParameter*> (treeState.getParameter ("eqScale"));
+    if (param == nullptr)
+        return;
+
+    // Vertical drag: up = more, down = less. Shift/Alt = fine.
+    const bool fine = e.mods.isShiftDown() || e.mods.isAltDown();
+    const float pixelsPerUnit = fine ? 200.0f : 80.0f; // 100% = 1.0 unit
+    const float newScale = juce::jlimit (0.0f, 2.0f,
+                                         dragStartScale - (float) e.getDistanceFromDragStartY() / pixelsPerUnit);
+
+    param->setValueNotifyingHost (param->convertTo0to1 (newScale));
+    refreshText();
+}
+
+void EqScaleScrubber::mouseUp (const juce::MouseEvent& e)
+{
+    juce::ignoreUnused (e);
+    endGesture();
+}
+
+void EqScaleScrubber::mouseEnter (const juce::MouseEvent& e)
+{
+    juce::ignoreUnused (e);
+    hovered = true;
+    repaint();
+}
+
+void EqScaleScrubber::mouseExit (const juce::MouseEvent& e)
+{
+    juce::ignoreUnused (e);
+    hovered = false;
+    repaint();
+}
+
+void EqScaleScrubber::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    juce::ignoreUnused (e);
+    if (undoManager != nullptr)
+        undoManager->beginNewTransaction ("EQ Scale reset");
+    if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (treeState.getParameter ("eqScale")))
+        param->setValueNotifyingHost (param->convertTo0to1 (1.0f));
+    refreshText();
+}
+
 OutputGainScrubber::OutputGainScrubber (juce::AudioProcessorValueTreeState& state, juce::UndoManager* undoMgr)
     : treeState (state), undoManager (undoMgr)
 {

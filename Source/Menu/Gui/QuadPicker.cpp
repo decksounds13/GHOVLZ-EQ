@@ -2,197 +2,210 @@
 #include "../SharedResources.h"
 #include <JuceHeader.h>
 
-QuadPicker::QuadPicker(SharedResources& resources)
-    : sharedResources(resources)
+QuadPicker::QuadPicker (SharedResources& resources)
+    : sharedResources (resources)
 {
-    // DBG("QuadPicker constructor called");
-    setHue(0.0f);
-    addMouseListener(this, true);
-
-
+    setHue (0.0f);
 }
 
-void QuadPicker::paint(juce::Graphics& g) {
-    // Check if the gradient image needs to be updated
-    if (isFirstPaint || hueColor != lastHueColor || gradientImage.isNull()) {
-        gradientImage = juce::Image(juce::Image::ARGB, getWidth(), getHeight(), true);
-        juce::Graphics imgGraphics(gradientImage);
+void QuadPicker::paint (juce::Graphics& g)
+{
+    const int w = getWidth();
+    const int h = getHeight();
+    if (w <= 0 || h <= 0)
+        return;
 
-        for (int y = 0; y < getHeight(); ++y) {
-            float lightness = 1.0f - (float)y / (float)getHeight();
-            juce::ColourGradient gradient(hueColor.withSaturation(0.0f).withLightness(lightness),
-                0, (float)y,
-                hueColor.withSaturation(1.0f).withLightness(lightness),
-                (float)getWidth(), (float)y,
-                false);
-            imgGraphics.setGradientFill(gradient);
-            imgGraphics.fillRect(0, y, getWidth(), 1);
-        }
-
-        lastHueColor = hueColor; // Update the last used color
-        isFirstPaint = false; // Update the flag after the first paint
+    // Rebuild when hue changes or the component was resized (menu drag-resize).
+    if (isFirstPaint || hueColor != lastHueColor || gradientImage.isNull()
+        || gradientImage.getWidth() != w || gradientImage.getHeight() != h)
+    {
+        updateGradientImage();
+        lastHueColor = hueColor;
+        isFirstPaint = false;
     }
 
-    // Define a rounded rectangle for the clipping region and outline
-    float cornerSize = 5.0f;
+    constexpr float cornerSize = 5.0f;
     juce::Path roundedClipPath;
-    roundedClipPath.addRoundedRectangle(getLocalBounds().toFloat(), cornerSize);
+    roundedClipPath.addRoundedRectangle (getLocalBounds().toFloat(), cornerSize);
 
-    // Save the current graphics state and set the clipping region
     g.saveState();
-    g.reduceClipRegion(roundedClipPath);
-
-    // Draw the cached gradient image
-    g.drawImageAt(gradientImage, 0, 0);
-
-    // Restore the graphics state to remove clipping
+    g.reduceClipRegion (roundedClipPath);
+    g.drawImageAt (gradientImage, 0, 0);
     g.restoreState();
 
-    // Draw an outline around the QuadPicker with the same rounded rectangle (optional)
-    // juce::Colour menuThinBorderColor = sharedResources.sharedColors.menuThinBorderColor;
-    // g.setColour(menuThinBorderColor);
-    // g.strokePath(roundedClipPath, juce::PathStrokeType(1.0f));
-
-   // Create a path for the shadow2 based on the ellipse's position
-    juce::Path shadowPath;
-    shadowPath.addEllipse(selectedPosition.x - 5, selectedPosition.y - 5, 10, 10);
-
-    // Render the shadow2 using the path
-    //shadow2.render(g, shadowPath);
-
-    // Draw the selected position circle
-    g.setColour(juce::Colours::white);
-    g.drawEllipse(selectedPosition.x - 5, selectedPosition.y - 5, 10, 10, 2);
-
-
+    // Selection ring — follows mouse via setSelectedPosition.
+    g.setColour (juce::Colours::white);
+    g.drawEllipse (selectedPosition.x - 5.0f, selectedPosition.y - 5.0f, 10.0f, 10.0f, 2.0f);
 }
 
-void QuadPicker::resized() {
-    float cornerSize = 5.0f;
-    shadowPath.clear();  // Clear the existing path
-    shadowPath.addRoundedRectangle(getLocalBounds().toFloat(), cornerSize);
-
-    // ... other resize logic, if any
-}
-void QuadPicker::mouseDrag(const juce::MouseEvent& event)
+void QuadPicker::resized()
 {
-    setSelectedPosition(event.position);
+    constexpr float cornerSize = 5.0f;
+    shadowPath.clear();
+    shadowPath.addRoundedRectangle (getLocalBounds().toFloat(), cornerSize);
 
-    if (auto* uiElementsList = findParentComponentOfClass<UIElementsList>()) {
-        auto selectedIndices = uiElementsList->getSelectedRows(); // Get selected rows
-
-        if (!selectedIndices.isEmpty()) {
-            int firstSelectedIndex = selectedIndices.getFirst(); // Get the first selected index
-            uiElementsList->updateColorsForSelectedElements(selectedColor);
-        }
+    if (getWidth() > 0 && getHeight() > 0)
+    {
+        updateGradientImage();
+        lastHueColor = hueColor;
+        isFirstPaint = false;
+        // Keep the ring on the same colour after layout / menu resize.
+        syncPositionFromSelectedColor();
     }
 }
 
+void QuadPicker::applyPointerPosition (juce::Point<float> localPos)
+{
+    const float w = (float) juce::jmax (1, getWidth());
+    const float h = (float) juce::jmax (1, getHeight());
+    localPos.x = juce::jlimit (0.0f, w - 1.0f, localPos.x);
+    localPos.y = juce::jlimit (0.0f, h - 1.0f, localPos.y);
+    setSelectedPosition (localPos);
+}
 
-void QuadPicker::setHue(float newHue)
+void QuadPicker::mouseDown (const juce::MouseEvent& event)
+{
+    draggingColour = true;
+    applyPointerPosition (event.position);
+}
+
+void QuadPicker::mouseDrag (const juce::MouseEvent& event)
+{
+    if (! draggingColour)
+        draggingColour = true;
+    applyPointerPosition (event.position);
+}
+
+void QuadPicker::mouseUp (const juce::MouseEvent& event)
+{
+    juce::ignoreUnused (event);
+    if (! draggingColour)
+        return;
+
+    draggingColour = false;
+    // Full commit path (theme / chrome) after a light live-preview scrub.
+    if (onColorChanged)
+        onColorChanged (selectedColor);
+}
+
+void QuadPicker::setHue (float newHue)
 {
     float currentSaturation = selectedColor.getSaturation();
     float currentBrightness = selectedColor.getBrightness();
     float currentAlpha = selectedColor.getFloatAlpha();
 
-    hueColor = juce::Colour::fromHSV(newHue, currentSaturation, currentBrightness, currentAlpha);
-    selectedColor = hueColor;
+    // Full-sat mid-bright sample for the SV pad base colour.
+    hueColor = juce::Colour::fromHSV (newHue, 1.0f, 0.5f, 1.0f);
+    selectedColor = juce::Colour::fromHSV (newHue, currentSaturation, currentBrightness, currentAlpha);
+    syncPositionFromSelectedColor();
+    updateGradientImage();
+    lastHueColor = hueColor;
     repaint();
 }
 
+void QuadPicker::syncPositionFromSelectedColor()
+{
+    if (getWidth() <= 0 || getHeight() <= 0)
+        return;
 
-void QuadPicker::setSelectedPosition(juce::Point<float> newPosition) {
-    selectedPosition = newPosition;
+    float h = 0.0f, s = 0.0f, b = 0.0f;
+    selectedColor.getHSB (h, s, b);
+    juce::ignoreUnused (h);
+    selectedPosition.x = s * (float) getWidth();
+    selectedPosition.y = (1.0f - b) * (float) getHeight();
+}
 
-    DBG("New Position x: " + juce::String(newPosition.x));
-    DBG("QuadPicker Width: " + juce::String(getWidth()));
+void QuadPicker::setSelectedPosition (juce::Point<float> newPosition)
+{
+    const float w = (float) juce::jmax (1, getWidth());
+    const float h = (float) juce::jmax (1, getHeight());
 
-    float saturation = newPosition.x / (float)getWidth();
-    float lightness = 1.0f - newPosition.y / (float)getHeight();
+    selectedPosition.x = juce::jlimit (0.0f, w - 1.0f, newPosition.x);
+    selectedPosition.y = juce::jlimit (0.0f, h - 1.0f, newPosition.y);
 
-    float currentHue, currentSaturation, currentBrightness;
-    selectedColor.getHSB(currentHue, currentSaturation, currentBrightness);
+    const float saturation = juce::jlimit (0.0f, 1.0f, selectedPosition.x / w);
+    const float brightness = juce::jlimit (0.0f, 1.0f, 1.0f - selectedPosition.y / h);
+
+    float currentHue = 0.0f, currentSaturation = 0.0f, currentBrightness = 0.0f;
+    selectedColor.getHSB (currentHue, currentSaturation, currentBrightness);
+    juce::ignoreUnused (currentSaturation, currentBrightness);
     const float keepAlpha = selectedColor.getFloatAlpha();
 
-    float limitedHue = std::clamp(currentHue, sharedResources.sharedColors.hueLowerLimit, sharedResources.sharedColors.hueUpperLimit);
+    const float limitedHue = juce::jlimit (sharedResources.sharedColors.hueLowerLimit,
+                                           sharedResources.sharedColors.hueUpperLimit,
+                                           currentHue);
 
-    // Preserve the element's assigned alpha — picker is HSV-only.
-    selectedColor = juce::Colour::fromHSV(limitedHue, saturation, lightness, keepAlpha);
+    selectedColor = juce::Colour::fromHSV (limitedHue, saturation, brightness, keepAlpha);
 
-    DBG("Selected Color: " + selectedColor.toString());
-
+    // Full pad repaint (gradient is cached) — partial dirty rects left edge artifacts.
     repaint();
 
-    if (onColorChanged) {
-        onColorChanged(selectedColor);
-    }
+    if (onColorChanged)
+        onColorChanged (selectedColor);
 }
 
-
-void QuadPicker::hueChanged(float newHue)
+void QuadPicker::hueChanged (float newHue)
 {
-    setHue(newHue);
+    setHue (newHue);
+}
+
+void QuadPicker::setColor (const juce::Colour& newColor)
+{
+    // While the user is scrubbing the pad, ignore external setColor (feedback from
+    // directColorUpdate / theme notify) so the ring tracks the mouse 1:1.
+    if (draggingColour)
+        return;
+
+    float newHue = 0.0f, newSaturation = 0.0f, newBrightness = 0.0f;
+    newColor.getHSB (newHue, newSaturation, newBrightness);
+
+    selectedColor = newColor;
+    hueColor = juce::Colour::fromHSV (newHue, 1.0f, 0.5f, 1.0f);
+
+    if (hueColor != lastHueColor)
+    {
+        updateGradientImage();
+        lastHueColor = hueColor;
+    }
+
+    syncPositionFromSelectedColor();
     repaint();
 }
-
-void QuadPicker::setColor(const juce::Colour& newColor)
-{
-    DBG("QuadPicker::setColor called with color: " + newColor.toString());  // Debug statement
-
-    // Extract the hue, saturation, and brightness of the new color
-    float newHue, newSaturation, newBrightness;
-    newColor.getHSB(newHue, newSaturation, newBrightness);
-
-    // Extract the hue, saturation, and brightness of the current selected color
-    float currentHue, currentSaturation, currentBrightness;
-    selectedColor.getHSB(currentHue, currentSaturation, currentBrightness);
-
-    // Check if saturation or brightness has changed
-    if (newSaturation != currentSaturation || newBrightness != currentBrightness) {
-        // Update the selected color with the new color
-        selectedColor = newColor;
-
-        // Update the hueColor for gradient display purposes
-        hueColor = juce::Colour::fromHSV(newHue, 1.0f, 0.5f, 1.0f);
-
-        // Update the selectedPosition based on newColor's saturation and brightness
-        selectedPosition.x = newSaturation * getWidth();
-        selectedPosition.y = (1.0f - newBrightness) * getHeight();
-
-        selectedColor = newColor;
-
-        repaint();
-    }
-}
-
-
-
 
 juce::Colour QuadPicker::getSelectedColor() const
 {
     return selectedColor;
 }
 
-
-//Investigate as cause of mulitple selection only updating last selectedcolor
-void QuadPicker::onElementSelected(const juce::String& name, const juce::Colour& color)
+void QuadPicker::onElementSelected (const juce::String& name, const juce::Colour& color)
 {
-    // Update the color picker with the new color
-    setColor(color);
+    juce::ignoreUnused (name);
+    setColor (color);
 }
 
-void QuadPicker::updateGradientImage() {
-    gradientImage = juce::Image(juce::Image::ARGB, getWidth(), getHeight(), true);
-    juce::Graphics g(gradientImage);
+void QuadPicker::updateGradientImage()
+{
+    const int w = getWidth();
+    const int h = getHeight();
+    if (w <= 0 || h <= 0)
+    {
+        gradientImage = {};
+        return;
+    }
 
-    for (int y = 0; y < getHeight(); ++y) {
-        float lightness = 1.0f - (float)y / (float)getHeight();
-        juce::ColourGradient gradient(hueColor.withSaturation(0.0f).withLightness(lightness),
-            0, (float)y,
-            hueColor.withSaturation(1.0f).withLightness(lightness),
-            (float)getWidth(), (float)y,
-            false);
-        g.setGradientFill(gradient);
-        g.fillRect(0, y, getWidth(), 1);
+    gradientImage = juce::Image (juce::Image::ARGB, w, h, true);
+    juce::Graphics g (gradientImage);
+
+    for (int y = 0; y < h; ++y)
+    {
+        // Match setSelectedPosition: top = bright, bottom = dark (HSB brightness).
+        const float brightness = 1.0f - (float) y / (float) juce::jmax (1, h - 1);
+        juce::ColourGradient gradient (hueColor.withSaturation (0.0f).withBrightness (brightness),
+                                       0.0f, (float) y,
+                                       hueColor.withSaturation (1.0f).withBrightness (brightness),
+                                       (float) w, (float) y,
+                                       false);
+        g.setGradientFill (gradient);
+        g.fillRect (0, y, w, 1);
     }
 }

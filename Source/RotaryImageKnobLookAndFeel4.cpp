@@ -85,8 +85,8 @@ void RotaryImageKnobLookAndFeel4::drawRotarySlider(juce::Graphics& g, int x, int
 
         // Create colour gradient
         const bool bandHighlight = KnobBandHighlight::isActive (slider);
-        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight);
-        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight);
+        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight, &slider);
+        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight, &slider);
         juce::ColourGradient gradient(darkOrange, x, y,
             brightOrange, x + width, y + height, false);
 

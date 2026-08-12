@@ -273,6 +273,18 @@ juce::Colour SharedColors::randomColourInLimits (float alpha) const
     return juce::Colour::fromHSV (h, s, b, juce::jlimit (0.0f, 1.0f, alpha));
 }
 
+juce::Colour SharedColors::applyGraphBandMinSaturation (juce::Colour c) const noexcept
+{
+    if (! graphBandRandomMinSatEnabled)
+        return c;
+
+    float h = 0.0f, s = 0.0f, v = 0.0f;
+    c.getHSB (h, s, v);
+    const float minS = juce::jlimit (0.0f, 1.0f, graphBandRandomMinSaturation);
+    s = juce::jmax (minS, s);
+    return juce::Colour::fromHSV (h, s, v, c.getFloatAlpha());
+}
+
 namespace
 {
 float relativeLuminance (juce::Colour c) noexcept
@@ -427,9 +439,16 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     fix (menuListBoxTextColor1, menuListBoxSelectionColor1);
     fix (menuTextBoxTextColor1, blendBg (menuBackgroundGradientColor1, menuBackgroundGradientColor2));
 
+    // Faceplate: chrome buttons sit on pluginButtonBackground; labels / Freq-Q-Gain
+    // group titles and brand wordmark sit on the plugin faceplate wash.
+    const auto pluginFaceBg = blendBg (pluginBackground, pluginBackground2);
     fix (pluginButtonText, pluginButtonBackground);
+    fix (pluginButtonText, pluginFaceBg);
+    fix (pluginButtonText, pluginBackground);
+    fix (pluginButtonText, pluginBackground2);
     fix (pluginPresetText, pluginPresetBackground);
-    fix (pluginBrandText, blendBg (pluginBackground, pluginBackground2));
+    fix (pluginBrandText, pluginFaceBg);
+    fix (pluginBrandText, pluginBackground);
 
     fix (graphAxisText, graphBg);
     // Handle numbers are drawn on band-coloured disks (not the graph); global
@@ -438,9 +457,16 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     fix (graphHandleText, graphBg);
     fix (graphHandleOutline, graphBg);
 
+    // Option box + combo / graph-top UI menus (PluginMenuTheme + PopupMenu LAF).
     fix (optionText, optionBackground);
+    fix (optionText, optionBackground.darker (0.35f));
     fix (optionComboText, optionComboBackground);
+
+    // Mod panel: full strip gradient + brighter button faces + column cards.
     fix (modText, modBackground);
+    fix (modText, modBackground.darker (0.55f));
+    fix (modText, modBackground.brighter (0.15f));
+    fix (modText, modBackground.darker (0.35f));
 
     fix (knobPopupText, knobPopupBackground);
     fix (meterReadoutText, meterBackground);
@@ -519,6 +545,12 @@ void SharedColors::randomizeColors()
             const float bri = juce::jlimit (0.45f, 1.0f, colour.getBrightness());
             colour = juce::Colour::fromHSV (colour.getHue(), sat, bri, keepAlpha);
         }
+        else if (name.startsWith ("Graph Band"))
+        {
+            colour = applyGraphBandMinSaturation (
+                juce::Colour::fromHSV (colour.getHue(), colour.getSaturation(),
+                                       colour.getBrightness(), keepAlpha));
+        }
         else if (name == "Knob Multiply")
         {
             // Soft filter: mid sat, bright — never near black.
@@ -579,6 +611,12 @@ juce::Colour SharedColors::randomizeSelectedColorsWithinRange()
             const float sat = juce::jmax (0.55f, last.getSaturation());
             const float bri = juce::jlimit (0.45f, 1.0f, last.getBrightness());
             last = juce::Colour::fromHSV (last.getHue(), sat, bri, keepAlpha);
+        }
+        else if (name.startsWith ("Graph Band"))
+        {
+            last = applyGraphBandMinSaturation (
+                juce::Colour::fromHSV (last.getHue(), last.getSaturation(),
+                                       last.getBrightness(), keepAlpha));
         }
         else if (name == "Knob Multiply")
         {

@@ -44,6 +44,9 @@
     <Filter Include="ParametricEqProject\Source\Match">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ParametricEqProject\Source\Learn">
+      <UniqueIdentifier>{b2c3d4e5-f6a7-8901-bcde-f12345678901}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ParametricEqProject\Source\StructuralSplit">
       <UniqueIdentifier>{A8C3E1F2-4B5D-6E7F-8091-A2B3C4D5E6F7}</UniqueIdentifier>
     </Filter>
@@ -1215,6 +1218,21 @@
     </ClCompile>
     <ClCompile Include="..\..\Source\Match\MatchProcessor.cpp">
       <Filter>ParametricEqProject\Source\Match</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Learn\BiquadMagnitude.cpp">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Learn\ParametricMatcher.cpp">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Learn\EqBandFitter.cpp">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Learn\EqSourceClassifier.cpp">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Learn\EqLearnController.cpp">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob1.cpp">
       <Filter>ParametricEqProject\Source</Filter>
@@ -5123,6 +5141,27 @@
     </ClInclude>
     <ClInclude Include="..\..\Source\Match\MatchProcessor.h">
       <Filter>ParametricEqProject\Source\Match</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Learn\EqLearnSettings.h">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Learn\BiquadMagnitude.h">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Learn\ParametricMatcher.h">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Learn\EqBandFitter.h">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Learn\EqSourceTemplates.h">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Learn\EqSourceClassifier.h">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Learn\EqLearnController.h">
+      <Filter>ParametricEqProject\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob1.h">
       <Filter>ParametricEqProject\Source</Filter>

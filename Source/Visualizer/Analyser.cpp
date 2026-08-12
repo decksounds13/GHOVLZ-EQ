@@ -130,6 +130,67 @@ float Analyser::getScopePreData (size_t index)
     return m_scopePreData[index];
 }
 
+void Analyser::getVolumeRangeInDecibels (float& minDb, float& maxDb) noexcept
+{
+    const juce::ScopedLock lock (m_volumeRangeChange);
+    minDb = m_minimumVolumeInDecibels;
+    maxDb = m_maximumVolumeInDecibels;
+}
+
+float Analyser::getScopeDataDb (size_t index)
+{
+    float minDb = -120.0f, maxDb = 12.0f;
+    getVolumeRangeInDecibels (minDb, maxDb);
+    const float n = getScopeData (index);
+    return juce::jmap (juce::jlimit (0.0f, 1.0f, n), 0.0f, 1.0f, minDb, maxDb);
+}
+
+float Analyser::getScopePreDataDb (size_t index)
+{
+    float minDb = -120.0f, maxDb = 12.0f;
+    getVolumeRangeInDecibels (minDb, maxDb);
+    const float n = getScopePreData (index);
+    return juce::jmap (juce::jlimit (0.0f, 1.0f, n), 0.0f, 1.0f, minDb, maxDb);
+}
+
+int Analyser::copyScopeDataDb (bool pre, float* destDb, int maxBins)
+{
+    if (destDb == nullptr || maxBins <= 0)
+        return 0;
+
+    // Message-thread safe: only m_scopeLock (never m_analysisLock).
+    // Taking analysisLock here deadlocks / freezes Ableton when Spec/UI paints
+    // while the analyser thread holds analysis for a large FFT.
+    float minDb = -120.0f, maxDb = 12.0f;
+    getVolumeRangeInDecibels (minDb, maxDb);
+
+    const juce::ScopedLock lock (m_scopeLock);
+    const auto& src = pre ? m_scopePreData : m_scopeDynamicData;
+    const int n = juce::jmin (maxBins, (int) src.size());
+    for (int i = 0; i < n; ++i)
+    {
+        const float norm = juce::jlimit (0.0f, 1.0f, src[(size_t) i]);
+        destDb[i] = juce::jmap (norm, 0.0f, 1.0f, minDb, maxDb);
+    }
+    return n;
+}
+
+float Analyser::getScopePeakDb (bool pre) noexcept
+{
+    float minDb = -120.0f, maxDb = 12.0f;
+    getVolumeRangeInDecibels (minDb, maxDb);
+
+    const juce::ScopedLock lock (m_scopeLock);
+    const auto& src = pre ? m_scopePreData : m_scopeDynamicData;
+    if (src.empty())
+        return -200.0f;
+
+    float peakN = 0.0f;
+    for (float n : src)
+        peakN = juce::jmax (peakN, n);
+    return juce::jmap (juce::jlimit (0.0f, 1.0f, peakN), 0.0f, 1.0f, minDb, maxDb);
+}
+
 float Analyser::getScopeMaximumsData (size_t index)
 {
     const juce::ScopedLock lock (m_scopeLock);

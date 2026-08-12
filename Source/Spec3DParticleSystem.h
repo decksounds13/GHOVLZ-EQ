@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "ParticleForceModule.h"
 #include "ParticleEmitterTypes.h"
+#include "ParticleNodeGraph/ParticleAttributes.h"
 #include <vector>
 #include <cstdint>
 #include <array>
@@ -592,6 +593,14 @@ private:
                          float& rotX, float& rotY, float& rotZ,
                          const FrameSources& frame) noexcept;
     void applyUpdateMods (Particle& p, const FrameSources& frame) noexcept;
+    /** Sample a graph attribute as 0..1 float (or magnitude for vectors). */
+    float sampleGraphAttr01 (ParticleNodeGraph::AttrId id, const Particle& p,
+                             const FrameSources& frame) const noexcept;
+    /** Returns false if particle should be culled. */
+    bool passesGraphFilters (const Particle& p, bool atSpawn,
+                             const FrameSources& frame) const noexcept;
+    void applyGraphColourRamps (Particle& p, bool atSpawn,
+                                const FrameSources& frame) const noexcept;
     void applyColourMods (Particle& p, ParticleModDest dest, float src, ParticleModOp op, float amount) const;
     static void setHue (float& r, float& g, float& b, float hue01) noexcept;
     void integrateForceStack (Particle& p, const ForceModScales& scales, float dt) noexcept;

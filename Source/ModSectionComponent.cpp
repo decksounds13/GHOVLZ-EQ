@@ -880,24 +880,60 @@ void ModSectionComponent::setThemeColors (SharedResources* r) noexcept
 void ModSectionComponent::applyThemeToChildControls()
 {
     const auto& c = colors();
+    const auto panelBg = c.modBackground;
+    const auto buttonBg = c.modBackground.brighter (0.15f);
+    // Per-surface ink: Legible text resolves against actual panel / button fills.
+    const auto primaryInk = c.legibleTextOn (c.modText, panelBg);
+    const auto secondaryInk = c.enforceLegibleText
+                                  ? c.legibleTextOn (c.modText.withAlpha (0.90f), panelBg)
+                                  : c.modText.withAlpha (0.65f);
+    const auto buttonInk = c.legibleTextOn (c.modText, buttonBg);
+    const auto sliderTextInk = c.legibleTextOn (c.modText, panelBg.darker (0.35f));
 
     ComboBoxLookAndFeel::sharedForPopupMenus().setThemeColors (themeColors);
-    matrixTitle.setColour (juce::Label::textColourId, c.modText);
+    matrixTitle.setColour (juce::Label::textColourId, primaryInk);
+    matrixTitle.setMinimumHorizontalScale (1.0f);
 
-    auto styleModButton = [&c] (juce::TextButton& b)
+    auto styleModButton = [&] (juce::TextButton& b)
     {
-        b.setColour (juce::TextButton::buttonColourId, c.modBackground.brighter (0.15f));
+        b.setColour (juce::TextButton::buttonColourId, buttonBg);
         b.setColour (juce::TextButton::buttonOnColourId, c.modAccent);
-        b.setColour (juce::TextButton::textColourOffId, c.modText);
+        b.setColour (juce::TextButton::textColourOffId, buttonInk);
         b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    };
+
+    auto styleTinyLabel = [&] (juce::Label& lab, bool secondary)
+    {
+        lab.setColour (juce::Label::textColourId, secondary ? secondaryInk : primaryInk);
+        lab.setMinimumHorizontalScale (1.0f);
+    };
+
+    auto styleAmount = [&] (juce::Slider& s)
+    {
+        s.setColour (juce::Slider::trackColourId, c.modBackground.darker (0.25f));
+        s.setColour (juce::Slider::backgroundColourId, c.modBackground.darker (0.45f));
+        s.setColour (juce::Slider::thumbColourId, c.modAccent);
+        s.setColour (juce::Slider::textBoxTextColourId, sliderTextInk.withAlpha (0.92f));
+        s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+    };
+
+    auto styleThresh = [&] (juce::Slider& s)
+    {
+        s.setColour (juce::Slider::trackColourId, juce::Colours::transparentBlack);
+        s.setColour (juce::Slider::backgroundColourId, juce::Colours::transparentBlack);
+        s.setColour (juce::Slider::thumbColourId, c.modAccent);
+        s.setColour (juce::Slider::textBoxTextColourId, sliderTextInk.withAlpha (0.92f));
+        s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     };
 
     for (auto& col : columns)
         if (col != nullptr)
         {
-            col->title.setColour (juce::Label::textColourId, c.modText);
-            col->rateLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
-            col->phaseLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+            styleTinyLabel (col->title, false);
+            styleTinyLabel (col->rateLabel, true);
+            styleTinyLabel (col->phaseLabel, true);
             styleModButton (col->prevShape);
             styleModButton (col->nextShape);
             styleModButton (col->retrigButton);
@@ -908,10 +944,10 @@ void ModSectionComponent::applyThemeToChildControls()
 
     if (shapeColumn != nullptr)
     {
-        shapeColumn->title.setColour (juce::Label::textColourId, c.modText);
-        shapeColumn->rateLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
-        shapeColumn->phaseLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
-        shapeColumn->smoothLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        styleTinyLabel (shapeColumn->title, false);
+        styleTinyLabel (shapeColumn->rateLabel, true);
+        styleTinyLabel (shapeColumn->phaseLabel, true);
+        styleTinyLabel (shapeColumn->smoothLabel, true);
         styleModButton (shapeColumn->expandButton);
         styleModButton (shapeColumn->retrigButton);
         shapeColumn->rateSlider.setThemeColors (themeColors);
@@ -926,13 +962,37 @@ void ModSectionComponent::applyThemeToChildControls()
 
     if (envColumn != nullptr)
     {
-        envColumn->title.setColour (juce::Label::textColourId, c.modText);
-        envColumn->threshLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
-        envColumn->attackLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
-        envColumn->releaseLabel.setColour (juce::Label::textColourId, c.modText.withAlpha (0.65f));
+        styleTinyLabel (envColumn->title, false);
+        styleTinyLabel (envColumn->threshLabel, true);
+        styleTinyLabel (envColumn->attackLabel, true);
+        styleTinyLabel (envColumn->releaseLabel, true);
+        styleThresh (envColumn->thresholdSlider);
         envColumn->attackSlider.setThemeColors (themeColors);
         envColumn->releaseSlider.setThemeColors (themeColors);
         envColumn->repaint();
+    }
+
+    // Matrix rows: index / On / amount / polar used hardcoded whitesmoke — theme them.
+    if (matrixContent != nullptr)
+    {
+        for (auto& row : matrixContent->rows)
+        {
+            if (row == nullptr)
+                continue;
+            styleTinyLabel (row->indexLabel, true);
+            styleModButton (row->polarButton);
+            styleAmount (row->amountSlider);
+            row->enabledToggle.setColour (juce::ToggleButton::textColourId, secondaryInk);
+            row->enabledToggle.setColour (juce::ToggleButton::tickColourId, c.modAccent);
+            row->repaint();
+        }
+    }
+
+    {
+        auto& bar = matrixViewport.getVerticalScrollBar();
+        bar.setColour (juce::ScrollBar::backgroundColourId, c.modBackground.darker (0.45f));
+        bar.setColour (juce::ScrollBar::thumbColourId, c.modAccent.withMultipliedBrightness (0.75f));
+        bar.setColour (juce::ScrollBar::trackColourId, c.modBackground.darker (0.25f));
     }
 }
 

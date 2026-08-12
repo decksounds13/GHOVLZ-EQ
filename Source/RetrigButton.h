@@ -36,7 +36,7 @@ inline juce::String retrigButtonTooltip()
 {
     return "Restart this modulator when a MIDI note starts.\n"
            "Left-click or right-click: Off / MIDI.\n"
-           "Ableton: make a MIDI track and set MIDI To → this track and this plugin "
+           "Ableton: make a MIDI track and set MIDI To -> this track and this plugin "
            "(same setup as Serum FX).";
 }
 

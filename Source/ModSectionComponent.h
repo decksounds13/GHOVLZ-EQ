@@ -113,7 +113,7 @@ private:
         bool rateSyncMode = false;
 
         juce::Label title;
-        juce::TextButton expandButton { juce::CharPointer_UTF8 ("\xe2\x86\x95") }; // ↕
+        juce::TextButton expandButton { "<>" };
         ShapeCurveEditor editor;
         RateImageKnob rateSlider;
         RetrigTextButton retrigButton { "N" };

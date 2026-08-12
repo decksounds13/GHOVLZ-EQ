@@ -1,4 +1,5 @@
 #include "BandMonitorButton.h"
+#include "KnobThemeHelpers.h"
 
 BandMonitorButton::BandMonitorButton()
     : juce::Button ("bandMonitor")
@@ -31,58 +32,86 @@ void BandMonitorButton::paintButton (juce::Graphics& g, bool shouldDrawButtonAsH
     juce::ignoreUnused (shouldDrawButtonAsDown);
     listening = getToggleState();
 
+    // Match power / knob chrome active-inactive language.
+    juce::Colour ink;
     if (listening)
-        g.setColour (brighterAndMoreSaturated (baseColor, 2.0f, 2.0f));
+        ink = KnobTheme::chromeActive (baseColor);
     else if (shouldDrawButtonAsHighlighted)
-        g.setColour (brighterAndMoreSaturated (baseColor, 1.4f, 1.4f));
+        ink = brighterAndMoreSaturated (KnobTheme::chromeInactive (baseColor), 1.15f, 1.1f);
     else
-        g.setColour (baseColor);
+        ink = KnobTheme::chromeInactive (baseColor);
 
-    const float lineWidth = 2.4f;
-    const float diameter = (float) getWidth() * 0.70f - 2.0f * lineWidth;
+    const float lineWidth = 2.2f;
+    const float diameter = (float) juce::jmin (getWidth(), getHeight()) * 0.72f - 2.0f * lineWidth;
     const float centerX = (float) getWidth() * 0.5f;
     const float centerY = (float) getHeight() * 0.5f;
-    const float radius = diameter * 0.5f;
+    const float radius = juce::jmax (4.0f, diameter * 0.5f);
 
+    // Glow ring (match OnOff / power style).
+    g.setColour (ink);
     juce::Path ring;
     ring.addEllipse (centerX - radius, centerY - radius, diameter, diameter);
     g.strokePath (ring, juce::PathStrokeType (lineWidth));
 
-    // Outer black rim (match OnOffButton1).
     const float outerRadius = radius + 2.0f;
     juce::Path outer;
     outer.addEllipse (centerX - outerRadius, centerY - outerRadius,
                       outerRadius * 2.0f, outerRadius * 2.0f);
     g.setColour (juce::Colours::black);
-    g.strokePath (outer, juce::PathStrokeType (4.0f));
+    g.strokePath (outer, juce::PathStrokeType (3.5f));
 
-    // Headphones glyph — cups + headband, scaled to the inner disc.
-    if (listening)
-        g.setColour (brighterAndMoreSaturated (baseColor, 2.0f, 2.0f));
-    else if (shouldDrawButtonAsHighlighted)
-        g.setColour (brighterAndMoreSaturated (baseColor, 1.4f, 1.4f));
-    else
-        g.setColour (baseColor);
+    // ------------------------------------------------------------------
+    // Headphones: two ear cups + headband. Built for small faces (~16–24 px).
+    // Cup geometry is chunky so it still reads when the ring is tight.
+    // ------------------------------------------------------------------
+    g.setColour (ink);
 
-    const float s = radius * 0.92f;
-    const float cupW = s * 0.34f;
-    const float cupH = s * 0.52f;
-    const float cupY = centerY - cupH * 0.15f;
-    const float leftCupX = centerX - s * 0.55f;
-    const float rightCupX = centerX + s * 0.55f - cupW;
+    const float s = radius * 0.95f;
+    // Vertical oval cups (classic cans).
+    const float cupW = s * 0.38f;
+    const float cupH = s * 0.58f;
+    const float cupCy = centerY + s * 0.06f;
+    const float cupInset = s * 0.48f; // distance from centre to cup centre
 
-    auto leftCup = juce::Rectangle<float> (leftCupX, cupY, cupW, cupH);
-    auto rightCup = juce::Rectangle<float> (rightCupX, cupY, cupW, cupH);
-    g.fillRoundedRectangle (leftCup, cupW * 0.35f);
-    g.fillRoundedRectangle (rightCup, cupW * 0.35f);
+    const auto leftCup = juce::Rectangle<float> (centerX - cupInset - cupW * 0.5f,
+                                                 cupCy - cupH * 0.5f,
+                                                 cupW, cupH);
+    const auto rightCup = juce::Rectangle<float> (centerX + cupInset - cupW * 0.5f,
+                                                  cupCy - cupH * 0.5f,
+                                                  cupW, cupH);
 
-    juce::Path band;
-    const float bandY = cupY + cupH * 0.12f;
-    const float bandR = s * 0.58f;
-    band.addCentredArc (centerX, bandY + bandR * 0.15f, bandR, bandR * 0.85f,
-                        0.0f, juce::MathConstants<float>::pi * 1.12f,
-                        juce::MathConstants<float>::pi * 1.88f, true);
-    g.strokePath (band, juce::PathStrokeType (lineWidth * 0.95f,
-                                              juce::PathStrokeType::curved,
-                                              juce::PathStrokeType::rounded));
+    // Outer cup shells.
+    g.fillEllipse (leftCup);
+    g.fillEllipse (rightCup);
+
+    // Inner pads (cutouts) so cups read as hollow earpieces, not blobs.
+    const float padInsetX = cupW * 0.28f;
+    const float padInsetY = cupH * 0.22f;
+    g.setColour (juce::Colours::black.withAlpha (listening ? 0.55f : 0.70f));
+    g.fillEllipse (leftCup.reduced (padInsetX, padInsetY));
+    g.fillEllipse (rightCup.reduced (padInsetX, padInsetY));
+
+    g.setColour (ink);
+
+    // Headband: thick arc over the top connecting the cups.
+    // JUCE arcs: 0 = +X (right), clockwise. Top = 3pi/2. Left=pi, right=0/2pi.
+    juce::Path headband;
+    const float bandCx = centerX;
+    const float bandCy = cupCy - cupH * 0.05f;
+    const float bandRx = cupInset + cupW * 0.08f;
+    const float bandRy = s * 0.72f;
+    // From upper-left cup through top to upper-right cup (clockwise: pi → 2pi).
+    const float fromA = juce::MathConstants<float>::pi + 0.18f;
+    const float toA = juce::MathConstants<float>::twoPi - 0.18f;
+    headband.addCentredArc (bandCx, bandCy, bandRx, bandRy, 0.0f, fromA, toA, true);
+    g.strokePath (headband, juce::PathStrokeType (juce::jmax (2.0f, lineWidth * 1.15f),
+                                                  juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+
+    // Short stems from headband ends into each cup (reads as headband hinges).
+    const float stemLen = cupH * 0.18f;
+    g.drawLine (leftCup.getCentreX(), leftCup.getY() + 1.0f,
+                leftCup.getCentreX(), leftCup.getY() + stemLen, lineWidth * 0.9f);
+    g.drawLine (rightCup.getCentreX(), rightCup.getY() + 1.0f,
+                rightCup.getCentreX(), rightCup.getY() + stemLen, lineWidth * 0.9f);
 }

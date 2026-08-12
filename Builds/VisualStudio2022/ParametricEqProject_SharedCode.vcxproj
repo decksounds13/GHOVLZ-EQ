@@ -166,6 +166,7 @@
     <ClCompile Include="..\..\Source\ModuleLookPresets.cpp"/>
     <ClCompile Include="..\..\Source\StereogramComponent.cpp"/>
     <ClCompile Include="..\..\Source\HistogramComponent.cpp"/>
+    <ClCompile Include="..\..\Source\ThdMeterComponent.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\PathSampleOverlay.cpp"/>
     <ClCompile Include="..\..\Source\ColourRamp\RampColorPickerPanel.cpp"/>
@@ -240,6 +241,11 @@
     <ClCompile Include="..\..\Source\Spectral\SpectralDynamicsProcessor.cpp"/>
     <ClCompile Include="..\..\Source\StructuralSplit\StructuralSplitEngine.cpp"/>
     <ClCompile Include="..\..\Source\Match\MatchProcessor.cpp"/>
+    <ClCompile Include="..\..\Source\Learn\BiquadMagnitude.cpp"/>
+    <ClCompile Include="..\..\Source\Learn\ParametricMatcher.cpp"/>
+    <ClCompile Include="..\..\Source\Learn\EqBandFitter.cpp"/>
+    <ClCompile Include="..\..\Source\Learn\EqSourceClassifier.cpp"/>
+    <ClCompile Include="..\..\Source\Learn\EqLearnController.cpp"/>
     <ClCompile Include="..\..\Source\RotaryImageKnob1.cpp"/>
     <ClCompile Include="..\..\Source\RotaryImageKnob2.cpp"/>
     <ClCompile Include="..\..\Source\RotaryImageKnob3.cpp"/>
@@ -3496,6 +3502,8 @@
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h"/>
     <ClInclude Include="..\..\Source\Spec3DParticleSystem.h"/>
+    <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleDataTypes.h"/>
+    <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleAttributes.h"/>
     <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleNodeTypes.h"/>
     <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphModel.h"/>
     <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleNodeGraphCompiler.h"/>
@@ -3511,6 +3519,7 @@
     <ClInclude Include="..\..\Source\LoudnessComponent.h"/>
     <ClInclude Include="..\..\Source\StereogramComponent.h"/>
     <ClInclude Include="..\..\Source\HistogramComponent.h"/>
+    <ClInclude Include="..\..\Source\ThdMeterComponent.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\GradientRamp.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\ColourRampBank.h"/>
     <ClInclude Include="..\..\Source\ColourRamp\PathSampleOverlay.h"/>
@@ -3626,6 +3635,13 @@
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitEngine.h"/>
     <ClInclude Include="..\..\Source\Match\MatchSettings.h"/>
     <ClInclude Include="..\..\Source\Match\MatchProcessor.h"/>
+    <ClInclude Include="..\..\Source\Learn\EqLearnSettings.h"/>
+    <ClInclude Include="..\..\Source\Learn\BiquadMagnitude.h"/>
+    <ClInclude Include="..\..\Source\Learn\ParametricMatcher.h"/>
+    <ClInclude Include="..\..\Source\Learn\EqBandFitter.h"/>
+    <ClInclude Include="..\..\Source\Learn\EqSourceTemplates.h"/>
+    <ClInclude Include="..\..\Source\Learn\EqSourceClassifier.h"/>
+    <ClInclude Include="..\..\Source\Learn\EqLearnController.h"/>
     <ClInclude Include="..\..\Source\RotaryImageKnob1.h"/>
     <ClInclude Include="..\..\Source\RotaryImageKnob2.h"/>
     <ClInclude Include="..\..\Source\RotaryImageKnob3.h"/>

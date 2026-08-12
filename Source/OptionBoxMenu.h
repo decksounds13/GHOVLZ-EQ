@@ -58,6 +58,13 @@ public:
     void setInteractionFaded (bool shouldFade);
     /** Keep OptionBox visual size locked to the plugin scale after parent resize. */
     void updateUiScaleFromParent();
+    /**
+        Graph/plugin width used for ui scale (not the current host parent).
+        Must stay pinned to the EQ graph so rehosting onto EqEditor does not resize the box.
+    */
+    void setUiScaleReferenceWidth (float widthPx) noexcept;
+    /** True while the user is dragging the floating box (skip reparent / graph-scale moves). */
+    bool isDragInProgress() const noexcept { return isBeingDragged; }
     /** Internal 0–7, or global display 8–63 for extended bands. */
     int getCurrentBandIndex() const { return currentBandIndex; }
     /** Headphones solo-monitor for the current OptionBox band. */
@@ -133,6 +140,14 @@ private:
     void applyUiScale();
     int getVisualWidth() const;
     int getVisualHeight() const;
+    /** Visual footprint in parent coords (accounts for AffineTransform::scale). */
+    juce::Rectangle<int> getVisualBoundsInParent() const noexcept;
+    /** Invalidate parent over visual bounds + drop-shadow halo (kills drag ghosts). */
+    void repaintParentOverVisual (juce::Rectangle<int> visualInParent) const;
+    /** Outer rim + title strip — grab zones that stay easy under audio load. */
+    bool isDragChrome (juce::Point<int> localPos) const noexcept;
+    /** Knobs / buttons / sliders / combos — never start a window drag from these. */
+    static bool isInteractiveControl (const juce::Component* c) noexcept;
     /** Hard-clamp so the transformed visual bounds never leave the graph parent. */
     void constrainVisualBoundsToParent();
     const SharedColors& colors() const noexcept;
@@ -141,8 +156,15 @@ private:
     bool isBeingDragged = false;
     juce::Point<int> lastMousePosition;
     bool isDraggable = true;
-    int dragOffsetX = 0;
-    int dragOffsetY = 0;
+    /**
+        Do NOT use ComponentDragger here: with AffineTransform::scale it applies
+        local-space mouse deltas as parent setBounds offsets (teleport / flash).
+        Drag uses parent-space mouse deltas vs these two anchors instead.
+    */
+    juce::Point<int> dragStartMouseInParent;
+    juce::Point<int> dragStartCompPos;
+    /** Graph width for scale; independent of EqEditor rehost parent. */
+    float uiScaleReferenceWidth = designParentWidth;
     int anchorHandleX = 0;
     int anchorHandleY = 0;
     bool isMouseOverChildComponent = false;

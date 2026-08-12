@@ -1,64 +1,99 @@
 #pragma once
 
-#include <JuceHeader.h>
+#include "ParticleDataTypes.h"
+#include "ParticleAttributes.h"
 #include <cstdint>
 
 /**
     Particle node-graph (Embergen / Houdini / UE Niagara-style).
-    Typed pins, graph topology, compile → Spec3D particle stack.
+    Typed pins map onto DataType; compile -> Spec3D stack + attribute program.
 */
 namespace ParticleNodeGraph
 {
+
+/** Pin types - mirrors DataType for wiring; kept as PinType for existing call sites. */
 enum class PinType : uint8_t
 {
     floatT = 0,
     vec3,
     boolT,
-    force,      // force module contribution
-    emitter,    // emitter configuration
-    exec,       // optional flow (kept for future)
-    any         // never stored; used for loose matching
+    force,
+    emitter,
+    exec,
+    any,
+    // Extended universal types
+    intT,
+    vec2,
+    vec4,
+    colour,
+    particles,
+    ramp,
+    curve,
+    field   // reserved: fluids / sparse fields later
 };
 
-inline const char* pinTypeName (PinType t) noexcept
+inline DataType pinTypeToDataType (PinType t) noexcept
 {
     switch (t)
     {
-        case PinType::floatT:  return "Float";
-        case PinType::vec3:    return "Vector3";
-        case PinType::boolT:   return "Bool";
-        case PinType::force:   return "Force";
-        case PinType::emitter: return "Emitter";
-        case PinType::exec:    return "Exec";
-        default:               return "Any";
+        case PinType::floatT:    return DataType::floatT;
+        case PinType::vec3:      return DataType::vec3;
+        case PinType::boolT:     return DataType::boolT;
+        case PinType::force:     return DataType::force;
+        case PinType::emitter:   return DataType::emitter;
+        case PinType::exec:      return DataType::exec;
+        case PinType::intT:      return DataType::intT;
+        case PinType::vec2:      return DataType::vec2;
+        case PinType::vec4:      return DataType::vec4;
+        case PinType::colour:    return DataType::colour;
+        case PinType::particles: return DataType::particles;
+        case PinType::ramp:      return DataType::ramp;
+        case PinType::curve:     return DataType::curve;
+        case PinType::field:     return DataType::field;
+        default:                 return DataType::any;
     }
+}
+
+inline PinType dataTypeToPinType (DataType t) noexcept
+{
+    switch (t)
+    {
+        case DataType::floatT:    return PinType::floatT;
+        case DataType::vec3:      return PinType::vec3;
+        case DataType::boolT:     return PinType::boolT;
+        case DataType::force:     return PinType::force;
+        case DataType::emitter:   return PinType::emitter;
+        case DataType::exec:      return PinType::exec;
+        case DataType::intT:      return PinType::intT;
+        case DataType::vec2:      return PinType::vec2;
+        case DataType::vec4:      return PinType::vec4;
+        case DataType::colour:    return PinType::colour;
+        case DataType::particles: return PinType::particles;
+        case DataType::ramp:      return PinType::ramp;
+        case DataType::curve:     return PinType::curve;
+        case DataType::field:     return PinType::field;
+        default:                 return PinType::any;
+    }
+}
+
+inline const char* pinTypeName (PinType t) noexcept
+{
+    return dataTypeName (pinTypeToDataType (t));
 }
 
 inline juce::Colour pinTypeColour (PinType t) noexcept
 {
-    switch (t)
-    {
-        case PinType::floatT:  return juce::Colour (0xff5ec8ff); // cyan
-        case PinType::vec3:    return juce::Colour (0xffb07cff); // purple
-        case PinType::boolT:   return juce::Colour (0xffff6b6b); // red
-        case PinType::force:   return juce::Colour (0xffffb347); // amber
-        case PinType::emitter: return juce::Colour (0xff7dffa3); // mint
-        case PinType::exec:    return juce::Colour (0xffeeeeee);
-        default:               return juce::Colours::grey;
-    }
+    return dataTypeColour (pinTypeToDataType (t));
 }
 
-/** True if a wire from `from` can feed `to` (strict: same type). */
 inline bool pinTypesCompatible (PinType from, PinType to) noexcept
 {
-    if (from == PinType::any || to == PinType::any)
-        return true;
-    return from == to;
+    return dataTypesCompatible (pinTypeToDataType (from), pinTypeToDataType (to));
 }
 
 enum class NodeKind : uint16_t
 {
-    // IO / system
+    // IO / system  (ids stable - serialized in ValueTree)
     simOutput = 0,
     comment,
 
@@ -104,14 +139,47 @@ enum class NodeKind : uint16_t
     vecDot,
 
     // Utility
-    floatToVec3, // broadcast float → vec3
+    floatToVec3,
     switchFloat,
 
-    // Combine / merge (fan-in; multi-wire on each In pin)
-    combineForce,    // merge Force → Force
-    combineEmitter,  // merge Emitter → Emitter (primary + extras for future multi-emit)
-    combineFloat,    // sum Float → Float
-    combineVec3,     // sum Vector3 → Vector3
+    // Combine
+    combineForce,
+    combineEmitter,
+    combineFloat,
+    combineVec3,
+
+    // ── Framework expansion (append only) ──────────────────────────
+    constInt,
+    constVec2,
+    constVec4,
+    constColour,
+
+    makeVec2,
+    breakVec2,
+    makeVec4,
+    breakVec4,
+    makeColour,
+    breakColour,
+
+    colourLerp,
+    colourMul,
+
+    mapRange,
+    thresholdGate,
+
+    convertToFloat,
+    convertToVec3,
+    convertToColour,
+
+    uniformTime,
+    uniformDelta,
+    uniformAmplitude,
+
+    /** Filter particle stream by attribute (amount / threshold / curve). */
+    filterAttr,
+    /** Colour particles from attribute via 2-stop ramp. */
+    colourRampAttr,
+    combineParticles,
 
     count
 };
@@ -133,6 +201,10 @@ inline const char* nodeKindName (NodeKind k) noexcept
         case NodeKind::constFloat:          return "Float";
         case NodeKind::constVec3:           return "Vector3";
         case NodeKind::constBool:           return "Bool";
+        case NodeKind::constInt:            return "Int";
+        case NodeKind::constVec2:           return "Vector2";
+        case NodeKind::constVec4:           return "Vector4";
+        case NodeKind::constColour:         return "Colour";
         case NodeKind::mathAdd:             return "Add";
         case NodeKind::mathSub:             return "Subtract";
         case NodeKind::mathMul:             return "Multiply";
@@ -146,19 +218,38 @@ inline const char* nodeKindName (NodeKind k) noexcept
         case NodeKind::mathPow:             return "Power";
         case NodeKind::mathSin:             return "Sin";
         case NodeKind::mathCos:             return "Cos";
+        case NodeKind::makeVec2:            return "Make Vector2";
+        case NodeKind::breakVec2:           return "Break Vector2";
         case NodeKind::makeVec3:            return "Make Vector3";
         case NodeKind::breakVec3:           return "Break Vector3";
+        case NodeKind::makeVec4:            return "Make Vector4";
+        case NodeKind::breakVec4:           return "Break Vector4";
+        case NodeKind::makeColour:          return "Make Colour";
+        case NodeKind::breakColour:         return "Break Colour";
         case NodeKind::vecLength:           return "Vector Length";
         case NodeKind::vecNormalize:        return "Normalize";
         case NodeKind::vecScale:            return "Scale Vector";
         case NodeKind::vecAdd:              return "Add Vector";
         case NodeKind::vecDot:              return "Dot Product";
-        case NodeKind::floatToVec3:         return "Float → Vector3";
+        case NodeKind::floatToVec3:         return "Float -> Vector3";
         case NodeKind::switchFloat:         return "Switch (Float)";
+        case NodeKind::colourLerp:          return "Lerp Colour";
+        case NodeKind::colourMul:           return "Multiply Colour";
+        case NodeKind::mapRange:            return "Map Range";
+        case NodeKind::thresholdGate:       return "Threshold";
+        case NodeKind::convertToFloat:      return "To Float";
+        case NodeKind::convertToVec3:       return "To Vector3";
+        case NodeKind::convertToColour:     return "To Colour";
+        case NodeKind::uniformTime:         return "Uniform: Time";
+        case NodeKind::uniformDelta:        return "Uniform: Delta";
+        case NodeKind::uniformAmplitude:    return "Uniform: Amplitude";
+        case NodeKind::filterAttr:          return "Filter by Attribute";
+        case NodeKind::colourRampAttr:      return "Colour Ramp (Attribute)";
         case NodeKind::combineForce:        return "Combine Forces";
         case NodeKind::combineEmitter:      return "Combine Emitters";
         case NodeKind::combineFloat:        return "Combine Float (Sum)";
         case NodeKind::combineVec3:         return "Combine Vector3 (Sum)";
+        case NodeKind::combineParticles:    return "Combine Particles";
         default:                            return "Node";
     }
 }
@@ -184,13 +275,22 @@ inline juce::String nodeKindCategory (NodeKind k)
         case NodeKind::combineEmitter:
         case NodeKind::combineFloat:
         case NodeKind::combineVec3:
+        case NodeKind::combineParticles:
             return "Combine";
         case NodeKind::constFloat:
+        case NodeKind::constVec2:
         case NodeKind::constVec3:
+        case NodeKind::constVec4:
         case NodeKind::constBool:
+        case NodeKind::constInt:
+        case NodeKind::constColour:
             return "Constants";
+        case NodeKind::makeVec2:
+        case NodeKind::breakVec2:
         case NodeKind::makeVec3:
         case NodeKind::breakVec3:
+        case NodeKind::makeVec4:
+        case NodeKind::breakVec4:
         case NodeKind::vecLength:
         case NodeKind::vecNormalize:
         case NodeKind::vecScale:
@@ -198,18 +298,61 @@ inline juce::String nodeKindCategory (NodeKind k)
         case NodeKind::vecDot:
         case NodeKind::floatToVec3:
             return "Vector";
+        case NodeKind::makeColour:
+        case NodeKind::breakColour:
+        case NodeKind::colourLerp:
+        case NodeKind::colourMul:
+        case NodeKind::colourRampAttr:
+            return "Colour";
+        case NodeKind::filterAttr:
+            return "Attributes";
+        case NodeKind::uniformTime:
+        case NodeKind::uniformDelta:
+        case NodeKind::uniformAmplitude:
+            return "Uniforms";
+        case NodeKind::mapRange:
+        case NodeKind::thresholdGate:
+        case NodeKind::convertToFloat:
+        case NodeKind::convertToVec3:
+        case NodeKind::convertToColour:
+            return "Utility";
         default:
             return "Math";
+    }
+}
+
+/** Default evaluation stage for a node kind. */
+inline EvalStage nodeKindDefaultStage (NodeKind k) noexcept
+{
+    switch (k)
+    {
+        case NodeKind::filterAttr:
+        case NodeKind::colourRampAttr:
+            return EvalStage::either; // stage stored in params
+        case NodeKind::forceGravity:
+        case NodeKind::forceDrag:
+        case NodeKind::forceWind:
+        case NodeKind::forceCurl:
+        case NodeKind::forceTurbulence:
+        case NodeKind::forceRotation:
+            return EvalStage::update;
+        case NodeKind::emitterSpectrogram:
+        case NodeKind::emitterPoint:
+            return EvalStage::spawn;
+        default:
+            return EvalStage::either;
     }
 }
 
 /** Pins that accept multiple inbound wires (Niagara-style fan-in). */
 inline bool pinAllowsMultiWire (NodeKind nodeKind, const juce::String& pinId) noexcept
 {
-    if (nodeKind == NodeKind::simOutput && (pinId == "force" || pinId == "emitter"))
+    if (nodeKind == NodeKind::simOutput
+        && (pinId == "force" || pinId == "emitter" || pinId == "particles"))
         return true;
     if ((nodeKind == NodeKind::combineForce || nodeKind == NodeKind::combineEmitter
-         || nodeKind == NodeKind::combineFloat || nodeKind == NodeKind::combineVec3)
+         || nodeKind == NodeKind::combineFloat || nodeKind == NodeKind::combineVec3
+         || nodeKind == NodeKind::combineParticles)
         && pinId.startsWith ("in"))
         return true;
     return false;
@@ -229,12 +372,11 @@ struct NodeDesc
     juce::String title;
     juce::Array<PinDesc> inputs;
     juce::Array<PinDesc> outputs;
-    /** Default scalar params stored on the node (UI knobs). */
     juce::Array<juce::String> paramKeys;
     juce::Array<float> paramDefaults;
+    EvalStage stage = EvalStage::either;
 };
 
-/** Factory: pin layout + default params for each kind. */
 NodeDesc describeNode (NodeKind kind);
 
 } // namespace ParticleNodeGraph

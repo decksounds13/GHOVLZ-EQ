@@ -3,6 +3,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <cmath>
 
 namespace ParticleNodeGraph
 {
@@ -25,16 +26,28 @@ void GraphModel::clear()
 void GraphModel::createDefaultGraph()
 {
     clear();
-    const auto e = addNode (NodeKind::emitterSpectrogram, { 60.0f, 180.0f });
-    const auto g = addNode (NodeKind::forceGravity, { 280.0f, 60.0f });
-    const auto d = addNode (NodeKind::forceDrag, { 280.0f, 200.0f });
-    const auto t = addNode (NodeKind::forceTurbulence, { 280.0f, 340.0f });
-    const auto comb = addNode (NodeKind::combineForce, { 480.0f, 180.0f });
-    const auto rate = addNode (NodeKind::constFloat, { 60.0f, 360.0f });
+    const auto e = addNode (NodeKind::emitterSpectrogram, { 40.0f, 160.0f });
+    const auto filt = addNode (NodeKind::filterAttr, { 240.0f, 160.0f });
+    if (auto* f = findNode (filt))
+    {
+        f->setParam ("attr", (float) AttrId::fft);
+        f->setParam ("threshold", 0.15f);
+        f->setParam ("amount", 1.0f);
+    }
+    const auto ramp = addNode (NodeKind::colourRampAttr, { 440.0f, 160.0f });
+    if (auto* r = findNode (ramp))
+        r->setParam ("attr", (float) AttrId::fft);
+    const auto g = addNode (NodeKind::forceGravity, { 240.0f, 40.0f });
+    const auto d = addNode (NodeKind::forceDrag, { 240.0f, 320.0f });
+    const auto t = addNode (NodeKind::forceTurbulence, { 240.0f, 420.0f });
+    const auto comb = addNode (NodeKind::combineForce, { 480.0f, 300.0f });
+    const auto rate = addNode (NodeKind::constFloat, { 40.0f, 360.0f });
     if (auto* rn = findNode (rate))
         rn->setParam ("value", 4000.0f);
-    const auto out = addNode (NodeKind::simOutput, { 720.0f, 180.0f });
-    connect (e, "out", out, "emitter");
+    const auto out = addNode (NodeKind::simOutput, { 700.0f, 180.0f });
+    connect (e, "out", filt, "in");
+    connect (filt, "out", ramp, "in");
+    connect (ramp, "out", out, "particles");
     connect (g, "out", comb, "in0");
     connect (d, "out", comb, "in1");
     connect (t, "out", comb, "in2");
@@ -119,7 +132,8 @@ bool GraphModel::wouldCreateCycle (uint32_t fromNode, uint32_t toNode) const
 }
 
 uint32_t GraphModel::connect (uint32_t fromNode, const juce::String& fromPin,
-                              uint32_t toNode, const juce::String& toPin)
+                              uint32_t toNode, const juce::String& toPin,
+                              bool allowInvalid)
 {
     auto* a = findNode (fromNode);
     auto* b = findNode (toNode);
@@ -131,9 +145,13 @@ uint32_t GraphModel::connect (uint32_t fromNode, const juce::String& fromPin,
     if (outDesc == nullptr || inDesc == nullptr)
         return 0;
 
+    const bool typeOk = pinTypesCompatible (outDesc->type, inDesc->type);
+    const bool cycle = wouldCreateCycle (fromNode, toNode);
+    if ((! typeOk || cycle) && ! allowInvalid)
+        return 0;
+
     // Fan-in pins keep multiple wires (forces, combine nodes, multi-emitter).
-    const bool multiIn = pinAllowsMultiWire (b->kind, toPin)
-                         && pinTypesCompatible (outDesc->type, inDesc->type);
+    const bool multiIn = pinAllowsMultiWire (b->kind, toPin) && typeOk;
     if (! multiIn)
     {
         wires_.erase (std::remove_if (wires_.begin(), wires_.end(),
@@ -157,13 +175,7 @@ uint32_t GraphModel::connect (uint32_t fromNode, const juce::String& fromPin,
     w.fromPin = fromPin;
     w.toNode = toNode;
     w.toPin = toPin;
-    w.typeValid = pinTypesCompatible (outDesc->type, inDesc->type)
-                  && ! wouldCreateCycle (fromNode, toNode);
-    // Type mismatch: still store wire as invalid visual feedback.
-    if (! pinTypesCompatible (outDesc->type, inDesc->type))
-        w.typeValid = false;
-    if (wouldCreateCycle (fromNode, toNode))
-        w.typeValid = false;
+    w.typeValid = typeOk && ! cycle;
 
     wires_.push_back (w);
     notify();
@@ -377,13 +389,164 @@ void GraphModel::deleteSelection()
         removeNode (id);
 }
 
-void GraphModel::moveSelectedBy (juce::Point<float> delta)
+void GraphModel::moveSelectedBy (juce::Point<float> delta, bool notifyEach)
 {
+    bool any = false;
     for (auto& n : nodes_)
         if (n.selected)
+        {
             n.pos += delta;
-    if (! selectedNodeIds().empty())
+            any = true;
+        }
+    if (any && notifyEach)
         notify();
+}
+
+void GraphModel::snapSelectedToGrid (float grid)
+{
+    bool any = false;
+    for (auto& n : nodes_)
+        if (n.selected)
+        {
+            n.pos.x = snap (n.pos.x, grid);
+            n.pos.y = snap (n.pos.y, grid);
+            any = true;
+        }
+    if (any)
+        notify();
+}
+
+std::vector<uint32_t> GraphModel::duplicateSelection (juce::Point<float> offset)
+{
+    const auto tree = copySelectionToValueTree();
+    return pasteValueTree (tree, offset);
+}
+
+juce::ValueTree GraphModel::copySelectionToValueTree() const
+{
+    juce::ValueTree root ("ParticleNodeGraphClip");
+    root.setProperty ("version", 1, nullptr);
+    const auto ids = selectedNodeIds();
+    if (ids.empty())
+        return root;
+
+    std::set<uint32_t> sel;
+    for (auto id : ids)
+        sel.insert (id);
+
+    for (const auto& n : nodes_)
+    {
+        if (! sel.count (n.id))
+            continue;
+        juce::ValueTree nt ("Node");
+        nt.setProperty ("id", (int) n.id, nullptr);
+        nt.setProperty ("kind", (int) n.kind, nullptr);
+        nt.setProperty ("x", n.pos.x, nullptr);
+        nt.setProperty ("y", n.pos.y, nullptr);
+        nt.setProperty ("comment", n.commentText, nullptr);
+        nt.setProperty ("headerArgb", (int) n.headerColourArgb, nullptr);
+        for (const auto& kv : n.params)
+            nt.setProperty ("p_" + kv.first, kv.second, nullptr);
+        root.appendChild (nt, nullptr);
+    }
+    for (const auto& w : wires_)
+    {
+        if (! sel.count (w.fromNode) || ! sel.count (w.toNode))
+            continue;
+        juce::ValueTree wt ("Wire");
+        wt.setProperty ("from", (int) w.fromNode, nullptr);
+        wt.setProperty ("fromPin", w.fromPin, nullptr);
+        wt.setProperty ("to", (int) w.toNode, nullptr);
+        wt.setProperty ("toPin", w.toPin, nullptr);
+        wt.setProperty ("valid", w.typeValid, nullptr);
+        root.appendChild (wt, nullptr);
+    }
+    return root;
+}
+
+std::vector<uint32_t> GraphModel::pasteValueTree (const juce::ValueTree& tree,
+                                                 juce::Point<float> offset)
+{
+    std::vector<uint32_t> newIds;
+    if (! tree.hasType ("ParticleNodeGraphClip") && ! tree.hasType ("ParticleNodeGraph"))
+        return newIds;
+
+    beginEdit();
+    clearSelection();
+
+    std::map<uint32_t, uint32_t> idMap;
+    for (int i = 0; i < tree.getNumChildren(); ++i)
+    {
+        const auto ch = tree.getChild (i);
+        if (! ch.hasType ("Node"))
+            continue;
+        const auto oldId = (uint32_t) (int) ch.getProperty ("id", 0);
+        const auto kind = (NodeKind) juce::jlimit (0, (int) NodeKind::count - 1,
+                                                   (int) ch.getProperty ("kind", 0));
+        juce::Point<float> pos { (float) ch.getProperty ("x", 0.0) + offset.x,
+                                 (float) ch.getProperty ("y", 0.0) + offset.y };
+        // Inline add without nested notify spam
+        GraphNode n;
+        n.id = nextNodeId_++;
+        n.kind = kind;
+        n.pos = pos;
+        n.selected = true;
+        n.commentText = ch.getProperty ("comment", "").toString();
+        n.headerColourArgb = (uint32_t) (int) ch.getProperty ("headerArgb", 0);
+        const auto desc = describeNode (kind);
+        for (int p = 0; p < desc.paramKeys.size(); ++p)
+        {
+            const auto key = desc.paramKeys[p];
+            n.params[key] = (float) ch.getProperty ("p_" + key, desc.paramDefaults[p]);
+        }
+        idMap[oldId] = n.id;
+        newIds.push_back (n.id);
+        nodes_.push_back (std::move (n));
+    }
+
+    for (int i = 0; i < tree.getNumChildren(); ++i)
+    {
+        const auto ch = tree.getChild (i);
+        if (! ch.hasType ("Wire"))
+            continue;
+        const auto fo = (uint32_t) (int) ch.getProperty ("from", 0);
+        const auto to = (uint32_t) (int) ch.getProperty ("to", 0);
+        if (! idMap.count (fo) || ! idMap.count (to))
+            continue;
+        connect (idMap[fo], ch.getProperty ("fromPin", "").toString(),
+                 idMap[to], ch.getProperty ("toPin", "").toString());
+    }
+
+    endEdit (true);
+    return newIds;
+}
+
+juce::Rectangle<float> GraphModel::contentBounds() const
+{
+    juce::Rectangle<float> b;
+    bool first = true;
+    for (const auto& n : nodes_)
+    {
+        const auto nb = nodeBounds (n);
+        if (first) { b = nb; first = false; }
+        else b = b.getUnion (nb);
+    }
+    return b;
+}
+
+juce::Rectangle<float> GraphModel::selectionBounds() const
+{
+    juce::Rectangle<float> b;
+    bool first = true;
+    for (const auto& n : nodes_)
+    {
+        if (! n.selected)
+            continue;
+        const auto nb = nodeBounds (n);
+        if (first) { b = nb; first = false; }
+        else b = b.getUnion (nb);
+    }
+    return b;
 }
 
 juce::Rectangle<float> GraphModel::nodeBounds (const GraphNode& n)

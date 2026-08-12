@@ -19,11 +19,13 @@ class Menu : public juce::Component,
              public juce::Button::Listener
 {
 public:
-    static constexpr int kContentWidth = 533;          // previous 800 * 2/3 — leaves ~half window for maximized scopes
-    static constexpr int kContentHeight = 447;         // ~850 / 1.9
-    static constexpr int kDragBarHeight = 24;
+    /** Room for full plain tab labels (no ellipsis); leaves space for maximized scopes. */
+    static constexpr int kContentWidth = 560;
+    static constexpr int kContentHeight = 460;
+    static constexpr int kDragBarHeight = 26;
     static constexpr int kScrollBarThickness = 11;
-    static constexpr int kTabsPerPage = 6;
+    /** Fewer per page so multi-word labels stay fully visible with the pager. */
+    static constexpr int kTabsPerPage = 5;
 
     Menu (SharedResources& resources,
           juce::AudioProcessorValueTreeState& state,

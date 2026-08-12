@@ -4,27 +4,73 @@
 #include "Menu/SharedResources.h"
 #include "GraphOverlayButtonLookAndFeel.h"
 
-/** Shared popup / combo menu colours — matches Mod section LFO shape < > toggles. */
+/**
+    Shared popup / chrome-menu colours for the graph-top UI panel, context menus,
+    and related CallOutBox chrome.
+
+    Live SharedColors (Plugin/Option family) so dice / Faceplate randomize hits
+    these panels; Legible text is applied vs each surface.
+    Falls back to factory-like defaults when no SharedResources is active.
+*/
 namespace PluginMenuTheme
 {
-    inline juce::Colour background() noexcept { return juce::Colour::fromRGBA (60, 50, 35, 255); }
-    inline juce::Colour highlight() noexcept  { return juce::Colour::fromRGBA (180, 150, 55, 255); }
-    inline juce::Colour text() noexcept       { return juce::Colours::whitesmoke.withAlpha (0.9f); }
-    inline juce::Colour textOnHighlight() noexcept { return juce::Colours::black; }
+    inline const SharedColors& colors() noexcept
+    {
+        static const SharedColors defaults;
+        if (auto* active = SharedResources::getActive())
+            return active->sharedColors;
+        return defaults;
+    }
+
+    /** Panel / row fill — Option Combo Background (synced from Plugin chrome). */
+    inline juce::Colour background() noexcept
+    {
+        return colors().optionComboBackground;
+    }
+
+    /** Hover / selected row + accent. */
+    inline juce::Colour highlight() noexcept
+    {
+        return colors().optionComboHighlight;
+    }
+
+    /** Primary label ink on panel background. */
+    inline juce::Colour text() noexcept
+    {
+        const auto& c = colors();
+        return c.legibleTextOn (c.optionComboText, c.optionComboBackground)
+            .withAlpha (0.95f);
+    }
+
+    /** Label ink on highlight/accent rows (black when accent is light, white when dark). */
+    inline juce::Colour textOnHighlight() noexcept
+    {
+        const auto& c = colors();
+        return c.legibleTextOn (juce::Colours::black, c.optionComboHighlight);
+    }
+
+    inline juce::Colour outline() noexcept
+    {
+        return colors().optionBorder;
+    }
 
     inline void applyColours (juce::LookAndFeel& lf)
     {
-        lf.setColour (juce::PopupMenu::backgroundColourId, background());
-        lf.setColour (juce::PopupMenu::textColourId, text());
-        lf.setColour (juce::PopupMenu::headerTextColourId, text());
-        lf.setColour (juce::PopupMenu::highlightedBackgroundColourId, highlight());
-        lf.setColour (juce::PopupMenu::highlightedTextColourId, textOnHighlight());
-        lf.setColour (juce::ComboBox::backgroundColourId, background());
-        lf.setColour (juce::ComboBox::outlineColourId, juce::Colour::fromRGBA (30, 25, 18, 255));
-        lf.setColour (juce::ComboBox::buttonColourId, background());
-        lf.setColour (juce::ComboBox::arrowColourId, text());
-        lf.setColour (juce::ComboBox::textColourId, text());
-        lf.setColour (juce::ComboBox::focusedOutlineColourId, highlight());
+        const auto bg = background();
+        const auto hl = highlight();
+        const auto ink = text();
+        const auto inkOn = textOnHighlight();
+        lf.setColour (juce::PopupMenu::backgroundColourId, bg);
+        lf.setColour (juce::PopupMenu::textColourId, ink);
+        lf.setColour (juce::PopupMenu::headerTextColourId, ink);
+        lf.setColour (juce::PopupMenu::highlightedBackgroundColourId, hl);
+        lf.setColour (juce::PopupMenu::highlightedTextColourId, inkOn);
+        lf.setColour (juce::ComboBox::backgroundColourId, bg);
+        lf.setColour (juce::ComboBox::outlineColourId, outline());
+        lf.setColour (juce::ComboBox::buttonColourId, bg);
+        lf.setColour (juce::ComboBox::arrowColourId, ink);
+        lf.setColour (juce::ComboBox::textColourId, ink);
+        lf.setColour (juce::ComboBox::focusedOutlineColourId, hl);
     }
 }
 
@@ -54,16 +100,19 @@ public:
     void applyThemeColours()
     {
         const auto& c = colors();
+        // Legible text: combo / popup ink vs field fill; highlight row ink vs accent.
+        const auto comboInk = c.legibleTextOn (c.optionComboText, c.optionComboBackground);
+        const auto hlInk = c.legibleTextOn (juce::Colours::black, c.optionComboHighlight);
         setColour (juce::PopupMenu::backgroundColourId, c.optionComboBackground);
-        setColour (juce::PopupMenu::textColourId, c.optionComboText);
-        setColour (juce::PopupMenu::headerTextColourId, c.optionComboText);
+        setColour (juce::PopupMenu::textColourId, comboInk);
+        setColour (juce::PopupMenu::headerTextColourId, comboInk);
         setColour (juce::PopupMenu::highlightedBackgroundColourId, c.optionComboHighlight);
-        setColour (juce::PopupMenu::highlightedTextColourId, juce::Colours::black);
+        setColour (juce::PopupMenu::highlightedTextColourId, hlInk);
         setColour (juce::ComboBox::backgroundColourId, c.optionComboBackground);
         setColour (juce::ComboBox::outlineColourId, c.optionBorder);
         setColour (juce::ComboBox::buttonColourId, c.optionComboBackground);
-        setColour (juce::ComboBox::arrowColourId, c.optionComboText);
-        setColour (juce::ComboBox::textColourId, c.optionComboText);
+        setColour (juce::ComboBox::arrowColourId, comboInk);
+        setColour (juce::ComboBox::textColourId, comboInk);
         setColour (juce::ComboBox::focusedOutlineColourId, c.optionComboHighlight);
     }
 
@@ -73,6 +122,19 @@ public:
         applyThemeColours();
         g.fillAll (colors().optionComboBackground);
         juce::ignoreUnused (width, height);
+    }
+
+    void drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area,
+                            bool isSeparator, bool isActive, bool isHighlighted,
+                            bool isTicked, bool hasSubMenu, const juce::String& text,
+                            const juce::String& shortcutKeyText,
+                            const juce::Drawable* icon, const juce::Colour* textColourToUse) override
+    {
+        // Re-bind colours every paint so open menus track dice without reopening.
+        applyThemeColours();
+        LookAndFeel_V4::drawPopupMenuItem (g, area, isSeparator, isActive, isHighlighted,
+                                           isTicked, hasSubMenu, text, shortcutKeyText,
+                                           icon, textColourToUse);
     }
 
     void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
@@ -96,7 +158,8 @@ public:
         path.startNewSubPath ((float) arrowZone.getX() + 2.0f, (float) arrowZone.getCentreY() - 2.0f);
         path.lineTo ((float) arrowZone.getCentreX(), (float) arrowZone.getCentreY() + 2.5f);
         path.lineTo ((float) arrowZone.getRight() - 2.0f, (float) arrowZone.getCentreY() - 2.0f);
-        g.setColour (c.optionComboText.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
+        const auto arrowInk = c.legibleTextOn (c.optionComboText, c.optionComboBackground);
+        g.setColour (arrowInk.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
         g.strokePath (path, juce::PathStrokeType (1.4f));
     }
 

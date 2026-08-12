@@ -55,13 +55,16 @@ void RotaryImageKnobLookAndFeel1::drawRotarySlider(juce::Graphics& g, int x, int
         if (slider.isMouseOverOrDragging() || bandHighlight)
         {
             customSpread = bandHighlight ? 7 : 6;
-            customShadowColor = KnobBandHighlight::intensify (
-                theme.knobArc.withAlpha ((float) alphaValue / 255.0f), bandHighlight);
+            // Match active power-ring ink (not faded raw knobArc).
+            customShadowColor = KnobTheme::arcBright (theme, bandHighlight, &slider)
+                                    .withAlpha ((float) alphaValue / 255.0f);
         }
         else
         {
             customSpread = 1;
-            customShadowColor = KnobTheme::arcDark (theme, bandHighlight).withAlpha ((float) (alphaValue - 50) / 255.0f);
+            // Idle glow still uses active chrome family so on bands don't look powered-down.
+            customShadowColor = KnobTheme::arcBright (theme, false, &slider)
+                                    .withAlpha ((float) juce::jmax (40, alphaValue - 30) / 255.0f);
         }
 
         // shadows::StackShadow stackShadow(customShadowColor, customOffset, customBlur, customSpread);
@@ -103,8 +106,8 @@ void RotaryImageKnobLookAndFeel1::drawRotarySlider(juce::Graphics& g, int x, int
 
 
         // Create colour references for the gradient start and end
-        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight);
-        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight);
+        juce::Colour brightOrange = KnobTheme::arcBright (theme, bandHighlight, &slider);
+        juce::Colour darkOrange = KnobTheme::arcDark (theme, bandHighlight, &slider);
 
         // Loop for the filled arc
         for (int i = numSegments - 1; i >= 0; --i) {

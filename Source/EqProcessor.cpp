@@ -2,6 +2,7 @@
 #include "LoudnessComponent.h"
 #include "StereogramComponent.h"
 #include "HistogramComponent.h"
+#include "ThdMeterComponent.h"
 #include "EqEditor.h"
 #include "BinaryData.h"
 #include "Menu/Theme.h"
@@ -339,6 +340,18 @@ void EqProcessor::setHistogramTarget (HistogramComponent* target) noexcept
 HistogramComponent* EqProcessor::getHistogramTarget() const noexcept
 {
     return histogramTarget.load (std::memory_order_acquire);
+}
+
+void EqProcessor::setThdTarget (ThdMeterComponent* target) noexcept
+{
+    thdTarget.store (target, std::memory_order_release);
+    if (target != nullptr && sampleRate > 0.0)
+        target->prepare (sampleRate);
+}
+
+ThdMeterComponent* EqProcessor::getThdTarget() const noexcept
+{
+    return thdTarget.load (std::memory_order_acquire);
 }
 
 void EqProcessor::setBandListenIndex (int bandIndex) noexcept
@@ -1226,6 +1239,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "HISTOGRAM_GLOW_OPACITY_ID", "HistogramGlowOpacity",
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
         analyserDefaults.getFloat ("HISTOGRAM_GLOW_OPACITY_ID", 70.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "THD_MAX_HARMONICS_ID", "ThdMaxHarmonics",
+        juce::NormalisableRange<float> (2.0f, 8.0f, 1.0f),
+        analyserDefaults.getFloat ("THD_MAX_HARMONICS_ID", 8.0f)));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "THD_LOCK_DB_ID", "ThdLockDb",
+        juce::NormalisableRange<float> (6.0f, 40.0f, 0.1f),
+        analyserDefaults.getFloat ("THD_LOCK_DB_ID", 18.0f)));
+    // 0 = Broadband, 1 = Multiband residual map
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "THD_MODE_ID", "ThdMode",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 1.0f),
+        analyserDefaults.getFloat ("THD_MODE_ID", 0.0f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "OSC_USE_RAMP_ID", "OscUseRamp",
         analyserDefaults.getBool ("OSC_USE_RAMP_ID", true)));
@@ -1236,6 +1262,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_MULTICOLOR_BAND_FILL_ID", "MulticolorBandFill",
         analyserDefaults.getBool ("EQ_MULTICOLOR_BAND_FILL_ID", true)));
+    // Faceplate power rings + knob glow arcs follow graph handle multicolours (default off).
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "EQ_BAND_CHROME_MATCH_HANDLES_ID", "BandChromeMatchHandles",
+        analyserDefaults.getBool ("EQ_BAND_CHROME_MATCH_HANDLES_ID", false)));
     // Graph cursor crosshair (default on).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_SHOW_CROSSHAIR_ID", "ShowCrosshair",
@@ -1324,6 +1354,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "outputGain", "Output Gain",
         juce::NormalisableRange<float> (-24.0f, 24.0f, 0.01f),
         0.0f));
+
+    // Global EQ / Match depth scale: 0% flat → 100% as dialed → 200% exaggerated.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "eqScale", "EQ Scale",
+        juce::NormalisableRange<float> (0.0f, 2.0f, 0.01f),
+        1.0f));
 
     // Autogain: compensates EQ loudness change via an internal offset (not the Out knob).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -2218,7 +2254,7 @@ void EqProcessor::appendExtendedLinearPhaseSpecs (LinearPhaseEqEngine::BandSpec*
         // Use current smoothed values (already advanced in processBlock via take/skip).
         s.frequency = smoothExtFreq[(size_t) ei].getCurrentValue();
         s.q = smoothExtQ[(size_t) ei].getCurrentValue();
-        s.gainDb = smoothExtGain[(size_t) ei].getCurrentValue();
+        s.gainDb = smoothExtGain[(size_t) ei].getCurrentValue() * getEqScale();
         s.type = p.type != nullptr ? (int) std::lround (p.type->load()) : FilterType::bell;
         s.slope = p.slope != nullptr ? (int) std::lround (p.slope->load()) : FilterSlope::db12;
         s.isHighpass = FilterType::isHighpassFamily (s.type);
@@ -2277,6 +2313,7 @@ void EqProcessor::processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock
         const int slope = p.slope != nullptr ? (int) std::lround (p.slope->load()) : FilterSlope::db12;
         const int channel = p.channel != nullptr ? (int) std::lround (p.channel->load()) : BandChannel::stereo;
         const bool dynOn = p.dynamic != nullptr && p.dynamic->load() > 0.5f;
+        const float eqScale = getEqScale();
 
         if (dynOn && FilterType::usesGain (type) && dryL != nullptr
             && p.dynThreshold != nullptr && p.attackMs != nullptr && p.releaseMs != nullptr)
@@ -2287,11 +2324,14 @@ void EqProcessor::processExtendedBands (juce::dsp::AudioBlock<float>& audioBlock
             dyn.updateEnvelopeCoeffs (atk, rel, sr, numSamples);
             const float amount = dyn.detectAmount (dryL, dryR, numSamples, sr, freq, q, thresh);
             gainDb = DynamicEq::effectiveGainDb (true, gainDb, amount);
+            // Publish pre-scale (UI multiplies by eqScale); DSP uses scaled gain.
             dyn.publishEffectiveGain (gainDb);
+            gainDb *= eqScale;
         }
         else
         {
             dyn.publishEffectiveGain (gainDb);
+            gainDb *= eqScale;
         }
 
         const float effQ = FilterType::effectiveBellQ (type, q, gainDb, proportionalQOn);
@@ -2441,6 +2481,8 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         stereo->prepare (sampleRate);
     if (auto* hist = histogramTarget.load (std::memory_order_acquire))
         hist->prepare (sampleRate);
+    if (auto* thd = thdTarget.load (std::memory_order_acquire))
+        thd->prepare (sampleRate);
 
     // Initialize dsp modules
     juce::dsp::ProcessSpec spec;
@@ -2931,6 +2973,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                     hist->pushSamples (left, right, numSamples);
                 }
             }
+
+            if (auto* thd = thdTarget.load (std::memory_order_acquire))
+            {
+                if (thd->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+                {
+                    const auto* left = mainBuffer.getReadPointer (0);
+                    const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                    thd->pushSamples (left, right, numSamples);
+                }
+            }
         }
 
         processSpec3DVisualSidechain (mainBuffer, numSamples);
@@ -3364,6 +3416,43 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         splitActive = true;
     }
 
+    // Publish T/S ratio only when Split DSP is already armed (free reuse) or Learn
+    // is actively capturing for source detection — never run computeGains every block.
+    const bool learnWantsTs = learnTransientStatsCapture.load (std::memory_order_relaxed);
+    if ((splitActive || learnWantsTs)
+        && nChMain > 0 && numSamples > 0
+        && splitTGainBuffer.getNumSamples() >= numSamples
+        && splitSGainBuffer.getNumSamples() >= numSamples)
+    {
+        const float* tGainPub = splitTGain;
+        if (tGainPub == nullptr && learnWantsTs)
+        {
+            float* detect = splitTGainBuffer.getWritePointer (0);
+            const float* dL = mainBuffer.getReadPointer (0);
+            const float* dR = nChMain > 1 ? mainBuffer.getReadPointer (1) : dL;
+            for (int i = 0; i < numSamples; ++i)
+                detect[i] = 0.5f * (dL[i] + dR[i]);
+
+            const float sep01 = juce::jlimit (0.0f, 1.0f,
+                rawFloat (StructuralSplit::separationParamId(), StructuralSplit::kDefaultSeparation)
+                    / StructuralSplit::kMaxSeparation);
+            structuralSplitEngine.computeGains (detect, numSamples, sep01,
+                                                splitTGainBuffer.getWritePointer (0),
+                                                splitSGainBuffer.getWritePointer (0));
+            tGainPub = splitTGainBuffer.getReadPointer (0);
+        }
+
+        if (tGainPub != nullptr)
+        {
+            double sumT = 0.0;
+            for (int i = 0; i < numSamples; ++i)
+                sumT += (double) tGainPub[i];
+            const float meanT = (float) (sumT / (double) juce::jmax (1, numSamples));
+            const float prev = publishedTransientRatio.load (std::memory_order_relaxed);
+            publishedTransientRatio.store (prev * 0.88f + meanT * 0.12f, std::memory_order_relaxed);
+        }
+    }
+
     auto applySplitDeltaIfArmed = [&] (int bandIndex, int filterType)
     {
         if (! splitActive || ! FilterType::usesGain (filterType))
@@ -3463,6 +3552,8 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         return eg;
     };
 
+    const float eqScale = juce::jlimit (0.0f, 2.0f, rawFloat ("eqScale", 1.0f));
+
     const int hsType = BandChannel::readChoiceIndex (treeState, "highShelfType", FilterType::highShelf);
     const float effHighShelfGain = resolveDynamicGain (
         isHighShelfOn, FilterType::usesGain (hsType), rawBool ("highShelfDynamic"),
@@ -3471,7 +3562,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         smoothedHighShelfGain, smoothedHighShelfFrequency, smoothedHighShelfQ,
         rawFloat ("highShelfDynThreshold", -24.0f),
         rawFloat ("highShelfAttackMs", DynamicEq::attackMs),
-        rawFloat ("highShelfReleaseMs", DynamicEq::releaseMs));
+        rawFloat ("highShelfReleaseMs", DynamicEq::releaseMs)) * eqScale;
 
     const int lsType = BandChannel::readChoiceIndex (treeState, "lowShelfType", FilterType::lowShelf);
     const float effLowShelfGain = resolveDynamicGain (
@@ -3481,7 +3572,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         smoothedLowShelfGain, smoothedLowShelfFrequency, smoothedLowShelfQ,
         rawFloat ("lowShelfDynThreshold", -24.0f),
         rawFloat ("lowShelfAttackMs", DynamicEq::attackMs),
-        rawFloat ("lowShelfReleaseMs", DynamicEq::releaseMs));
+        rawFloat ("lowShelfReleaseMs", DynamicEq::releaseMs)) * eqScale;
 
     const int b1Type = BandChannel::readChoiceIndex (treeState, "band1Type", FilterType::bell);
     const float effBand1Gain = resolveDynamicGain (
@@ -3491,7 +3582,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         smoothedBand1Gain, smoothedBand1Frequency, smoothedBand1Q,
         rawFloat ("band1DynThreshold", -24.0f),
         rawFloat ("band1AttackMs", DynamicEq::attackMs),
-        rawFloat ("band1ReleaseMs", DynamicEq::releaseMs));
+        rawFloat ("band1ReleaseMs", DynamicEq::releaseMs)) * eqScale;
 
     const int b2Type = BandChannel::readChoiceIndex (treeState, "band2Type", FilterType::bell);
     const float effBand2Gain = resolveDynamicGain (
@@ -3501,7 +3592,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         smoothedBand2Gain, smoothedBand2Frequency, smoothedBand2Q,
         rawFloat ("band2DynThreshold", -24.0f),
         rawFloat ("band2AttackMs", DynamicEq::attackMs),
-        rawFloat ("band2ReleaseMs", DynamicEq::releaseMs));
+        rawFloat ("band2ReleaseMs", DynamicEq::releaseMs)) * eqScale;
 
     const int b3Type = BandChannel::readChoiceIndex (treeState, "band3Type", FilterType::bell);
     const float effBand3Gain = resolveDynamicGain (
@@ -3511,7 +3602,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         smoothedBand3Gain, smoothedBand3Frequency, smoothedBand3Q,
         rawFloat ("band3DynThreshold", -24.0f),
         rawFloat ("band3AttackMs", DynamicEq::attackMs),
-        rawFloat ("band3ReleaseMs", DynamicEq::releaseMs));
+        rawFloat ("band3ReleaseMs", DynamicEq::releaseMs)) * eqScale;
 
     const int b4Type = BandChannel::readChoiceIndex (treeState, "band4Type", FilterType::bell);
     const float effBand4Gain = resolveDynamicGain (
@@ -3521,7 +3612,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         smoothedBand4Gain, smoothedBand4Frequency, smoothedBand4Q,
         rawFloat ("band4DynThreshold", -24.0f),
         rawFloat ("band4AttackMs", DynamicEq::attackMs),
-        rawFloat ("band4ReleaseMs", DynamicEq::releaseMs));
+        rawFloat ("band4ReleaseMs", DynamicEq::releaseMs)) * eqScale;
 
     const int hpType = BandChannel::readChoiceIndex (treeState, "highpassType", FilterType::highpass);
     const int lpType = BandChannel::readChoiceIndex (treeState, "lowpassType", FilterType::lowpass);
@@ -3532,7 +3623,9 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const bool matchOn = rawBool (MatchEq::enabledParamId());
     const int matchPlacement = MatchEq::readChoiceIndex (
         treeState, MatchEq::placementParamId(), MatchEq::beforeEq, MatchEq::numPlacements - 1);
-    const float matchAmount = rawFloat (MatchEq::amountParamId(), MatchEq::kDefaultAmount);
+    const float matchAmount = juce::jlimit (
+        MatchEq::kMinAmount, MatchEq::kMaxAmount,
+        rawFloat (MatchEq::amountParamId(), MatchEq::kDefaultAmount) * eqScale);
     const int matchSpeed = MatchEq::readChoiceIndex (
         treeState, MatchEq::speedParamId(), MatchEq::med, MatchEq::numSpeeds - 1);
     const float matchSmooth = rawFloat (MatchEq::smoothParamId(), MatchEq::kDefaultSmooth);
@@ -3586,13 +3679,13 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         specs[0].enabled = isHighpassOn;
         specs[0].frequency = smoothedHighpassCutoff;
         specs[0].q = smoothedHighpassQ;
-        specs[0].gainDb = rawFloat ("highpassGain");
+        specs[0].gainDb = rawFloat ("highpassGain") * eqScale;
         fillHpLpFlags (specs[0], hpType, BandChannel::readChoiceIndex (treeState, "highpassSlope"));
 
         specs[1].enabled = isLowpassOn;
         specs[1].frequency = smoothedLowpassCutoff;
         specs[1].q = smoothedLowpassQ;
-        specs[1].gainDb = rawFloat ("lowpassGain");
+        specs[1].gainDb = rawFloat ("lowpassGain") * eqScale;
         fillHpLpFlags (specs[1], lpType, BandChannel::readChoiceIndex (treeState, "lowpassSlope"));
 
         specs[2].enabled = isHighShelfOn;
@@ -3654,7 +3747,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const int hpType = BandChannel::readChoiceIndex (treeState, "highpassType", FilterType::highpass);
             const int hpSlope = BandChannel::readChoiceIndex (treeState, "highpassSlope");
             const int hpChannel = BandChannel::readChoiceIndex (treeState, "highpassChannel");
-            const float hpGain = rawFloat ("highpassGain");
+            const float hpGain = rawFloat ("highpassGain") * eqScale;
             const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
             captureSplitDry();
 
@@ -3715,7 +3808,7 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             const int lpType = BandChannel::readChoiceIndex (treeState, "lowpassType", FilterType::lowpass);
             const int lpSlope = BandChannel::readChoiceIndex (treeState, "lowpassSlope");
             const int lpChannel = BandChannel::readChoiceIndex (treeState, "lowpassChannel");
-            const float lpGain = rawFloat ("lowpassGain");
+            const float lpGain = rawFloat ("lowpassGain") * eqScale;
             const double sr = getSampleRate() > 0.0 ? getSampleRate() : sampleRate;
             captureSplitDry();
 
@@ -3992,9 +4085,11 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         if (! (bandOn && spectralOn && typeUsesGain))
             return;
 
-        const float amt = juce::jlimit (SpectralDynamics::kMinSpectralAmount,
-                                        SpectralDynamics::kMaxSpectralAmount,
-                                        amount);
+        // eqScale 0..2 multiplies spectral Amount (cuts/boosts) like band gains / Match.
+        // Allow up to 2× param max so 200% can still exaggerate a full Amount dial.
+        const float amt = juce::jlimit (0.0f,
+                                        SpectralDynamics::kMaxSpectralAmount * 2.0f,
+                                        amount * eqScale);
 
         SpectralDynamics::BandSettings settings;
         settings.enabled = true;
@@ -4475,6 +4570,16 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                 const auto* left = mainBuffer.getReadPointer (0);
                 const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
                 hist->pushSamples (left, right, mainBuffer.getNumSamples());
+            }
+        }
+
+        if (auto* thd = thdTarget.load (std::memory_order_acquire))
+        {
+            if (thd->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                thd->pushSamples (left, right, mainBuffer.getNumSamples());
             }
         }
     }

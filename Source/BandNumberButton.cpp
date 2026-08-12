@@ -1,4 +1,5 @@
 #include "BandNumberButton.h"
+#include "KnobThemeHelpers.h"
 
 BandNumberButton::BandNumberButton (juce::AudioProcessorValueTreeState& state,
                                     const juce::String& parameterIDIn)
@@ -34,11 +35,15 @@ void BandNumberButton::paintButton (juce::Graphics& g,
 {
     juce::ignoreUnused (shouldDrawButtonAsDown);
 
-    juce::Colour ink = baseColor;
+    // Same active/inactive language as faceplate knob glow arcs (KnobTheme::chrome*).
+    // baseColor is the band chrome base (Knob Arc, or handle multicolor when mode is on).
+    juce::Colour ink;
     if (isButtonDown)
-        ink = brighterAndMoreSaturated (baseColor, 2.0f, 2.0f);
+        ink = KnobTheme::chromeActive (baseColor);
     else if (shouldDrawButtonAsHighlighted)
-        ink = brighterAndMoreSaturated (baseColor, 1.4f, 1.4f);
+        ink = brighterAndMoreSaturated (KnobTheme::chromeInactive (baseColor), 1.15f, 1.1f);
+    else
+        ink = KnobTheme::chromeInactive (baseColor);
 
     const float lineWidth = 3.0f;
     const float circleDiameter = (float) getWidth() * 0.7f - 2.0f * lineWidth;

@@ -261,7 +261,7 @@ namespace
         }
     }
 
-    /** Square graphic toolbar button — UE5 Sequencer / Premiere style. */
+    /** Square graphic toolbar button - UE5 Sequencer / Premiere style. */
     class SeqToolButton final : public juce::Button
     {
     public:
@@ -280,7 +280,7 @@ namespace
 
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
-            // Square face, tight radius (editor chrome — not pill labels).
+            // Square face, tight radius (editor chrome - not pill labels).
             auto r = getLocalBounds().toFloat().reduced (0.5f);
             const bool on = getToggleState();
             auto fill = findColour (on ? juce::TextButton::buttonOnColourId
@@ -396,13 +396,13 @@ Spec3DRampTimelineComponent::Spec3DRampTimelineComponent (SharedResources& resou
 
     // Tool groups (always created; visibility depends on expanded layout)
     selectToolButton = makeTool (SeqToolButton::Glyph::select,
-                                 "Selection tool (V) — select, move, trim");
+                                 "Selection tool (V) - select, move, trim");
     selectToolButton->setClickingTogglesState (true);
     selectToolButton->setRadioGroupId (0x51E0);
     selectToolButton->onClick = [this] { setEditTool (EditTool::select); };
 
     razorToolButton = makeTool (SeqToolButton::Glyph::razor,
-                                "Razor tool (C) — click clip to cut at mouse");
+                                "Razor tool (C) - click clip to cut at mouse");
     razorToolButton->setClickingTogglesState (true);
     razorToolButton->setRadioGroupId (0x51E0);
     razorToolButton->onClick = [this] { setEditTool (EditTool::razor); };
@@ -583,7 +583,7 @@ const SharedColors& Spec3DRampTimelineComponent::colors() const noexcept
 void Spec3DRampTimelineComponent::styleChrome()
 {
     const auto& c = colors();
-    // Flat square tool face — dark idle, gold active (Sequencer / Premiere).
+    // Flat square tool face - dark idle, gold active (Sequencer / Premiere).
     const auto face = c.pluginButtonBackground.brighter (0.06f);
     const auto faceOn = c.pluginButtonAccent;
     auto styleBtn = [&] (juce::Button* b)
@@ -680,7 +680,7 @@ void Spec3DRampTimelineComponent::commitEdit (const juce::String& name)
 
     auto& um = getUndoManager();
     um.beginNewTransaction (name);
-    // perform() re-applies `after` (idempotent) and registers undo → `before`.
+    // perform() re-applies `after` (idempotent) and registers undo -> `before`.
     um.perform (new RampSequenceUndoAction (
         sequence,
         editSnapshotBefore,
@@ -1323,7 +1323,7 @@ int Spec3DRampTimelineComponent::hitFadeHandle (juce::Point<float> p) const noex
         const float fadePx = juce::jmax (0.0f, lane.getWidth() * (fadeSec / len));
 
         // Left edge of the fade zone (or just inside the clip end when fade is 0)
-        // — drag this to resize. Always hittable so fades can be created from zero.
+        // - drag this to resize. Always hittable so fades can be created from zero.
         const float fadeStartX = (fadeSec > 1.0e-4f)
                                      ? (xRight - fadePx)
                                      : (xRight - kFadeHit * 1.5f);
@@ -1538,7 +1538,7 @@ void Spec3DRampTimelineComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // ── Razor tool (C): cut at mouse X — industry standard blade behaviour ──
+    // ── Razor tool (C): cut at mouse X - industry standard blade behaviour ──
     if (editTool == EditTool::razor && expandedLayout)
     {
         // Only cut on the ramp clip lane (not automation keys).

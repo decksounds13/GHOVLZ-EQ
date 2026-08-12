@@ -67,20 +67,35 @@ void TextButtonLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button
         return;
     }
 
-    // Fallback for plain TextButtons (OptionBox M/S/L/R, etc.)
+    // Fallback for plain TextButtons (OptionBox M/S/L/R, Sat, etc.):
+    // subtle top→bottom form (slight brighten / darken + desat) for soft 3D.
     auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
     juce::Colour fill = button.getToggleState()
                             ? button.findColour (juce::TextButton::buttonOnColourId)
                             : button.findColour (juce::TextButton::buttonColourId);
 
     if (shouldDrawButtonAsDown)
-        fill = fill.brighter (0.2f);
+        fill = fill.brighter (0.14f);
     else if (shouldDrawButtonAsHighlighted)
-        fill = fill.brighter (0.1f);
+        fill = fill.brighter (0.08f);
 
-    g.setColour (fill);
+    auto top = fill.brighter (0.08f);
+    float h = 0.0f, s = 0.0f, v = 0.0f;
+    fill.getHSB (h, s, v);
+    auto bottom = juce::Colour::fromHSV (h,
+                                         juce::jlimit (0.0f, 1.0f, s * 0.90f),
+                                         juce::jlimit (0.0f, 1.0f, v * 0.88f),
+                                         fill.getFloatAlpha());
+    juce::ColourGradient grad (top, bounds.getX(), bounds.getY(),
+                               bottom, bounds.getX(), bounds.getBottom(), false);
+    g.setGradientFill (grad);
     g.fillRoundedRectangle (bounds, 3.0f);
-    g.setColour (juce::Colours::black.withAlpha (0.7f));
+
+    // Prefer LAF outline colour when set (OptionBox themes optionBorder); else soft dark edge.
+    auto outline = buttonOutlineColor;
+    if (outline.getFloatAlpha() < 0.02f)
+        outline = juce::Colours::black.withAlpha (0.55f);
+    g.setColour (outline.withAlpha (juce::jmin (1.0f, outline.getFloatAlpha() * 0.95f)));
     g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
 }
 
@@ -103,9 +118,9 @@ void TextButtonLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& 
     // Set the font for button text
     g.setFont(juce::Font("Lato Black", buttonTextSize, juce::Font::plain));
 
-    // Draw the button text directly
-    g.drawText(originalButtonText, button.getLocalBounds(),
-        juce::Justification::centred, true);
+    // Never ellipsize chrome captions to "..." — layout must fit the full plain string.
+    g.drawText (originalButtonText, button.getLocalBounds().reduced (2, 0),
+                juce::Justification::centred, false);
 }
 
 

@@ -174,13 +174,34 @@ public:
     bool orderedRampGradation = true;
 
     /**
-        Accessibility: keep text readable on Scope cards, meters, graph handles, menus.
+        Accessibility: keep text readable on faceplate chrome, mod panel, option box,
+        graph-top UI menus / PopupMenus, Scope cards, meters, graph handles, and menus.
         On by default globally (ui_prefs + Appearance); can disable in Appearance.
         After randomize / theme load, adjusts text value (V only) vs its background.
     */
     bool enforceLegibleText = true;
     /** 0 = mild separation, 1 = strong. Only used when enforceLegibleText. */
     float textContrastAmount = 0.55f;
+
+    /**
+        Floating OptionBox panel body opacity (0–1). Default 0.90 so the spectrum
+        peeks through. Not a theme colour; persisted in ui_prefs. Dice does not touch it.
+    */
+    float optionBoxOpacity = 0.90f;
+
+    /**
+        When true, Graph Band 1–8 (and matching faceplate power/glow chrome) never
+        drop below graphBandRandomMinSaturation. Spectrum settings; ui_prefs.
+    */
+    bool graphBandRandomMinSatEnabled = true;
+    /**
+        Floor on Graph Band saturation (0–1). Default 0.25 so bands never go fully grey.
+        Only applied when graphBandRandomMinSatEnabled. Does not change H/S/V range sliders.
+    */
+    float graphBandRandomMinSaturation = 0.25f;
+
+    /** Enforce min sat on a colour when the Spectrum toggle is on; otherwise returns c. */
+    juce::Colour applyGraphBandMinSaturation (juce::Colour c) const noexcept;
 
     SharedColors();
 

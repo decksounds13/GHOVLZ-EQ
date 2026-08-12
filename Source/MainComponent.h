@@ -25,6 +25,7 @@
 #include "LoudnessComponent.h"
 #include "StereogramComponent.h"
 #include "HistogramComponent.h"
+#include "ThdMeterComponent.h"
 #include "EqPresetStore.h"
 #include "ColourRamp/ColourRampBank.h"
 #include "ColourRamp/PathSampleOverlay.h"
@@ -89,7 +90,7 @@ public:
     void setScopeMode (bool shouldEnable, bool notifyPrefs = true);
     bool isScopeMode() const noexcept { return scopeModeEnabled; }
 
-    /** Scope arrange: false = 2×2 quad, true = side-by-side strip (EQ graph hidden). */
+    /** Scope arrange: false = 2x2 quad, true = side-by-side strip (EQ graph hidden). */
     void setScopeStripLayout (bool shouldUseStrip, bool notifyPrefs = true);
     bool isScopeStripLayout() const noexcept { return scopeStripLayout; }
 
@@ -127,7 +128,7 @@ public:
     /** Scope-mode tap only (compact chrome scopes unchanged). Persisted via ui_prefs. */
     void setScopeTapPost (bool shouldTapPost, bool notifyPrefs = true);
     bool isScopeTapPost() const noexcept { return scopeTapPost; }
-    /** Scope + Pre: analyzer-only (DSP off) — hide EQ chrome. */
+    /** Scope + Pre: analyzer-only (DSP off) - hide EQ chrome. */
     bool isScopeAnalyzerOnly() const noexcept { return scopeModeEnabled && ! scopeTapPost; }
     /** Strip Scope (or Pre): hide phase / Side Check / DSP chrome. */
     bool shouldHideScopeDspChrome() const noexcept
@@ -152,7 +153,7 @@ public:
     const SharedResources& getSharedResources() const noexcept { return sharedResources; }
 
     /** Expanded/Scope OpenGL spectrogram heightfield. Compact strip stays 2D. */
-    /** Debounced UI prefs write — use after Look scrubbing instead of sync disk I/O. */
+    /** Debounced UI prefs write - use after Look scrubbing instead of sync disk I/O. */
     void requestUiPrefsSave() noexcept;
 
     void setSpec3DMode (bool shouldEnable, bool notifyPrefs = true);
@@ -173,7 +174,7 @@ public:
     void syncParticleCurveEco() noexcept;
     /**
         True OS fullscreen for Spec3D (F11 / right-click): borderless top-level window
-        covering the monitor — not just the plugin editor.
+        covering the monitor - not just the plugin editor.
     */
     void setSpec3DFullscreen (bool shouldEnable, bool notifyPrefs = true);
     void toggleSpec3DFullscreen (bool notifyPrefs = true);
@@ -587,6 +588,11 @@ public:
     /** Embergen/Houdini-style particle node graph (desktop window). */
     void showParticleNodeGraphWindow();
 
+    /** True while the Settings panel is visible (including Spec3D desktop float). */
+    bool isSettingsMenuOpen() const noexcept { return menu.isVisible(); }
+    /** Reparent Settings menu onto EqEditor above OptionBox, or restore under MainComponent. */
+    void hostSettingsMenuForOptionBoxStack (bool hostOnEditor);
+
 private:
     /** TextButton that exposes a right-click callback for A/B/C/D snapshot menus. */
     class AbSlotButton : public juce::TextButton
@@ -661,13 +667,13 @@ private:
     void exitSpec3DOsFullscreen();
     void applySpec3DFullscreenLayout(); // keeps OS FS host sized; no-op when not FS
     juce::Component* getScopeModuleComponent (ScopeModuleId id) noexcept;
-    /** Expanded Osc/Gon/Spec bounds — excludes piano strip when open. */
+    /** Expanded Osc/Gon/Spec bounds - excludes piano strip when open. */
     juce::Rectangle<int> getExpandedScopeContentBounds() const;
-    /** Bottom of top chrome (bypass/presets/settings) — GL must stay below this. */
+    /** Bottom of top chrome (bypass/presets/settings) - GL must stay below this. */
     int getTopChromeClearY() const;
     /**
         Expanded Spec: place view + tool column with zero overlap.
-        Required for 3D — OpenGL uses a native HWND that ignores JUCE z-order.
+        Required for 3D - OpenGL uses a native HWND that ignores JUCE z-order.
     */
     void layoutExpandedSpectrogramWithTools (int btnSize, int btnGap);
     void syncScopeChromeButtonOpacity();
@@ -675,6 +681,11 @@ private:
     void syncExpandedOscOverlayStack();
     void beginRampSampling();
     void applyColourRampsToMeters();
+    /**
+        When open: reparent OptionBox onto EqEditor so it stacks above Phase/SideCheck/Scope
+        (siblings of MainComponent). When closed: restore under FrequencyResponseComponent.
+        Settings menu is raised above the box by EqEditor::raiseOptionBoxStack when open.
+    */
     void hostOptionBoxAboveExpandedOsc (bool shouldHost);
     void applyGoniometerActive (bool shouldEnable);
     void applySpectrogramActive (bool shouldEnable);
@@ -742,11 +753,15 @@ private:
             GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, r, corner);
             g.setColour (fill);
             g.fillRoundedRectangle (r, corner);
-            g.setColour (pal.pluginButtonAccent.withAlpha (200.0f / 255.0f));
+            // Match GraphOverlayButtonLookAndFeel / styleChromeButton (UI, Bypass, A-D, etc.).
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
             g.drawRoundedRectangle (r, corner, 1.0f);
 
-            const auto ink = getToggleState() ? juce::Colours::black
-                                              : pal.pluginButtonText.withAlpha (0.9f);
+            // Same ink path as styleChromeButton so dice / zoom / expand match text chrome.
+            const auto ink = getToggleState()
+                                 ? pal.legibleTextOn (juce::Colours::black, pal.pluginButtonAccent)
+                                 : pal.legibleTextOn (pal.pluginButtonText, pal.pluginButtonBackground)
+                                       .withAlpha (0.92f);
             g.setColour (ink);
 
             const float s = juce::jmin (r.getWidth(), r.getHeight());
@@ -921,11 +936,11 @@ private:
     AbSlotButton slotDButton { "D" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
 
-    /** Preset chrome: ◀ | editable name | ▼ | ▶ | Save */
-    juce::TextButton presetPrevButton { juce::String::charToString ((juce::juce_wchar) 0x25C0) };
+    /** Preset chrome: ◀ | editable name | v | ▶ | Save */
+    juce::TextButton presetPrevButton { "<" };
     juce::TextEditor presetNameEditor;
-    juce::TextButton presetMenuButton { juce::String::charToString ((juce::juce_wchar) 0x25BC) };
-    juce::TextButton presetNextButton { juce::String::charToString ((juce::juce_wchar) 0x25B6) };
+    juce::TextButton presetMenuButton { "v" };
+    juce::TextButton presetNextButton { ">" };
     juce::TextButton presetSaveButton { "Save" };
 
     /** Left of preset bar: UI theme picker + dice randomize (ramps live in the UI dropdown). */
@@ -933,24 +948,24 @@ private:
     OscToolButton uiRandomizeButton { OscToolButton::Glyph::Dice };
     PathSampleOverlay rampSampleOverlay;
 
-    /** Top-right: Undo / Redo just left of Settings. Curved arrows (↶ ↷). */
-    juce::TextButton undoButton { juce::CharPointer_UTF8 ("\xe2\x86\xb6") }; // ↶
-    juce::TextButton redoButton { juce::CharPointer_UTF8 ("\xe2\x86\xb7") }; // ↷
+    /** Top-right: Undo / Redo just left of Settings. */
+    juce::TextButton undoButton { "<<" };
+    juce::TextButton redoButton { ">>" };
 
     /** Top chrome row, just right of Save's X: Eco disables analyser/FFT visuals. */
     juce::TextButton ecoButton { "Eco" };
 
-    /** OSC toggle — shows a compact beat-synced waveform between Eco and L/R. */
+    /** OSC toggle - shows a compact beat-synced waveform between Eco and L/R. */
     juce::TextButton oscButton { "OSC" };
     OscilloscopeComponent oscilloscope;
     FramedFloatingScopeWindow oscFrame;
 
-    /** Gon toggle — sits under OSC; square goniometer + correlation on the right. */
+    /** Gon toggle - sits under OSC; square goniometer + correlation on the right. */
     juce::TextButton gonButton { "Gon" };
     GoniometerComponent goniometer;
     FramedFloatingScopeWindow gonFrame;
 
-    /** Spec toggle — spectrogram strip between UI dice and the EQ preset bar. */
+    /** Spec toggle - spectrogram strip between UI dice and the EQ preset bar. */
     juce::TextButton specButton { "Spec" };
     SpectrogramComponent spectrogram;
     FramedFloatingScopeWindow specFrame;
@@ -969,6 +984,7 @@ private:
     LoudnessComponent loudnessMeter;
     StereogramComponent stereogram;
     HistogramComponent histogram;
+    ThdMeterComponent thdMeter;
 
     /** Dims UI under an expanded scope (clicks pass through). */
     class OscDimmerComponent : public juce::Component
@@ -1130,10 +1146,10 @@ private:
 
     bool ecoEnabled = false;
     bool scopeModeEnabled = false;
-    /** false = 2×2 quad (when N==4) or grid; true = horizontal strip (EQ graph hidden). */
+    /** false = 2x2 quad (when N==4) or grid; true = horizontal strip (EQ graph hidden). */
     bool scopeStripLayout = false;
     std::vector<ScopeModuleId> scopeEnabledOrder = ScopeModules::defaultEnabledOrder();
-    /** Strip column width fractions (sum ≈ 1). Sized to match scopeEnabledOrder. */
+    /** Strip column width fractions (sum ~ 1). Sized to match scopeEnabledOrder. */
     std::vector<float> scopeStripFractions;
     void ensureScopeStripFractions();
     void setScopeStripColumnFraction (int leftSlot, float leftFrac);

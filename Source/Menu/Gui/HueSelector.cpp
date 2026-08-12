@@ -70,9 +70,11 @@ void HueSelector::resized()
     int startX = (getWidth() - totalWidth) / 2;
 
     // Set bounds for slider
-    hueSlider.setBounds(startX, 0, sliderWidth, getHeight());
+    hueSlider.setBounds (startX, 0, sliderWidth, getHeight());
 
-    generateGradientImage();
+    // Rebuild hue strip whenever the settings menu resizes this column.
+    if (getWidth() > 0 && getHeight() > 0)
+        generateGradientImage();
 }
 
 void HueSelector::sliderValueChanged(juce::Slider* slider)
@@ -144,8 +146,9 @@ void HueSelector:: generateGradientImage() {
     int padding = 5;
     int extraPadding = 2;
     int sliderWidth = 30;
-    int gradientWidth = getWidth() - sliderWidth - padding * 3 - extraPadding * 2;
-    juce::Rectangle<int> imageBounds(0, 0, gradientWidth, getHeight() - padding / 2 - extraPadding * 2);
+    int gradientWidth = juce::jmax (1, getWidth() - sliderWidth - padding * 3 - extraPadding * 2);
+    int gradientHeight = juce::jmax (1, getHeight() - padding / 2 - extraPadding * 2);
+    juce::Rectangle<int> imageBounds (0, 0, gradientWidth, gradientHeight);
 
     gradientImage = juce::Image(juce::Image::PixelFormat::ARGB, imageBounds.getWidth(), imageBounds.getHeight(), true);
     juce::Graphics g(gradientImage);

@@ -49,7 +49,8 @@ void SettingsButtonLookAndFeel::drawButtonText (juce::Graphics& g,
     juce::ignoreUnused (shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
 
     const auto& c = palette();
-    g.setColour (c.pluginButtonText.withAlpha (0.85f));
+    // Match styleChromeButton / OscToolButton off-state ink (Plugin Button Text on bg).
+    g.setColour (c.legibleTextOn (c.pluginButtonText, c.pluginButtonBackground).withAlpha (0.92f));
 
     const int paddingX = juce::roundToInt (button.getWidth() * 0.23f);
     const int paddingY = juce::roundToInt (button.getHeight() * 0.23f);

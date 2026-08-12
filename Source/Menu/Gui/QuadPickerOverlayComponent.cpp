@@ -2,168 +2,150 @@
 #include "HueSelector.h"
 #include <JuceHeader.h>
 
-QuadPickerOverlayComponent::QuadPickerOverlayComponent(juce::Component& quadPicker,  juce::Slider& brightnessRangeSlider, juce::Slider& saturationRangeSlider)
-    : quadPicker(quadPicker), brightnessRangeSlider(brightnessRangeSlider), saturationRangeSlider(saturationRangeSlider)
+QuadPickerOverlayComponent::QuadPickerOverlayComponent (juce::Component& quadPickerIn,
+                                                        juce::Slider& brightnessRangeSliderIn,
+                                                        juce::Slider& saturationRangeSliderIn)
+    : quadPicker (quadPickerIn),
+      brightnessRangeSlider (brightnessRangeSliderIn),
+      saturationRangeSlider (saturationRangeSliderIn)
 {
+    setInterceptsMouseClicks (false, false);
 }
 
-void QuadPickerOverlayComponent::paint(juce::Graphics& g)
+void QuadPickerOverlayComponent::paint (juce::Graphics& g)
 {
-    auto bounds = quadPicker.getBounds();
+    // Overlay is laid out to match the pad — always paint in *local* coords.
+    const int width = getWidth();
+    const int height = getHeight();
+    if (width <= 0 || height <= 0)
+        return;
 
-    float brightnessLower = brightnessRangeSlider.getMinValue();
-    float brightnessUpper = brightnessRangeSlider.getMaxValue();
-    float saturationLower = saturationRangeSlider.getMinValue();
-    float saturationUpper = saturationRangeSlider.getMaxValue();
+    // Nothing to draw when randomize range guides are off and not hovering range sliders.
+    const bool showRangeGuides = isSaturationRandomizationEnabled || isBrightnessRandomizationEnabled;
+    const bool showHover = isMouseOverSaturationSlider || isMouseOverBrightnessSlider;
+    if (! showRangeGuides && ! showHover)
+        return;
 
+    const float brightnessLower = (float) brightnessRangeSlider.getMinValue();
+    const float brightnessUpper = (float) brightnessRangeSlider.getMaxValue();
+    const float saturationLower = (float) saturationRangeSlider.getMinValue();
+    const float saturationUpper = (float) saturationRangeSlider.getMaxValue();
 
-    // Calculate the positions of Rectangle 1 and Rectangle 2 based on the constraints
+    const int brightnessUpperY = height - (int) (brightnessUpper * (float) height);
+    const int brightnessLowerY = height - (int) (brightnessLower * (float) height) - brightnessUpperY;
+    const int saturationUpperX = (int) (saturationUpper * (float) width);
+    const int saturationLowerX = (int) (saturationLower * (float) width);
 
-    int brightnessUpperY = bounds.getHeight() - static_cast<int>(brightnessUpper * bounds.getHeight());
-    int brightnessLowerY = bounds.getHeight() - static_cast<int>(brightnessLower * bounds.getHeight()) - brightnessUpperY;
-    int saturationUpperX = saturationUpper * bounds.getWidth();
-    int saturationLowerX = saturationLower * bounds.getWidth();
+    g.setColour (juce::Colours::grey.withAlpha (0.25f));
 
-    int width = bounds.getWidth();
-    int height = bounds.getHeight();
- 
-    g.setColour(juce::Colours::grey.withAlpha(0.25f));
-
-    // Shared corner rectangles (Rectangles 1, 3, 5, 7)
-    if (isSaturationRandomizationEnabled || isBrightnessRandomizationEnabled) {
-        juce::Rectangle<int> rect1(saturationUpper * width, 0, width, brightnessUpperY);
-        juce::Rectangle<int> rect3(0, 0, saturationLowerX, brightnessUpperY);
-        juce::Rectangle<int> rect5(saturationUpper * width, brightnessUpperY + brightnessLowerY, width, height - (brightnessUpperY + brightnessLowerY));
-        juce::Rectangle<int> rect7(0, brightnessUpperY + brightnessLowerY, saturationLowerX, height - (brightnessUpperY + brightnessLowerY));
-
-        g.fillRect(rect1);
-        g.fillRect(rect3);
-        g.fillRect(rect5);
-        g.fillRect(rect7);
+    if (isSaturationRandomizationEnabled || isBrightnessRandomizationEnabled)
+    {
+        g.fillRect (saturationUpperX, 0, juce::jmax (0, width - saturationUpperX), brightnessUpperY);
+        g.fillRect (0, 0, juce::jmax (0, saturationLowerX), brightnessUpperY);
+        g.fillRect (saturationUpperX, brightnessUpperY + brightnessLowerY,
+                    juce::jmax (0, width - saturationUpperX),
+                    juce::jmax (0, height - (brightnessUpperY + brightnessLowerY)));
+        g.fillRect (0, brightnessUpperY + brightnessLowerY,
+                    juce::jmax (0, saturationLowerX),
+                    juce::jmax (0, height - (brightnessUpperY + brightnessLowerY)));
     }
 
-    // Saturation-exclusive rectangles (Rectangles 2, 6)
-    if (isBrightnessRandomizationEnabled) {
-        juce::Rectangle<int> rect2(saturationLower * width, 0, saturationUpperX - saturationLowerX, brightnessUpperY);
-        juce::Rectangle<int> rect6(saturationLower * width, brightnessUpperY + brightnessLowerY, saturationUpperX - saturationLowerX, height - (brightnessUpperY + brightnessLowerY));
-
-        g.fillRect(rect2);
-        g.fillRect(rect6);
+    if (isBrightnessRandomizationEnabled)
+    {
+        g.fillRect (saturationLowerX, 0,
+                    juce::jmax (0, saturationUpperX - saturationLowerX), brightnessUpperY);
+        g.fillRect (saturationLowerX, brightnessUpperY + brightnessLowerY,
+                    juce::jmax (0, saturationUpperX - saturationLowerX),
+                    juce::jmax (0, height - (brightnessUpperY + brightnessLowerY)));
     }
 
-    // Brightness-exclusive rectangles (Rectangles 4, 8)
-    if (isSaturationRandomizationEnabled) {
-        juce::Rectangle<int> rect4(saturationUpper * width, brightnessUpperY, width, brightnessLowerY);
-        juce::Rectangle<int> rect8(0, brightnessUpperY, saturationLowerX, brightnessLowerY);
-
-        g.fillRect(rect4);
-        g.fillRect(rect8);
+    if (isSaturationRandomizationEnabled)
+    {
+        g.fillRect (saturationUpperX, brightnessUpperY,
+                    juce::jmax (0, width - saturationUpperX), juce::jmax (0, brightnessLowerY));
+        g.fillRect (0, brightnessUpperY, juce::jmax (0, saturationLowerX), juce::jmax (0, brightnessLowerY));
     }
 
-
-    // Draw vertical lines across the quadPicker component for hover
-    juce::Colour hoverLinesColor = juce::Colours::grey.withAlpha(0.85f); // Custom hover lines color (yellow in this example)
-
-    if (isMouseOverSaturationSlider) {
-        if (isMouseOverHorizontalPartOfSaturationSlider) {
-            // Draw horizontal line at the appropriate Y position
-            g.setColour(hoverLinesColor);
-            g.fillRect(0, mouseYPosition - 1, width, 2);
-        }
-        else {
-            // Draw vertical line at the appropriate X position
-            g.setColour(hoverLinesColor);
-            g.fillRect(mouseXPosition - 1, 0, 2, height);
-        }
-    }
-    else if (isMouseOverBrightnessSlider) {
-        if (isMouseOverHorizontalPartOfBrightnessSlider) {
-            // Draw horizontal line at the appropriate Y position
-            g.setColour(hoverLinesColor);
-            g.fillRect(0, mouseYPosition - 1, width, 2);
-        }
-        else {
-            // Draw vertical line at the appropriate X position
-            g.setColour(hoverLinesColor);
-            g.fillRect(mouseXPosition - 1, 0, 2, height);
-        }
+    // Hover guides only when the mouse is actually over a range slider (parent space).
+    const juce::Colour hoverLinesColor = juce::Colours::grey.withAlpha (0.85f);
+    if (isMouseOverSaturationSlider || isMouseOverBrightnessSlider)
+    {
+        g.setColour (hoverLinesColor);
+        if (isMouseOverHorizontalPartOfSaturationSlider || isMouseOverHorizontalPartOfBrightnessSlider)
+            g.fillRect (0, mouseYPosition - 1, width, 2);
+        else
+            g.fillRect (mouseXPosition - 1, 0, 2, height);
     }
 
+    // Range outline lines — only while the matching randomize chip is on.
+    const juce::Colour rangeLineColor (juce::Colours::whitesmoke.withAlpha (0.85f));
+    g.setColour (rangeLineColor);
 
-
-
-
-    // Range Box / Lines
-    // Define the custom color
-    juce::Colour rangeLineColor(juce::Colours::whitesmoke.withAlpha(0.85f)); // WhiteSmoke with alpha 0.85
-
-    if (isSaturationRandomizationEnabled && isBrightnessRandomizationEnabled) {
-        // Draw within the saturation range if both toggles are enabled
-        int saturationLowerX = saturationRangeSlider.getMinValue() * bounds.getWidth();
-        int saturationUpperX = saturationRangeSlider.getMaxValue() * bounds.getWidth();
-
-        g.setColour(rangeLineColor);
-        g.fillRect(saturationLowerX, brightnessUpperY - 1, saturationUpperX - saturationLowerX, 2);
-        g.fillRect(saturationLowerX, brightnessUpperY + brightnessLowerY - 1, saturationUpperX - saturationLowerX, 2);
+    if (isSaturationRandomizationEnabled && isBrightnessRandomizationEnabled)
+    {
+        g.fillRect (saturationLowerX, brightnessUpperY - 1,
+                    juce::jmax (0, saturationUpperX - saturationLowerX), 2);
+        g.fillRect (saturationLowerX, brightnessUpperY + brightnessLowerY - 1,
+                    juce::jmax (0, saturationUpperX - saturationLowerX), 2);
+        g.fillRect (saturationUpperX - 1, brightnessUpperY, 2, juce::jmax (0, brightnessLowerY));
+        g.fillRect (saturationLowerX - 1, brightnessUpperY, 2, juce::jmax (0, brightnessLowerY));
     }
-    else if (isBrightnessRandomizationEnabled) {
-        // Span the entire width if only brightness randomization is enabled
-        g.setColour(rangeLineColor);
-        g.fillRect(0, brightnessUpperY - 1, bounds.getWidth(), 2); // Horizontal line at brightnessUpperY
-        g.fillRect(0, brightnessUpperY + brightnessLowerY - 1, bounds.getWidth(), 2); // Horizontal line at brightnessLowerY
+    else if (isBrightnessRandomizationEnabled)
+    {
+        g.fillRect (0, brightnessUpperY - 1, width, 2);
+        g.fillRect (0, brightnessUpperY + brightnessLowerY - 1, width, 2);
     }
-
-    // Vertical lines logic
-    if (isSaturationRandomizationEnabled) {
-        g.setColour(rangeLineColor); // Custom line color
-
-        if (!isBrightnessRandomizationEnabled) {
-            // Span the entire height if brightness randomization is disabled
-            g.fillRect(saturationUpperX - 1, 0, 2, bounds.getHeight()); // Vertical line at saturationUpperX
-            g.fillRect(saturationLowerX - 1, 0, 2, bounds.getHeight()); // Vertical line at saturationLowerX
-        }
-        else {
-            // Draw within brightness range if brightness randomization is enabled
-            g.fillRect(saturationUpperX - 1, brightnessUpperY, 2, brightnessLowerY); // Vertical line at saturationUpperX
-            g.fillRect(saturationLowerX - 1, brightnessUpperY, 2, brightnessLowerY); // Vertical line at saturationLowerX
-        }
+    else if (isSaturationRandomizationEnabled)
+    {
+        g.fillRect (saturationUpperX - 1, 0, 2, height);
+        g.fillRect (saturationLowerX - 1, 0, 2, height);
     }
-
-
-
-
- 
- }
+}
 
 void QuadPickerOverlayComponent::resized()
 {
-    setBounds(quadPicker.getBounds());
-
+    // Parent owns setBounds.
 }
 
-void QuadPickerOverlayComponent::setSaturationRandomizationEnabled(bool isEnabled) {
+void QuadPickerOverlayComponent::setSaturationRandomizationEnabled (bool isEnabled)
+{
     isSaturationRandomizationEnabled = isEnabled;
-    repaint();  // Trigger a repaint to reflect the new state
+    repaint();
 }
 
-void QuadPickerOverlayComponent::setBrightnessRandomizationEnabled(bool isEnabled) {
+void QuadPickerOverlayComponent::setBrightnessRandomizationEnabled (bool isEnabled)
+{
     isBrightnessRandomizationEnabled = isEnabled;
-    repaint();  // Trigger a repaint to reflect the new state
+    repaint();
 }
 
+void QuadPickerOverlayComponent::mouseMove (const juce::MouseEvent& event)
+{
+    // Hit-test range sliders in parent space (they are siblings of the pad, not children).
+    auto* parent = getParentComponent();
+    if (parent == nullptr)
+        return;
 
-void QuadPickerOverlayComponent::mouseMove(const juce::MouseEvent& event) {
-    // Convert the global position to a local position within this component
-    juce::Point<int> localPosition = event.getEventRelativeTo(this).getPosition();
+    const auto parentPos = event.getEventRelativeTo (parent).getPosition();
+    const auto localPos = event.getEventRelativeTo (this).getPosition();
+    mouseXPosition = localPos.x;
+    mouseYPosition = localPos.y;
 
-    // Update mouseXPosition and mouseYPosition with local coordinates
-    mouseXPosition = localPosition.getX();
-    mouseYPosition = localPosition.getY();
+    isMouseOverSaturationSlider = saturationRangeSlider.getBounds().contains (parentPos);
+    isMouseOverBrightnessSlider = brightnessRangeSlider.getBounds().contains (parentPos);
 
-    // Check if the mouse is over the saturation or brightness sliders
-    isMouseOverSaturationSlider = saturationRangeSlider.getBounds().contains(localPosition);
-    isMouseOverBrightnessSlider = brightnessRangeSlider.getBounds().contains(localPosition);
+    // TwoValueHorizontal: thumbs are vertical strips near the ends; treat as vertical hover.
+    isMouseOverHorizontalPartOfSaturationSlider = false;
+    isMouseOverHorizontalPartOfBrightnessSlider = false;
 
-    // Trigger a repaint to update the hover lines
+    repaint();
+}
+
+void QuadPickerOverlayComponent::mouseExit (const juce::MouseEvent&)
+{
+    isMouseOverSaturationSlider = false;
+    isMouseOverBrightnessSlider = false;
+    isMouseOverHorizontalPartOfSaturationSlider = false;
+    isMouseOverHorizontalPartOfBrightnessSlider = false;
     repaint();
 }

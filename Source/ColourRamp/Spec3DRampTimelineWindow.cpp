@@ -28,7 +28,7 @@ Spec3DRampTimelineWindow::Spec3DRampTimelineWindow (SharedResources& resourcesIn
     };
     addAndMakeVisible (timeline);
 
-    closeButton.setButtonText (juce::String::charToString ((juce::juce_wchar) 0x00D7));
+    closeButton.setButtonText ("x");
     closeButton.setTooltip ("Close");
     closeButton.onClick = [this]
     {

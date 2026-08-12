@@ -2,19 +2,10 @@
 #include "RotaryImageKnob2.h"
 #include "KnobThemeHelpers.h"
 
-namespace
-{
-    void showKnobValueText (juce::Slider& slider, bool show, SharedResources* themeColors)
-    {
-        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 45, 20);
-        KnobTheme::applyValuePopupColours (slider, show, KnobTheme::colors (themeColors));
-    }
-}
-
 RotaryImageKnob2::RotaryImageKnob2()
 {
     setSliderStyle(Slider::SliderStyle::RotaryHorizontalVerticalDrag);
-    setTextBoxStyle(Slider::TextBoxBelow, false, 45, 20);
+    setTextBoxStyle(Slider::TextBoxBelow, false, 56, 18);
     setTextBoxIsEditable(true);
     setRange(0.15, 10.0, 0.01);
 
@@ -24,7 +15,13 @@ float startAngleDegrees = 40.0;
     float endAngleDegrees = 320.0;
     setRotaryParameters(juce::degreesToRadians(startAngleDegrees), juce::degreesToRadians(endAngleDegrees), true);
 
-    showKnobValueText (*this, false, themeColors);
+    onValueChange = [this]
+    {
+        if (isMouseOverOrDragging() || hasKeyboardFocus (true))
+            refreshValuePopup (true);
+    };
+
+    KnobTheme::showValueTextBox (*this, false, themeColors);
 }
 
 RotaryImageKnob2::~RotaryImageKnob2()
@@ -41,7 +38,7 @@ void RotaryImageKnob2::setThemeColors (SharedResources* r) noexcept
 
 void RotaryImageKnob2::refreshValuePopup (bool show)
 {
-    showKnobValueText (*this, show, themeColors);
+    KnobTheme::showValueTextBox (*this, show, themeColors);
 }
 
 void RotaryImageKnob2::paint(juce::Graphics& g)

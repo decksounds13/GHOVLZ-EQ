@@ -69,6 +69,14 @@ public:
     void syncModButton (bool isOpen);
 
     void setThemeColors (SharedResources* r) noexcept;
+    /** Power rings + knob glow arcs (Knob Arc or handle multicolours + optional min sat). */
+    void applyFaceplateBandChrome();
+
+    /**
+        Z-order: OptionBox above Phase / SideCheck / Scope chrome; Settings menu
+        stays above the box when open. Called from MainComponent and resized().
+    */
+    void raiseOptionBoxStack();
 
     void loadUiPrefs();
     /** Immediate prefs write (shutdown / explicit). Prefer requestSaveUiPrefs while scrubbing UI. */

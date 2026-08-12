@@ -13,8 +13,7 @@ void HueSelectorOverlayComponent::paint(juce::Graphics& g)
 
 void HueSelectorOverlayComponent::resized()
 {
-    // Match the bounds of the HueSelector component
-    setBounds(hueSelector.getBounds());
+    // Parent owns setBounds — do not re-setBounds to hueSelector here.
 }
 
 void HueSelectorOverlayComponent::drawHueSelectorOverlay(juce::Graphics& g)

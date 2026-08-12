@@ -1074,6 +1074,134 @@ void Spec3DParticleSystem::applySpawnMods (Particle& p, float& lifespan, float& 
     }
 }
 
+float Spec3DParticleSystem::sampleGraphAttr01 (ParticleNodeGraph::AttrId id, const Particle& p,
+                                               const FrameSources& frame) const noexcept
+{
+    using ParticleNodeGraph::AttrId;
+    switch (id)
+    {
+        case AttrId::fft:           return juce::jlimit (0.0f, 1.0f, p.binDb01);
+        case AttrId::binFreq:       return juce::jlimit (0.0f, 1.0f, p.binFreq01);
+        case AttrId::history:
+            if (owner.meshW < 2) return 1.0f;
+            return juce::jlimit (0.0f, 1.0f, (float) p.col / (float) (owner.meshW - 1));
+        case AttrId::age:           return juce::jmax (0.0f, p.age);
+        case AttrId::normalizedAge:
+            if (p.maxLife < 1.0e-4f) return 0.0f;
+            return juce::jlimit (0.0f, 1.0f, p.age / p.maxLife);
+        case AttrId::life:          return juce::jmax (0.0f, p.maxLife);
+        case AttrId::speed:
+        {
+            const float s2 = p.velX * p.velX + p.velY * p.velY + p.velZ * p.velZ;
+            // Soft normalize: ~2 units/s → 1
+            return juce::jlimit (0.0f, 1.0f, std::sqrt (s2) * 0.5f);
+        }
+        case AttrId::size:          return juce::jlimit (0.0f, 1.0f, p.sizeScale);
+        case AttrId::alpha:         return juce::jlimit (0.0f, 1.0f, p.alpha);
+        case AttrId::emissive:      return juce::jlimit (0.0f, 1.0f, p.emissiveScale);
+        case AttrId::colourGain:    return juce::jlimit (0.0f, 1.0f, p.colourGain);
+        case AttrId::posY:          return juce::jlimit (0.0f, 1.0f, p.y);
+        case AttrId::targetY:       return juce::jlimit (0.0f, 1.0f, p.targetY);
+        case AttrId::particleId:
+        {
+            uint32_t n = p.id;
+            n ^= n >> 16; n *= 0x7feb352du; n ^= n >> 15; n *= 0x846ca68bu; n ^= n >> 16;
+            return (n & 0x00ffffffu) * (1.0f / 16777215.0f);
+        }
+        case AttrId::random0:       return juce::jlimit (0.0f, 1.0f, p.randV[0][0]);
+        case AttrId::random1:       return juce::jlimit (0.0f, 1.0f, p.randV[1][0]);
+        case AttrId::random2:       return juce::jlimit (0.0f, 1.0f, p.randV[2][0]);
+        case AttrId::position:
+        {
+            const float s2 = p.x * p.x + p.y * p.y + p.z * p.z;
+            return juce::jlimit (0.0f, 1.0f, std::sqrt (s2) * 0.25f);
+        }
+        case AttrId::velocity:      return sampleGraphAttr01 (AttrId::speed, p, frame);
+        case AttrId::colour:
+            return juce::jlimit (0.0f, 1.0f, 0.2126f * p.r + 0.7152f * p.g + 0.0722f * p.b);
+        case AttrId::orientation:
+            return juce::jlimit (0.0f, 1.0f, std::abs (p.rotY) / juce::MathConstants<float>::twoPi);
+        default:
+            juce::ignoreUnused (frame);
+            return 0.0f;
+    }
+}
+
+bool Spec3DParticleSystem::passesGraphFilters (const Particle& p, bool atSpawn,
+                                               const FrameSources& frame) const noexcept
+{
+    const auto& filters = owner.particleGraphProgram.filters;
+    if (filters.empty())
+        return true;
+
+    for (const auto& f : filters)
+    {
+        if (! f.enabled)
+            continue;
+        // stage: 0 spawn, 1 update, 2 both
+        if (f.stage == 0 && ! atSpawn) continue;
+        if (f.stage == 1 && atSpawn) continue;
+
+        float w = sampleGraphAttr01 (f.attr, p, frame);
+        w = ParticleNodeGraph::applyCurve01 (w, f.curveShape);
+        w = f.mapMin + (f.mapMax - f.mapMin) * w;
+        if (f.invert)
+            w = 1.0f - w;
+
+        bool pass = true;
+        if (f.thresholdEnabled)
+        {
+            const float thr = juce::jlimit (0.0f, 0.99f, f.threshold);
+            const bool above = w > thr;
+            pass = (f.keepMode == 0) ? above : ! above;
+        }
+
+        if (! pass)
+        {
+            // amount = cull probability (1 = hard reject)
+            const float amt = juce::jlimit (0.0f, 1.0f, f.amount);
+            if (amt >= 0.999f)
+                return false;
+            // Deterministic-ish hash from particle id so live reconnect is stable
+            uint32_t n = p.id * 747796405u + 2891336453u;
+            n = (n ^ (n >> 16)) * 0x7feb352du;
+            const float u = (n & 0x00ffffffu) * (1.0f / 16777215.0f);
+            if (u < amt)
+                return false;
+        }
+    }
+    return true;
+}
+
+void Spec3DParticleSystem::applyGraphColourRamps (Particle& p, bool atSpawn,
+                                                  const FrameSources& frame) const noexcept
+{
+    const auto& ramps = owner.particleGraphProgram.colourRamps;
+    if (ramps.empty())
+        return;
+
+    for (const auto& op : ramps)
+    {
+        if (! op.enabled)
+            continue;
+        if (op.stage == 0 && ! atSpawn) continue;
+        if (op.stage == 1 && atSpawn) continue;
+
+        float t = sampleGraphAttr01 (op.sourceAttr, p, frame);
+        t = ParticleNodeGraph::applyCurve01 (t, op.curveShape);
+        t = op.mapMin + (op.mapMax - op.mapMin) * t;
+        if (op.invert)
+            t = 1.0f - t;
+        t = juce::jlimit (0.0f, 1.0f, t);
+
+        p.r = op.c0[0] + (op.c1[0] - op.c0[0]) * t;
+        p.g = op.c0[1] + (op.c1[1] - op.c0[1]) * t;
+        p.b = op.c0[2] + (op.c1[2] - op.c0[2]) * t;
+        p.alpha = op.c0[3] + (op.c1[3] - op.c0[3]) * t;
+        p.baseR = p.r; p.baseG = p.g; p.baseB = p.b;
+    }
+}
+
 void Spec3DParticleSystem::applyUpdateMods (Particle& p, const FrameSources& frame) noexcept
 {
     p.colourGain = 1.0f;
@@ -1723,6 +1851,15 @@ void Spec3DParticleSystem::finalizeSpawn (const ParticleSpawnSample& sample, flo
     if (life > 1.0e-4f)
         p.maxLife = life;
 
+    // Graph program: colour ramps then filters (reject birth if fail).
+    applyGraphColourRamps (p, true, frame);
+    if (! passesGraphFilters (p, true, frame))
+    {
+        markDead (slot);
+        ++lastCulledCount;
+        return;
+    }
+
     const float jAmt = juce::jmax (0.0f, owner.particleSpawnJitter) * juce::jmax (0.0f, jitterSc);
     if (jAmt > 1.0e-6f)
     {
@@ -2122,6 +2259,31 @@ void Spec3DParticleSystem::update (float dtSeconds)
             p.baseB = bb0 * (1.0f - fr) + bb1 * fr;
             p.binDb01 = db0 * (1.0f - fr) + db1 * fr;
             applyUpdateMods (p, frame);
+        }
+    }
+
+    // Graph update-stage filters/colour (always on CPU so Live Apply works under GPU sim).
+    // Full force integrate still uses cpuIntegrateAll / GPU path below.
+    if (! owner.particleGraphProgram.filters.empty()
+        || ! owner.particleGraphProgram.colourRamps.empty())
+    {
+        if ((int) aliveList.size() != aliveCount)
+            rebuildAliveList();
+        for (int ai = (int) aliveList.size() - 1; ai >= 0; --ai)
+        {
+            const int i = aliveList[(size_t) ai];
+            if (i < 0 || i >= (int) pool.size())
+                continue;
+            auto& p = pool[(size_t) i];
+            if (! p.alive)
+                continue;
+            applyGraphColourRamps (p, false, frame);
+            if (! passesGraphFilters (p, false, frame))
+            {
+                markDead (i);
+                if (owner.particleGpuSimEnabled && gpuComputeReady)
+                    queueGpuKill (i);
+            }
         }
     }
 

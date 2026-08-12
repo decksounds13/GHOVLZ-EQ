@@ -19,14 +19,73 @@ namespace KnobTheme
         return defaultColors;
     }
 
-    inline juce::Colour arcBright (const SharedColors& c, bool bandHighlight) noexcept
+    /** Optional per-knob arc colour (ARGB int on Slider properties). Empty = theme knobArc. */
+    inline constexpr const char* arcColourPropertyID = "arcColourArgb";
+
+    inline juce::Colour resolveArcBase (const SharedColors& c, const juce::Slider* slider) noexcept
     {
-        return KnobBandHighlight::intensify (c.knobArc, bandHighlight);
+        if (slider != nullptr)
+        {
+            const auto& props = slider->getProperties();
+            if (props.contains (arcColourPropertyID))
+                return juce::Colour ((juce::uint32) (int) props[arcColourPropertyID]);
+        }
+        return c.knobArc;
     }
 
-    inline juce::Colour arcDark (const SharedColors& c, bool bandHighlight) noexcept
+    inline void setArcColour (juce::Slider& slider, juce::Colour colour) noexcept
     {
-        return KnobBandHighlight::intensify (c.knobArc.darker (0.55f), bandHighlight);
+        slider.getProperties().set (arcColourPropertyID, (int) colour.getARGB());
+        slider.repaint();
+    }
+
+    inline void clearArcColour (juce::Slider& slider) noexcept
+    {
+        slider.getProperties().remove (arcColourPropertyID);
+        slider.repaint();
+    }
+
+    /**
+        Active (band on) chrome ink — shared by power rings and knob glow arcs.
+        Preserves H/S/V of the base (no sat/bright boost) so "match handle colours"
+        stays identical to graph handles. Only forces full alpha.
+    */
+    inline juce::Colour chromeActive (juce::Colour base) noexcept
+    {
+        return base.withAlpha (1.0f);
+    }
+
+    /** Inactive (band off) chrome ink — dimmed active ink. */
+    inline juce::Colour chromeInactive (juce::Colour base) noexcept
+    {
+        return chromeActive (base).darker (0.55f);
+    }
+
+    /**
+        Same solid colour the graph draws for a band handle disk:
+        full alpha + optional legibleHandleFill (does not raise sat for dice limits).
+    */
+    inline juce::Colour chromeFromHandleFill (const SharedColors& c,
+                                              juce::Colour handleFill,
+                                              juce::Colour graphBackground) noexcept
+    {
+        return c.legibleHandleFill (handleFill.withAlpha (1.0f), graphBackground);
+    }
+
+    inline juce::Colour arcBright (const SharedColors& c, bool bandHighlight,
+                                   const juce::Slider* slider = nullptr) noexcept
+    {
+        // Exact base colour (handle match or Knob Arc) — only hover/selection intensifies.
+        const auto base = chromeActive (resolveArcBase (c, slider));
+        return KnobBandHighlight::intensify (base, bandHighlight);
+    }
+
+    inline juce::Colour arcDark (const SharedColors& c, bool bandHighlight,
+                                 const juce::Slider* slider = nullptr) noexcept
+    {
+        // Mild gradient tail only; bright end of the arc stays the true band/theme colour.
+        const auto base = chromeActive (resolveArcBase (c, slider)).darker (0.18f);
+        return KnobBandHighlight::intensify (base, bandHighlight);
     }
 
     /** Multiply filter: never full black; white ≈ identity. */
@@ -135,5 +194,32 @@ namespace KnobTheme
         slider.setColour (juce::Slider::textBoxTextColourId, textColour);
         slider.setColour (juce::Slider::textBoxBackgroundColourId, bgColour);
         slider.setColour (juce::Slider::textBoxOutlineColourId, outlineColour);
+    }
+
+    /**
+        Size the slider value text box to the full plain numeric string (never "...").
+        Call whenever the value popup is shown or the value changes while shown.
+    */
+    inline void showValueTextBox (juce::Slider& slider, bool show, SharedResources* themeColors) noexcept
+    {
+        const auto& c = colors (themeColors);
+        const auto text = slider.getTextFromValue (slider.getValue());
+        // Match typical Slider text-box face; measure full string + padding.
+        const juce::Font font (juce::FontOptions (12.5f));
+        const float tw = juce::GlyphArrangement::getStringWidth (font, text);
+        // Wide enough for e.g. "20000 Hz", "-24.0 dB", "1000.0 ms" — never clamp to tiny knob width.
+        const int boxW = juce::jlimit (44, 100, (int) std::ceil (tw) + 14);
+        const int boxH = 18;
+        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, boxW, boxH);
+        applyValuePopupColours (slider, show, c);
+
+        for (int i = 0; i < slider.getNumChildComponents(); ++i)
+        {
+            if (auto* lab = dynamic_cast<juce::Label*> (slider.getChildComponent (i)))
+            {
+                lab->setMinimumHorizontalScale (1.0f);
+                lab->setJustificationType (juce::Justification::centred);
+            }
+        }
     }
 }

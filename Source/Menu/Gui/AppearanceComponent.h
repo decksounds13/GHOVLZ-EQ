@@ -48,6 +48,11 @@ public:
     void updateComponents(juce::Colour newColor);
 
     void directColorUpdate(juce::Colour newColor, bool applyAlpha = false);
+    /**
+        Lightweight SV-pad scrub: update selection colours + local readouts only.
+        No full-plugin theme refresh (that made the ring lag). Commit via directColorUpdate on mouse-up.
+    */
+    void liveColourPreviewFromPad (juce::Colour newColor);
 
     void updateColorSelectors(const juce::Array<juce::Colour>& colors);
 
@@ -137,19 +142,25 @@ private:
     juce::TextButton randomizeAlphaToggleButton{ "A" };
 
 
-    juce::Label uiElementsLabel;
+    /** Section headers (Phase 1 Appearance structure). */
+    juce::Label coloursSectionLabel;
     juce::Label themesLabel;
+    juce::Label randomizeSectionLabel;
+    juce::Label chromeSectionLabel;
 
-    juce::Label accessibilityLabel;
     juce::ToggleButton enforceLegibleTextToggle { "Legible text" };
     juce::Label textContrastLabel;
     juce::Slider textContrastSlider;
+    juce::Label optionBoxOpacityLabel;
+    juce::Slider optionBoxOpacitySlider;
+    /** Live percent for Option box opacity (e.g. "90%"). */
+    juce::Label optionBoxOpacityPercentLabel;
 
     std::unique_ptr<Eyedropper> eyedropper;
     std::unique_ptr<juce::TextButton> eyedropperButton; // Add this line
 
     CustomTextButton randomizeColorsButton{ "Randomize" };
-    CustomTextButton randomizeSelectedColorsButton{ "Rand. All" };
+    CustomTextButton randomizeSelectedColorsButton { "Rand sel" };
 
     CustomPopup popup;
 

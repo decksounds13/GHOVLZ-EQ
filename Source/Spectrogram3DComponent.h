@@ -5,6 +5,7 @@
 #include "MelatoninBlur/melatonin/shadows.h"
 #include "Spec3DParticleSystem.h"
 #include "ParticleForceModule.h"
+#include "ParticleNodeGraph/ParticleAttributes.h"
 #include <atomic>
 #include <vector>
 #include <cstdint>
@@ -643,6 +644,16 @@ public:
     void setParticleForceStack (std::vector<ParticleForceModule> stack) noexcept;
     uint32_t nextParticleForceUid() noexcept { return ++particleForceUidSerial; }
 
+    /**
+        Hot-reload attribute program from the particle node graph (filters, colour ramps).
+        Safe to call every connect/disconnect; applied on next spawn/update.
+    */
+    void setParticleGraphProgram (const ParticleNodeGraph::GraphProgram& program) noexcept;
+    const ParticleNodeGraph::GraphProgram& getParticleGraphProgram() const noexcept
+    {
+        return particleGraphProgram;
+    }
+
     void setParticleMeshShape (ParticleMeshShape s) noexcept;
     ParticleMeshShape getParticleMeshShape() const noexcept { return particleMeshShape; }
     /**
@@ -828,6 +839,8 @@ private:
         void applyPixelFormat();
         void applyBackgroundTransparency() noexcept;
         void reattachWithCurrentFormat();
+        /** Reset fail/retry state so Spec can re-open after a busy GPU (e.g. a game). */
+        void resetAttachState() noexcept;
         void triggerRedraw() { if (openGLContext.isAttached()) openGLContext.triggerRepaint(); }
         juce::OpenGLContext& getOpenGLContext() noexcept { return openGLContext; }
         bool isGlReady() const noexcept { return glReady; }
@@ -925,6 +938,9 @@ private:
         bool contextFailed = false;
         bool glReady = false;
         bool softContentDirty = true;
+        /** Caps async attach retries so a contended GPU cannot flood the message queue. */
+        int attachAttempts = 0;
+        static constexpr int kMaxAttachAttempts = 16;
 
         std::unique_ptr<juce::OpenGLShaderProgram> colourShader;
         std::unique_ptr<juce::OpenGLShaderProgram::Attribute> colourPositionAttrib;
@@ -1301,6 +1317,7 @@ private:
     bool particleDebugOverlayEnabled = false;
     std::vector<ParticleForceModule> particleForceStack;
     uint32_t particleForceUidSerial = 1;
+    ParticleNodeGraph::GraphProgram particleGraphProgram;
     ParticleMeshShape particleMeshShape = ParticleMeshShape::sphere;
     float particleInitRotX = 0.0f, particleInitRotY = 0.0f, particleInitRotZ = 0.0f;
     float particleInitRotRandom = 0.0f; // 0..1 scales random euler at spawn

@@ -2,39 +2,37 @@
 
 #include <JuceHeader.h>
 
-
-class QuadPickerOverlayComponent : public juce::Component {
+/**
+    Non-interactive overlay on the SV pad: randomize-range shading and guides.
+    Must not paint stray lines when randomize is off (hover flags must be zero-init).
+*/
+class QuadPickerOverlayComponent : public juce::Component
+{
 public:
-    QuadPickerOverlayComponent(juce::Component& quadPicker, juce::Slider& brightnessRangeSlider, juce::Slider& saturationRangeSlider);
+    QuadPickerOverlayComponent (juce::Component& quadPicker,
+                                juce::Slider& brightnessRangeSlider,
+                                juce::Slider& saturationRangeSlider);
 
-    void paint(juce::Graphics& g) override;
-  
+    void paint (juce::Graphics& g) override;
     void resized() override;
 
-    void setSaturationRandomizationEnabled(bool isEnabled);
-    void setBrightnessRandomizationEnabled(bool isEnabled);
-    void mouseMove(const juce::MouseEvent& event) override;
+    void setSaturationRandomizationEnabled (bool isEnabled);
+    void setBrightnessRandomizationEnabled (bool isEnabled);
+    void mouseMove (const juce::MouseEvent& event) override;
+    void mouseExit (const juce::MouseEvent& event) override;
 
 private:
     juce::Component& quadPicker;
-    juce::Slider& brightnessRangeSlider; 
-    juce::Slider& saturationRangeSlider; 
+    juce::Slider& brightnessRangeSlider;
+    juce::Slider& saturationRangeSlider;
 
     bool isSaturationRandomizationEnabled = false;
     bool isBrightnessRandomizationEnabled = false;
 
-    double brightnessUpper;
-    double brightnessLower;
-    double saturationUpper;
-    double saturationLower;
-
-
-    bool isMouseOverSaturationSlider;
-    bool isMouseOverBrightnessSlider;
-    bool isMouseOverHorizontalPartOfSaturationSlider;
-    bool isMouseOverHorizontalPartOfBrightnessSlider;
-    int mouseXPosition;
-    int mouseYPosition;
+    bool isMouseOverSaturationSlider = false;
+    bool isMouseOverBrightnessSlider = false;
+    bool isMouseOverHorizontalPartOfSaturationSlider = false;
+    bool isMouseOverHorizontalPartOfBrightnessSlider = false;
+    int mouseXPosition = 0;
+    int mouseYPosition = 0;
 };
-
-

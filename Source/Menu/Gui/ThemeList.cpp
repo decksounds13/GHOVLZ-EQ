@@ -451,6 +451,9 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
     const bool keepOrdered = live.orderedRampGradation;
     const bool keepLegible = live.enforceLegibleText;
     const float keepContrast = live.textContrastAmount;
+    const float keepOptionBoxOpacity = live.optionBoxOpacity;
+    const bool keepGraphBandMinSatEn = live.graphBandRandomMinSatEnabled;
+    const float keepGraphBandMinSat = live.graphBandRandomMinSaturation;
     const bool keepH = live.randomizeHue, keepS = live.randomizeSaturation;
     const bool keepB = live.randomizeBrightness, keepA = live.randomizeAlpha;
     const float hueL = live.hueLowerLimit, hueU = live.hueUpperLimit;
@@ -469,6 +472,9 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
     live.orderedRampGradation = keepOrdered;
     live.enforceLegibleText = keepLegible;
     live.textContrastAmount = keepContrast;
+    live.optionBoxOpacity = keepOptionBoxOpacity;
+    live.graphBandRandomMinSatEnabled = keepGraphBandMinSatEn;
+    live.graphBandRandomMinSaturation = keepGraphBandMinSat;
     live.randomizeHue = keepH;
     live.randomizeSaturation = keepS;
     live.randomizeBrightness = keepB;

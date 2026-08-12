@@ -89,8 +89,22 @@ private:
         juce::ToggleButton multicolorBandFillToggle { "Multicolor Band Fill" };
         std::unique_ptr<ButtonAttachment> multicolorBandFillAttachment;
 
+        /** Power rings + faceplate knob glow arcs use each band's handle colour. */
+        juce::ToggleButton bandChromeMatchHandlesToggle { "Match power/glow to band colours" };
+        std::unique_ptr<ButtonAttachment> bandChromeMatchHandlesAttachment;
+
+        /** Floor Graph Band / matching faceplate power+glow saturation. */
+        juce::ToggleButton bandMinSatEnableToggle { "Band min sat" };
+        juce::Label bandMinSatLabel;
+        juce::Slider bandMinSatSlider;
+        juce::Label bandMinSatPercentLabel;
+
         juce::ToggleButton showCrosshairToggle { "Show Crosshair" };
         std::unique_ptr<ButtonAttachment> showCrosshairAttachment;
+
+        void syncBandMinSatControlsFromShared();
+        void applyBandMinSatFromControls();
+        void notifyHostSaveUiPrefs();
 
         juce::Label layersLabel;
         juce::ToggleButton preCurveToggle { "Pre Curve" };

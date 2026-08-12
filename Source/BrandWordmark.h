@@ -3,7 +3,7 @@
 #include <JuceHeader.h>
 #include <JucePluginDefines.h>
 
-/** GHOVLZ! EQ wordmark — Bahnschrift brand type, fixed (not user-selectable). */
+/** GHOVLZ! EQ wordmark - Bahnschrift brand type, fixed (not user-selectable). */
 class BrandWordmark : public juce::Component,
                       public juce::SettableTooltipClient
 {
@@ -14,17 +14,16 @@ public:
         return "GHOVLZ! EQ";
     }
 
-    /** Secondary product framing beside the hero brand. */
+    /** Secondary product framing beside the hero brand (plain ASCII). */
     static juce::String getSideCheckTagText()
     {
-        // Prefer ™; hosts/fonts that lack the glyph still render a readable fallback via paint().
-        return juce::CharPointer_UTF8 ("with SideCheck\xe2\x84\xa2");
+        return "with SideCheck(TM)";
     }
 
-    /** ASCII fallback if the typeface cannot draw ™. */
+    /** Same as getSideCheckTagText() - kept for call sites that used the ASCII path. */
     static juce::String getSideCheckTagTextAscii()
     {
-        return "with SideCheck(TM)";
+        return getSideCheckTagText();
     }
 
     /** UI label synced to JucePlugin_VersionString with a beta suffix. */
@@ -71,21 +70,17 @@ public:
         return ga.getBoundingBox (0, ga.getNumGlyphs(), true).getWidth();
     }
 
-    /** Prefer ™; fall back to ASCII if the glyph measures as empty / missing. */
-    static juce::String resolveSideCheckTagText (const juce::Font& font)
+    /** Plain-ASCII brand tag (no special trademark glyphs). */
+    static juce::String resolveSideCheckTagText (const juce::Font& /*font*/)
     {
-        const auto withTm = getSideCheckTagText();
-        const float tmW = measureTextWidth (font, juce::CharPointer_UTF8 ("\xe2\x84\xa2"));
-        if (tmW > 0.5f)
-            return withTm;
-        return getSideCheckTagTextAscii();
+        return getSideCheckTagText();
     }
 
     void paint (juce::Graphics& g) override
     {
         const float h = (float) getHeight();
         const float brandH = juce::jmax (10.0f, h * (compactLook ? 0.62f : 0.70f));
-        // SideCheck stays at full 2× tag size; beta is 75% of that.
+        // SideCheck stays at full 2x tag size; beta is 75% of that.
         const float tagH = juce::jmax (8.0f, brandH * 1.00f);
         const float versionH = juce::jmax (8.0f, tagH * 0.75f);
 

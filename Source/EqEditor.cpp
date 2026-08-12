@@ -12,6 +12,7 @@
 #include "BandNumberButton.h"
 #include "EqEditor.h"
 #include "KnobBandHighlight.h"
+#include "KnobThemeHelpers.h"
 #include "ComboBoxLookAndFeel.h"
 #include "FilterType.h"
 #include "FilterSlope.h"
@@ -93,7 +94,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
     setSize (designWidth, designHeight);
 
-    // Free resize — any aspect ratio; layout adapts in resized().
+    // Free resize - any aspect ratio; layout adapts in resized().
     resizeConstrainer.setFixedAspectRatio (0.0);
     resizeConstrainer.setSizeLimits (900, 500, 2400, 1600);
     setConstrainer (&resizeConstrainer);
@@ -105,7 +106,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     addChildComponent (*modSection);
     modSection->setVisible (false);
 
-    // Minimize ▲/▼ lives on FrequencyResponseComponent (graph top-left), not the faceplate.
+    // Minimize ^/v lives on FrequencyResponseComponent (graph top-left), not the faceplate.
 
 
     //frequencyResponseComponent->addMouseListener(this, true);
@@ -146,7 +147,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
 
 
-    // Band 1 (default HP) — Freq / Gain / Q
+    // Band 1 (default HP) - Freq / Gain / Q
     knob1.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     addAndMakeVisible(knob1);
     knob1.setBounds(100,100, 40, 40);
@@ -165,7 +166,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     knob2.addListener(this);
     highpassQAttachment = std::make_unique<SliderAttachment>(audioProcessor.treeState, "highpassQ", knob2);
 
-    // Band 8 (default LP) — Freq / Gain / Q
+    // Band 8 (default LP) - Freq / Gain / Q
     knob3.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     addAndMakeVisible(knob3);
     knob3.setBounds(100, 100, 40, 40);
@@ -336,7 +337,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
         wireFaceplateKnobInteraction (*k);
     updateFaceplateSlopeWheelMode();
 
-    // Output gain — bottom faceplate trim strip (expanded UI; laid out in resized)
+    // Output gain - bottom faceplate trim strip (expanded UI; laid out in resized)
     outputGainKnob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     outputGainKnob.setBounds (0, 0, 100, 100 - yOffset);
     addAndMakeVisible (outputGainKnob);
@@ -396,7 +397,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     sideCheckAmountAttachment = std::make_unique<SliderAttachment> (
         audioProcessor.treeState, SideCheck::amountParamId(), sideCheckAmountKnob);
 
-    // Fast / Med / Slow ballistics — toggle button shows current state (no ComboBox).
+    // Fast / Med / Slow ballistics - toggle button shows current state (no ComboBox).
     sideCheckSpeedButton.setClickingTogglesState (false);
     sideCheckSpeedButton.setTooltip (SideCheck::speedTooltipForMode (SideCheck::fast));
     sideCheckSpeedButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
@@ -424,8 +425,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     sideCheckHqAttachment = std::make_unique<ButtonAttachment> (
         audioProcessor.treeState, SideCheck::hqParamId(), sideCheckHqButton);
 
-    // Compact HP / LP — same OptionBox attach path (copy NormalisableRange skew before SliderAttachment).
-    // Range is 0 Hz…20 kHz (SideCheck::kMinHpLpHz / kMaxFreqHz); HP defaults to 0 (fully open).
+    // Compact HP / LP - same OptionBox attach path (copy NormalisableRange skew before SliderAttachment).
+    // Range is 0 Hz...20 kHz (SideCheck::kMinHpLpHz / kMaxFreqHz); HP defaults to 0 (fully open).
     auto attachSideCheckFreqKnob = [this] (RotaryImageKnobForOptionBox& knob,
                                            const juce::String& paramID,
                                            const juce::String& tip,
@@ -438,7 +439,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
         addChildComponent (knob);
 
         // Always seed the skewed log-ish range before attachment so the knob
-        // never keeps the ctor's placeholder 0.36–0.80 range.
+        // never keeps the ctor's placeholder 0.36-0.80 range.
         knob.setNormalisableRange (juce::NormalisableRange<double> (
             (double) SideCheck::kMinHpLpHz,
             (double) SideCheck::kMaxFreqHz,
@@ -460,7 +461,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
         attachment = std::make_unique<SliderAttachment> (audioProcessor.treeState, paramID, knob);
     };
     attachSideCheckFreqKnob (sideCheckHpKnob, SideCheck::hpHzParamId(),
-        "HP - Side Check highpass (0 Hz–20 kHz; effect starts above this frequency; default 0 = fully open). Right-click: slope", sideCheckHpAttachment);
+        "HP - Side Check highpass (0 Hz-20 kHz; effect starts above this frequency; default 0 = fully open). Right-click: slope", sideCheckHpAttachment);
     attachSideCheckFreqKnob (sideCheckLpKnob, SideCheck::lpHzParamId(),
         "LP - Side Check lowpass (effect stops below this frequency). Right-click: slope", sideCheckLpAttachment);
     sideCheckHpKnob.onPopupMenu = [this] { showSideCheckHpLpSlopeMenu (true); };
@@ -482,6 +483,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
     audioProcessor.treeState.addParameterListener (SideCheck::enabledParamId(), this);
     audioProcessor.treeState.addParameterListener (SideCheck::modeParamId(), this);
+    audioProcessor.treeState.addParameterListener ("EQ_BAND_CHROME_MATCH_HANDLES_ID", this);
     for (const char* typeId : { "highpassType", "lowpassType", "band1Type", "band2Type",
                                 "band3Type", "band4Type", "highShelfType", "lowShelfType" })
         audioProcessor.treeState.addParameterListener (typeId, this);
@@ -733,7 +735,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     border21.setColour(juce::GroupComponent::textColourId, textColor);
     border22.setColour(juce::GroupComponent::outlineColourId, outlineColor);
     border22.setColour(juce::GroupComponent::textColourId, textColor);
-    // No outline — used as a side text label beside the trim-strip output knob
+    // No outline - used as a side text label beside the trim-strip output knob
     borderOutputGain.setColour(juce::GroupComponent::outlineColourId, juce::Colours::transparentBlack);
     borderOutputGain.setColour(juce::GroupComponent::textColourId, textColor);
 
@@ -741,7 +743,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     // mode (beneath Settings/menu), on the editor faceplate trim when expanded.
     addChildComponent (brandWordmark);
 
-    // Default: graph-only compact UI (faceplate hidden). Toggle still expands via ▲/▼.
+    // Default: graph-only compact UI (faceplate hidden). Toggle still expands via ^/v.
     applyCompactUi();
 }
  
@@ -758,6 +760,7 @@ EqEditor::~EqEditor()
 
     audioProcessor.treeState.removeParameterListener (SideCheck::enabledParamId(), this);
     audioProcessor.treeState.removeParameterListener (SideCheck::modeParamId(), this);
+    audioProcessor.treeState.removeParameterListener ("EQ_BAND_CHROME_MATCH_HANDLES_ID", this);
     for (const char* typeId : { "highpassType", "lowpassType", "band1Type", "band2Type",
                                 "band3Type", "band4Type", "highShelfType", "lowShelfType" })
         audioProcessor.treeState.removeParameterListener (typeId, this);
@@ -817,7 +820,7 @@ void EqEditor::paint(juce::Graphics& g)
         return;
     }
 
-    // Match resized() stack: top band → graph → optional mod → faceplate → trim.
+    // Match resized() stack: top band -> graph -> optional mod -> faceplate -> trim.
     const int titleBarHeight = getTopBandHeight();
     const int trimH = getBottomTrimHeight();
     const int faceplateStripH = isFaceplateSuppressed() ? 0 : getFaceplateHeightForWidth (getWidth());
@@ -933,13 +936,15 @@ void EqEditor::resized()
         layoutPhaseModeCombo();
         layoutSideCheckButton();
         layoutScopeModeButton();
+        // Chrome just toFront'd — re-assert OptionBox (and Settings) above it.
+        raiseOptionBoxStack();
         return;
     }
 
     // Padding between groups and rows
     const int padding = px (10.0f);
 
-    // Stack: graph (fills leftover) → mod (optional, 3/4 faceplate) → faceplate → bottom trim.
+    // Stack: graph (fills leftover) -> mod (optional, 3/4 faceplate) -> faceplate -> bottom trim.
     // Scope mode suppresses the faceplate strip (knobs parked); bottom chrome stays.
     const int graphTop = getTopBandHeight();
     const int trimH = getBottomTrimHeight();
@@ -998,7 +1003,7 @@ void EqEditor::resized()
     int contentBelowTopKnob = juce::jmax (1, faceplateBottom - topKnobY);
     int rowHeight = juce::jmax (1, contentBelowTopKnob / 2);
 
-    // Faceplate image knobs must stay 1:1 — never stretch W/H independently.
+    // Faceplate image knobs must stay 1:1 - never stretch W/H independently.
     int largeSide = juce::jmin ((int) (groupWidth * 0.7f), (int) (rowHeight * 0.85f));
     int smallSide = juce::jmin (groupWidth / 2, (int) (rowHeight * 0.55f));
     int gainSide = juce::jmax (1, juce::roundToInt ((float) largeSide * 1.2f)); // gain knobs +20%
@@ -1072,7 +1077,7 @@ void EqEditor::resized()
     const bool band8HpLp = typeIsHpLpForGlobal (g7, FilterType::lowpass);
 
     // Place shelf/band Freq (left) and Q (right) equally spaced about the gain centre.
-    // Does not advance startX — caller controls column X (keeps bands 2–7 fixed).
+    // Does not advance startX - caller controls column X (keeps bands 2-7 fixed).
     auto placeBandFreqQAroundGainAt = [&] (int colX,
                                            juce::Component& freqKnob,
                                            juce::Component& qKnob,
@@ -1091,14 +1096,14 @@ void EqEditor::resized()
         qKnob.setBounds (gainCentreX + halfPitch - smallSide / 2, bandSmallY, smallSide, smallSide);
     };
 
-    // Classic HP/LP: large Q on top, large Freq under Q label — same size/orientation as before.
+    // Classic HP/LP: large Q on top, large Freq under Q label - same size/orientation as before.
     // Column X uses the same gain-centre alignment as the middle bands (brings 1 & 8 in a bit).
     auto placeHpLpVerticalAt = [&] (int colX,
                                     juce::Component& freqKnob,
                                     juce::Component& qKnob,
                                     juce::Component& gainKnob)
     {
-        gainKnob.setBounds ({}); // parked — not used in 2-knob mode
+        gainKnob.setBounds ({}); // parked - not used in 2-knob mode
         const int stackX = colX + bandLargeXOff
                            + (gainSide - largeSide) / 2; // centre stack on gain column
         qKnob.setBounds (stackX, topKnobY, largeSide, largeSide);
@@ -1127,7 +1132,7 @@ void EqEditor::resized()
     const int colX7 = faceplateOriginX + colPitch * 6;
     const int colX8 = faceplateOriginX + colPitch * 7;
 
-    // All 8 columns: HP/LP → vertical 2-knob; otherwise 3-knob with gain.
+    // All 8 columns: HP/LP -> vertical 2-knob; otherwise 3-knob with gain.
     placeBandColumn (colX1, band1HpLp, knob1,  knob2,  knobHpGain);
     placeBandColumn (colX2, band2HpLp, knob8,  knob10, knob9);
     placeBandColumn (colX3, band3HpLp, knob11, knob13, knob12);
@@ -1139,7 +1144,7 @@ void EqEditor::resized()
 
     updateBandFaceplateGainVisibility();
 
-    // Output gain — small knob centered in the lighter bottom faceplate trim strip
+    // Output gain - small knob centered in the lighter bottom faceplate trim strip
     int outClusterLeftX = getWidth();
     {
         const int outTrimH = trimH;
@@ -1156,7 +1161,7 @@ void EqEditor::resized()
         const int outY = trimTop + (outTrimH - outSize) / 2;
         outputGainKnob.setBounds (outX, outY, outSize, outSize);
 
-        // Layout: [A] [Out] [knob] — button a few px under trim height
+        // Layout: [A] [Out] [knob] - button a few px under trim height
         const int btnSize = juce::jlimit (16, outTrimH - 6, outSize);
         const int labelW = px (28.0f);
         const int labelH = juce::jmin (px (18.0f), outTrimH - 2);
@@ -1262,7 +1267,7 @@ void EqEditor::resized()
     placeLabelUnderKnob (border15, knob7, 0.45f, qLabelMinW);
     placeLabelUnderKnob (border16, knob4, 0.45f, qLabelMinW);
 
-    // Gain labels — only when that column is in 3-knob (gain) mode.
+    // Gain labels - only when that column is in 3-knob (gain) mode.
     auto placeGainLabel = [&] (juce::GroupComponent& label, juce::Component& gainKnob, bool hpLp)
     {
         if (hpLp)
@@ -1352,11 +1357,14 @@ void EqEditor::resized()
         bandsFullToastLabel.setBounds ((getWidth() - tw) / 2, graphTop + px (8.0f), tw, th);
         bandsFullToastLabel.toFront (false);
     }
+
+    // Chrome just toFront'd — re-assert OptionBox (and Settings) above Phase/SideCheck/Scope.
+    raiseOptionBoxStack();
 }
 
 void EqEditor::updateBandFaceplateGainVisibility()
 {
-    // Compact / Scope: faceplate is suppressed — don't fight visibility here.
+    // Compact / Scope: faceplate is suppressed - don't fight visibility here.
     if (isFaceplateSuppressed())
     {
         updateFaceplateSlopeWheelMode();
@@ -1408,8 +1416,8 @@ void EqEditor::layoutBrandWordmark (int outClusterLeftX)
         else
             addAndMakeVisible (brandWordmark);
 
-        // Top-center of the graph UI — clear of minimize/Bypass/A–D (left) and Settings (right).
-        // Extra width/height for 2× "with SideCheck™" + beta beside "GHOVLZ! EQ".
+        // Top-center of the graph UI - clear of minimize/Bypass/A-D (left) and Settings (right).
+        // Extra width/height for 2x "with SideCheck(TM)" + beta beside "GHOVLZ! EQ".
         const int logoH = juce::jmax (22, getTopBandHeight() - 2);
         const int logoW = juce::jmin (px (640.0f), juce::jmax (220, (getWidth() * 7) / 10));
         const int logoX = (getWidth() - logoW) / 2;
@@ -1431,7 +1439,7 @@ void EqEditor::layoutBrandWordmark (int outClusterLeftX)
 
     // Prefer true window center; clamp so the wordmark stays left of the A/Out cluster
     // and right of the help (?) button on the trim.
-    // Extra width for 2× "with SideCheck™" + beta beside "GHOVLZ! EQ".
+    // Extra width for 2x "with SideCheck(TM)" + beta beside "GHOVLZ! EQ".
     const int maxLogoW = juce::jmin (px (660.0f), juce::jmax (80, openRight - px (16.0f)));
     const int logoH = juce::jmax (20, trimH - 4);
     const int logoW = maxLogoW;
@@ -1456,7 +1464,7 @@ void EqEditor::layoutBrandWordmark (int outClusterLeftX)
 
 void EqEditor::layoutHelpTooltipsButton()
 {
-    // Strip Scope: hide ? — Scope / Settings / UI / Dice overlays remain.
+    // Strip Scope: hide ? - Scope / Settings / UI / Dice overlays remain.
     if (mainComponent != nullptr && mainComponent->isScopeMode() && mainComponent->isScopeStripLayout())
     {
         helpTooltipsButton.setVisible (false);
@@ -1480,7 +1488,7 @@ void EqEditor::layoutHelpTooltipsButton()
     if (uiCompact)
     {
         // Sit just right of Proportional Q at the bottom of the spectrum graph
-        // (mainComponent), not the editor — so Mod panel doesn't push these down.
+        // (mainComponent), not the editor - so Mod panel doesn't push these down.
         constexpr int pLeft = 18;
         constexpr int pW = 22;
         constexpr int gap = 4;
@@ -1590,7 +1598,7 @@ void EqEditor::layoutScopeModeButton()
     int y = 0;
     if (stripOverlay)
     {
-        // Square control, bottom-left above piano strip — keep Scope on this Y (not Match row centre).
+        // Square control, bottom-left above piano strip - keep Scope on this Y (not Match row centre).
         x = px (8.0f);
         y = juce::jmax (0, getHeight() - btnSize - px (8.0f) - pianoH);
         const int scopeY = y;
@@ -1730,7 +1738,7 @@ void EqEditor::layoutSideCheckButton()
         sideCheckAmountKnob.setBounds (cx, y, knobSize, knobSize);
         cx += knobSize + gap;
 
-        // Compact Fast/Med/Slow toggle — short enough for both compact and expanded chrome.
+        // Compact Fast/Med/Slow toggle - short enough for both compact and expanded chrome.
         const int speedW = juce::jmax (px (48.0f), uiCompact ? 52 : 58);
         sideCheckSpeedButton.setBounds (cx, y, speedW, btnSize);
         cx = sideCheckSpeedButton.getRight() + gap;
@@ -1910,7 +1918,7 @@ void EqEditor::saveLastUiThemeToDisk() const
     theme.setModified (juce::Time::getCurrentTime());
     if (auto xml = std::unique_ptr<juce::XmlElement> (theme.toXml()))
     {
-        // Colours only — strip any accidental DSP / GlobalUi payload.
+        // Colours only - strip any accidental DSP / GlobalUi payload.
         while (auto* child = xml->getFirstChildElement())
             xml->removeChildElement (child, true);
 
@@ -1952,6 +1960,9 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
     const bool keepOrdered = live.orderedRampGradation;
     const bool keepLegible = live.enforceLegibleText;
     const float keepContrast = live.textContrastAmount;
+    const float keepOptionBoxOpacity = live.optionBoxOpacity;
+    const bool keepGraphBandMinSatEn = live.graphBandRandomMinSatEnabled;
+    const float keepGraphBandMinSat = live.graphBandRandomMinSaturation;
     const bool keepH = live.randomizeHue, keepS = live.randomizeSaturation;
     const bool keepB = live.randomizeBrightness, keepA = live.randomizeAlpha;
     const float hueL = live.hueLowerLimit, hueU = live.hueUpperLimit;
@@ -1970,6 +1981,9 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
     live.orderedRampGradation = keepOrdered;
     live.enforceLegibleText = keepLegible;
     live.textContrastAmount = keepContrast;
+    live.optionBoxOpacity = keepOptionBoxOpacity;
+    live.graphBandRandomMinSatEnabled = keepGraphBandMinSatEn;
+    live.graphBandRandomMinSaturation = keepGraphBandMinSat;
     live.randomizeHue = keepH;
     live.randomizeSaturation = keepS;
     live.randomizeBrightness = keepB;
@@ -1997,7 +2011,7 @@ void EqEditor::syncScopeModeButton()
 
     juce::String tip = "Scope - quad metering view (Gon / Spectrum / Oscilloscope / Spectrogram).";
     tip << " Right-click for Pre/Post tap.";
-    tip << (tapPost ? " Scope · Post (EQ DSP on)." : " Scope · Pre (analyzer, DSP off).");
+    tip << (tapPost ? " Scope | Post (EQ DSP on)." : " Scope | Pre (analyzer, DSP off).");
     scopeModeButton.setTooltip (tip);
 }
 
@@ -2014,7 +2028,7 @@ bool EqEditor::isFaceplateSuppressed() const noexcept
 int EqEditor::getScopeStripWindowHeight (int width) const
 {
     const float scale = (float) juce::jmax (1, width) / (float) designWidth;
-    // Edge-to-edge strip window — overlays sit on the panes.
+    // Edge-to-edge strip window - overlays sit on the panes.
     const int stripDesign = mainComponent != nullptr ? mainComponent->getScopeStripHeightPx() : 200;
     return juce::jmax (1, juce::roundToInt ((float) stripDesign * scale));
 }
@@ -2317,9 +2331,12 @@ void EqEditor::loadUiPrefs()
     bool randFaceplate = true, randGraph = true, randMenu = true;
     bool randRampFft = true, randRampSpec = true, randRampSpec3D = true, randRampFill = true;
     bool orderedRampGradation = true;
-    // Accessibility — on by default globally (Appearance can still toggle).
+    // Accessibility - on by default globally (Appearance can still toggle).
     bool enforceLegibleText = true;
     float textContrastAmount = 0.55f;
+    float optionBoxOpacity = 0.90f;
+    bool graphBandRandomMinSatEnabled = true;
+    float graphBandRandomMinSaturation = 0.25f;
     bool pianoDisplayOnLoad = false;
     bool spec3DOnLoad = false;
     bool spec3DFrameCustom = false;
@@ -2443,7 +2460,7 @@ void EqEditor::loadUiPrefs()
     int spec3DParticleBinding = 0;  // 0 = trail, 1 = free
     float spec3DParticleEmission = 40000.0f; // particles/sec
     float spec3DParticleSpawnJitter = 0.0025f; // must match Spectrogram3DComponent::kDefaultParticleSpawnJitter
-    float spec3DParticleSpeed = 1.0f; // legacy → Init vel Y
+    float spec3DParticleSpeed = 1.0f; // legacy -> Init vel Y
     float spec3DParticleInitVelX = 0.0f;
     float spec3DParticleInitVelZ = 0.0f;
     float spec3DParticleVelRandom = 0.0f;
@@ -2573,6 +2590,12 @@ void EqEditor::loadUiPrefs()
                 enforceLegibleText = xml->getBoolAttribute ("enforceLegibleText", true);
                 textContrastAmount = (float) xml->getDoubleAttribute ("textContrastAmount", 0.55);
                 textContrastAmount = juce::jlimit (0.0f, 1.0f, textContrastAmount);
+                optionBoxOpacity = (float) xml->getDoubleAttribute ("optionBoxOpacity", 0.90);
+                optionBoxOpacity = juce::jlimit (0.30f, 1.0f, optionBoxOpacity);
+                graphBandRandomMinSatEnabled = xml->getBoolAttribute ("graphBandRandomMinSatEnabled", true);
+                graphBandRandomMinSaturation = (float) xml->getDoubleAttribute (
+                    "graphBandRandomMinSaturation", 0.25);
+                graphBandRandomMinSaturation = juce::jlimit (0.0f, 1.0f, graphBandRandomMinSaturation);
                 faceplateBank = juce::jlimit (0, EqBand::kMaxBanks - 1,
                                               xml->getIntAttribute ("faceplateBank", 0));
                 pianoDisplayOnLoad = xml->getBoolAttribute ("pianoDisplay", false);
@@ -2594,7 +2617,7 @@ void EqEditor::loadUiPrefs()
                 }
                 else
                 {
-                    // Migrate legacy bool: on → 4x, off stays off.
+                    // Migrate legacy bool: on -> 4x, off stays off.
                     spec3DMsaaLevel = xml->getBoolAttribute ("spec3dMsaa", true) ? 4 : 0;
                 }
                 spec3DTransparentBg = xml->getBoolAttribute ("spec3dTransparentBg", true);
@@ -2676,7 +2699,7 @@ void EqEditor::loadUiPrefs()
                 spec3DDof = xml->getBoolAttribute ("spec3dDof", false);
                 spec3DDofFocus = (float) xml->getDoubleAttribute (
                     "spec3dDofFocus", Spectrogram3DComponent::kDofFocusDefault);
-                // Prefer F-Stop / focal length; migrate legacy aperture/amount → F-Stop.
+                // Prefer F-Stop / focal length; migrate legacy aperture/amount -> F-Stop.
                 if (xml->hasAttribute ("spec3dDofFStop"))
                 {
                     spec3DDofFStop = (float) xml->getDoubleAttribute (
@@ -2782,7 +2805,7 @@ void EqEditor::loadUiPrefs()
                 spec3DParticleSpraySpeedMax = (float) xml->getDoubleAttribute ("spec3dParticleSpraySpeedMax", 1.0);
                 spec3DParticleBinding = xml->getIntAttribute ("spec3dParticleBinding", 0);
                 spec3DParticleEmission = (float) xml->getDoubleAttribute ("spec3dParticleEmission", 40000.0);
-                // V3: particles/sec. Pre-V3 was a unitless ~0–5 scale (plus older 0–1).
+                // V3: particles/sec. Pre-V3 was a unitless ~0-5 scale (plus older 0-1).
                 if (! xml->hasAttribute ("spec3dParticleEmissionV3"))
                 {
                     if (spec3DParticleEmission > 0.0f && spec3DParticleEmission <= 20.0f)
@@ -2992,7 +3015,7 @@ void EqEditor::loadUiPrefs()
                                                            : Spectrogram3DComponent::ShadowQuality::ultra)),
             false);
         // SSGI temporal/denoise/half-res/mesh-normals kept in Spectrogram3DComponent for later
-        // use, but not loaded from prefs (Look UI removed — use Quality Ultra instead).
+        // use, but not loaded from prefs (Look UI removed - use Quality Ultra instead).
         mainComponent->setSpec3DSsgiTemporalEnabled (false, false);
         mainComponent->setSpec3DSsgiDenoiseEnabled (false, false);
         mainComponent->setSpec3DSsgiHalfResEnabled (false, false);
@@ -3174,7 +3197,7 @@ void EqEditor::loadUiPrefs()
         mainComponent->setGonExpanded (gonExpandedOnLoad, false);
         mainComponent->setSpecExpanded (specExpandedOnLoad, false);
 
-        // Theme colours: host session first, else last_ui_theme.xml (disk — same path as dice flags).
+        // Theme colours: host session first, else last_ui_theme.xml (disk - same path as dice flags).
         if (haveSessionTheme || audioProcessor.hasSessionUiTheme())
             mainComponent->reapplySessionUiThemeFromProcessor();
         else if (loadLastUiThemeFromDisk())
@@ -3195,6 +3218,9 @@ void EqEditor::loadUiPrefs()
         c.orderedRampGradation = orderedRampGradation;
         c.enforceLegibleText = enforceLegibleText;
         c.textContrastAmount = textContrastAmount;
+        c.optionBoxOpacity = optionBoxOpacity;
+        c.graphBandRandomMinSatEnabled = graphBandRandomMinSatEnabled;
+        c.graphBandRandomMinSaturation = graphBandRandomMinSaturation;
         // Re-apply text vs background contrast (Scope + global) after theme restore.
         if (c.enforceLegibleText)
             c.enforceLegibleTextContrast();
@@ -3227,7 +3253,7 @@ void EqEditor::loadUiPrefs()
 void EqEditor::requestSaveUiPrefs() noexcept
 {
     uiPrefsSavePending = true;
-    // ~250 ms after the last change — responsive scrubbing, one write when idle.
+    // ~250 ms after the last change - responsive scrubbing, one write when idle.
     uiPrefsSaveDueMs = juce::Time::getMillisecondCounter() + 250;
     if (! isTimerRunning())
         startTimer (50);
@@ -3263,6 +3289,9 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("orderedRampGradation", c.orderedRampGradation);
         xml->setAttribute ("enforceLegibleText", c.enforceLegibleText);
         xml->setAttribute ("textContrastAmount", (double) c.textContrastAmount);
+        xml->setAttribute ("optionBoxOpacity", (double) c.optionBoxOpacity);
+        xml->setAttribute ("graphBandRandomMinSatEnabled", c.graphBandRandomMinSatEnabled);
+        xml->setAttribute ("graphBandRandomMinSaturation", (double) c.graphBandRandomMinSaturation);
     }
     xml->setAttribute ("lastScopeWidth", lastScopeWidth);
     xml->setAttribute ("lastScopeHeight", lastScopeHeight);
@@ -3587,7 +3616,7 @@ void EqEditor::saveUiPrefs() const
     if (file.getParentDirectory().isDirectory())
         xml->writeTo (file);
 
-    // Full palette — same disk folder as dice flags (this is what actually survives Ableton).
+    // Full palette - same disk folder as dice flags (this is what actually survives Ableton).
     saveLastUiThemeToDisk();
 
     // Host project state: same prefs + theme + GlobalUi modules (best-effort for per-project).
@@ -3718,7 +3747,7 @@ void EqEditor::rebindFaceplateAttachments()
         onOff.setParameterID (onId);
     };
 
-    // Display columns L→R: Band1 HP, Band2 LS, Band3–6, Band7 HS, Band8 LP
+    // Display columns L->R: Band1 HP, Band2 LS, Band3-6, Band7 HS, Band8 LP
     bindColumn (0, knob1,  knobHpGain, knob2,  highpassCutoffAttachment, highpassGainAttachment, highpassQAttachment, *onOffButton1);
     bindColumn (1, knob8,  knob9,      knob10, lowShelfFrequencyAttachment, lowShelfGainAttachment, lowShelfQAttachment, *onOffButton4);
     bindColumn (2, knob11, knob12,     knob13, band1FrequencyAttachment, band1GainAttachment, band1QAttachment, *onOffButton5);
@@ -3733,7 +3762,7 @@ void EqEditor::rebindFaceplateAttachments()
 
 void EqEditor::updateFaceplateBandNumbers()
 {
-    // Display columns L→R match bindColumn / placeOnOffCentered mapping.
+    // Display columns L->R match bindColumn / placeOnOffCentered mapping.
     BandNumberButton* buttons[8] = {
         onOffButton1.get(), onOffButton4.get(), onOffButton5.get(), onOffButton6.get(),
         onOffButton7.get(), onOffButton8.get(), onOffButton3.get(), onOffButton2.get()
@@ -3783,6 +3812,57 @@ void EqEditor::openOptionBoxForFaceplateBand (int bandIndex)
     if (bandIndex < 0 || mainComponent == nullptr)
         return;
     mainComponent->getFrequencyResponseComponent().showOptionBoxForBand (bandIndex);
+}
+
+void EqEditor::raiseOptionBoxStack()
+{
+    if (mainComponent == nullptr)
+        return;
+
+    auto* box = mainComponent->getFrequencyResponseComponent().getOptionBoxMenu();
+    const bool boxOpen = box != nullptr && box->isVisible();
+
+    if (boxOpen)
+    {
+        // Never reparent / setBounds mid-drag — AffineTransform + getBounds conversion
+        // made the box flash across the editor.
+        if (box->isDragInProgress())
+        {
+            box->setAlwaysOnTop (true);
+            box->toFront (false);
+        }
+        else if (box->getParentComponent() != this)
+        {
+            // Top-left only — box keeps design size + AffineTransform::scale.
+            if (auto* oldParent = box->getParentComponent())
+            {
+                const auto topLeftHere = getLocalPoint (oldParent, box->getPosition());
+                addAndMakeVisible (box);
+                box->setTopLeftPosition (topLeftHere);
+            }
+            else
+            {
+                addAndMakeVisible (box);
+            }
+            box->setAlwaysOnTop (true);
+            box->toFront (false);
+        }
+        else
+        {
+            box->setAlwaysOnTop (true);
+            box->toFront (false);
+        }
+    }
+
+    // Settings panel must win when open (reparent onto editor above OptionBox).
+    // Skip Settings rehost while OptionBox is mid-drag (stack thrash → flash).
+    if (box != nullptr && box->isDragInProgress())
+        return;
+
+    if (mainComponent->isSettingsMenuOpen())
+        mainComponent->hostSettingsMenuForOptionBoxStack (true);
+    else
+        mainComponent->hostSettingsMenuForOptionBoxStack (false);
 }
 
 bool EqEditor::cycleFilterSlopeForBand (int bandIndex, int delta)
@@ -3901,7 +3981,7 @@ void EqEditor::setBandManipulationHighlight (int bandIndex)
     {
         setFaceplateBank (EqBand::bankFromGlobal (bandIndex), false);
         const int col = EqBand::slotInBankFromGlobal (bandIndex);
-        // Map display column → highlight using Bank1 internal indices for the switch below.
+        // Map display column -> highlight using Bank1 internal indices for the switch below.
         constexpr int internalByCol[8] = { 4, 7, 0, 1, 2, 3, 6, 5 };
         bandIndex = internalByCol[juce::jlimit (0, 7, col)];
     }
@@ -3977,7 +4057,7 @@ void EqEditor::setBandManipulationHighlight (int bandIndex)
 
 void EqEditor::sliderValueChanged(juce::Slider* slider)
 {
-    // Faceplate knobs are APVTS-attached. Do NOT call updateBand*/updateHighpass here —
+    // Faceplate knobs are APVTS-attached. Do NOT call updateBand*/updateHighpass here -
     // those snap IIR coeffs on the message thread and fight processBlock smoothing (zipper).
     if (slider == &sideCheckHpKnob || slider == &sideCheckLpKnob)
         enforceSideCheckHpLpOrder (slider);
@@ -3993,6 +4073,12 @@ void EqEditor::parameterChanged(const juce::String& parameterID, float newValue)
         updateSideCheckAmountVisibility();
     else if (parameterID == SideCheck::modeParamId())
         updateSideCheckSpeedButtonText();
+    else if (parameterID == "EQ_BAND_CHROME_MATCH_HANDLES_ID")
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<EqEditor> (this)]
+        {
+            if (safe != nullptr)
+                safe->applyFaceplateBandChrome();
+        });
     else if (parameterID.endsWithIgnoreCase ("Type"))
         resized(); // swap Band 1/8 between vertical HP/LP and 3-knob layouts
 }
@@ -4084,14 +4170,20 @@ const SharedColors& EqEditor::themePalette() const noexcept
 void EqEditor::applyFaceplateTheme()
 {
     const auto& c = themePalette();
-    brandWordmark.setBrandColour (c.pluginBrandText);
+    const auto faceBg = c.pluginBackground.interpolatedWith (c.pluginBackground2, 0.5f);
+    // Per-surface ink so Legible text keeps faceplate chrome readable after dice/themes.
+    const auto buttonInk = c.legibleTextOn (c.pluginButtonText, c.pluginButtonBackground);
+    const auto faceInk = c.legibleTextOn (c.pluginButtonText, faceBg);
+    const auto brandInk = c.legibleTextOn (c.pluginBrandText, faceBg);
+    brandWordmark.setBrandColour (brandInk);
 
-    auto styleChrome = [&c] (juce::TextButton& b)
+    const auto onInk = c.legibleTextOn (juce::Colours::black, c.pluginButtonAccent);
+    auto styleChrome = [&] (juce::TextButton& b)
     {
         b.setColour (juce::TextButton::buttonColourId, c.pluginButtonBackground);
         b.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
-        b.setColour (juce::TextButton::textColourOffId, c.pluginButtonText.withAlpha (0.85f));
-        b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b.setColour (juce::TextButton::textColourOffId, buttonInk.withAlpha (0.92f));
+        b.setColour (juce::TextButton::textColourOnId, onInk);
         b.repaint();
     };
 
@@ -4114,14 +4206,15 @@ void EqEditor::applyFaceplateTheme()
     attachGraphShadow (sideCheckHqButton);
 
     faceplateBankPrevButton.setChromeColours (c.pluginButtonBackground,
-                                              c.pluginButtonText.withAlpha (0.9f));
+                                              buttonInk.withAlpha (0.95f));
     faceplateBankNextButton.setChromeColours (c.pluginButtonBackground,
-                                              c.pluginButtonText.withAlpha (0.9f));
+                                              buttonInk.withAlpha (0.95f));
 
-    const auto labelColour = c.pluginButtonText.withAlpha (0.85f);
+    const auto labelColour = faceInk.withAlpha (0.92f);
     auto themeLabel = [labelColour] (juce::Label& lab)
     {
         lab.setColour (juce::Label::textColourId, labelColour);
+        lab.setMinimumHorizontalScale (1.0f);
         lab.repaint();
     };
 
@@ -4129,29 +4222,122 @@ void EqEditor::applyFaceplateTheme()
     themeLabel (sideCheckHpLabel);
     themeLabel (sideCheckLpLabel);
 
-    // Band number buttons: off = dimmed knob arc; on = brighter ring + number.
-    const auto powerColour = c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f);
-    auto themePower = [powerColour] (std::unique_ptr<BandNumberButton>& b)
+    // Freq / Q / Gain / Out group titles sit on the faceplate wash (not button chrome).
+    auto themeGroup = [labelColour] (juce::GroupComponent& g)
     {
-        if (b != nullptr)
-        {
-            b->setBaseColor (powerColour);
-            b->repaint();
-        }
+        g.setColour (juce::GroupComponent::textColourId, labelColour);
+        g.repaint();
     };
-    themePower (onOffButton1);
-    themePower (onOffButton2);
-    themePower (onOffButton3);
-    themePower (onOffButton4);
-    themePower (onOffButton5);
-    themePower (onOffButton6);
-    themePower (onOffButton7);
-    themePower (onOffButton8);
+    themeGroup (border1);
+    themeGroup (border2);
+    themeGroup (border3);
+    themeGroup (border4);
+    themeGroup (border5);
+    themeGroup (border6);
+    themeGroup (border7);
+    themeGroup (border8);
+    themeGroup (border9);
+    themeGroup (border10);
+    themeGroup (border11);
+    themeGroup (border12);
+    themeGroup (border13);
+    themeGroup (border14);
+    themeGroup (border15);
+    themeGroup (border16);
+    themeGroup (border17);
+    themeGroup (border18);
+    themeGroup (border19);
+    themeGroup (border20);
+    themeGroup (border21);
+    themeGroup (border22);
+    themeGroup (borderOutputGain);
+
+    applyFaceplateBandChrome();
+}
+
+void EqEditor::applyFaceplateBandChrome()
+{
+    const auto& c = themePalette();
+    const auto faceBg = c.pluginBackground.interpolatedWith (c.pluginBackground2, 0.5f);
+
+    const bool matchHandles = [&]
+    {
+        if (auto* p = audioProcessor.treeState.getRawParameterValue ("EQ_BAND_CHROME_MATCH_HANDLES_ID"))
+            return p->load() > 0.5f;
+        return false;
+    }();
+
+    // Graph handle palette (FRC): 1-4 parametric, 5 HP, 6 LP, 7 HS, 8 LS.
+    const juce::Colour handlePalette[8] = {
+        c.graphBand1, c.graphBand2, c.graphBand3, c.graphBand4,
+        c.graphBand5, c.graphBand6, c.graphBand7, c.graphBand8
+    };
+    // Display columns L->R: HP, LS, B1, B2, B3, B4, HS, LP → handle slots above.
+    const int colToHandleSlot[8] = { 4, 7, 0, 1, 2, 3, 6, 5 };
+
+    BandNumberButton* powerBtns[8] = {
+        onOffButton1.get(), onOffButton4.get(), onOffButton5.get(), onOffButton6.get(),
+        onOffButton7.get(), onOffButton8.get(), onOffButton3.get(), onOffButton2.get()
+    };
+
+    // Per-column knobs: F/G/Q triples matching bindColumn.
+    juce::Slider* colKnobs[8][3] = {
+        { &knob1,  &knobHpGain, &knob2  },
+        { &knob8,  &knob9,      &knob10 },
+        { &knob11, &knob12,     &knob13 },
+        { &knob14, &knob15,     &knob16 },
+        { &knob17, &knob18,     &knob19 },
+        { &knob20, &knob21,     &knob22 },
+        { &knob5,  &knob6,      &knob7  },
+        { &knob3,  &knobLpGain, &knob4  }
+    };
+
+    // Same background blend the graph uses when resolving handle fill (FRC paint).
+    const auto graphBgForHandles = c.graphBackground.interpolatedWith (c.graphBackground2, 0.5f);
+
+    for (int col = 0; col < 8; ++col)
+    {
+        juce::Colour chrome = c.knobArc;
+        if (matchHandles)
+        {
+            // Same colour as the band handle disk, then optional Spectrum min-sat floor.
+            // Same pipeline as graph handles: handle fill + optional min-sat floor.
+            chrome = c.applyGraphBandMinSaturation (handlePalette[colToHandleSlot[col]].withAlpha (1.0f));
+            chrome = KnobTheme::chromeFromHandleFill (c, chrome, graphBgForHandles);
+        }
+        else if (c.enforceLegibleText)
+        {
+            chrome = c.legibleHandleFill (chrome.withAlpha (1.0f), faceBg);
+        }
+        else
+        {
+            chrome = chrome.withAlpha (1.0f);
+        }
+
+        if (powerBtns[col] != nullptr)
+            powerBtns[col]->setBaseColor (chrome);
+
+        for (int k = 0; k < 3; ++k)
+        {
+            if (colKnobs[col][k] == nullptr)
+                continue;
+            if (matchHandles)
+                KnobTheme::setArcColour (*colKnobs[col][k], chrome);
+            else
+                KnobTheme::clearArcColour (*colKnobs[col][k]);
+        }
+    }
 }
 
 void EqEditor::setThemeColors (SharedResources* r) noexcept
 {
     themeColors = r;
+    if (r != nullptr)
+        r->makeActive();
+    // Keep stock LookAndFeel popup/combo IDs in sync with live theme (UI menu, etc.).
+    PluginMenuTheme::applyColours (getLookAndFeel());
+    ComboBoxLookAndFeel::sharedForPopupMenus().setThemeColors (r);
+
     auto applyKnob = [r] (auto& knob)
     {
         knob.setThemeColors (r);
@@ -4223,7 +4409,7 @@ int EqEditor::getGraphHeightForWidth (int width) const
 
 int EqEditor::getModPanelHeightForGraphHeight (int graphHeight) const
 {
-    // 3/4 of the faceplate strip height — shortens expanded UI with mod open.
+    // 3/4 of the faceplate strip height - shortens expanded UI with mod open.
     const int gh = graphHeight > 0 ? graphHeight : getGraphHeightForWidth (getWidth());
     const int full = juce::jmax (190, juce::roundToInt ((float) gh * 0.62f));
     return juce::jmax (1, juce::roundToInt ((float) full * 0.75f));
@@ -4249,7 +4435,7 @@ int EqEditor::getExpandedEditorHeight (int width, bool includeModPanel) const
     const int stripH = isFaceplateSuppressed() ? 0 : getFaceplateHeightForWidth (width);
     const int modH = includeModPanel ? getModPanelHeightForGraphHeight (graphH) : 0;
     const int trimH = juce::jmax (22, juce::roundToInt (30.0f * scale));
-    // Piano grows the graph host (MainComponent), not the faceplate — plot height stays via getPlotHeight().
+    // Piano grows the graph host (MainComponent), not the faceplate - plot height stays via getPlotHeight().
     return graphTop + graphH + getPianoWindowExtra() + modH + stripH + trimH;
 }
 
@@ -4258,7 +4444,7 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
     auto setVis = [shouldShow] (juce::Component& c) { c.setVisible (shouldShow); };
 
     setVis (knob1);  setVis (knob2);  setVis (knob3);  setVis (knob4);
-    setVis (knobHpGain); setVis (knobLpGain); // were missing — leaked onto graph in compact UI
+    setVis (knobHpGain); setVis (knobLpGain); // were missing - leaked onto graph in compact UI
     setVis (knob5);  setVis (knob6);  setVis (knob7);  setVis (knob8);
     setVis (knob9);  setVis (knob10); setVis (knob11); setVis (knob12);
     setVis (knob13); setVis (knob14); setVis (knob15); setVis (knob16);
@@ -4332,7 +4518,7 @@ void EqEditor::applyCompactUi()
         const int h = savedEditorHeight > 0 ? (savedEditorHeight + pianoExtra)
                                             : getExpandedEditorHeight (w, modPanelOpen);
 
-        // Free aspect — any ratio within size limits.
+        // Free aspect - any ratio within size limits.
         resizeConstrainer.setFixedAspectRatio (0.0);
         resizeConstrainer.setSizeLimits (900, 500, 2400, 1600);
         setConstrainer (&resizeConstrainer);

@@ -4,6 +4,7 @@
 #include "EqBand.h"
 #include "EqProcessor.h"
 #include "Match/MatchSettings.h"
+#include "KnobThemeHelpers.h"
 
 namespace
 {
@@ -55,7 +56,12 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
 
     setSize (designWidth, designHeight);
-    setPaintingIsUnclipped (true);
+    // Must stay clipped. Unclipped paint + drop shadow left OptionBox "ghosts" when
+    // dragged over the mod matrix (parent dirty rects didn't cover the trail).
+    setPaintingIsUnclipped (false);
+    setOpaque (false);
+    // Do NOT addMouseListener(this, true): nested drag events mixed coordinate
+    // spaces and made the box teleport/flash while moving.
 
     // Hierarchical filter menu (HP/LP slopes live under submenus).
     customComboBox.setLookAndFeel (&customLookAndFeel);
@@ -65,7 +71,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     customComboBox.setTooltip (
         "Filter model. Highpass / Lowpass open a submenu of slopes (and Brickwall).");
 
-    // Per-band saturation — right of filter model dropdown.
+    // Per-band saturation - right of filter model dropdown.
     satButton.setClickingTogglesState (true);
     satButton.setTooltip ("Saturation - raising band gain adds harmonics in that region (Q sets how wide). Right-click to choose a model or oversampling.");
     satButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
@@ -87,7 +93,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     satPrePostButton.addListener (this);
     addChildComponent (satPrePostButton);
 
-    // Post-mode drive — compact face matching Side Check HP/LP knobs (~chrome btnSize).
+    // Post-mode drive - compact face matching Side Check HP/LP knobs (~chrome btnSize).
     satDriveKnob.setCompactNoValueBox (true);
     satDriveKnob.setTooltip (
         "Drive - pre-gain into post saturation (-12 to +12 dB). Center = 0 dB. "
@@ -113,8 +119,8 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     {
         b.setClickingTogglesState (false);
         b.setTooltip (tip);
-        // Stock LAF + gold fill so these stay visible on the dark OptionBox header.
-        b.setLookAndFeel (nullptr);
+        // Same gradient LAF as other OptionBox chrome (re-themed in applyThemeToChildControls).
+        b.setLookAndFeel (&myTextButtonLookAndFeel);
         b.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
         b.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (220, 190, 80, 255));
         b.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
@@ -175,7 +181,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     sidechainMidiButton.addListener (this);
     addChildComponent (sidechainMidiButton);
 
-    // Dynamic EQ "D" — same visual language as M/S/L/R; toggle + compact threshold under freq knob.
+    // Dynamic EQ "D" - same visual language as M/S/L/R; toggle + compact threshold under freq knob.
     dynamicButton.setButtonText ("D");
     dynamicButton.setClickingTogglesState (true);
     dynamicButton.setTooltip ("Dynamic EQ - band gain responds to level in this band");
@@ -187,7 +193,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     dynamicButton.addListener (this);
     addChildComponent (dynamicButton);
 
-    // Transient / Sustain mode — above D, centered under frequency knob.
+    // Transient / Sustain mode - above D, centered under frequency knob.
     transientModeButton.setButtonText ("Transient");
     transientModeButton.setClickingTogglesState (false);
     transientModeButton.setTooltip (
@@ -238,7 +244,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     dynThresholdSlider.addListener (this);
     addChildComponent (dynThresholdSlider);
 
-    // Res: vertical (same param mapping as horizontal — value is orientation-agnostic).
+    // Res: vertical (same param mapping as horizontal - value is orientation-agnostic).
     spectralBandwidthSlider.setSliderStyle (juce::Slider::LinearVertical);
     spectralBandwidthSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     spectralBandwidthSlider.setTooltip (
@@ -250,7 +256,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     spectralBandwidthSlider.addListener (this);
     addChildComponent (spectralBandwidthSlider);
 
-    // Amount: vertical. Param Amount 0–2 (higher = more); slider is inverted so
+    // Amount: vertical. Param Amount 0-2 (higher = more); slider is inverted so
     // bottom = more processing (sliderValue = 1 − amount/max).
     spectralAmountSlider.setSliderStyle (juce::Slider::LinearVertical);
     spectralAmountSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
@@ -268,13 +274,15 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
         label.setFont (juce::Font ("Lato Black", 10.0f, juce::Font::plain));
         label.setJustificationType (juce::Justification::centred);
         label.setColour (juce::Label::textColourId, colors().optionText);
+        // Never ellipsize "Res"/"Amt" to "..." — width is sized to the string in resized().
+        label.setMinimumHorizontalScale (1.0f);
         label.setInterceptsMouseClicks (false, false);
         addChildComponent (label);
     };
     setupSpectralSliderLabel (spectralResLabel, "Res");
     setupSpectralSliderLabel (spectralAmountLabel, "Amt");
 
-    // A / R image knobs — hover shows value in ms (shared envelope params).
+    // A / R image knobs - hover shows value in ms (shared envelope params).
     auto setupTinyTimeKnob = [this] (RotaryImageKnobForOptionBox& knob, const juce::String& tip)
     {
         knob.setCompactNoValueBox (false);
@@ -309,6 +317,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     treeState.addParameterListener (SpectralPerBandLattice::enabledParamId(), this);
     treeState.addParameterListener (BandSaturation::spectralSatParamId(), this);
     treeState.addParameterListener (MatchEq::enabledParamId(), this);
+    treeState.addParameterListener ("EQ_BAND_CHROME_MATCH_HANDLES_ID", this);
 
     applyThemeToChildControls();
     resized();
@@ -320,6 +329,7 @@ OptionBoxMenu::~OptionBoxMenu()
     treeState.removeParameterListener (SpectralPerBandLattice::enabledParamId(), this);
     treeState.removeParameterListener (BandSaturation::spectralSatParamId(), this);
     treeState.removeParameterListener (MatchEq::enabledParamId(), this);
+    treeState.removeParameterListener ("EQ_BAND_CHROME_MATCH_HANDLES_ID", this);
     listenToCurrentBandOnOff (false);
     listenToCurrentBandDynamic (false);
     listenToCurrentBandSpectral (false);
@@ -374,6 +384,8 @@ OptionBoxMenu::~OptionBoxMenu()
     spectralExpandButton.setLookAndFeel (nullptr);
     satButton.setLookAndFeel (nullptr);
     satPrePostButton.setLookAndFeel (nullptr);
+    prevBandButton.setLookAndFeel (nullptr);
+    nextBandButton.setLookAndFeel (nullptr);
 }
 
 
@@ -393,39 +405,52 @@ void OptionBoxMenu::setThemeColors (SharedResources* r) noexcept
 void OptionBoxMenu::applyThemeToChildControls()
 {
     const auto& c = colors();
+    const auto panelInk = c.legibleTextOn (c.optionText, c.optionBackground);
+    const auto comboInk = c.legibleTextOn (c.optionComboText, c.optionComboBackground);
+    const auto buttonInk = c.legibleTextOn (c.optionText, c.optionComboBackground);
+    const auto quietInk = c.enforceLegibleText
+                              ? c.legibleTextOn (c.optionText.withAlpha (0.88f), c.optionComboBackground)
+                              : c.optionText.withAlpha (0.55f);
+    // Shared control outline token for every rectangular chrome control on the box.
+    const auto controlOutline = c.optionBorder.withAlpha (0.85f);
 
     customLookAndFeel.setThemeColors (themeColors);
 
-    // Match faceplate / mod chrome family.
-    myTextButtonLookAndFeel.setGradientColor1 (c.optionComboBackground.brighter (0.12f));
-    myTextButtonLookAndFeel.setGradientColor2 (c.optionComboBackground.darker (0.35f));
-    myTextButtonLookAndFeel.setButtonTextColor (c.optionText.withAlpha (0.9f));
-    myTextButtonLookAndFeel.setButtonOutlineColor (c.optionBorder);
+    // Match faceplate / mod chrome family — top brighter / bottom darker for soft 3D form.
+    myTextButtonLookAndFeel.setGradientColor1 (c.optionComboBackground.brighter (0.10f));
+    myTextButtonLookAndFeel.setGradientColor2 (
+        c.optionComboBackground.darker (0.18f).withMultipliedSaturation (0.90f));
+    myTextButtonLookAndFeel.setButtonTextColor (buttonInk.withAlpha (0.92f));
+    myTextButtonLookAndFeel.setButtonOutlineColor (controlOutline);
     myTextButtonLookAndFeel.setButtonBackgroundColor (c.optionComboBackground);
 
     sidechainButtonLookAndFeel.setGradientColor1 (c.optionComboBackground.brighter (0.08f));
-    sidechainButtonLookAndFeel.setGradientColor2 (c.optionComboBackground.darker (0.4f));
-    sidechainButtonLookAndFeel.setButtonTextColor (c.optionText.withAlpha (0.55f));
-    sidechainButtonLookAndFeel.setButtonOutlineColor (c.optionBorder);
+    sidechainButtonLookAndFeel.setGradientColor2 (
+        c.optionComboBackground.darker (0.22f).withMultipliedSaturation (0.90f));
+    sidechainButtonLookAndFeel.setButtonTextColor (quietInk);
+    sidechainButtonLookAndFeel.setButtonOutlineColor (controlOutline);
     sidechainButtonLookAndFeel.setButtonBackgroundColor (c.optionComboBackground);
 
-    auto styleCombo = [&c] (juce::ComboBox& box)
+    auto styleCombo = [&] (juce::ComboBox& box)
     {
         box.setColour (juce::ComboBox::backgroundColourId, c.optionComboBackground);
-        box.setColour (juce::ComboBox::textColourId, c.optionComboText);
+        box.setColour (juce::ComboBox::textColourId, comboInk);
         box.setColour (juce::ComboBox::outlineColourId, c.optionBorder);
-        box.setColour (juce::ComboBox::arrowColourId, c.optionComboText);
+        box.setColour (juce::ComboBox::arrowColourId, comboInk);
         box.setColour (juce::ComboBox::buttonColourId, c.optionComboBackground);
     };
 
     styleCombo (customComboBox);
 
-    auto styleLabel = [&c] (juce::Label& lab)
+    auto styleLabel = [&] (juce::Label& lab)
     {
-        lab.setColour (juce::Label::textColourId, c.optionText);
+        lab.setColour (juce::Label::textColourId, panelInk);
+        lab.setMinimumHorizontalScale (1.0f);
     };
-    // Band title stays high-contrast white so "Band 12" remains readable on the header.
-    bandNameLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+    // Band title: legible white (or light ink) on the option panel header.
+    bandNameLabel.setColour (juce::Label::textColourId,
+                             c.legibleTextOn (juce::Colours::white, c.optionBackground));
+    bandNameLabel.setMinimumHorizontalScale (1.0f);
     styleLabel (frequencyLabel);
     styleLabel (gainLabel);
     styleLabel (qLabel);
@@ -434,12 +459,14 @@ void OptionBoxMenu::applyThemeToChildControls()
     styleLabel (spectralResLabel);
     styleLabel (spectralAmountLabel);
 
-    auto styleChrome = [&c] (juce::TextButton& b)
+    auto styleChrome = [&] (juce::TextButton& b)
     {
+        b.setLookAndFeel (&myTextButtonLookAndFeel);
         b.setColour (juce::TextButton::buttonColourId, c.optionComboBackground);
         b.setColour (juce::TextButton::buttonOnColourId, c.optionComboHighlight);
-        b.setColour (juce::TextButton::textColourOffId, c.optionText.withAlpha (0.9f));
-        b.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b.setColour (juce::TextButton::textColourOffId, buttonInk.withAlpha (0.92f));
+        b.setColour (juce::TextButton::textColourOnId,
+                     c.legibleTextOn (juce::Colours::black, c.optionComboHighlight));
         b.repaint();
     };
 
@@ -452,23 +479,36 @@ void OptionBoxMenu::applyThemeToChildControls()
     styleChrome (sidechainButton);
     styleChrome (sidechainMidiButton);
     styleChrome (dynamicButton);
-    styleChrome (transientModeButton);
-    transientModeButton.setColour (juce::TextButton::textColourOffId, c.optionText.withAlpha (0.45f));
+    // Keep TransientModeButtonLookAndFeel (drawText no-ellipsis) — styleChrome would
+    // swap in myTextButtonLookAndFeel which ellipsizes "Transient" to "...".
+    transientModeButton.setLookAndFeel (&transientModeButtonLookAndFeel);
+    transientModeButton.setColour (juce::TextButton::buttonColourId, c.optionComboBackground);
+    transientModeButton.setColour (juce::TextButton::buttonOnColourId, c.optionComboHighlight);
+    transientModeButton.setColour (juce::TextButton::textColourOffId, quietInk);
+    transientModeButton.setColour (juce::TextButton::textColourOnId,
+                                   c.legibleTextOn (juce::Colours::black, c.optionComboHighlight));
+    transientModeButtonLookAndFeel.setButtonOutlineColor (controlOutline);
+    transientModeButtonLookAndFeel.setGradientColor1 (c.optionComboBackground.brighter (0.10f));
+    transientModeButtonLookAndFeel.setGradientColor2 (
+        c.optionComboBackground.darker (0.18f).withMultipliedSaturation (0.90f));
+    transientModeButtonLookAndFeel.setButtonTextColor (quietInk);
+    transientModeButton.repaint();
     styleChrome (spectralButton);
     styleChrome (spectralExpandButton);
     styleChrome (satButton);
     styleChrome (satPrePostButton);
 
-    // Sidechain idle stays quieter than other chrome.
+    // Sidechain idle stays quieter than other chrome (still legible when enforce is on).
     sidechainButton.setColour (juce::TextButton::buttonColourId,
                                c.optionComboBackground.withAlpha (160.0f / 255.0f));
-    sidechainButton.setColour (juce::TextButton::textColourOffId, c.optionText.withAlpha (0.38f));
+    sidechainButton.setColour (juce::TextButton::textColourOffId, quietInk);
 
-    auto styleSlider = [&c] (juce::Slider& s)
+    auto styleSlider = [&] (juce::Slider& s)
     {
         s.setColour (juce::Slider::backgroundColourId, c.optionBackground.darker (0.25f));
         s.setColour (juce::Slider::trackColourId, c.optionComboHighlight.withAlpha (220.0f / 255.0f));
         s.setColour (juce::Slider::thumbColourId, c.optionComboHighlight.brighter (0.25f));
+        s.setColour (juce::Slider::textBoxOutlineColourId, controlOutline.withAlpha (0.55f));
         s.repaint();
     };
     styleSlider (dynThresholdSlider);
@@ -490,12 +530,37 @@ void OptionBoxMenu::applyThemeToChildControls()
 
     if (onOffButton1 != nullptr)
     {
-        onOffButton1->setBaseColor (c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f));
+        // Exact same colour as faceplate power / knob arcs for this band.
+        juce::Colour powerChrome = c.knobArc.withAlpha (1.0f);
+        if (currentBandIndex >= 0)
+        {
+            bool matchHandles = false;
+            if (auto* p = treeState.getRawParameterValue ("EQ_BAND_CHROME_MATCH_HANDLES_ID"))
+                matchHandles = p->load() > 0.5f;
+            if (matchHandles)
+            {
+                const int slot = (currentBandIndex < 4) ? currentBandIndex
+                               : (currentBandIndex == 4) ? 4
+                               : (currentBandIndex == 5) ? 5
+                               : (currentBandIndex == 6) ? 6
+                               : (currentBandIndex == 7) ? 7
+                               : (currentBandIndex % 8);
+                const juce::Colour handlePalette[8] = {
+                    c.graphBand1, c.graphBand2, c.graphBand3, c.graphBand4,
+                    c.graphBand5, c.graphBand6, c.graphBand7, c.graphBand8
+                };
+                const auto graphBg = c.graphBackground.interpolatedWith (c.graphBackground2, 0.5f);
+                powerChrome = c.applyGraphBandMinSaturation (
+                    handlePalette[juce::jlimit (0, 7, slot)].withAlpha (1.0f));
+                powerChrome = KnobTheme::chromeFromHandleFill (c, powerChrome, graphBg);
+            }
+        }
+        onOffButton1->setBaseColor (powerChrome);
         onOffButton1->repaint();
     }
     if (bandMonitorButton != nullptr)
     {
-        bandMonitorButton->setBaseColor (c.knobArc.withMultipliedBrightness (0.45f).withMultipliedSaturation (0.85f));
+        bandMonitorButton->setBaseColor (c.knobArc.withAlpha (1.0f));
         bandMonitorButton->repaint();
     }
 
@@ -507,18 +572,26 @@ void OptionBoxMenu::paint(juce::Graphics& g)
 {
     const auto& c = colors();
 
-    // Same body wash as EqEditor faceplate (radial Plugin Background 2 → Plugin Background).
+    // Panel wash: option/plugin family with user OptionBox opacity (default 90%).
     const float width = (float) designWidth;
     const float height = (float) designHeight;
-    juce::ColourGradient bodyGrad (c.pluginBackground2,
+    const float panelA = juce::jlimit (0.30f, 1.0f, c.optionBoxOpacity);
+    // Prefer optionBackground for theme alpha; fall back to faceplate plugin wash.
+    const auto fillTop = c.optionBackground.getFloatAlpha() > 0.01f
+                             ? c.optionBackground.withMultipliedAlpha (panelA)
+                             : c.pluginBackground2.withMultipliedAlpha (panelA);
+    const auto fillBot = c.pluginBackground.withMultipliedAlpha (panelA);
+    juce::ColourGradient bodyGrad (fillTop,
                                    juce::Point<float> (width * 0.5f, 0.0f),
-                                   c.pluginBackground,
+                                   fillBot,
                                    juce::Point<float> (width, height),
                                    true);
 
     const float cornerRadius = 20.0f;
     const float borderWidth = 8.0f;
     const float thinOutlineWidth = 2.0f;
+    // Borders read slightly more solid than the fill so the frame doesn't vanish.
+    const float borderA = juce::jmin (1.0f, panelA * 1.08f + 0.06f);
 
     juce::Path panelPath;
     panelPath.addRoundedRectangle (0.0f, 0.0f, width, height, cornerRadius);
@@ -531,7 +604,9 @@ void OptionBoxMenu::paint(juce::Graphics& g)
     juce::Path borderPath;
     const float offset = borderWidth * 0.5f;
     borderPath.addRoundedRectangle (offset, offset, width - borderWidth, height - borderWidth, cornerRadius - offset);
-    g.setColour (c.pluginButtonBackground);
+    const auto midBorder = (c.optionBorder.getFloatAlpha() > 0.01f ? c.optionBorder : c.pluginButtonBackground)
+                               .withMultipliedAlpha (borderA);
+    g.setColour (midBorder);
     g.strokePath (borderPath, juce::PathStrokeType (borderWidth));
 
     juce::Path innerThinOutlinePath;
@@ -539,12 +614,12 @@ void OptionBoxMenu::paint(juce::Graphics& g)
     innerThinOutlinePath.addRoundedRectangle (innerOffset, innerOffset,
                                               width - 2.0f * innerOffset, height - 2.0f * innerOffset,
                                               cornerRadius - innerOffset);
-    g.setColour (c.pluginBackground.darker (0.35f));
+    g.setColour (c.pluginBackground.darker (0.35f).withMultipliedAlpha (borderA));
     g.strokePath (innerThinOutlinePath, juce::PathStrokeType (thinOutlineWidth));
 
     juce::Path outerThinOutlinePath;
     outerThinOutlinePath.addRoundedRectangle (0.0f, 0.0f, (float) getWidth(), (float) getHeight(), cornerRadius);
-    g.setColour (c.pluginButtonAccent.withAlpha (0.45f));
+    g.setColour (c.pluginButtonAccent.withAlpha (0.45f * panelA));
     g.strokePath (outerThinOutlinePath, juce::PathStrokeType (thinOutlineWidth));
 
     paintDynThresholdMeter (g);
@@ -612,7 +687,7 @@ void OptionBoxMenu::resized()
         bandMonitorButton->toFront (false);
     }
 
-    // Give "Band 12" / "Band 64" room — was ~44px and clipped to ellipsis.
+    // Give "Band 12" / "Band 64" room - was ~44px and clipped to ellipsis.
     const int nameLeft = nextBandButton.getRight() + 4;
     const int nameRight = onOffButton1->getX() - 3;
     bandNameLabel.setBounds (nameLeft, labelY, juce::jmax (36, nameRight - nameLeft), labelHeight);
@@ -629,7 +704,7 @@ void OptionBoxMenu::resized()
     satButton.setBounds (customComboBox.getRight() + satGap, rowY, satBtnW, comboBoxHeight);
     satPrePostButton.setBounds (satButton.getRight() + satGap, rowY, prePostW, comboBoxHeight);
 
-    // Post drive under Pre/Post — same compact footprint as Side Check HP/LP (~btnSize).
+    // Post drive under Pre/Post - same compact footprint as Side Check HP/LP (~btnSize).
     constexpr int satDriveSize = 20;
     satDriveKnob.setBounds (satPrePostButton.getX() + (prePostW - satDriveSize) / 2,
                             satPrePostButton.getBottom() + 3,
@@ -697,7 +772,7 @@ void OptionBoxMenu::resized()
     int leftButtonX = sideButtonX + buttonWidth + spacing;
     int rightButtonX = leftButtonX + buttonWidth + spacing;
 
-    // Set bounds for M, S, L, R buttons — level with the Q label after the top crop.
+    // Set bounds for M, S, L, R buttons - level with the Q label after the top crop.
     midSelectorButton.setBounds(midButtonX, comboBoxBottom + spacing, buttonWidth, buttonHeight);
     sideSelectorButton.setBounds(sideButtonX, comboBoxBottom + spacing, buttonWidth, buttonHeight);
     leftSelectorButton.setBounds(leftButtonX, comboBoxBottom + spacing, buttonWidth, buttonHeight);
@@ -732,17 +807,24 @@ void OptionBoxMenu::resized()
     // D + S + E column under that, left-aligned. Extra spectral options live on S right-click.
     const int dynBtnW = 15;
     const int dynBtnH = 18;
-    const int modeBtnW = juce::roundToInt (15.0f * 2.25f); // ~34
+    // Full plain captions "Transient" / "Sustain" — never ship "..." from a ~34 px button.
+    const juce::Font modeFont (juce::FontOptions().withName ("Lato Black").withHeight (9.0f));
+    const float modeTextW = juce::jmax (
+        juce::GlyphArrangement::getStringWidth (modeFont, "Transient"),
+        juce::GlyphArrangement::getStringWidth (modeFont, "Sustain"));
+    const int modeBtnW = juce::jmax (52, (int) std::ceil (modeTextW) + 10);
     const int modeY = knob1Bounds.getBottom() + 2 - bottomStackLift;
     const int dynRowY = modeY + dynBtnH + 2; // D under Transient
     const int optionBoxRight = getWidth() - padding * 2;
     const int dynRowX = knob1Bounds.getX() + 2;
     const bool sOn = isCurrentBandSpectralOn();
 
-    transientModeButton.setBounds (knob1Bounds.getCentreX() - modeBtnW / 2,
-                                   modeY,
-                                   modeBtnW,
-                                   dynBtnH);
+    {
+        const int modeX = juce::jlimit (dynRowX,
+                                        juce::jmax (dynRowX, optionBoxRight - modeBtnW),
+                                        knob1Bounds.getCentreX() - modeBtnW / 2);
+        transientModeButton.setBounds (modeX, modeY, modeBtnW, dynBtnH);
+    }
 
     dynamicButton.setBounds (dynRowX, dynRowY, dynBtnW, dynBtnH);
 
@@ -768,10 +850,19 @@ void OptionBoxMenu::resized()
     const int sliderBottom = spectralExpandButton.getBottom() + 3;
     const int sliderH = juce::jmax (24, sliderBottom - sliderTrackY);
 
-    spectralResLabel.setBounds (resX - 2, sliderTop, sliderColW + 4, sliderLabelH);
+    // Size label columns to full plain text ("Res", "Amt") — never ship "..." from a 18px column.
+    auto labelWFor = [] (const juce::Label& lab, int minW) -> int
+    {
+        const float tw = juce::GlyphArrangement::getStringWidth (lab.getFont(), lab.getText());
+        return juce::jmax (minW, (int) std::ceil (tw) + 4);
+    };
+    const int resLabelW = labelWFor (spectralResLabel, sliderColW + 4);
+    const int amtLabelW = labelWFor (spectralAmountLabel, sliderColW + 4);
+
+    spectralResLabel.setBounds (resX + (sliderColW - resLabelW) / 2, sliderTop, resLabelW, sliderLabelH);
     spectralBandwidthSlider.setBounds (resX, sliderTrackY, sliderColW, sliderH);
 
-    spectralAmountLabel.setBounds (amountX - 2, sliderTop, sliderColW + 4, sliderLabelH);
+    spectralAmountLabel.setBounds (amountX + (sliderColW - amtLabelW) / 2, sliderTop, amtLabelW, sliderLabelH);
     spectralAmountSlider.setBounds (amountX, sliderTrackY, sliderColW, sliderH);
 
     // Post-spectral drive under Res when enabled from the S right-click menu.
@@ -794,7 +885,7 @@ void OptionBoxMenu::resized()
     threshX = juce::jmin (threshX, optionBoxRight - kThreshW);
     dynThresholdSlider.setBounds (threshX, threshTop, kThreshW, threshH);
 
-    // A / R — face is arSize; ms readout sits in a short band under the face (hover).
+    // A / R - face is arSize; ms readout sits in a short band under the face (hover).
     // A/R letter labels use a tight gap under the face (not under the readout band).
     const int arLabelH = 12;
     const int arValueH = 14;
@@ -819,6 +910,39 @@ void OptionBoxMenu::resized()
     updateDynamicControlsVisibility();
 }
 
+bool OptionBoxMenu::isInteractiveControl (const juce::Component* c) noexcept
+{
+    if (c == nullptr)
+        return false;
+    for (auto* p = c; p != nullptr; p = p->getParentComponent())
+    {
+        if (dynamic_cast<const juce::Slider*> (p) != nullptr
+            || dynamic_cast<const juce::Button*> (p) != nullptr
+            || dynamic_cast<const juce::ComboBox*> (p) != nullptr)
+            return true;
+    }
+    return false;
+}
+
+bool OptionBoxMenu::isDragChrome (juce::Point<int> localPos) const noexcept
+{
+    const int w = getWidth();
+    const int h = getHeight();
+    if (w <= 0 || h <= 0)
+        return false;
+    if (! juce::Rectangle<int> (0, 0, w, h).contains (localPos))
+        return false;
+
+    // Title / band-name strip — primary grab target when UI is busy under audio.
+    constexpr int kHeaderH = 52;
+    if (localPos.y < kHeaderH)
+        return true;
+
+    // Outer frame (was 12px — too thin once dyn/spectral controls fill the box).
+    constexpr int kRim = 22;
+    return ! juce::Rectangle<int> (0, 0, w, h).reduced (kRim).contains (localPos);
+}
+
 void OptionBoxMenu::mouseDown(const juce::MouseEvent& event)
 {
     if (event.eventComponent == &satButton && event.mods.isPopupMenu())
@@ -838,29 +962,28 @@ void OptionBoxMenu::mouseDown(const juce::MouseEvent& event)
     if (! isDraggable)
         return;
 
-    // Ignore drag starts that originated on child controls.
+    // Only accept primary presses that land on this component (chrome / empty panel).
+    // Child knobs/buttons handle their own mouseDown first.
     if (event.eventComponent != this)
         return;
 
-    juce::Rectangle<int> borderBounds (12, 12, getWidth() - 24, getHeight() - 24);
-    if (! borderBounds.contains (event.getPosition()))
-    {
-        isBeingDragged = true;
+    if (! event.mods.isLeftButtonDown() || event.mods.isPopupMenu())
+        return;
 
-        if (auto* parent = getParentComponent())
-        {
-            // Use visual (transformed) bounds so drag stays aligned under UI scale.
-            const auto parentPos = event.getEventRelativeTo (parent).getPosition();
-            const auto visual = getBoundsInParent();
-            dragOffsetX = parentPos.x - visual.getX();
-            dragOffsetY = parentPos.y - visual.getY();
-        }
-        else
-        {
-            dragOffsetX = juce::roundToInt (event.position.x);
-            dragOffsetY = juce::roundToInt (event.position.y);
-        }
-    }
+    const auto localPos = event.getPosition();
+    if (! isDragChrome (localPos))
+        return;
+
+    auto* parent = getParentComponent();
+    if (parent == nullptr)
+        return;
+
+    isBeingDragged = true;
+    // Parent-space mouse (getEventRelativeTo applies this component's AffineTransform).
+    // Never feed local-space deltas into setTopLeftPosition — that multiplies by 1/scale.
+    dragStartMouseInParent = event.getEventRelativeTo (parent).getPosition();
+    dragStartCompPos = getPosition();
+    toFront (false);
 }
 
 void OptionBoxMenu::mouseDrag(const juce::MouseEvent& event)
@@ -872,41 +995,48 @@ void OptionBoxMenu::mouseDrag(const juce::MouseEvent& event)
     if (parent == nullptr)
         return;
 
-    const auto parentPos = event.getEventRelativeTo (parent).getPosition();
-    const int padding = juce::jmax (0, juce::roundToInt (15.0f * getUiScale()));
-    const int maxX = juce::jmax (padding, parent->getWidth() - getVisualWidth() - padding);
-    const int maxY = juce::jmax (padding, parent->getHeight() - getVisualHeight() - padding);
-    const int newX = juce::jlimit (padding, maxX, parentPos.x - dragOffsetX);
-    const int newY = juce::jlimit (padding, maxY, parentPos.y - dragOffsetY);
-    setTopLeftPosition (newX, newY);
+    const auto oldVisual = getVisualBoundsInParent();
+
+    // Recompute parent-space mouse from this event. Using a fixed drag-start anchor
+    // (not ComponentDragger's local delta) keeps 1:1 tracking under AffineTransform::scale.
+    const auto mouseInParent = event.getEventRelativeTo (parent).getPosition();
+    const auto delta = mouseInParent - dragStartMouseInParent;
+    setTopLeftPosition (dragStartCompPos.x + delta.x,
+                        dragStartCompPos.y + delta.y);
     constrainVisualBoundsToParent();
+
+    // Invalidate old/new footprints (kills mod-matrix ghosts without fighting paint).
+    repaintParentOverVisual (oldVisual);
+    repaintParentOverVisual (getVisualBoundsInParent());
 }
 
 void OptionBoxMenu::mouseUp(const juce::MouseEvent& event)
 {
+    juce::ignoreUnused (event);
+    if (! isBeingDragged)
+        return;
+
     isBeingDragged = false;
+    constrainVisualBoundsToParent();
+    repaintParentOverVisual (getVisualBoundsInParent());
 }
 
 void OptionBoxMenu::mouseExit(const juce::MouseEvent& event)
 {
-    // Mouse event's position is already in local coordinates of this component (OptionBoxMenu)
-    juce::Point<int> localPosition = event.position.toInt();
-    ;
-
-
+    juce::ignoreUnused (event);
+    if (! isBeingDragged)
+        setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
 void OptionBoxMenu::mouseMove(const juce::MouseEvent& event)
 {
-    juce::Rectangle<int> borderBounds(12, 12, getWidth() - 24, getHeight() - 24);
-    if (!borderBounds.contains(event.getPosition()))
-    {
-        setMouseCursor(juce::MouseCursor::DraggingHandCursor);
-    }
+    if (isBeingDragged)
+        return;
+
+    if (isDragChrome (event.getPosition()))
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
     else
-    {
-        setMouseCursor(juce::MouseCursor::NormalCursor);
-    }
+        setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
 
@@ -919,11 +1049,22 @@ float OptionBoxMenu::getUiScale() const
 {
     // Grow never: stay at design size when the plugin is larger than 100%.
     // Shrink 1:1 when the plugin is smaller than the design width.
+    // Use the graph reference width — not the current host parent. When the box
+    // is rehosted onto EqEditor, parent width jumps to full editor size and would
+    // otherwise re-scale the AffineTransform mid-session (looks like teleport/flash).
+    if (uiScaleReferenceWidth > 1.0f)
+        return juce::jmin (1.0f, uiScaleReferenceWidth / designParentWidth);
+
     if (auto* parent = getParentComponent())
         if (parent->getWidth() > 0)
             return juce::jmin (1.0f, (float) parent->getWidth() / designParentWidth);
 
     return 1.0f;
+}
+
+void OptionBoxMenu::setUiScaleReferenceWidth (float widthPx) noexcept
+{
+    uiScaleReferenceWidth = juce::jmax (1.0f, widthPx);
 }
 
 void OptionBoxMenu::applyUiScale()
@@ -943,6 +1084,24 @@ int OptionBoxMenu::getVisualHeight() const
     return juce::roundToInt ((float) designHeight * getUiScale());
 }
 
+juce::Rectangle<int> OptionBoxMenu::getVisualBoundsInParent() const noexcept
+{
+    // AffineTransform::scale is applied about the component origin, so the
+    // on-screen panel is design*scale at (getX(), getY()) — not getBounds().
+    return { getX(), getY(), getVisualWidth(), getVisualHeight() };
+}
+
+void OptionBoxMenu::repaintParentOverVisual (juce::Rectangle<int> visualInParent) const
+{
+    auto* parent = getParentComponent();
+    if (parent == nullptr)
+        return;
+
+    // Melatonin shadow + soft border extend past the panel edge.
+    constexpr int kHalo = 28;
+    parent->repaint (visualInParent.expanded (kHalo));
+}
+
 void OptionBoxMenu::constrainVisualBoundsToParent()
 {
     auto* parent = getParentComponent();
@@ -956,39 +1115,21 @@ void OptionBoxMenu::constrainVisualBoundsToParent()
 
     const float scale = getUiScale();
     const int padding = juce::jmax (0, juce::roundToInt (15.0f * scale));
-    const int visualW = getVisualWidth();
-    const int visualH = getVisualHeight();
-
-    // Max top-left so the *transformed* box stays inside the graph.
-    const int maxX = juce::jmax (padding, parentW - visualW - padding);
-    const int maxY = juce::jmax (padding, parentH - visualH - padding);
-
-    int x = juce::jlimit (padding, maxX, getX());
-    int y = juce::jlimit (padding, maxY, getY());
-
-    // Second pass using actual transformed bounds (AffineTransform-safe).
-    setTopLeftPosition (x, y);
-    auto visual = getBoundsInParent();
-
-    int dx = 0;
-    int dy = 0;
-
-    if (visual.getRight() > parentW - padding)
-        dx = (parentW - padding) - visual.getRight();
-    if (visual.getX() + dx < padding)
-        dx = padding - visual.getX();
-    if (visual.getBottom() > parentH - padding)
-        dy = (parentH - padding) - visual.getBottom();
-    if (visual.getY() + dy < padding)
-        dy = padding - visual.getY();
-
-    if (dx != 0 || dy != 0)
-        setTopLeftPosition (getX() + dx, getY() + dy);
+    // Clamp with design*scale (matches setTransform), not getBoundsInParent() —
+    // that can disagree with AffineTransform::scale and shove the box as you near edges.
+    const int maxX = juce::jmax (padding, parentW - getVisualWidth() - padding);
+    const int maxY = juce::jmax (padding, parentH - getVisualHeight() - padding);
+    setTopLeftPosition (juce::jlimit (padding, maxX, getX()),
+                        juce::jlimit (padding, maxY, getY()));
 }
 
 void OptionBoxMenu::updateUiScaleFromParent()
 {
     if (! Component::isVisible())
+        return;
+
+    // Don't re-apply AffineTransform mid-drag — it fights cursor tracking.
+    if (isBeingDragged)
         return;
 
     // Keep the user's placed position; only refresh scale + clamp to the graph.
@@ -1078,7 +1219,7 @@ bool OptionBoxMenu::isCurrentBandEnabled() const
 
 void OptionBoxMenu::updateDisplayAlpha()
 {
-    // Only dim while dragging a handle/knob. Band on/off is shown by the On button —
+    // Only dim while dragging a handle/knob. Band on/off is shown by the On button -
     // do not fade the whole box when < > switches to a disabled band.
     setAlpha (interactionFaded ? 0.5f : 1.0f);
 }
@@ -1088,10 +1229,10 @@ void OptionBoxMenu::cycleBand (int delta)
     if (currentBandIndex < 0 || delta == 0)
         return;
 
-    // Switching bands should only reload that band's settings — clear any drag-fade.
+    // Switching bands should only reload that band's settings - clear any drag-fade.
     interactionFaded = false;
 
-    // currentBandIndex is internal 0–7 or global display 8–63.
+    // currentBandIndex is internal 0-7 or global display 8-63.
     const int currentGlobal = (currentBandIndex < EqBand::kBankSize)
                                   ? EqBand::displayFromInternal (currentBandIndex)
                                   : currentBandIndex;
@@ -1131,7 +1272,7 @@ void OptionBoxMenu::cycleBand (int delta)
                          : nextGlobal;
     setCurrentBandIndex (next, cachedBandNames.data());
 
-    // Stay put — do not call setInitialPosition.
+    // Stay put - do not call setInitialPosition.
     if (onBandCycled != nullptr)
         onBandCycled (next);
 }
@@ -1184,7 +1325,7 @@ void OptionBoxMenu::listenToCurrentBandSpectral (bool shouldListen)
     if (! shouldListen)
         return;
 
-    // Spectral lattice is Bank 1 only — do not bind for extended bands.
+    // Spectral lattice is Bank 1 only - do not bind for extended bands.
     if (! SpectralDynamics::supportsSpectral (currentBandIndex))
         return;
 
@@ -1210,6 +1351,14 @@ void OptionBoxMenu::parameterChanged (const juce::String& parameterID, float new
         {
             if (safe != nullptr)
                 safe->updateDisplayAlpha();
+        });
+    }
+    else if (parameterID == "EQ_BAND_CHROME_MATCH_HANDLES_ID")
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<OptionBoxMenu> (this)]
+        {
+            if (safe != nullptr)
+                safe->applyThemeToChildControls();
         });
     }
     else if (parameterID == listenedTypeParamID || parameterID == listenedSlopeParamID)
@@ -1438,7 +1587,7 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     satDriveAttachment.reset();
     sidechainButtonAttachment.reset();
     sidechainMidiButtonAttachment.reset();
-    // Stage 2 is global — keep attachments alive across band switches; rebind if missing.
+    // Stage 2 is global - keep attachments alive across band switches; rebind if missing.
     dynThresholdAttachment.reset();
     attackMsAttachment.reset();
     releaseMsAttachment.reset();
@@ -1451,7 +1600,7 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
     const bool extended = bandIndex >= EqBand::kBankSize;
     const auto dynID = extended ? DynamicEq::dynamicParamIDForGlobal (bandIndex)
                                 : DynamicEq::dynamicParamIDForBandIndex (bandIndex);
-    // Spectral is Bank 1 only — leave IDs empty for extended slots.
+    // Spectral is Bank 1 only - leave IDs empty for extended slots.
     const auto spectralID = (! extended && SpectralDynamics::supportsSpectral (bandIndex))
                                 ? SpectralDynamics::spectralParamIDForBandIndex (bandIndex)
                                 : juce::String();
@@ -1596,7 +1745,7 @@ void OptionBoxMenu::bindDynamicControls (int bandIndex)
         if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (treeState.getParameter (amountID)))
         {
             // Slider shows inverted travel: bottom (0) = max Amount, top (1) = Amount 0.
-            // Important: Amount ≈ 0 hard-bypasses the BP bank (no S CPU) even if S is on.
+            // Important: Amount ~ 0 hard-bypasses the BP bank (no S CPU) even if S is on.
             spectralAmountSlider.setRange (0.0, 1.0, 0.01);
             spectralAmountAttachment = std::make_unique<juce::ParameterAttachment> (
                 *param,
@@ -1715,7 +1864,7 @@ void OptionBoxMenu::refreshFilterModelComboText()
 {
     const auto label = FilterType::displayName (readCurrentFilterType(), readCurrentFilterSlope());
     customComboBox.clear (juce::dontSendNotification);
-    // Single display item — real choices live in the hierarchical popup.
+    // Single display item - real choices live in the hierarchical popup.
     customComboBox.addItem (label, 1);
     customComboBox.setSelectedId (1, juce::dontSendNotification);
     customComboBox.setText (label, juce::dontSendNotification);
@@ -1845,7 +1994,7 @@ void OptionBoxMenu::applyFilterMenuResult (int resultId)
 
 void OptionBoxMenu::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
 {
-    // Type selection is hierarchical (mouseDown → PopupMenu); ignore stock combo changes.
+    // Type selection is hierarchical (mouseDown -> PopupMenu); ignore stock combo changes.
     juce::ignoreUnused (comboBoxThatHasChanged);
 }
 
@@ -1956,7 +2105,7 @@ void OptionBoxMenu::setCurrentBandIndex(int index, const std::string bandNames[]
     listenToCurrentBandSpectral (false);
     currentBandIndex = index;
 
-    // Always use global display name so Bank 9–64 stay readable ("Band 12").
+    // Always use global display name so Bank 9-64 stay readable ("Band 12").
     const int globalDisplay = (index < EqBand::kBankSize)
                                   ? EqBand::displayFromInternal (index)
                                   : index;
@@ -1965,7 +2114,7 @@ void OptionBoxMenu::setCurrentBandIndex(int index, const std::string bandNames[]
     const auto title = juce::String (currentBandName);
     bandNameLabel.setText (title, juce::NotificationType::dontSendNotification);
     bandNameLabel.setTooltip (title);
-    // Two-digit band numbers need a slightly smaller face to avoid "…".
+    // Two-digit band numbers need a slightly smaller face to avoid "...".
     bandNameLabel.setFont (juce::Font ("Lato Black",
                                        globalDisplay >= 9 ? 13.0f : 15.0f,
                                        juce::Font::plain));
@@ -1975,6 +2124,8 @@ void OptionBoxMenu::setCurrentBandIndex(int index, const std::string bandNames[]
     listenToCurrentBandOnOff (true);
     listenToCurrentBandDynamic (true);
     listenToCurrentBandSpectral (true);
+    // Refresh power ring ink when band-match multicolour mode is on.
+    applyThemeToChildControls();
     // Keep monitor armed on the newly selected band if headphones were already on.
     if (bandMonitorButton != nullptr && bandMonitorButton->getToggleState())
         setBandListening (true);
@@ -2060,7 +2211,7 @@ void OptionBoxMenu::cycleTransientMode()
     if (choice == nullptr)
         return;
 
-    const int next = (choice->getIndex() + 1) % 3; // Off → Transient → Sustain → Off
+    const int next = (choice->getIndex() + 1) % 3; // Off -> Transient -> Sustain -> Off
     *choice = next;
     syncTransientModeButton();
 }

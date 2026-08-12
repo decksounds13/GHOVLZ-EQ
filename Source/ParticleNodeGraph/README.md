@@ -1,51 +1,67 @@
 # Particle Node Graph
 
-UE / Embergen / Houdini–inspired graph editor for Spec3D particles.
+Industry-style typed node editor for Spec3D particles (Houdini / Embergen / UE Niagara inspired).
 
 ## Open
 **Settings → Spec3D Look → Particles → “Open Particle Node Graph…”**
 
-## Interaction
+## Window
+| UI | Role |
+|----|------|
+| **File · Edit · Options · View · Help** | Full menu bar |
+| **Toolbar** | Live ON/OFF · Apply · status |
+| **Canvas** | Graph editor |
+| **Output** | Collapsible compile / debug log |
+
+## Industry-standard editing
+| Feature | How |
+|---------|-----|
+| **Undo / Redo** | `Ctrl+Z` / `Ctrl+Y` (or Shift+Ctrl+Z) · Edit menu |
+| **Copy / Cut / Paste** | `Ctrl+C` / `X` / `V` |
+| **Duplicate** | `Ctrl+D` · keeps internal wires |
+| **Delete** | `Del` (nodes or selected wire) |
+| **Grid snap** | Options → Snap to Grid (default ON); snaps on move end |
+| **Property edit** | Double-click node · RMB → Edit Properties |
+| **Save / Load** | `Ctrl+S` / `O` → `Documents/Decksounds/ParametricEq/particle_node_graph.xml` · Save/Load As… |
+| **Type-safe wires** | Incompatible connections are **refused** (no silent red graph pollution) |
+| **Compatible pin glow** | While dragging a wire, valid targets pulse white |
+| **RMB on pin** | Create **only compatible** node + auto-wire |
+| **Live Apply** | Topology/param changes push to particles (~60 ms debounce) |
+
+## Navigation
 | Input | Action |
 |-------|--------|
-| MMB or Space+LMB drag | Pan |
+| MMB / Space+LMB | Pan |
 | Wheel | Zoom |
-| LMB on node | Select / move |
-| LMB drag empty | Box select |
-| LMB drag output pin → input | Connect wire |
-| Drag from wired input | Rewire (pulls existing wire) |
-| **Ctrl+click** (or **Cmd+click**) on pin circle | **Disconnect** all wires on that pin |
-| RMB empty | Create node menu |
-| RMB on node | Header colour palette, Arrange, Delete |
-| **L** | **Arrange Nodes** (layered left→right, Houdini/UE style) — also in RMB menus as **Arrange Nodes · L** |
-| Del / Backspace | Delete selection |
-| Esc | Cancel wire drag |
-| RMB on node → **Header Colour** | Palette for node header accent |
+| **Home** | Fit all nodes |
+| **F** | Frame selection |
+| **L** | Layered auto-arrange |
+
+## Wiring
+| Input | Action |
+|-------|--------|
+| Drag output → input | Connect (type-checked) |
+| **Ctrl+click pin** | Disconnect all wires on pin |
+| **RMB pin (dot)** | Filtered create+wire menu |
+| Select wire + Del | Remove wire |
+| Hover pin | Tooltip: name · type · RMB hint |
 
 ## Types
-Float, Vector3, Bool, Force, Emitter — colour-coded pins.  
-**Incompatible connections** still appear as **red wires** and show a type-mismatch tooltip; they do not compile.
+Float, Int, Bool, Vector2/3/4, Colour, Particles, Force, Emitter — colour-coded.  
+Ramp / Field reserved for future assets & fluids.
 
-## Apply
-**Apply to Particles** compiles the graph into emission / lifespan / size / emitter / force stack on the live Spec3D particle system.
+## Attributes
+- **Filter by Attribute** — threshold / amount / curve / stage  
+- **Colour Ramp (Attribute)** — 2-stop colour from FFT, age, etc.  
+Double-click Filter/Ramp → attribute picker; double-click again path or Edit Properties for params.
 
-## Node library
-- **System:** Simulation Output, Comment  
-- **Emitters:** Spectrogram, Point  
-- **Forces:** Gravity, Drag, Wind, Curl, Turbulence, Rotation  
-- **Combine:** Forces, Emitters, Float (sum), Vector3 (sum)  
-- **Constants:** Float, Vector3, Bool  
-- **Math:** Add, Sub, Mul, Div, Lerp, Clamp, Abs, Negate, Min, Max, Power, Sin, Cos, Switch  
-- **Vector:** Make / Break Vector3, Length, Normalize, Scale, Add, Dot, Float→Vector3  
+## Live apply
+**Live: ON** (default) recompiles emitters, forces, filters, and colour ramps into the running Spec3D system when you wire, disconnect, or edit. Turn off for bulk edits, then **Apply** (`Ctrl+Enter`).
 
-### Combine nodes
-- **Combine Forces** — In 1…6, multi-wire per pin. Recursively flattens into the force stack (order by node Y).  
-- **Combine Emitters** — merges emitter branches; primary = first Spectrogram if present, else first by Y.  
-- **Combine Float / Vector3** — sums all wired inputs.  
+## Default graph
+Spectrogram → Filter (FFT) → Colour Ramp → Sim Out + force stack.
 
-Sim Output **Force** / **Emitter** pins also allow multi-wire fan-in.
-
-Default graph: Spectrogram → Sim Out, Gravity+Drag+Turbulence → **Combine Forces** → Sim Out.
-
-## Future
-- Simultaneous multi-emitter spawn, fluid nodes, collision, fields, live pin values, undo, graph prefs.
+## Architecture
+- Compile → force stack + `GraphProgram` (filters / colour ramps)  
+- Runtime spawn + update cull/colour  
+- `Field` pin type reserved so fluids can land without a type-system rewrite  

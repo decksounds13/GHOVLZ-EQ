@@ -239,17 +239,26 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 		// Additional logic if needed
 		};
 
-	// Accessibility — legible text after randomize
-	accessibilityLabel.setText ("Accessibility", juce::dontSendNotification);
-	accessibilityLabel.setJustificationType (juce::Justification::centredLeft);
-	accessibilityLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
-	addAndMakeVisible (accessibilityLabel);
+	// Section: Randomize (header only - buttons laid out in resized)
+	randomizeSectionLabel.setText ("Randomize", juce::dontSendNotification);
+	randomizeSectionLabel.setJustificationType (juce::Justification::centredLeft);
+	randomizeSectionLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
+	randomizeSectionLabel.setMinimumHorizontalScale (1.0f);
+	addAndMakeVisible (randomizeSectionLabel);
+
+	// Section: Chrome - legible text + floating panel opacity
+	chromeSectionLabel.setText ("Chrome", juce::dontSendNotification);
+	chromeSectionLabel.setJustificationType (juce::Justification::centredLeft);
+	chromeSectionLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
+	chromeSectionLabel.setMinimumHorizontalScale (1.0f);
+	addAndMakeVisible (chromeSectionLabel);
 
 	enforceLegibleTextToggle.setClickingTogglesState (true);
 	enforceLegibleTextToggle.setToggleState (sharedResources.sharedColors.enforceLegibleText,
 	                                         juce::dontSendNotification);
 	enforceLegibleTextToggle.setTooltip (
-	    "On by default. Keeps labels readable on Scope modules, meters, graph handles, and menus. "
+	    "On by default. Keeps labels readable on the faceplate, mod panel, option box, "
+	    "graph-top UI menus, PopupMenus, Scope modules, meters, graph handles, and settings menus. "
 	    "After randomize (and on theme load), pushes text value away from its background. "
 	    "Adjusts text only (value), not backgrounds.");
 	enforceLegibleTextToggle.onClick = [this]
@@ -263,6 +272,7 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 
 	textContrastLabel.setText ("Contrast", juce::dontSendNotification);
 	textContrastLabel.setJustificationType (juce::Justification::centredLeft);
+	textContrastLabel.setMinimumHorizontalScale (1.0f);
 	addAndMakeVisible (textContrastLabel);
 
 	textContrastSlider.setRange (0.0, 1.0, 0.01);
@@ -273,6 +283,27 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	textContrastSlider.addListener (this);
 	addAndMakeVisible (textContrastSlider);
 
+	optionBoxOpacityLabel.setText ("Option box opacity", juce::dontSendNotification);
+	optionBoxOpacityLabel.setJustificationType (juce::Justification::centredLeft);
+	optionBoxOpacityLabel.setMinimumHorizontalScale (1.0f);
+	addAndMakeVisible (optionBoxOpacityLabel);
+
+	optionBoxOpacitySlider.setRange (0.30, 1.0, 0.01);
+	optionBoxOpacitySlider.setValue (sharedResources.sharedColors.optionBoxOpacity, juce::dontSendNotification);
+	optionBoxOpacitySlider.setSliderStyle (juce::Slider::LinearHorizontal);
+	optionBoxOpacitySlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+	optionBoxOpacitySlider.setTooltip (
+	    "How solid the floating band editor (Option box) is over the spectrum. "
+	    "Default 90%. Open the Option box on the graph to preview. "
+	    "Does not change Spectrum analyser Opacity.");
+	optionBoxOpacitySlider.addListener (this);
+	addAndMakeVisible (optionBoxOpacitySlider);
+
+	optionBoxOpacityPercentLabel.setJustificationType (juce::Justification::centredRight);
+	optionBoxOpacityPercentLabel.setMinimumHorizontalScale (1.0f);
+	optionBoxOpacityPercentLabel.setInterceptsMouseClicks (false, false);
+	addAndMakeVisible (optionBoxOpacityPercentLabel);
+
 	syncAccessibilityControls();
 
 	randomizeSelectedColorsButton.onClick = [this] {
@@ -280,7 +311,7 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 		DBG("Selected palette indices for randomization: " + juce::String(selectedIndices.size()));
 		auto& sharedColors = sharedResources.sharedColors;
 
-		// Reset all flags to false (skip) — then enable selected palette slots.
+		// Reset all flags to false (skip) - then enable selected palette slots.
 		std::fill(sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), (uint8_t) 1);
 
 		// Set flags for the selected palette indices (0 = randomize; inverted historical semantics)
@@ -303,12 +334,9 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 
 		// Randomize the selected colors and get the randomized color
 		juce::Colour randomizedColor = sharedResources.sharedColors.randomizeSelectedColorsWithinRange();
+		// Enforce last: never re-sync faceplate/mod after (that undoes mod-panel text fixes).
 		if (sharedResources.sharedColors.enforceLegibleText)
-		{
 			sharedResources.sharedColors.enforceLegibleTextContrast();
-			if (sharedResources.sharedColors.randomizeFaceplateMod)
-				sharedResources.sharedColors.syncFaceplateModScheme();
-		}
 
 		std::fill(sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), (uint8_t) 1);
 
@@ -353,23 +381,20 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 		brightnessRangeSlider.setMaxValue(brightnessRangeSlider.getMaxValue());
 
 		sharedResources.sharedColors.randomizeColors();
+		// Enforce last: never re-sync faceplate/mod after (that undoes mod-panel text fixes).
 		if (sharedResources.sharedColors.enforceLegibleText)
-		{
 			sharedResources.sharedColors.enforceLegibleTextContrast();
-			if (sharedResources.sharedColors.randomizeFaceplateMod)
-				sharedResources.sharedColors.syncFaceplateModScheme();
-		}
 		refreshAfterRandomize();
 		};
 
 	randomizeColorsButton.onPopupMenu = [this] { showRandomizeScopeMenu(); };
 
 	addAndMakeVisible(randomizeSelectedColorsButton);
-	randomizeSelectedColorsButton.setButtonText("Rand. Sel."); // Setting the button text
+	randomizeSelectedColorsButton.setButtonText ("Rand sel");
 	randomizeSelectedColorsButton.setLookAndFeel(&textButtonLookAndFeel);
 
 	addAndMakeVisible(randomizeColorsButton);
-	randomizeColorsButton.setButtonText("Rand. All"); // Setting the button text
+	randomizeColorsButton.setButtonText ("Rand all");
 	randomizeColorsButton.setLookAndFeel(&textButtonLookAndFeel); // Applying the custom LookAndFeel
 
 	addAndMakeVisible(randomizeHueToggleButton);
@@ -392,7 +417,7 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	randomizeAlphaToggleButton.setLookAndFeel(&textButtonLookAndFeel2); // Applying the custom LookAndFeel
 	randomizeAlphaToggleButton.setClickingTogglesState(true);
 
-	// Populate UI Elements from the theme colour registry (sorted A–Z on header click).
+	// Populate UI Elements from the theme colour registry (sorted A-Z on header click).
 	uiElementsList.populateFromRegistry();
 
 	// Get color of the first item in the list
@@ -474,155 +499,179 @@ void AppearanceComponent::paint(juce::Graphics& g)
 void AppearanceComponent::resized()
 {
 	DBG("AppearanceComponent::resized Called");
-	int padding = 20;
-	int quadPickerScaleX = getWidth() / 3;
-	int quadPickerScaleY = getHeight() * .9;
-	int hueSelectorScaleX = padding * 3.5;
-	int hueSelectorScaleY = quadPickerScaleY;
-	int hueSelectorX = getWidth() - quadPickerScaleX - padding - hueSelectorScaleX;
-	int hueSelectorY = padding;
-	int quadPickerX = getWidth() - quadPickerScaleX - padding;
-	int quadPickerY = padding;
-	int saturationRangeSliderX = quadPickerX;
-	int saturationRangeSliderY = quadPickerY - padding;
-	int hueRangeSliderX = hueSelectorX + hueSelectorScaleX - 20;
-	int hueRangeSliderY = quadPickerY + 2;
-	int brightnessRangeSliderX = getWidth() - padding * 1.825;
-	int rangeSliderWidth = 40;
-	int swatchSize = 130;
-	int miscellaneousColumnScaleX = swatchSize + padding;
-	int listBoxWidth = getWidth() - quadPickerScaleX - hueSelectorScaleX - swatchSize * 1.6;
-	int listHeight = hueSelectorScaleY / 2 - padding * 2;
-	int colorValuesInputScaleX = getWidth() - listBoxWidth - hueSelectorScaleX - quadPickerScaleX - padding;
-	int colorValuesInputScaleY = getHeight() - swatchSize / 2 - padding;
-	int colorValueInputX = listBoxWidth + padding / 1.5;
-	int colorValueInputY = swatchSize + padding * 1.3;
-	int colorSwatchX = getWidth() - quadPickerScaleX - hueSelectorScaleX - padding * 1.2 - swatchSize;
+	const int padding = 16;
+	const int sectionHeaderH = 16;
+	const int sectionGap = 8;
+	const int rowH = 22;
+	// Legible + Option box opacity
+	const int chromeBlockH = sectionHeaderH + sectionGap + rowH + 4 + rowH;
+	const int randomizeBlockH = sectionHeaderH + 4 + 24;
+	const int themeBtnH = 30;
 
-	int themesListY = padding + listHeight + 2 * padding;
-	int themesListX = padding;
-	int elementsListY = padding * 1.5;
-	int themesLabelY = themesListY - 21;
+	const int quadPickerScaleX = getWidth() / 3;
+	const int hueSelectorScaleX = juce::roundToInt ((float) padding * 3.5f);
+	const int swatchSize = 130;
+	const int listBoxWidth = juce::jmax (160, getWidth() - quadPickerScaleX - hueSelectorScaleX - juce::roundToInt ((float) swatchSize * 1.6f));
+	const int themesListX = padding;
 
+	const int leftTop = padding;
+	const int leftBottom = getHeight() - padding;
+	const int leftBottomReserve = chromeBlockH + randomizeBlockH + themeBtnH + sectionGap * 4 + 12;
+	const int leftUsable = juce::jmax (120, leftBottom - leftTop - leftBottomReserve);
+	const int listHeight = juce::jmax (64, (leftUsable - sectionHeaderH * 2 - sectionGap * 2) / 2);
 
-	// Shadows
-	float cornerSize = 5.0f;
+	int y = leftTop;
+	coloursSectionLabel.setBounds (padding, y, listBoxWidth, sectionHeaderH);
+	y += sectionHeaderH + 4;
+	const int elementsListY = y;
+	uiElementsList.setBounds (padding, elementsListY, listBoxWidth, listHeight);
+	y = elementsListY + listHeight + sectionGap;
+
+	randomizeSectionLabel.setBounds (padding, y, listBoxWidth, sectionHeaderH);
+	y += sectionHeaderH + 4;
+	const int randomRowH = 24;
+	const int chipW = 26;
+	const int chipGap = 4;
+	const int chipsBlockW = chipW * 4 + chipGap * 3;
+	// Size randomize buttons to full plain captions (no "..." from a too-narrow box).
+	const juce::Font randFont (juce::FontOptions().withName ("Lato Black").withHeight (12.0f));
+	const int randSelW = juce::jmax (56, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (randFont, "Rand sel")) + 12);
+	const int randAllW = juce::jmax (56, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (randFont, "Rand all")) + 12);
+	const int maxRandPair = listBoxWidth - chipsBlockW - 12;
+	const int randBtnW = juce::jmax (randSelW, randAllW);
+	const int usedRandW = juce::jmin (maxRandPair, randBtnW * 2 + 6);
+	const int eachRandW = juce::jmax (randSelW, (usedRandW - 6) / 2);
+	randomizeSelectedColorsButton.setBounds (padding, y, eachRandW, randomRowH);
+	randomizeColorsButton.setBounds (padding + eachRandW + 6, y, eachRandW, randomRowH);
+	int chipX = padding + listBoxWidth - chipsBlockW;
+	randomizeHueToggleButton.setBounds (chipX, y, chipW, randomRowH);
+	chipX += chipW + chipGap;
+	randomizeSaturationToggleButton.setBounds (chipX, y, chipW, randomRowH);
+	chipX += chipW + chipGap;
+	randomizeBrightnessToggleButton.setBounds (chipX, y, chipW, randomRowH);
+	chipX += chipW + chipGap;
+	randomizeAlphaToggleButton.setBounds (chipX, y, chipW, randomRowH);
+	y += randomRowH + sectionGap;
+
+	themesLabel.setBounds (padding, y, listBoxWidth, sectionHeaderH);
+	y += sectionHeaderH + 4;
+	const int themesListY = y;
+	themeList.setBounds (themesListX, themesListY, listBoxWidth, listHeight);
+	y = themesListY + listHeight + 6;
+
+	const int themeBtnW = juce::jmax (48, (listBoxWidth - 12) / 3);
+	newPresetButton.setBounds (padding, y, themeBtnW, themeBtnH);
+	overwritePresetButton.setBounds (padding + themeBtnW + 6, y, themeBtnW, themeBtnH);
+	deletePresetButton.setBounds (padding + (themeBtnW + 6) * 2, y, themeBtnW, themeBtnH);
+	y += themeBtnH + sectionGap + 2;
+
+	chromeSectionLabel.setBounds (padding, y, listBoxWidth, sectionHeaderH);
+	y += sectionHeaderH + 4;
+
+	const juce::Font bodyFont (juce::FontOptions (12.0f));
+	const int legibleW = juce::jmax (88, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (bodyFont, "Legible text")) + 28);
+	const int contrastLabW = juce::jmax (52, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (bodyFont, "Contrast")) + 8);
+	enforceLegibleTextToggle.setBounds (padding, y, legibleW, rowH);
+	textContrastLabel.setBounds (padding + legibleW + 6, y, contrastLabW, rowH);
+	textContrastSlider.setBounds (padding + legibleW + contrastLabW + 10, y,
+	                              juce::jmax (60, listBoxWidth - legibleW - contrastLabW - 10), rowH);
+	y += rowH + 4;
+
+	const int opacityLabW = juce::jmax (120, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (bodyFont, "Option box opacity")) + 8);
+	// Full percent readout ("100%") - never ellipsize to "..."
+	const int percentW = juce::jmax (36, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (bodyFont, "100%")) + 6);
+	optionBoxOpacityLabel.setBounds (padding, y, opacityLabW, rowH);
+	optionBoxOpacitySlider.setBounds (padding + opacityLabW + 6, y,
+	                                  juce::jmax (50, listBoxWidth - opacityLabW - percentW - 10), rowH);
+	optionBoxOpacityPercentLabel.setBounds (padding + listBoxWidth - percentW, y, percentW, rowH);
+
+	// Right column: SV pad + hue strip scale with the Appearance panel (menu resize).
+	const int rangeSliderWidth = 40;
+	const int quadPickerScaleY = juce::jmax (180, juce::roundToInt ((float) getHeight() * 0.9f));
+	const int hueSelectorScaleY = quadPickerScaleY;
+	const int hueSelectorX = getWidth() - quadPickerScaleX - padding - hueSelectorScaleX;
+	const int hueSelectorY = padding;
+	const int quadPickerX = getWidth() - quadPickerScaleX - padding;
+	const int quadPickerY = padding;
+	// Saturation range strip sits above the pad (not covering it) so pad hits stay clean.
+	const int saturationRangeSliderY = juce::jmax (0, quadPickerY - rangeSliderWidth);
+	const int hueRangeSliderX = hueSelectorX + hueSelectorScaleX - 20;
+	const int brightnessRangeSliderX = juce::roundToInt ((float) getWidth() - (float) padding * 1.825f);
+	const int colorValuesInputScaleX = juce::jmax (80, getWidth() - listBoxWidth - hueSelectorScaleX - quadPickerScaleX - padding);
+	const int colorValuesInputScaleY = juce::jmax (80, getHeight() - swatchSize / 2 - padding);
+	const int colorValueInputX = listBoxWidth + juce::roundToInt ((float) padding / 1.5f);
+	const int colorValueInputY = swatchSize + juce::roundToInt ((float) padding * 1.3f);
+	const int colorSwatchX = getWidth() - quadPickerScaleX - hueSelectorScaleX
+	                         - juce::roundToInt ((float) padding * 1.2f) - swatchSize;
+
+	constexpr float cornerSize = 5.0f;
 	quadPickerShadowPath.clear();
-	quadPickerShadowPath.addRoundedRectangle(quadPickerX, quadPickerY, quadPickerScaleX, quadPickerScaleY, cornerSize);
+	quadPickerShadowPath.addRoundedRectangle ((float) quadPickerX, (float) quadPickerY,
+	                                          (float) quadPickerScaleX, (float) quadPickerScaleY, cornerSize);
 
-	float cornerSize2 = 14.0f;
+	constexpr float cornerSize2 = 14.0f;
 	uiElementsListShadowPath.clear();
-	uiElementsListShadowPath.addRoundedRectangle(padding, elementsListY, listBoxWidth, listHeight, cornerSize2);
+	uiElementsListShadowPath.addRoundedRectangle ((float) padding, (float) elementsListY,
+	                                              (float) listBoxWidth, (float) listHeight, cornerSize2);
 
-	float cornerSize3 = 14.0f;
+	constexpr float cornerSize3 = 14.0f;
 	themesListShadowPath.clear();
-	themesListShadowPath.addRoundedRectangle(padding, themesListY, listBoxWidth, listHeight, cornerSize3);
+	themesListShadowPath.addRoundedRectangle ((float) padding, (float) themesListY,
+	                                          (float) listBoxWidth, (float) listHeight, cornerSize3);
 
-
-
-
-	quadPicker.setBounds(quadPickerX, quadPickerY, quadPickerScaleX, quadPickerScaleY);
-	hueSelector.setBounds(hueSelectorX, hueSelectorY, hueSelectorScaleX, hueSelectorScaleY);
-	colorSwatch.setBounds(colorSwatchX, padding * 1.5, swatchSize, swatchSize);
-	colorValuesInput.setBounds(colorValueInputX, colorValueInputY, colorValuesInputScaleX, colorValuesInputScaleY);
-
-	uiElementsList.setBounds(padding, elementsListY, listBoxWidth, listHeight);
-	themeList.setBounds(themesListX, themesListY, listBoxWidth, listHeight);
-	uiElementsLabel.setBounds(padding, padding * 1.5 - 21, listBoxWidth, 16); // 16 for height, 5 for space above
-	themesLabel.setBounds(themesListX, themesLabelY, listBoxWidth, 16); // Same here
-
-	saturationRangeSlider.setBounds(quadPickerX - 8, saturationRangeSliderY, quadPickerScaleX + 22, rangeSliderWidth);
-	hueRangeSlider.setBounds(hueRangeSliderX - 8, hueSelectorY - 3, rangeSliderWidth, hueSelectorScaleY + 10);
-	brightnessRangeSlider.setBounds(brightnessRangeSliderX, hueSelectorY - 7, rangeSliderWidth, hueSelectorScaleY + 22);
-
-	// Calculate the widths and positions for the three new buttons
-	int buttonHeight = 35;
-	int buttonWidth = (listBoxWidth) / 3.5; // Subtract padding for two gaps and divide by 3 for three buttons
-	int buttonSpacing = (listBoxWidth) / 3;
-	int firstButtonX = padding;
-	int secondButtonX = firstButtonX + buttonSpacing + 3;
-	int thirdButtonX = secondButtonX + buttonSpacing + 3;
-	int buttonY = themesLabel.getY() + listHeight + padding * 1.53;
-
-	// Set the bounds for the three buttons
-	newPresetButton.setBounds(firstButtonX, buttonY, buttonWidth, buttonHeight);
-	overwritePresetButton.setBounds(secondButtonX, buttonY, buttonWidth, buttonHeight);
-	deletePresetButton.setBounds(thirdButtonX, buttonY, buttonWidth, buttonHeight);
-
-	// Button Shadows
-	float cornerSize4 = 6.0f;
+	constexpr float cornerSize4 = 6.0f;
 	newPresetButtonShadowPath.clear();
-	newPresetButtonShadowPath.addRoundedRectangle(firstButtonX, buttonY, buttonWidth, buttonHeight, cornerSize4);
-
+	newPresetButtonShadowPath.addRoundedRectangle (newPresetButton.getBounds().toFloat(), cornerSize4);
 	overwritePresetButtonShadowPath.clear();
-	overwritePresetButtonShadowPath.addRoundedRectangle(secondButtonX, buttonY, buttonWidth, buttonHeight, cornerSize4);
-
+	overwritePresetButtonShadowPath.addRoundedRectangle (overwritePresetButton.getBounds().toFloat(), cornerSize4);
 	deletePresetButtonShadowPath.clear();
-	deletePresetButtonShadowPath.addRoundedRectangle(thirdButtonX, buttonY, buttonWidth, buttonHeight, cornerSize4);
-
-	int randomButtonWidth = buttonWidth;
-	int randomButtonHeight = 20;
-	int randomSelectedButtonX = listBoxWidth / 3 + padding;
-	int randomButtonX = randomSelectedButtonX + randomButtonWidth + padding / 2; // 20px padding from right
-	int randomButtonY = themesLabel.getY() - padding / 5; // Align with the Themes label	
-	int randomHueToggleButtonX = padding + listBoxWidth / 2 - padding / 2;
-	int randomHueToggleButtonY = elementsListY - padding * 1.35;
-	int randomToggleAvailableX = listBoxWidth / 2;
-	int randomToggleButtonSpacing = randomToggleAvailableX / 4;
-
-	int randomSaturationToggleButtonX = randomHueToggleButtonX + randomToggleButtonSpacing;
-	int randomBrightnessToggleButtonX = randomHueToggleButtonX + randomToggleButtonSpacing * 2;
-	int randomAlphaToggleButtonX = randomHueToggleButtonX + randomToggleButtonSpacing * 3;
-	int popupCenteredLocationX = listBoxWidth / 2;
-	int popupCenteredLocationY = themesListY + listHeight / 2;
-
-	// Randomize Button Shadows
+	deletePresetButtonShadowPath.addRoundedRectangle (deletePresetButton.getBounds().toFloat(), cornerSize4);
 	randomColorsButtonShadowPath.clear();
-	randomColorsButtonShadowPath.addRoundedRectangle(randomButtonX, randomButtonY, randomButtonWidth, randomButtonHeight, cornerSize4);
-
+	randomColorsButtonShadowPath.addRoundedRectangle (randomizeColorsButton.getBounds().toFloat(), cornerSize4);
 	randomSelectedColorsButtonShadowPath.clear();
-	randomSelectedColorsButtonShadowPath.addRoundedRectangle(randomSelectedButtonX, randomButtonY, randomButtonWidth, randomButtonHeight, cornerSize4);
+	randomSelectedColorsButtonShadowPath.addRoundedRectangle (randomizeSelectedColorsButton.getBounds().toFloat(), cornerSize4);
 
+	quadPicker.setBounds (quadPickerX, quadPickerY, quadPickerScaleX, quadPickerScaleY);
+	hueSelector.setBounds (hueSelectorX, hueSelectorY, hueSelectorScaleX, hueSelectorScaleY);
+	colorSwatch.setBounds (colorSwatchX, juce::roundToInt ((float) padding * 1.5f), swatchSize, swatchSize);
+	colorValuesInput.setBounds (colorValueInputX, colorValueInputY, colorValuesInputScaleX, colorValuesInputScaleY);
 
-	randomizeColorsButton.setBounds(randomButtonX, randomButtonY, randomButtonWidth, randomButtonHeight * 1);
-	randomizeSelectedColorsButton.setBounds(randomSelectedButtonX, randomButtonY, randomButtonWidth, randomButtonHeight * 1);
+	saturationRangeSlider.setBounds (quadPickerX - 8, saturationRangeSliderY, quadPickerScaleX + 22, rangeSliderWidth);
+	hueRangeSlider.setBounds (hueRangeSliderX - 8, hueSelectorY - 3, rangeSliderWidth, hueSelectorScaleY + 10);
+	brightnessRangeSlider.setBounds (brightnessRangeSliderX, hueSelectorY - 7, rangeSliderWidth, hueSelectorScaleY + 22);
 
-	randomizeHueToggleButton.setBounds(randomHueToggleButtonX, randomHueToggleButtonY, randomButtonWidth / 2.5, randomButtonHeight);
-	randomizeSaturationToggleButton.setBounds(randomSaturationToggleButtonX, randomHueToggleButtonY, randomButtonWidth / 2.5, randomButtonHeight);
-	randomizeBrightnessToggleButton.setBounds(randomBrightnessToggleButtonX, randomHueToggleButtonY, randomButtonWidth / 2.5, randomButtonHeight);
-	randomizeAlphaToggleButton.setBounds(randomAlphaToggleButtonX, randomHueToggleButtonY, randomButtonWidth / 2.5, randomButtonHeight);
-
-	// Accessibility row under theme New/Overwrite/Delete
-	const int accessY = buttonY + buttonHeight + 10;
-	const int accessH = 22;
-	accessibilityLabel.setBounds (padding, accessY, 100, accessH);
-	enforceLegibleTextToggle.setBounds (padding + 100, accessY, 120, accessH);
-	textContrastLabel.setBounds (padding + 230, accessY, 60, accessH);
-	textContrastSlider.setBounds (padding + 290, accessY, juce::jmax (80, listBoxWidth - 290), accessH);
-
-	juce::Colour firstItemColor = sharedResources.sharedColors.menuBackgroundGradientColor1;
-	quadPicker.setColor(firstItemColor);
-	hueSelector.setColor(firstItemColor);
-	colorSwatch.setColor(firstItemColor);
-
-	overlayComponent.setBounds(quadPicker.getBounds());
-	overlayComponent2.setBounds(hueSelector.getBounds());
-
-	popup.setBounds(themesListX, themesListY, listBoxWidth, listHeight );
+	// Overlay is display-only; keep it aligned and non-intercepting so the pad receives drag.
+	overlayComponent.setInterceptsMouseClicks (false, false);
+	overlayComponent2.setInterceptsMouseClicks (false, false);
+	overlayComponent.setBounds (quadPicker.getBounds());
+	overlayComponent2.setBounds (hueSelector.getBounds());
+	// Pad receives hits; overlay paints on top only for randomize guides (often empty).
+	quadPicker.toFront (false);
+	overlayComponent.toFront (false);
+	// Keep range sliders above the pad so their chrome is not confused with a pad edge line.
+	saturationRangeSlider.toFront (false);
+	brightnessRangeSlider.toFront (false);
+	hueRangeSlider.toFront (false);
+	popup.setBounds (themesListX, themesListY, listBoxWidth, listHeight);
 }
-
 void AppearanceComponent::initializeComponents() {
 	DBG("initializeComponents Called");
 
-	// Initialize QuadPicker's color change callback
-	quadPicker.onColorChanged = [this](juce::Colour newColor) {
-		updateComponents(newColor);
-		directColorUpdate(newColor);
-
-		// Update ColorValuesInput Saturation and Brightness Sliders
-		colorValuesInput.updateSaturationSlider(newColor.getSaturation() * 255.0f);
-		colorValuesInput.updateBrightnessSlider(newColor.getBrightness() * 255.0f);
-		};
+	// SV pad: light path while scrubbing (ring stays 1:1); full theme commit on mouse-up.
+	quadPicker.onColorChanged = [this] (juce::Colour newColor)
+	{
+		currentColor = newColor;
+		if (quadPicker.isDraggingColour())
+			liveColourPreviewFromPad (newColor);
+		else
+			directColorUpdate (newColor, false);
+	};
 
 	// Initialize HueSelector's hue change callback
 	hueSelector.onHueChanged = [this](float newHue) {
@@ -671,8 +720,10 @@ void AppearanceComponent::updateComponents(juce::Colour newColor)
 	juce::String selectedElementName = uiElementsList.getSelectedElementName();
 
 	juce::Colour menuLabelTextColor = sharedResources.sharedColors.menuLabelTextColor1;
-	uiElementsLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
-	themesLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
+	coloursSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	themesLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	randomizeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	chromeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 
 	// Enable write for selected palette slots, then apply.
 	auto paletteIndices = uiElementsList.getSelectedPaletteIndices();
@@ -708,8 +759,19 @@ void AppearanceComponent::updateComponents(juce::Colour newColor)
 	notifyThemeLiveChanged();
 }
 
+void AppearanceComponent::liveColourPreviewFromPad (juce::Colour newColor)
+{
+	// Pad paints the ring itself. Only touch the local readouts here —
+	// palette writes, list repaints, applyColourSideEffects, and notifyThemeLiveChanged
+	// run on mouse-up via directColorUpdate so scrubbing stays frame-smooth.
+	colorSwatch.setColor (newColor);
+	colorValuesInput.setColor (newColor);
+	colorValuesInput.updateHueSlider (newColor.getHue() * 255.0f);
+	colorValuesInput.updateSaturationSlider (newColor.getSaturation() * 255.0f);
+	colorValuesInput.updateBrightnessSlider (newColor.getBrightness() * 255.0f);
+}
+
 void AppearanceComponent::directColorUpdate(juce::Colour newColor, bool applyAlpha) {
-	DBG("directColorUpdate Called");
 	auto& sharedColors = sharedResources.sharedColors;
 	auto originalFlags = sharedColors.colorRandomizationFlags;
 	std::fill (sharedColors.colorRandomizationFlags.begin(), sharedColors.colorRandomizationFlags.end(), (uint8_t) 1);
@@ -737,14 +799,22 @@ void AppearanceComponent::directColorUpdate(juce::Colour newColor, bool applyAlp
 
 	sharedColors.colorRandomizationFlags = std::move (originalFlags);
 
-	colorSwatch.setColor(newColor);
-	colorValuesInput.setColor(newColor);
-	uiElementsList.updateSelectedElementColor(newColor);
-	quadPicker.setColor(newColor);
-	colorValuesInput.setColor(newColor);
+	colorSwatch.setColor (newColor);
+	colorValuesInput.setColor (newColor);
+	colorValuesInput.updateHueSlider (newColor.getHue() * 255.0f);
+	colorValuesInput.updateSaturationSlider (newColor.getSaturation() * 255.0f);
+	colorValuesInput.updateBrightnessSlider (newColor.getBrightness() * 255.0f);
+	uiElementsList.updateSelectedElementColor (newColor);
+
+	// Never push setColor back into the pad while scrubbing.
+	if (! quadPicker.isDraggingColour())
+		quadPicker.setColor (newColor);
 
 	repaintComponents();
-	updateAllComponents();
+
+	if (! quadPicker.isDraggingColour())
+		updateAllComponents();
+
 	notifyThemeLiveChanged();
 }
 
@@ -830,7 +900,7 @@ void AppearanceComponent::onPresetApplied(const Theme& theme)
 {
 	DBG("onPresetApplied Called");
 	// ThemeList already applied palette colours and preserved randomize flags.
-	// Do not re-assign theme.getColors() here — that would restore stale dice
+	// Do not re-assign theme.getColors() here - that would restore stale dice
 	// scope flags from the Theme snapshot and kill button/menu randomize.
 	juce::ignoreUnused (theme);
 
@@ -883,9 +953,14 @@ void AppearanceComponent::onPresetApplied(const Theme& theme)
 
 	juce::Colour menuLabelTextColor = sharedResources.sharedColors.menuLabelTextColor1;
 
-	// Set the text color for the labels
-	uiElementsLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
-	themesLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
+	// Set the text color for the section labels
+	coloursSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	themesLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	randomizeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	chromeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	optionBoxOpacityLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	optionBoxOpacityPercentLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	textContrastLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 
 	juce::Colour trackColor = sharedResources.sharedColors.menuScrollBarTrackColor1;
 	juce::Colour thumbColor = sharedResources.sharedColors.menuScrollBarThumbColor1;
@@ -947,27 +1022,44 @@ void AppearanceComponent::repaintNewPresetButton() {
 
 void AppearanceComponent::setupLabels() {
 	DBG("setupLabels Called");
-	accessibilityLabel.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
-	textContrastLabel.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
-	enforceLegibleTextToggle.setColour (juce::ToggleButton::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
+	const auto menuLabelTextColor = sharedResources.sharedColors.menuLabelTextColor1;
+	const auto sectionFont = juce::Font (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
+	const auto bodyFont = juce::Font (juce::FontOptions (12.0f));
+
+	auto styleSection = [&] (juce::Label& lab, const juce::String& text)
+	{
+		lab.setText (text, juce::dontSendNotification);
+		lab.setFont (sectionFont);
+		lab.setColour (juce::Label::textColourId, menuLabelTextColor);
+		lab.setMinimumHorizontalScale (1.0f);
+		lab.setJustificationType (juce::Justification::centredLeft);
+		addAndMakeVisible (lab);
+	};
+
+	styleSection (coloursSectionLabel, "Colours");
+	styleSection (themesLabel, "Themes");
+	styleSection (randomizeSectionLabel, "Randomize");
+	styleSection (chromeSectionLabel, "Chrome");
+
+	textContrastLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	textContrastLabel.setFont (bodyFont);
+	textContrastLabel.setMinimumHorizontalScale (1.0f);
+
+	optionBoxOpacityLabel.setText ("Option box opacity", juce::dontSendNotification);
+	optionBoxOpacityLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	optionBoxOpacityLabel.setFont (bodyFont);
+	optionBoxOpacityLabel.setMinimumHorizontalScale (1.0f);
+
+	optionBoxOpacityPercentLabel.setFont (bodyFont);
+	optionBoxOpacityPercentLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	optionBoxOpacityPercentLabel.setMinimumHorizontalScale (1.0f);
+
+	enforceLegibleTextToggle.setColour (juce::ToggleButton::textColourId, menuLabelTextColor);
 	enforceLegibleTextToggle.setColour (juce::ToggleButton::tickColourId, sharedResources.sharedColors.menuSliderFillColor);
-	// Set text for the labels
-	uiElementsLabel.setText("UI Elements", juce::dontSendNotification);
-	themesLabel.setText("Themes", juce::dontSendNotification);
-
-	// Set the font for the labels
-	uiElementsLabel.setFont(juce::Font("Lato Black", 16.0f, juce::Font::plain));
-	themesLabel.setFont(juce::Font("Lato Black", 16.0f, juce::Font::plain));
-
-	juce::Colour menuLabelTextColor = sharedResources.sharedColors.menuLabelTextColor1;
-
-	// Set the text color for the labels
-	uiElementsLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
-	themesLabel.setColour(juce::Label::textColourId, menuLabelTextColor);
-
-	// Add the labels to the parent component
-	addAndMakeVisible(uiElementsLabel);
-	addAndMakeVisible(themesLabel);
+	optionBoxOpacitySlider.setColour (juce::Slider::trackColourId, sharedResources.sharedColors.menuSliderFillColor);
+	optionBoxOpacitySlider.setColour (juce::Slider::thumbColourId, sharedResources.sharedColors.menuSliderFillColor.brighter (0.15f));
+	textContrastSlider.setColour (juce::Slider::trackColourId, sharedResources.sharedColors.menuSliderFillColor);
+	textContrastSlider.setColour (juce::Slider::thumbColourId, sharedResources.sharedColors.menuSliderFillColor.brighter (0.15f));
 }
 
 void AppearanceComponent::updateAllComponents() {
@@ -1020,8 +1112,13 @@ void AppearanceComponent::applyColourSideEffects (const juce::String& elementNam
 	else if (elementName == "Menu Label Text")
 	{
 		colorValuesInput.setLabelTextColor (newColor);
-		uiElementsLabel.setColour (juce::Label::textColourId, newColor);
+		coloursSectionLabel.setColour (juce::Label::textColourId, newColor);
 		themesLabel.setColour (juce::Label::textColourId, newColor);
+		randomizeSectionLabel.setColour (juce::Label::textColourId, newColor);
+		chromeSectionLabel.setColour (juce::Label::textColourId, newColor);
+		textContrastLabel.setColour (juce::Label::textColourId, newColor);
+		optionBoxOpacityLabel.setColour (juce::Label::textColourId, newColor);
+		optionBoxOpacityPercentLabel.setColour (juce::Label::textColourId, newColor);
 	}
 	else if (elementName == "Menu Scroll Track")
 	{
@@ -1197,6 +1294,19 @@ void AppearanceComponent::sliderValueChanged(juce::Slider* slider) {
 		if (sharedResources.sharedColors.enforceLegibleText)
 			applyAccessibilityTextContrast();
 	}
+
+	if (slider == &optionBoxOpacitySlider)
+	{
+		sharedResources.sharedColors.optionBoxOpacity =
+		    juce::jlimit (0.30f, 1.0f, (float) optionBoxOpacitySlider.getValue());
+		const int pct = juce::roundToInt (sharedResources.sharedColors.optionBoxOpacity * 100.0f);
+		optionBoxOpacityPercentLabel.setText (juce::String (pct) + "%", juce::dontSendNotification);
+		// Live update floating OptionBox without full theme reload.
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	}
 }
 
 void AppearanceComponent::syncAccessibilityControls()
@@ -1207,13 +1317,16 @@ void AppearanceComponent::syncAccessibilityControls()
 	textContrastSlider.setVisible (on);
 	textContrastLabel.setVisible (on);
 	textContrastSlider.setEnabled (on);
+	optionBoxOpacitySlider.setValue (sharedResources.sharedColors.optionBoxOpacity, juce::dontSendNotification);
+	const int pct = juce::roundToInt (sharedResources.sharedColors.optionBoxOpacity * 100.0f);
+	optionBoxOpacityPercentLabel.setText (juce::String (pct) + "%", juce::dontSendNotification);
 }
 
 void AppearanceComponent::applyAccessibilityTextContrast()
 {
+	// Enforce is the final pass - do not syncFaceplateModScheme afterward (rewrites
+	// Mod/Option text from Plugin Button Text without re-checking panel backgrounds).
 	sharedResources.sharedColors.enforceLegibleTextContrast();
-	if (sharedResources.sharedColors.randomizeFaceplateMod)
-		sharedResources.sharedColors.syncFaceplateModScheme();
 	refreshAfterRandomize();
 }
 
@@ -1260,7 +1373,15 @@ void AppearanceComponent::repaintComponents()
 	hueSelector.repaint();
 	colorValuesInput.repaint();
 	themesLabel.repaint();
-	uiElementsLabel.repaint();
+	coloursSectionLabel.repaint();
+	randomizeSectionLabel.repaint();
+	chromeSectionLabel.repaint();
+	optionBoxOpacityLabel.repaint();
+	optionBoxOpacityPercentLabel.repaint();
+	optionBoxOpacitySlider.repaint();
+	textContrastLabel.repaint();
+	textContrastSlider.repaint();
+	enforceLegibleTextToggle.repaint();
 	uiElementsList.repaint();
 	themeList.repaint();
 	hueRangeSlider.repaint();

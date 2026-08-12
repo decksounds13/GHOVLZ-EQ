@@ -544,7 +544,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
 
     setupLookToggle (motionBlurToggle,
                      "UE-style camera motion blur (soft path): depth reproject with previous "
-                     "view-projection → screen velocity → reconstruction gather. "
+                     "view-projection -> screen velocity -> reconstruction gather. "
                      "Blurs orbit / freecam / zoom motion. Off by default.");
     motionBlurAmountLabel.setText ("Motion blur amount", juce::dontSendNotification);
     setupLookSlider (motionBlurAmountLabel, motionBlurAmountSlider, 0.0, 1.0, 0.01,
@@ -624,13 +624,13 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     dofCocDilateLabel.setText ("DOF Edge Dilate", juce::dontSendNotification);
     setupLookSlider (dofCocDilateLabel, dofCocDilateSlider, 0.0, 1.0, 0.01,
                      "How far defocus CoC spreads into Soft BG void (radius only). "
-                     "0 = no spread. Does not brighten edges by itself — pairs with Edge Spill "
+                     "0 = no spread. Does not brighten edges by itself - pairs with Edge Spill "
                      "for mesh colour bleed onto sky. Keep moderate to avoid halos.");
     dofCocDilateSlider.setValue (Spectrogram3DComponent::kDofCocDilateDefault, juce::dontSendNotification);
     dofEdgeSpillLabel.setText ("DOF Edge Spill", juce::dontSendNotification);
     setupLookSlider (dofEdgeSpillLabel, dofEdgeSpillSlider, 0.0, 1.0, 0.01,
                      "How strongly out-of-focus mesh colour bleeds onto Soft BG at silhouettes "
-                     "(weight only, 0–1). Independent of Dilate — do not crank both to max "
+                     "(weight only, 0-1). Independent of Dilate - do not crank both to max "
                      "or you get a bright outline.");
     dofEdgeSpillSlider.setValue (Spectrogram3DComponent::kDofEdgeSpillDefault, juce::dontSendNotification);
 
@@ -670,9 +670,9 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     // Drag range to 250k; type higher if needed (absolute safety hard cap is 1M in engine).
     setupParticleSlider (particleMaxAliveLabel, particleMaxAliveSlider, 256.0, 250000.0, 256.0,
                          "Live particle budget (default 70000). Drag up to 250k; type higher if needed.\n"
-                         "This is the only particle count limit — no hidden GPU/CPU soft caps.\n"
+                         "This is the only particle count limit - no hidden GPU/CPU soft caps.\n"
                          "Raising Max does not allocate immediately; pool grows as particles spawn.\n"
-                         "At Max: spawn stops and oldest are culled — should not crash.\n"
+                         "At Max: spawn stops and oldest are culled - should not crash.\n"
                          "Emission controls fill rate toward Max.");
     setSliderActual (particleMaxAliveSlider, 70000.0);
     setupLookToggle (particleDebugOverlayToggle,
@@ -689,7 +689,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     };
     addAndMakeVisible (particleClearButton);
     styleSaveDefaultButton (particleNodeGraphButton);
-    particleNodeGraphButton.setButtonText ("Open Particle Node Graph…");
+    particleNodeGraphButton.setButtonText ("Open Particle Node Graph...");
     particleNodeGraphButton.setTooltip (
         "Embergen / Houdini / UE-style node graph for emitters, forces, and math. "
         "Typed wires; red = type mismatch.");
@@ -744,11 +744,11 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
         "sub-bin positions - particles don't stack on exact grid points.\n"
         "Slice: each frequency bin emits on its own clock (more grid-like columns), "
         "still with within-band scatter + spawn jitter.\n"
-        "Both modes still sample the live waterfall playhead — this only changes how "
+        "Both modes still sample the live waterfall playhead - this only changes how "
         "spawn rate is distributed.");
     particleEmitModeCombo.onChange = [this]
     {
-        // No parent relayout (height unchanged). Relayout → Menu sync was racing UI.
+        // No parent relayout (height unchanged). Relayout -> Menu sync was racing UI.
         applyLookControlsToMain();
     };
     addAndMakeVisible (particleEmitModeLabel);
@@ -762,13 +762,13 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     particleEmitterPosZLabel.setText ("Emitter Z", juce::dontSendNotification);
     setupParticleSlider (particleEmitterPosZLabel, particleEmitterPosZSlider, -2.0, 2.0, 0.01, "Emitter origin Z");
     setSliderActual (particleEmitterPosZSlider, 0.0);
-    particleSprayYawLabel.setText ("Spray yaw°", juce::dontSendNotification);
+    particleSprayYawLabel.setText ("Spray yaw", juce::dontSendNotification);
     setupParticleSlider (particleSprayYawLabel, particleSprayYawSlider, -180.0, 180.0, 0.5, "Spray aim yaw");
     setSliderActual (particleSprayYawSlider, 0.0);
-    particleSprayPitchLabel.setText ("Spray pitch°", juce::dontSendNotification);
+    particleSprayPitchLabel.setText ("Spray pitch", juce::dontSendNotification);
     setupParticleSlider (particleSprayPitchLabel, particleSprayPitchSlider, -90.0, 90.0, 0.5, "Spray aim pitch (90 = up)");
     setSliderActual (particleSprayPitchSlider, 90.0);
-    particleSpraySpreadLabel.setText ("Spray spread°", juce::dontSendNotification);
+    particleSpraySpreadLabel.setText ("Spray spread", juce::dontSendNotification);
     setupParticleSlider (particleSpraySpreadLabel, particleSpraySpreadSlider, 0.0, 180.0, 0.5, "Cone half-angle");
     setSliderActual (particleSpraySpreadSlider, 15.0);
     particleSpraySpeedMinLabel.setText ("Spray speed min", juce::dontSendNotification);
@@ -780,8 +780,8 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     particleEmissionLabel.setText ("Emission rate (particles/s)", juce::dontSendNotification);
     setupParticleSlider (particleEmissionLabel, particleEmissionSlider, 0.0, 100000.0, 1.0,
                          "Particles spawned per second (total across the field). "
-                         "Default 40000; drag 0–100k; type higher if needed. "
-                         "Live count ≈ rate × lifespan (until Max particles). "
+                         "Default 40000; drag 0-100k; type higher if needed. "
+                         "Live count ~ rate x lifespan (until Max particles). "
                          "Continuous and slice modes share this same particles/s budget.");
     setSliderActual (particleEmissionSlider, 40000.0);
     particleSpawnJitterLabel.setText ("Spawn jitter", juce::dontSendNotification);
@@ -871,7 +871,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     particleSizeRandomSlider.setTooltip (
         "Per-particle size scale range at spawn (multiplies Particle size). "
         "Drag the two thumbs: left = min scale, right = max scale. "
-        "1…1 = all particles the same size; e.g. 0.5…1.5 = half to 1.5× base size.");
+        "1 to 1 = all particles the same size; e.g. 0.5 to 1.5 = half to 1.5x base size.");
     particleSizeRandomSlider.onValueChange = [this]
     {
         particleSizeRandomMinReadout.setText (
@@ -883,7 +883,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (particleSizeRandomLabel);
     addAndMakeVisible (particleSizeRandomSlider);
     {
-        // Value boxes on the right — same colours / size language as styleSlider text boxes.
+        // Value boxes on the right - same colours / size language as styleSlider text boxes.
         auto styleValueBox = [this] (juce::Label& lab)
         {
             lab.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
@@ -940,13 +940,13 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     };
     addAndMakeVisible (particleMeshLabel);
     addAndMakeVisible (particleMeshCombo);
-    particleInitRotXLabel.setText ("Init rot X°", juce::dontSendNotification);
+    particleInitRotXLabel.setText ("Init rot X", juce::dontSendNotification);
     setupParticleSlider (particleInitRotXLabel, particleInitRotXSlider, -180.0, 180.0, 0.1, "Initial mesh rotation X (degrees).");
     setSliderActual (particleInitRotXSlider, 0.0);
-    particleInitRotYLabel.setText ("Init rot Y°", juce::dontSendNotification);
+    particleInitRotYLabel.setText ("Init rot Y", juce::dontSendNotification);
     setupParticleSlider (particleInitRotYLabel, particleInitRotYSlider, -180.0, 180.0, 0.1, "Initial mesh rotation Y (degrees).");
     setSliderActual (particleInitRotYSlider, 0.0);
-    particleInitRotZLabel.setText ("Init rot Z°", juce::dontSendNotification);
+    particleInitRotZLabel.setText ("Init rot Z", juce::dontSendNotification);
     setupParticleSlider (particleInitRotZLabel, particleInitRotZSlider, -180.0, 180.0, 0.1, "Initial mesh rotation Z (degrees).");
     setSliderActual (particleInitRotZSlider, 0.0);
     particleInitRotRndLabel.setText ("Init rot random", juce::dontSendNotification);
@@ -964,7 +964,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     particleForceStack->onChanged = [this] (bool structureChanged)
     {
         applyLookControlsToMain();
-        // Param scrub only: never sync/rebuild (Menu::resized → syncFromMain destroyed
+        // Param scrub only: never sync/rebuild (Menu::resized -> syncFromMain destroyed
         // force rows mid-drag and crashed when adjusting turbulence etc.).
         if (structureChanged)
             requestParentRelayout();
@@ -1004,7 +1004,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     {
         c.clear (juce::dontSendNotification);
         // Item id = enum + 1 (stable for prefs).
-        // FFT strength = per-bin intensity 0–1 (colour ramp / mesh height axis).
+        // FFT strength = per-bin intensity 0-1 (colour ramp / mesh height axis).
         // Labels include type suffix via particleModSourceMenuLabel, e.g. "Init vel (Vec3)".
         const ParticleModSource sources[] = {
             ParticleModSource::none,
@@ -1017,10 +1017,10 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
             ParticleModSource::random1,
             ParticleModSource::random2,
             ParticleModSource::random3,
-            ParticleModSource::initVel,     // Vec3 — full birth velocity
-            ParticleModSource::initVelX,    // Float — X only
-            ParticleModSource::initVelY,    // Float — Y only
-            ParticleModSource::initVelZ,    // Float — Z only
+            ParticleModSource::initVel,     // Vec3 - full birth velocity
+            ParticleModSource::initVelX,    // Float - X only
+            ParticleModSource::initVelY,    // Float - Y only
+            ParticleModSource::initVelZ,    // Float - Z only
             ParticleModSource::particleId,
         };
         for (auto s : sources)
@@ -1033,7 +1033,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
         // Labels include type, e.g. "Init vel (Vec3)", "Init vel X (Float)".
         const ParticleModDest dests[] = {
             ParticleModDest::emission,
-            ParticleModDest::initVel,      // Vec3 — all axes
+            ParticleModDest::initVel,      // Vec3 - all axes
             ParticleModDest::initVelX,     // Float
             ParticleModDest::initVelY,     // Float (preferred over riseSpeed)
             ParticleModDest::initVelZ,     // Float
@@ -1088,11 +1088,11 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
         fillModSource (row.source);
         row.source.setTooltip (
             "Modulation source.\n"
-            "FFT strength: 0–1 intensity at this particle's frequency (same axis as the "
-            "colour ramp — hottest bins = 1). Live-sampled as the trail scrolls so it can "
+            "FFT strength: 0-1 intensity at this particle's frequency (same axis as the "
+            "colour ramp - hottest bins = 1). Live-sampled as the trail scrolls so it can "
             "drive size / emissive / alpha / colour after birth.\n"
             "Amplitude: whole-playhead energy (global).\n"
-            "Bin freq: 0–1 frequency position of the particle.");
+            "Bin freq: 0-1 frequency position of the particle.");
         row.source.onChange = [this]
         {
             updateLookDevVisibility();
@@ -2472,7 +2472,7 @@ void Spectrogram3DSettingsComponent::Content::applyLookControlsToMain()
     }
     {
         // Combo ids: 1 = Slice, 2 = Continuous (default).
-        // Never treat id 0 / no selection as Slice — that silently forced Slice on every
+        // Never treat id 0 / no selection as Slice - that silently forced Slice on every
         // applyLook pass while the combo was hidden or mid-refresh.
         const int emitId = particleEmitModeCombo.getSelectedId();
         if (emitId == 2)

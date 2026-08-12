@@ -66,6 +66,10 @@
             file="Source/Spectrogram3DComponent.h"/>
       <FILE id="png01" name="ParticleNodeTypes.h" compile="0" resource="0"
             file="Source/ParticleNodeGraph/ParticleNodeTypes.h"/>
+      <FILE id="png09" name="ParticleDataTypes.h" compile="0" resource="0"
+            file="Source/ParticleNodeGraph/ParticleDataTypes.h"/>
+      <FILE id="png10" name="ParticleAttributes.h" compile="0" resource="0"
+            file="Source/ParticleNodeGraph/ParticleAttributes.h"/>
       <FILE id="png02" name="ParticleNodeTypes.cpp" compile="1" resource="0"
             file="Source/ParticleNodeGraph/ParticleNodeTypes.cpp"/>
       <FILE id="png03" name="ParticleNodeGraphModel.h" compile="0" resource="0"
@@ -209,6 +213,10 @@
             file="Source/OscilloscopeComponent.cpp"/>
       <FILE id="Vg0Q1d" name="OscilloscopeComponent.h" compile="0" resource="0"
             file="Source/OscilloscopeComponent.h"/>
+      <FILE id="ThdMtrC" name="ThdMeterComponent.cpp" compile="1" resource="0"
+            file="Source/ThdMeterComponent.cpp"/>
+      <FILE id="ThdMtrH" name="ThdMeterComponent.h" compile="0" resource="0"
+            file="Source/ThdMeterComponent.h"/>
       <FILE id="yJxciE" name="PhaseMode.h" compile="0" resource="0" file="Source/PhaseMode.h"/>
       <FILE id="yTH2U4" name="QuadPicker.cpp" compile="1" resource="0" file="Source/QuadPicker.cpp"/>
       <FILE id="DKr5Fh" name="QuadPicker.h" compile="0" resource="0" file="Source/QuadPicker.h"/>
@@ -432,6 +440,32 @@
               file="Source/Match/MatchProcessor.h"/>
         <FILE id="MtEngC" name="MatchProcessor.cpp" compile="1" resource="0"
               file="Source/Match/MatchProcessor.cpp"/>
+      </GROUP>
+      <GROUP id="LearnGrp" name="Learn">
+        <FILE id="LnSetH" name="EqLearnSettings.h" compile="0" resource="0"
+              file="Source/Learn/EqLearnSettings.h"/>
+        <FILE id="LnMagH" name="BiquadMagnitude.h" compile="0" resource="0"
+              file="Source/Learn/BiquadMagnitude.h"/>
+        <FILE id="LnMagC" name="BiquadMagnitude.cpp" compile="1" resource="0"
+              file="Source/Learn/BiquadMagnitude.cpp"/>
+        <FILE id="LnMatH" name="ParametricMatcher.h" compile="0" resource="0"
+              file="Source/Learn/ParametricMatcher.h"/>
+        <FILE id="LnMatC" name="ParametricMatcher.cpp" compile="1" resource="0"
+              file="Source/Learn/ParametricMatcher.cpp"/>
+        <FILE id="LnFitH" name="EqBandFitter.h" compile="0" resource="0"
+              file="Source/Learn/EqBandFitter.h"/>
+        <FILE id="LnFitC" name="EqBandFitter.cpp" compile="1" resource="0"
+              file="Source/Learn/EqBandFitter.cpp"/>
+        <FILE id="LnTplH" name="EqSourceTemplates.h" compile="0" resource="0"
+              file="Source/Learn/EqSourceTemplates.h"/>
+        <FILE id="LnClsH" name="EqSourceClassifier.h" compile="0" resource="0"
+              file="Source/Learn/EqSourceClassifier.h"/>
+        <FILE id="LnClsC" name="EqSourceClassifier.cpp" compile="1" resource="0"
+              file="Source/Learn/EqSourceClassifier.cpp"/>
+        <FILE id="LnCtlH" name="EqLearnController.h" compile="0" resource="0"
+              file="Source/Learn/EqLearnController.h"/>
+        <FILE id="LnCtlC" name="EqLearnController.cpp" compile="1" resource="0"
+              file="Source/Learn/EqLearnController.cpp"/>
       </GROUP>
       <FILE id="QUHsxC" name="RotaryImageKnob1.cpp" compile="1" resource="0"
             file="Source/RotaryImageKnob1.cpp"/>
