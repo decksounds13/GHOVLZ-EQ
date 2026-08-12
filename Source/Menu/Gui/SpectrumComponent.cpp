@@ -3,7 +3,6 @@
 #include "../../EqEditor.h"
 #include "../../MainComponent.h"
 #include "../../ModuleLookPresets.h"
-#include "../../Spectral/SpectralMethod.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
 
@@ -62,22 +61,7 @@ SpectrumComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (blockSizeLabel);
     addAndMakeVisible (blockSizeCombo);
     blockSizeAttachment = std::make_unique<ComboBoxAttachment> (treeState, "BLOCK_ID", blockSizeCombo);
-
-    spectralMethodLabel.setText ("Spectral Method", juce::dontSendNotification);
-    styleSettingsCombo (spectralMethodCombo);
-    {
-        const auto names = SpectralMethod::choiceNames();
-        for (int i = 0; i < names.size(); ++i)
-            spectralMethodCombo.addItem (names[i], i + 1);
-    }
-    spectralMethodCombo.setTooltip (
-        "Lattice: zero-latency IIR bandpass bank (default). "
-        "FFT: STFT magnitude GR with reported latency (~2048 samples). "
-        "Does not change Match or Side Check.");
-    addAndMakeVisible (spectralMethodLabel);
-    addAndMakeVisible (spectralMethodCombo);
-    spectralMethodAttachment = std::make_unique<ComboBoxAttachment> (
-        treeState, SpectralMethod::paramId(), spectralMethodCombo);
+    // Spectral Method (Lattice|FFT GR) removed — EQ dynamics Deny; Analyzer is display-only.
 
     refreshLabel.setText ("Refresh", juce::dontSendNotification);
     styleSlider (refreshSlider);
@@ -279,7 +263,6 @@ SpectrumComponent::Content::Content (SharedResources& resources,
 
     styleLabel (titleLabel);
     styleLabel (blockSizeLabel);
-    styleLabel (spectralMethodLabel);
     styleLabel (refreshLabel);
     styleLabel (avgLabel);
     styleLabel (curveSmoothLabel);
@@ -342,7 +325,6 @@ SpectrumComponent::Content::Content (SharedResources& resources,
 SpectrumComponent::Content::~Content()
 {
     blockSizeCombo.setLookAndFeel (nullptr);
-    spectralMethodCombo.setLookAndFeel (nullptr);
     curveSmoothCombo.setLookAndFeel (nullptr);
     treeState.removeParameterListener ("SPECTRUM_RESOLUTION_ID", this);
 }
@@ -560,15 +542,6 @@ void SpectrumComponent::Content::resized()
     area.removeFromTop (6);
 
     layoutComboRow (area, blockSizeLabel, blockSizeCombo);
-
-    // Wider than default combo row so "Lattice (zero latency)" never ellipsizes.
-    {
-        spectralMethodLabel.setBounds (area.removeFromTop (kSpectrumLabelH));
-        area.removeFromTop (kSpectrumLabelGap);
-        spectralMethodCombo.setBounds (
-            area.removeFromTop (kSpectrumSliderH).removeFromLeft (juce::jmin (320, area.getWidth())));
-        area.removeFromTop (kSpectrumRowGap);
-    }
 
     layoutSliderRow (area, refreshLabel, refreshSlider);
     layoutSliderRow (area, avgLabel, avgSlider);
