@@ -2,6 +2,8 @@
 
 #include <JuceHeader.h>
 #include "ParticleForceModule.h"
+#include "ParticleEmitterTypes.h"
+#include "ParticleNodeGraph/ParticleAttributes.h"
 #include <vector>
 #include <cstdint>
 #include <array>
@@ -15,6 +17,12 @@ enum class ParticleModSource : int
 {
     none = 0,
     amplitude,
+    /**
+        Per-particle FFT intensity 0–1 (same axis as the colour ramp / mesh height).
+        1 = hottest bins (top of intensity ramp). Live-sampled from the particle's
+        history column + freq bin so it can drive animation after birth.
+        Prefs id kept as binDb for compatibility.
+    */
     binDb,
     binFreq,
     ageNorm,
@@ -23,11 +31,21 @@ enum class ParticleModSource : int
     random1,
     random2,
     random3,
-    /** Birth velocity (Float = speed magnitude; Vec3 dests sample XYZ). */
+    /**
+        Birth velocity as Vec3 (world units/s). Float dests use speed magnitude.
+        Vec3 dests (e.g. Init vel) sample X/Y/Z independently.
+    */
     initVel,
     /** Stable per-particle id hashed to 0–1 (unique for each birth). */
-    particleId
+    particleId,
+    /** Birth velocity single axis (Float) — world units/s. */
+    initVelX,
+    initVelY,
+    initVelZ
 };
+
+/** Alias — same source as binDb (FFT intensity / colour-ramp axis). */
+inline constexpr ParticleModSource ParticleModSource_fftStrength = ParticleModSource::binDb;
 
 enum class ParticleModDest : int
 {
@@ -56,7 +74,11 @@ enum class ParticleModDest : int
     forceCurlSpeed,
     forceTurbulence,
     /** Vec3 birth linear velocity (world units/s). Float sources broadcast to XYZ. */
-    initVel = 22
+    initVel = 22,
+    /** Float birth velocity per axis (world units/s). */
+    initVelX = 23,
+    initVelY = 24,
+    initVelZ = 25
 };
 
 enum class ParticleModOp : int
@@ -83,6 +105,10 @@ inline ParticleValueType particleModDestType (ParticleModDest d) noexcept
         case ParticleModDest::initRotZ_legacy:
         case ParticleModDest::initVel:
             return ParticleValueType::Vec3;
+        case ParticleModDest::initVelX:
+        case ParticleModDest::initVelY:
+        case ParticleModDest::initVelZ:
+        case ParticleModDest::riseSpeed: // legacy alias of Init vel Y
         default:
             return ParticleValueType::Float;
     }
@@ -104,7 +130,10 @@ inline ParticleValueType particleModSourceType (ParticleModSource s) noexcept
     switch (s)
     {
         case ParticleModSource::initVel:
-            return ParticleValueType::Vec3; // XYZ available; Float dests use speed
+            return ParticleValueType::Vec3; // full XYZ; Float dests use speed magnitude
+        case ParticleModSource::initVelX:
+        case ParticleModSource::initVelY:
+        case ParticleModSource::initVelZ:
         case ParticleModSource::particleId:
         default:
             return ParticleValueType::Float;
@@ -117,7 +146,7 @@ inline const char* particleModSourceBaseName (ParticleModSource s) noexcept
     {
         case ParticleModSource::none:      return "None";
         case ParticleModSource::amplitude: return "Amplitude";
-        case ParticleModSource::binDb:     return "Bin dB";
+        case ParticleModSource::binDb:     return "FFT strength";
         case ParticleModSource::binFreq:   return "Bin freq";
         case ParticleModSource::ageNorm:   return "Age";
         case ParticleModSource::history:   return "History";
@@ -126,6 +155,9 @@ inline const char* particleModSourceBaseName (ParticleModSource s) noexcept
         case ParticleModSource::random2:   return "Random 2";
         case ParticleModSource::random3:   return "Random 3";
         case ParticleModSource::initVel:   return "Init vel";
+        case ParticleModSource::initVelX:  return "Init vel X";
+        case ParticleModSource::initVelY:  return "Init vel Y";
+        case ParticleModSource::initVelZ:  return "Init vel Z";
         case ParticleModSource::particleId: return "Particle id";
         default:                           return "Source";
     }
@@ -166,6 +198,9 @@ inline const char* particleModDestBaseName (ParticleModDest d) noexcept
         case ParticleModDest::forceCurlSpeed:   return "Force curl speed";
         case ParticleModDest::forceTurbulence:  return "Force turbulence";
         case ParticleModDest::initVel:          return "Init vel";
+        case ParticleModDest::initVelX:         return "Init vel X";
+        case ParticleModDest::initVelY:         return "Init vel Y";
+        case ParticleModDest::initVelZ:         return "Init vel Z";
         default:                                return "Dest";
     }
 }
@@ -512,10 +547,24 @@ private:
     void registerAlive (int index) noexcept;
     /** Kill excess alive particles (settled / oldest first) down to maxAliveBudget. */
     void enforceAliveBudget() noexcept;
-    /** Spawn on the playhead. binF is continuous in [0, meshH-1] (interpolated). */
+    /** Spawn on the playhead column only (meshW-1). binF continuous in [0, meshH-1]. */
     void spawnAtPlayhead (float binF, float lifespanBase, float sizeBase, float spawnJitterScale);
+    /** Spawn on a specific history column (playhead = meshW-1). */
+    void spawnAtColumn (int col, float binF, float lifespanBase, float sizeBase, float spawnJitterScale);
+    /** Shared birth path for all emitters (spectrogram + geometric). */
+    void finalizeSpawn (const ParticleSpawnSample& sample, float lifespanBase,
+                        float sizeBase, float spawnJitterScale);
+    /** Try one birth from the configured emitter type. Returns true if a particle was created. */
+    bool trySpawnOne (float lifespanBase, float sizeBase, float spawnJitterScale,
+                      float binFOrNeg1);
+    /** Point emitter: origin + cone spray velocity. */
+    bool samplePointEmitter (ParticleSpawnSample& out) noexcept;
+    /** Random unit direction inside a cone (yaw/pitch aim + half-angle spread). */
+    void sampleSprayDirection (float& outX, float& outY, float& outZ) noexcept;
     /** Energy-weighted random binF on the playhead (louder bands emit more). */
     float pickPlayheadBinF() noexcept;
+    /** Energy-weighted random (col, binF) across the full history mesh. */
+    void pickHistorySpawn (int& outCol, float& outBinF) noexcept;
     float sampleColumn (int bin, int col,
                         float& outR, float& outG, float& outB, float& outZ,
                         float& outDb01, float& outFreq01,
@@ -544,6 +593,14 @@ private:
                          float& rotX, float& rotY, float& rotZ,
                          const FrameSources& frame) noexcept;
     void applyUpdateMods (Particle& p, const FrameSources& frame) noexcept;
+    /** Sample a graph attribute as 0..1 float (or magnitude for vectors). */
+    float sampleGraphAttr01 (ParticleNodeGraph::AttrId id, const Particle& p,
+                             const FrameSources& frame) const noexcept;
+    /** Returns false if particle should be culled. */
+    bool passesGraphFilters (const Particle& p, bool atSpawn,
+                             const FrameSources& frame) const noexcept;
+    void applyGraphColourRamps (Particle& p, bool atSpawn,
+                                const FrameSources& frame) const noexcept;
     void applyColourMods (Particle& p, ParticleModDest dest, float src, ParticleModOp op, float amount) const;
     static void setHue (float& r, float& g, float& b, float hue01) noexcept;
     void integrateForceStack (Particle& p, const ForceModScales& scales, float dt) noexcept;

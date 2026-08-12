@@ -22,7 +22,7 @@ namespace
             + hypothesisId + "\",\"location\":\"" + location + "\",\"message\":\"" + message
             + "\",\"data\":" + dataJson + ",\"timestamp\":"
             + juce::String ((juce::int64) juce::Time::currentTimeMillis()) + "}\n";
-        // Absolute path — DAW CWD is unreliable for relative logs.
+        // Absolute path - DAW CWD is unreliable for relative logs.
         juce::File ("C:/Users/jerem/Desktop/DecksoundsParametricEq/ParametricEqProject/debug-70daa9.log")
             .appendText (line, false, false);
         juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
@@ -140,11 +140,11 @@ namespace
         uniform float uSssThickScale;
         uniform float uSssMaxThick;
         // Audio-level mod matrix (CPU sets which channels; flags are 0/1).
-        // factor = mix(1+min, 1+max, level); min/max are fractional (±1 = ±100%).
+        // factor = mix(1+min, 1+max, level); min/max are fractional (+/-1 = +/-100%).
         uniform float uAudioLevel;
         uniform float uAudioMin;
         uniform float uAudioMax;
-        uniform float uAudioModBright; // ramp brightness only — never lighting amount
+        uniform float uAudioModBright; // ramp brightness only - never lighting amount
         uniform float uAudioModLitAmt;
         uniform float uAudioModSpec;
         uniform float uAudioModRim;
@@ -154,7 +154,7 @@ namespace
         uniform float uPlayheadWallX;
         uniform float uAntiPlayheadWallX;
 
-        // Frequency axis u (0=low…1=high) → height-map V (mesh-row CDF).
+        // Frequency axis u (0=low...1=high) -> height-map V (mesh-row CDF).
         // Boost only above pivot: w=1 for u<=P, else 1+B*((u-P)/(1-P))^2.
         float meshTFromFreqAxis (float uAxis)
         {
@@ -174,7 +174,7 @@ namespace
         float sampleHeightNorm (vec2 xz)
         {
             float texU = clamp (xz.x * 0.5 + 0.5, 0.001, 0.999);
-            // World Z → frequency axis u (0=low, 1=high), matching CPU mesh build.
+            // World Z -> frequency axis u (0=low, 1=high), matching CPU mesh build.
             float uAxis = (uReverseFreq > 0.5)
                             ? clamp (xz.y * 0.5 + 0.5, 0.0, 1.0)
                             : clamp ((1.0 - xz.y) * 0.5, 0.0, 1.0);
@@ -189,7 +189,7 @@ namespace
         }
 
         /**
-            Heightfield self-shadow — horizon + IQ soft ray-march.
+            Heightfield self-shadow - horizon + IQ soft ray-march.
             Bias fights acne; Softness widens the terminator / penumbra;
             Quality sets sample density.
         */
@@ -257,7 +257,7 @@ namespace
                 if (abs (p.x) > 1.08 || abs (p.z) > 1.08 || p.y > uMeshHeight * 1.35)
                     break;
                 float h = p.y - sampleHeight (p.xz);
-                // Soft contact — no hard lit=0 cliff at the terminator.
+                // Soft contact - no hard lit=0 cliff at the terminator.
                 float softHit = smoothstep (-heightBias * mix (0.15, 0.8, soft01),
                                             heightBias * mix (0.8, 2.4, soft01),
                                             h);
@@ -439,7 +439,7 @@ namespace
                           * contrast, 0.0, 1.0);
         }
 
-        /** Closed solid: optical depth top→base + ridge taps. */
+        /** Closed solid: optical depth top->base + ridge taps. */
         float closedThickness (vec3 pos)
         {
             float h0 = sampleHeight (pos.xz);
@@ -517,13 +517,13 @@ namespace
             }
 
 )"
-        R"(            // Self/contact shadows are key-light effects — when lighting is off they are
+        R"(            // Self/contact shadows are key-light effects - when lighting is off they are
             // forced to 1.0 via uniforms; AO may still apply (ambient, own toggle).
             float shade = shadow * ao * contact;
 
             // Audio-level mod matrix: body always; closed playhead / anti-playhead opt-in.
-            // rawFactor = mix(1+min%, 1+max%, level); both % at 0 → 1 (no change).
-            // Excluded walls keep factor=1 (base look) — NOT the silence endpoint.
+            // rawFactor = mix(1+min%, 1+max%, level); both % at 0 -> 1 (no change).
+            // Excluded walls keep factor=1 (base look) - NOT the silence endpoint.
             float factor = 1.0;
             {
                 float lvl = clamp (uAudioLevel, 0.0, 1.0);
@@ -560,7 +560,7 @@ namespace
             if (baseAmt < 1.0e-4)
             {
                 // Flat / unlit (gizmo, grid). Optional gizmo x-ray: only fragments
-                // inside the sphere, at reduced alpha — sphere itself stays opaque.
+                // inside the sphere, at reduced alpha - sphere itself stays opaque.
                 float a = 1.0;
                 if (uGizmoXray > 0.5)
                 {
@@ -599,15 +599,15 @@ namespace
             vec3 specular = (D * G * F) / max (4.0 * NdotV * max (NdotL, 1.0e-4), 1.0e-4);
             specular *= specAmt * shadow * lightCol;
 
-            // Soft Lambert wrap on the mesh; lookdev sphere uses hard N·L so rough/spec read clearly.
+            // Soft Lambert wrap on the mesh; lookdev sphere uses hard N|L so rough/spec read clearly.
             float wrap = (uMatOverride > 0.5) ? NdotL : (NdotL * 0.72 + 0.28);
             vec3 kd = albedo * (1.0 - metal);
-            // Opt-in energy split — off preserves the legacy Look.
+            // Opt-in energy split - off preserves the legacy Look.
             if (uEnergyConserve > 0.5)
                 kd *= max (vec3 (0.0), vec3 (1.0) - F);
             vec3 diffuse = kd * (0.22 * ao + 0.78 * wrap * shadow) * lightCol;
 
-            // Dome / hemisphere fill — sky vs ground, or equirectangular HDRI.
+            // Dome / hemisphere fill - sky vs ground, or equirectangular HDRI.
             // Skipped for lookdev sphere so rough/specular aren't washed out by fill.
             float domeAmt = (uMatOverride > 0.5) ? 0.0 : clamp (uDomeStrength, 0.0, 1.0);
             if (uAudioModDome > 0.5)
@@ -683,7 +683,7 @@ namespace
         void main()
         {
             float r = length (vXZ);
-            // Soft elliptical contact stain — visible over Soft BG / EQ plate.
+            // Soft elliptical contact stain - visible over Soft BG / EQ plate.
             float a = (1.0 - smoothstep (0.15, 1.25, r));
             a *= a;
             a *= clamp (uStrength, 0.0, 1.0) * 0.85;
@@ -735,12 +735,12 @@ namespace
     //        15 = SVGF temporal + variance clamp (Modern), 16 = à-trous (Modern),
     //        17 = DOF CoC write (mesh only; sky = 0), 18 = luminance moments (Modern),
     //        19 = DOF CoC dilate (spread mesh CoC into soft-BG void),
-    //        20 = camera motion blur (depth reproject → screen velocity → gather).
+    //        20 = camera motion blur (depth reproject -> screen velocity -> gather).
     // Mode 6 uParam = DOF edge spill; mode 19 uParam = CoC dilate.
     // Mode 20: uStrength = shutter amount, uRadius = max blur px, uThreshold = quality.
     // Vendor denoisers (NVIDIA NRD/OptiX, Intel OIDN) are intentionally not used:
-    // they need D3D11/12, Vulkan, and/or CUDA/SYCL — incompatible with this JUCE
-    // OpenGL soft FBO→Image Spec3D path without a full API rewrite.
+    // they need D3D11/12, Vulkan, and/or CUDA/SYCL - incompatible with this JUCE
+    // OpenGL soft FBO->Image Spec3D path without a full API rewrite.
     constexpr const char* kPostFragmentShader = R"(
         #version 150
         in vec2 vUv;
@@ -776,10 +776,10 @@ namespace
         }
 
         // Thin-lens CoC (Marmoset/Substance-style). uRadius = focus (view Z),
-        // uStrength = lens power (fMm/35)² / (fStop/5.6) from CPU,
-        // uThreshold = quality (0/1/2 → base max blur px + sample count).
-        // Cleared / soft-BG depth is absence — always CoC 0.
-        // Soft silhouettes: dilate mesh CoC into the void (modes 17→19→6).
+        // uStrength = lens power (fMm/35)^2 / (fStop/5.6) from CPU,
+        // uThreshold = quality (0/1/2 -> base max blur px + sample count).
+        // Cleared / soft-BG depth is absence - always CoC 0.
+        // Soft silhouettes: dilate mesh CoC into the void (modes 17->19->6).
         float circleOfConfusionPx (float depth01)
         {
             if (depth01 >= 0.9995)
@@ -787,17 +787,17 @@ namespace
             float focus = max (uRadius, 0.05);
             float power = clamp (uStrength, 0.0, 16.0);
             float viewZ = max (linearViewZ (depth01), 0.05);
-            // Diopter difference — zero on the focus plane; F-Stop/focal length scale power.
+            // Diopter difference - zero on the focus plane; F-Stop/focal length scale power.
             float diopter = abs (1.0 / viewZ - 1.0 / focus);
             float baseBlur = (uThreshold < 0.5) ? 6.0
                            : ((uThreshold < 1.5) ? 10.0 : 14.0);
-            // Scene scale: power=1 (35mm @ f/5.6) ≈ former aperture ~0.35 look.
+            // Scene scale: power=1 (35mm @ f/5.6) ~ former aperture ~0.35 look.
             float coc = power * diopter * baseBlur * 12.0;
             float maxBlur = baseBlur * mix (1.0, 6.0, clamp (power * 0.35, 0.0, 1.0));
             return clamp (coc, 0.0, maxBlur);
         }
 
-        // Vogel disc (golden-angle) — even circular bokeh taps.
+        // Vogel disc (golden-angle) - even circular bokeh taps.
         vec2 vogelDisk (int i, int n)
         {
             float r = sqrt ((float (i) + 0.5) / float (n));
@@ -849,9 +849,9 @@ namespace
 )"
         R"(            if (uMode == 6)
             {
-                // Gather DOF — disc samples weighted by neighbour CoC.
-                // Soft BG: sky CoC is 0; uAux holds mesh CoC dilated into the void (17→19).
-                // Dilated CoC applies to SKY only — never inflate in-focus mesh/labels.
+                // Gather DOF - disc samples weighted by neighbour CoC.
+                // Soft BG: sky CoC is 0; uAux holds mesh CoC dilated into the void (17->19).
+                // Dilated CoC applies to SKY only - never inflate in-focus mesh/labels.
                 //
                 // Edge Dilate (mode 19) = how far CoC spreads into the void (radius only).
                 // Edge Spill (uParam) = how strongly mesh colour bleeds onto sky.
@@ -877,7 +877,7 @@ namespace
 
                 int nSamples = (uThreshold < 0.5) ? 8
                              : ((uThreshold < 1.5) ? 16 : 24);
-                // Straight (non-premultiplied) average — premult + unpremult was creating
+                // Straight (non-premultiplied) average - premult + unpremult was creating
                 // bright silhouette rings when soft-BG alpha and mesh alpha mixed.
                 vec3 accRgb = src.rgb;
                 float accA = src.a;
@@ -924,7 +924,7 @@ namespace
                 return;
             }
 )"
-        R"(            // SSR — screen-space reflection march.
+        R"(            // SSR - screen-space reflection march.
             // uStrength = mix, uRadius = march distance, uThreshold = quality,
             // uParam = hit thickness.
             // uInvProj packing:
@@ -960,7 +960,7 @@ namespace
                 }
                 if (! useMeshN)
                 {
-                    // Depth derivatives are blocky on curved surfaces — last resort.
+                    // Depth derivatives are blocky on curved surfaces - last resort.
                     vec3 ddx = viewPosFromDepthUv (vUv + vec2 (texel.x, 0.0), tanHalfW, tanHalfH) - viewPos;
                     vec3 ddy = viewPosFromDepthUv (vUv + vec2 (0.0, texel.y), tanHalfW, tanHalfH) - viewPos;
                     nrm = normalize (cross (ddx, ddy));
@@ -970,7 +970,7 @@ namespace
 
                 vec3 viewDir = normalize (viewPos);
                 vec3 reflDir = normalize (reflect (viewDir, nrm));
-                // Facing away from camera / into surface — no useful SSR.
+                // Facing away from camera / into surface - no useful SSR.
                 if (dot (reflDir, -viewDir) < 0.02)
                 {
                     fragColour = src;
@@ -1066,7 +1066,7 @@ namespace
                 float metalBoost = mix (1.0, 1.0 + metalBias * 1.5, metal);
                 float strength = clamp (uStrength, 0.0, 1.0);
 
-                // Soft hit sample — always a few taps (kills blocky point-sample SSR);
+                // Soft hit sample - always a few taps (kills blocky point-sample SSR);
                 // roughness widens the cone further.
                 vec3 refl = hitCol;
                 if (found)
@@ -1142,7 +1142,7 @@ namespace
                 vec3 t = normalize (cross (up, nrm));
                 vec3 b = cross (nrm, t);
 
-                // Quality: 0=Low 6×4, 1=Med 10×6, 2=High 14×8, 3=Ultra 20×12
+                // Quality: 0=Low 6x4, 1=Med 10x6, 2=High 14x8, 3=Ultra 20x12
                 // Extra march steps at high radius so step length stays small (avoids
                 // discrete "ghost sphere" copies on receivers).
                 int nSamples = (uThreshold < 0.5) ? 6
@@ -1184,11 +1184,11 @@ namespace
                             break;
 
                         float sceneZ = linearViewZ (depthSample (uv2));
-                        // Keep hit slab tight at high radius — wide slabs stamp many ghosts.
+                        // Keep hit slab tight at high radius - wide slabs stamp many ghosts.
                         float thick = mix (0.05, 0.09, radius01);
                         if (sceneZ < z - 0.008 && sceneZ > z - thick)
                         {
-                            // Soft tap around hit UV — thin emissive lines (gizmo) otherwise
+                            // Soft tap around hit UV - thin emissive lines (gizmo) otherwise
                             // become a star of discrete dashes on the receiver.
                             vec2 hitTexel = 1.0 / max (uResolution, vec2 (1.0));
                             vec3 rad = vec3 (0.0);
@@ -1234,9 +1234,9 @@ namespace
             }
             if (uMode == 10)
             {
-                // Bilateral denoise on GI buffer (uTex). uStrength = amount 0–1.
-                // uParam = step scale in texels (à-trous style; 1,2,4… merges vogel "stars").
-                // Depth weights stay loose — tight bilateral fails on curved receivers
+                // Bilateral denoise on GI buffer (uTex). uStrength = amount 0-1.
+                // uParam = step scale in texels (à-trous style; 1,2,4... merges vogel "stars").
+                // Depth weights stay loose - tight bilateral fails on curved receivers
                 // (sphere) and leaves the sample star intact.
                 float centerD = depthSample (vUv);
                 vec3 center = src.rgb;
@@ -1341,7 +1341,7 @@ namespace
             {
                 // Edge-aware à-trous. uTex=GI, uDepth=scene depth, uAux=normals (encoded),
                 // uStrength=amount, uParam=step in texels.
-                // uInvProj[0][0] > 0.5 → use guide normals from uAux.
+                // uInvProj[0][0] > 0.5 -> use guide normals from uAux.
                 float centerD = depthSample (vUv);
                 vec3 center = src.rgb;
                 if (centerD > 0.999 || uStrength < 1.0e-4)
@@ -1482,7 +1482,7 @@ namespace
             }
             if (uMode == 17)
             {
-                // DOF CoC write — mesh only (sky / cleared depth → 0).
+                // DOF CoC write - mesh only (sky / cleared depth -> 0).
                 // Store CoC / maxBlur so RGBA8 ping-pong FBOs don't clamp pixel radii.
                 float baseBlur = (uThreshold < 0.5) ? 6.0
                                : ((uThreshold < 1.5) ? 10.0 : 14.0);
@@ -1494,7 +1494,7 @@ namespace
             }
             if (uMode == 19)
             {
-                // DOF CoC dilate — max-filter spreads mesh CoC into the soft-BG void.
+                // DOF CoC dilate - max-filter spreads mesh CoC into the soft-BG void.
                 // Radius scales with dilate only (was mix(1, maxBlur) so dilate=0 still
                 // spread 1px and double-dipped with spill in mode 6).
                 float dilateAmt = clamp (uParam, 0.0, 1.0);
@@ -1526,8 +1526,8 @@ namespace
             if (uMode == 20)
             {
                 // UE-style camera motion blur: reconstruct view pos from depth,
-                // reproject with previous view-projection → screen velocity, gather.
-                // uStrength = shutter (0–1), uRadius = max streak (px), uThreshold = quality.
+                // reproject with previous view-projection -> screen velocity, gather.
+                // uStrength = shutter (0-1), uRadius = max streak (px), uThreshold = quality.
                 float depth = depthSample (vUv);
                 if (depth >= 0.9995)
                 {
@@ -1570,7 +1570,7 @@ namespace
                 float centerZ = linearViewZ (depth);
                 vec3 acc = src.rgb;
                 float wsum = 1.0;
-                // Centered gather along ±velocity (reconstruction-style).
+                // Centered gather along +/-velocity (reconstruction-style).
                 for (int i = 1; i < 24; ++i)
                 {
                     if (i >= nSamples)
@@ -1583,7 +1583,7 @@ namespace
                     if (d2 >= 0.9995)
                         continue;
                     float z2 = linearViewZ (d2);
-                    // Depth rejection — reduce ghosting across silhouettes.
+                    // Depth rejection - reduce ghosting across silhouettes.
                     float dz = abs (z2 - centerZ);
                     float w = exp (-dz * 6.0);
                     if (w < 0.02)
@@ -1595,7 +1595,7 @@ namespace
                 return;
             }
 
-            // SSAO — depth-delta taps (stable without perfect inv-projection).
+            // SSAO - depth-delta taps (stable without perfect inv-projection).
             float depth = depthSample (vUv);
             if (depth > 0.999)
             {
@@ -1635,7 +1635,7 @@ namespace
         void main()
         {
             vTex = texCoord;
-            // World-space billboard — same depth path as the mesh so DOF CoC matches.
+            // World-space billboard - same depth path as the mesh so DOF CoC matches.
             gl_Position = projectionMatrix * viewMatrix * vec4 (position, 1.0);
         }
     )";
@@ -1705,9 +1705,9 @@ Spectrogram3DComponent::GlHost::GlHost (Spectrogram3DComponent& o)
     setInterceptsMouseClicks (true, true);
     setWantsKeyboardFocus (true);
 
-    // 4.3 Core enables compute shaders for optional GPU particle integrate.
-    // Existing GLSL 150 mesh/post paths remain valid; GPU sim feature-gates at runtime.
-    openGLContext.setOpenGLVersionRequired (juce::OpenGLContext::openGL4_3);
+    // Prefer 3.2 (GLSL 150 mesh/post). GPU particle compute probes for 4.3 at runtime.
+    // Requiring 4.3 at attach time often fails or hangs when a game already owns the GPU.
+    openGLContext.setOpenGLVersionRequired (juce::OpenGLContext::openGL3_2);
     openGLContext.setRenderer (this);
     openGLContext.setComponentPaintingEnabled (false);
     applyPixelFormat();
@@ -1723,30 +1723,54 @@ void Spectrogram3DComponent::GlHost::applyPixelFormat()
     const int samples = (int) owner.msaaLevel;
     openGLContext.setMultisamplingEnabled (samples > 0);
     juce::OpenGLPixelFormat pf (8, 8, 24, 8);
-    pf.multisamplingLevel = (uint8_t) juce::jlimit (0, 16, samples);
+    // Cap MSAA under contention - high MSAA + exclusive game = attach stalls.
+    pf.multisamplingLevel = (uint8_t) juce::jlimit (0, 8, samples);
     openGLContext.setPixelFormat (pf);
+}
+
+void Spectrogram3DComponent::GlHost::resetAttachState() noexcept
+{
+    attachPending = false;
+    contextFailed = false;
+    attachAttempts = 0;
 }
 
 void Spectrogram3DComponent::GlHost::setActive (bool shouldBeActive) noexcept
 {
     setVisible (shouldBeActive);
     if (shouldBeActive)
+    {
+        // Fresh attempt each time Spec3D is shown (e.g. after closing a game).
+        resetAttachState();
         requestAttachAsync();
+    }
 }
 
 void Spectrogram3DComponent::GlHost::requestAttachAsync()
 {
-    if (openGLContext.isAttached() || attachPending)
+    if (openGLContext.isAttached() || attachPending || contextFailed)
         return;
 
+    if (attachAttempts >= kMaxAttachAttempts)
+    {
+        contextFailed = true;
+        owner.repaint();
+        return;
+    }
+
     attachPending = true;
+    ++attachAttempts;
+
+    // Back off when the GPU is busy (game running): avoid flooding callAsync.
+    const int delayMs = juce::jmin (750, (attachAttempts - 1) * 75);
+
     juce::Component::SafePointer<GlHost> safe (this);
-    juce::MessageManager::callAsync ([safe]
+    juce::Timer::callAfterDelay (delayMs, [safe]
     {
         if (safe == nullptr)
             return;
         safe->attachPending = false;
-        if (! safe->isVisible())
+        if (! safe->isVisible() || safe->contextFailed)
             return;
         safe->attachNow();
     });
@@ -1754,7 +1778,7 @@ void Spectrogram3DComponent::GlHost::requestAttachAsync()
 
 void Spectrogram3DComponent::GlHost::attachNow()
 {
-    if (! isVisible() || openGLContext.isAttached())
+    if (! isVisible() || openGLContext.isAttached() || contextFailed)
         return;
 
     if (getPeer() == nullptr || getWidth() < 2 || getHeight() < 2)
@@ -1764,8 +1788,46 @@ void Spectrogram3DComponent::GlHost::attachNow()
     }
 
     applyPixelFormat();
-    openGLContext.attachTo (*this);
+
+    // attachTo can block under GPU contention; we already deferred via callAfterDelay.
+    // If it does not attach, retry with backoff rather than spinning forever.
+    try
+    {
+        openGLContext.attachTo (*this);
+    }
+    catch (...)
+    {
+        contextFailed = true;
+        owner.repaint();
+        return;
+    }
+
+    if (! openGLContext.isAttached())
+    {
+        requestAttachAsync();
+        owner.repaint();
+        return;
+    }
+
+    attachAttempts = 0;
     openGLContext.triggerRepaint();
+    owner.repaint();
+
+    // If the driver never finishes init (stuck on "Initialising..."), fail soft - never hang the host.
+    juce::Component::SafePointer<GlHost> safe (this);
+    juce::Timer::callAfterDelay (2500, [safe]
+    {
+        if (safe == nullptr || ! safe->isVisible() || safe->contextFailed)
+            return;
+        if (safe->glReady)
+            return;
+        // Drop a half-dead context so Ableton keeps running; user can retry Spec later.
+        if (safe->openGLContext.isAttached())
+            safe->openGLContext.detach();
+        safe->glReady = false;
+        safe->contextFailed = true;
+        safe->owner.repaint();
+    });
 }
 
 void Spectrogram3DComponent::GlHost::reattachWithCurrentFormat()
@@ -1773,8 +1835,12 @@ void Spectrogram3DComponent::GlHost::reattachWithCurrentFormat()
     applyPixelFormat();
     if (openGLContext.isAttached())
         openGLContext.detach();
+    glReady = false;
     if (isVisible())
+    {
+        resetAttachState();
         requestAttachAsync();
+    }
 }
 
 void Spectrogram3DComponent::GlHost::createShaders()
@@ -2237,7 +2303,7 @@ void Spectrogram3DComponent::GlHost::uploadMeshIfNeeded()
     meshIndexCount = (int) inds.size();
 
     // Top surface is always the first meshW*meshH verts (closed mesh appends a bottom copy).
-    // Must refresh every upload — a stale height map makes shadows/AO/SSS scroll vs the waterfall.
+    // Must refresh every upload - a stale height map makes shadows/AO/SSS scroll vs the waterfall.
     if (owner.meshW >= 2 && owner.meshH >= 2
         && (int) verts.size() >= owner.meshW * owner.meshH)
         uploadHeightMap (verts, owner.meshW, owner.meshH);
@@ -2251,7 +2317,7 @@ void Spectrogram3DComponent::GlHost::ensureFloorGeometry()
     const bool logFreq = (owner.dataSource != nullptr) ? owner.dataSource->isLogFrequencyAxis() : true;
     const bool soft = owner.usesSoftComposite();
     const bool reverse = owner.reverseFrequencyAxis;
-    // Epoch 6: soft — no perimeter, ~1px interior grid, ticks are billboards.
+    // Epoch 6: soft - no perimeter, ~1px interior grid, ticks are billboards.
     constexpr int kFloorRibbonEpoch = 6;
 
     if (floorVbo != 0 && sr == floorGridSr && logFreq == floorGridLog && soft == floorGridSoftBg
@@ -2274,7 +2340,7 @@ void Spectrogram3DComponent::GlHost::rebuildFloorGeometry()
     constexpr float gridY = -0.010f;
     const bool soft = owner.usesSoftComposite();
     // Soft: thin ribbons (MSAA resolves edges). Solid keeps slightly wider strokes for DOF gather.
-    // Was 0.00055 — sub-pixel without reliable MSAA on post-stack chrome looked jagged.
+    // Was 0.00055 - sub-pixel without reliable MSAA on post-stack chrome looked jagged.
     const float kGridHalfW = soft ? 0.0011f : 0.0045f;
     // Solid-only thick ticks (soft uses camera-facing billboards in drawPlayheadTicks).
     constexpr float kTickHalfW = 0.00115f;
@@ -2330,7 +2396,7 @@ void Spectrogram3DComponent::GlHost::rebuildFloorGeometry()
 
     const float nyquist = (float) (floorGridSr * 0.5);
     const float maxHz = juce::jmin (SpectrogramComponent::kMaxDisplayHz, nyquist * 0.999f);
-    // Soft: inset from ±1 so freq/time strokes never form a rectangular border.
+    // Soft: inset from +/-1 so freq/time strokes never form a rectangular border.
     const float x0 = soft ? -0.98f : -1.0f;
     const float x1 = soft ?  0.98f :  1.0f;
     const float z0 = soft ? -0.98f : -1.0f;
@@ -2358,7 +2424,7 @@ void Spectrogram3DComponent::GlHost::rebuildFloorGeometry()
     constexpr int timeDiv = 8;
     for (int i = 0; i <= timeDiv; ++i)
     {
-        // Soft: skip outer time edges (i==0 / i==timeDiv) — those were the L/R border.
+        // Soft: skip outer time edges (i==0 / i==timeDiv) - those were the L/R border.
         if (soft && (i == 0 || i == timeDiv))
             continue;
         const float x = (float) i / (float) timeDiv * 2.0f - 1.0f;
@@ -2367,7 +2433,7 @@ void Spectrogram3DComponent::GlHost::rebuildFloorGeometry()
         pushRibbon (x, gridY, z0, x, gridY, z1, half, a, a, a + 0.02f);
     }
 
-    // Outer frame — solid only. Soft: never draw a perimeter (NO BORDER).
+    // Outer frame - solid only. Soft: never draw a perimeter (NO BORDER).
     if (! soft)
     {
         pushRibbon (-1.0f, gridY, -1.0f, 1.0f, gridY, -1.0f, kGridHalfW, 0.7f, 0.72f, 0.75f);
@@ -2653,7 +2719,7 @@ void Spectrogram3DComponent::GlHost::uploadHeightMap (const std::vector<Vertex>&
     if (w < 2 || h < 2 || (int) verts.size() < w * h)
         return;
 
-    // RGBA8 — universally sampleable on host GL drivers (VST wrappers often choke on R32F).
+    // RGBA8 - universally sampleable on host GL drivers (VST wrappers often choke on R32F).
     std::vector<juce::uint8> heights ((size_t) w * (size_t) h * 4u);
     const float invH = 1.0f / juce::jmax (1.0e-5f, owner.meshHeight);
     for (int z = 0; z < h; ++z)
@@ -3061,7 +3127,7 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
         glBindFramebuffer (GL_FRAMEBUFFER, softMsaaFbo);
         glViewport (0, 0, w, h);
         // Transparent clear, then a single soft plate (drawSoftTint) so DOF edge
-        // dilate/spill (modes 17→19→6) can blur OOF mesh into Soft BG void colour.
+        // dilate/spill (modes 17->19->6) can blur OOF mesh into Soft BG void colour.
         // Paint must not pre-fill a second translucent plate over this image.
         glClearColor (0.0f, 0.0f, 0.0f, 0.0f);
         glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -3085,7 +3151,7 @@ void Spectrogram3DComponent::GlHost::renderSoftComposite()
     ++gSoftFrameCounter;
     // #endregion
     // Mesh + lookdev sphere + gizmo into SSGI/SSR (gizmo bounce is intentional).
-    // Grid / ticks / labels stay deferred — bright chrome must not seed GI/bloom.
+    // Grid / ticks / labels stay deferred - bright chrome must not seed GI/bloom.
     drawContactShadow();
     drawSpectrogramSurface();
     drawDebugSphere();
@@ -3156,7 +3222,7 @@ void Spectrogram3DComponent::GlHost::setLightingUniforms (juce::OpenGLShaderProg
         sunTan = juce::jlimit (0.08f, 0.75f, lightWorld.y / horiz);
     }
 
-    // Shadows follow the key light — disabled when Lighting is off.
+    // Shadows follow the key light - disabled when Lighting is off.
     const float selfShadow = (owner.lightingEnabled && owner.selfShadowEnabled)
                                  ? owner.selfShadowStrength : 0.0f;
     const float aoAmt = owner.ssaoEnabled ? owner.ssaoStrength : 0.0f;
@@ -3443,7 +3509,7 @@ void Spectrogram3DComponent::GlHost::drawGroundAndGrid()
                                stride, (const void*) (sizeof (float) * 6));
     }
 
-    // Ground plane + grid ribbons (all triangles — ribbons replace GL_LINES for clean DOF).
+    // Ground plane + grid ribbons (all triangles - ribbons replace GL_LINES for clean DOF).
     if (floorVertexCount > 0)
         glDrawArrays (GL_TRIANGLES, 0, floorVertexCount);
 
@@ -3476,7 +3542,7 @@ void Spectrogram3DComponent::GlHost::drawPlayheadTicks()
     const int viewH = juce::jmax (1, viewRect.getHeight());
     constexpr float kTanHalfW = 1.0f / 1.5f;
     const float tanHalfH = kTanHalfW * ((float) viewH / (float) viewW);
-    // ~1.5 px wide, ~9 px tall — screen-constant so MSAA/resolve edges stay thin.
+    // ~1.5 px wide, ~9 px tall - screen-constant so MSAA/resolve edges stay thin.
     const float ndcHalfW = 0.75f / (float) viewW;
     const float ndcHalfH = 4.5f / (float) viewH;
 
@@ -3634,7 +3700,7 @@ namespace
         };
         float fl = juce::jmax (1.0e-6f, std::sqrt (f.x * f.x + f.y * f.y + f.z * f.z));
         f.x /= fl; f.y /= fl; f.z /= fl;
-        // s = normalize(f × up)
+        // s = normalize(f x up)
         juce::Vector3D<float> s {
             f.y * up.z - f.z * up.y,
             f.z * up.x - f.x * up.z,
@@ -3642,7 +3708,7 @@ namespace
         };
         float sl = juce::jmax (1.0e-6f, std::sqrt (s.x * s.x + s.y * s.y + s.z * s.z));
         s.x /= sl; s.y /= sl; s.z /= sl;
-        // u = s × f
+        // u = s x f
         juce::Vector3D<float> u {
             s.y * f.z - s.z * f.y,
             s.z * f.x - s.x * f.z,
@@ -3748,7 +3814,7 @@ void Spectrogram3DComponent::GlHost::updateCascadeMatrices()
     };
     const float extent = juce::jmax (maxX - minX, juce::jmax (maxY - minY, maxZ - minZ)) * 0.55f;
 
-    // Fixed shadow distance — cascade count only subdivides this range.
+    // Fixed shadow distance - cascade count only subdivides this range.
     const float nearD = 0.15f;
     const float farD = juce::jmax (3.0f, owner.camera.distance + extent * 2.0f);
     const float expN = juce::jlimit (1.0f, 4.0f, owner.shadowCascadeDistributionExponent);
@@ -3807,7 +3873,7 @@ void Spectrogram3DComponent::GlHost::updateCascadeMatrices()
         const float p = (float) (i + 1) / (float) nCasc;
         const float logS = nearD * std::pow (farD / juce::jmax (nearD, 1.0e-3f), p);
         const float linS = nearD + (farD - nearD) * p;
-        const float w = 1.0f / expN; // higher exponent → more logarithmic (UE-like)
+        const float w = 1.0f / expN; // higher exponent -> more logarithmic (UE-like)
         const float splitFar = juce::jmap (w, linS, logS);
         cascadeSplitFar[i] = splitFar;
 
@@ -3837,7 +3903,7 @@ void Spectrogram3DComponent::GlHost::updateCascadeMatrices()
             minLZ = juce::jmin (minLZ, lp.z); maxLZ = juce::jmax (maxLZ, lp.z);
         };
 
-        // Frustum slice corners (near cascades → tighter ortho → more texels).
+        // Frustum slice corners (near cascades -> tighter ortho -> more texels).
         for (float nx : { -1.0f, 1.0f })
             for (float ny : { -1.0f, 1.0f })
             {
@@ -4094,7 +4160,7 @@ void Spectrogram3DComponent::GlHost::drawDebugSphere()
     setMaterialOverrideUniforms (true, owner.debugSphereAlbedo,
                                  owner.debugSphereRoughness, owner.debugSphereMetalness,
                                  owner.debugSphereSpecular);
-    // Sphere is not a heightfield — skip self-shadow / AO / contact; keep cast map.
+    // Sphere is not a heightfield - skip self-shadow / AO / contact; keep cast map.
     if (colourSelfShadowUniform != nullptr)
         colourSelfShadowUniform->set (0.0f);
     if (colourAoAmountUniform != nullptr)
@@ -4323,7 +4389,7 @@ void Spectrogram3DComponent::GlHost::drawDebugGizmo()
     colourShader->use();
     setCornerUniforms (*colourShader);
     setLightingUniforms (*colourShader);
-    // Unlit emissive axes (lookdev) — solid volume so SSGI can hit them evenly.
+    // Unlit emissive axes (lookdev) - solid volume so SSGI can hit them evenly.
     if (colourLightingAmountUniform != nullptr)
         colourLightingAmountUniform->set (0.0f);
     if (colourCastShadowUniform != nullptr)
@@ -4493,7 +4559,7 @@ void Spectrogram3DComponent::GlHost::drawMeshNormalsPass (int width, int height)
         return;
 
     // Reuse soft scene depth (read-only) so mesh + lookdev sphere layer correctly.
-    // Clear colour only — wiping depth would destroy the soft FBO depth attachment.
+    // Clear colour only - wiping depth would destroy the soft FBO depth attachment.
     ssgiNormalsFbo.makeCurrentRenderingTarget();
     glViewport (0, 0, width, height);
     if (softDepthTex != 0)
@@ -4602,7 +4668,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
         if (postInvProjUniform != nullptr)
         {
             // Mode 6 (DoF gather): edge spill is uParam (not mat packing).
-            // Mode 7 (SSR): lookdev pack (rough/fresnel/edge/roughInf, intensity/…).
+            // Mode 7 (SSR): lookdev pack (rough/fresnel/edge/roughInf, intensity/...).
             // SSGI gather: [0][0] = mesh-normals flag.
             float id[16] = {
                 1, 0, 0, 0,
@@ -4635,7 +4701,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
 
         glActiveTexture (GL_TEXTURE0);
         glBindTexture (GL_TEXTURE_2D, colourTex);
-        // SSR hit UVs are sub-pixel — linear colour sampling avoids blocky mirrors.
+        // SSR hit UVs are sub-pixel - linear colour sampling avoids blocky mirrors.
         if (mode == 7 && colourTex != 0)
         {
             glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -4678,7 +4744,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
     ++postFrameIndex;
 
     // AO / self-shadow / dome run in the mesh shader.
-    // Post order: SSGI → SSR → bloom → grid/ticks/labels → DOF → tonemap.
+    // Post order: SSGI -> SSR -> bloom -> grid/ticks/labels -> DOF -> tonemap.
     // #region agent log
     if ((gSoftFrameCounter % 30) == 1 && owner.ssgiEnabled)
     {
@@ -4705,7 +4771,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
 
         if (! advanced)
         {
-            // Gather → multi-scale bilateral (merges vogel-disk stars/copies) → composite.
+            // Gather -> multi-scale bilateral (merges vogel-disk stars/copies) -> composite.
             drawFs (9, &postFboA, sceneTex, softDepthTex, 0,
                     1.0f, owner.ssgiRadius, qualityF, 0.0f,
                     width, height, false);
@@ -4776,7 +4842,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
 
             if (modernDenoise)
             {
-                // Modern: temporal+moments (optional) → à-trous passes → composite.
+                // Modern: temporal+moments (optional) -> à-trous passes -> composite.
                 if (owner.ssgiTemporalEnabled && ssgiHistoryFbo.isValid() && ssgiMomentsFbo.isValid())
                 {
                     const GLuint histTex = ssgiHistoryValid
@@ -4863,7 +4929,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
                              : (owner.ssrQuality == ShadowQuality::high ? 2.0f : 3.0f));
         const GLuint sceneTex = (GLuint) softFbo.getTextureID();
 
-        // Smooth mesh + sphere view-normals — depth derivatives were the "8-bit" look.
+        // Smooth mesh + sphere view-normals - depth derivatives were the "8-bit" look.
         ensureSsgiSupportBuffers (width, height, false, false, true, false);
         GLuint normalsTex = 0;
         if (ssgiNormalsFbo.isValid())
@@ -4894,7 +4960,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
                 1.0f, 1.0f, 0.0f, 0.0f, width, height, false);
     }
 
-    // Camera motion blur (depth → velocity from prev view-proj). After bloom so
+    // Camera motion blur (depth -> velocity from prev view-proj). After bloom so
     // glow streaks with camera; before chrome overlays so labels stay readable.
     if (owner.motionBlurEnabled && motionPrevVpValid)
     {
@@ -4967,7 +5033,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
                 1.0f, 1.0f, 0.0f, 0.0f, width, height, false);
     }
 
-    // Grid / ticks / labels after SSGI+SSR+bloom — chrome must not feed GI/bloom.
+    // Grid / ticks / labels after SSGI+SSR+bloom - chrome must not feed GI/bloom.
     // Draw into the MSAA soft target when available so thin ribbons resolve cleanly
     // (drawing only on the resolved softFbo left jaggies even with MSAA "on").
     {
@@ -5024,7 +5090,7 @@ void Spectrogram3DComponent::GlHost::applySsaoAndBloom (int width, int height)
                              : (owner.dofQuality == ShadowQuality::high ? 2.0f : 1.0f);
         const float lensPower = owner.getDofLensPower();
         const GLuint sceneTex = (GLuint) softFbo.getTextureID();
-        // Mesh CoC → dilate into soft-BG void → gather (industry transparent-BG pattern).
+        // Mesh CoC -> dilate into soft-BG void -> gather (industry transparent-BG pattern).
         // uStrength = thin-lens power from F-Stop + Focal Length.
         drawFs (17, &postFboA, sceneTex, softDepthTex, 0,
                 lensPower, owner.dofFocusDistance, qualityF, 0.0f,
@@ -5083,7 +5149,7 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
     const auto viewRect = owner.getGlViewLocal();
     const int viewW = juce::jmax (1, viewRect.getWidth());
     const int viewH = juce::jmax (1, viewRect.getHeight());
-    // Match prior on-screen size (~52×22 px) at the label's view depth.
+    // Match prior on-screen size (~52x22 px) at the label's view depth.
     constexpr float kTanHalfW = 1.0f / 1.5f;
     const float tanHalfH = kTanHalfW * ((float) viewH / (float) viewW);
     const float ndcHalfW = 52.0f / (float) viewW;
@@ -5100,7 +5166,7 @@ void Spectrogram3DComponent::GlHost::drawFrequencyLabels()
 
     for (const auto& lb : owner.freqLabels)
     {
-        // Just past the playhead edge — slightly above the grid.
+        // Just past the playhead edge - slightly above the grid.
         constexpr float kLabelWorldX = 1.008f;
         constexpr float kLabelWorldY = -0.006f;
         const float ax = kLabelWorldX;
@@ -5374,7 +5440,7 @@ bool Spectrogram3DComponent::HitLayer::keyStateChanged (bool isKeyDown)
 //==============================================================================
 namespace
 {
-    /** Translucent grip for Soft BG / Direct2D — default corner resizer paints as a black box. */
+    /** Translucent grip for Soft BG / Direct2D - default corner resizer paints as a black box. */
     class SoftResizeCorner final : public juce::ResizableCornerComponent
     {
     public:
@@ -5404,7 +5470,7 @@ namespace
         }
     };
 
-    /** Top-right magnifying glass — click-drag vertically for wheel-equivalent zoom. */
+    /** Top-right magnifying glass - click-drag vertically for wheel-equivalent zoom. */
     class ZoomHandleOverlay final : public juce::Component
     {
     public:
@@ -5513,7 +5579,7 @@ Spectrogram3DComponent::~Spectrogram3DComponent()
 Spectrogram3DComponent::CameraState Spectrogram3DComponent::getFactoryCameraState() noexcept
 {
     // ¾ view from above: pitch = elevation above the floor horizon (not a tilted orbit axis).
-    // Orbit pivot = centre of the mesh volume; distance places the eye ~3× height above peaks.
+    // Orbit pivot = centre of the mesh volume; distance places the eye ~3x height above peaks.
     constexpr float pitchDeg = 35.0f;
     constexpr float lookY = kDefaultMeshHeight * 0.5f;
     constexpr float eyeHeightAbovePeaks = 3.0f * kDefaultMeshHeight;
@@ -5603,7 +5669,7 @@ void Spectrogram3DComponent::setMeshHeight (float heightWorld) noexcept
         camera.panY = lookAtY();
         defaultCamera.panY = lookAtY();
     }
-    // Rescale existing history in place — do not wipe meshDb.
+    // Rescale existing history in place - do not wipe meshDb.
     if (meshW >= 2 && meshH >= 2 && ! meshDb.empty() && lastBrightness >= 0.0f)
         rebuildVerticesFromMeshDb (lastBrightness, lastMinDb, lastMaxDb);
     markLookDirty();
@@ -5614,7 +5680,7 @@ void Spectrogram3DComponent::setActive (bool shouldBeActive) noexcept
     const bool changed = (active != shouldBeActive);
     active = shouldBeActive;
     setAlwaysOnTop (false);
-    // Always re-apply visibility — Scope layout clears it before place, and an
+    // Always re-apply visibility - Scope layout clears it before place, and an
     // early-return here used to leave the docked 3D pane permanently hidden.
     setVisible (active);
 
@@ -5626,6 +5692,8 @@ void Spectrogram3DComponent::setActive (bool shouldBeActive) noexcept
 
     if (active)
     {
+        if (glHost != nullptr)
+            glHost->resetAttachState();
         clampCamera();
         markSoftContentDirty();
         syncSpec3DTimerRate();
@@ -5634,6 +5702,13 @@ void Spectrogram3DComponent::setActive (bool shouldBeActive) noexcept
     else
     {
         stopTimer();
+        // Free GPU resources so a game / other app can reclaim the device.
+        if (glHost != nullptr)
+        {
+            if (glHost->getOpenGLContext().isAttached())
+                glHost->getOpenGLContext().detach();
+            glHost->resetAttachState();
+        }
     }
 
     repaint();
@@ -5642,7 +5717,7 @@ void Spectrogram3DComponent::setActive (bool shouldBeActive) noexcept
 void Spectrogram3DComponent::setMeshQuality (MeshQuality q) noexcept
 {
     if (q == MeshQuality::overkill)
-        q = MeshQuality::ultra; // removed — was crashy / too heavy
+        q = MeshQuality::ultra; // removed - was crashy / too heavy
     if (meshQuality == q)
         return;
     meshQuality = q;
@@ -5715,12 +5790,21 @@ void Spectrogram3DComponent::ensureParticleSystem()
 
 void Spectrogram3DComponent::setParticleModeEnabled (bool shouldEnable) noexcept
 {
-    if (particleModeEnabled == shouldEnable) return;
+    if (particleModeEnabled == shouldEnable)
+    {
+        // Still clear when forcing off (toggle / prefs) so a stuck cloud cannot linger.
+        if (! shouldEnable && particleSystem != nullptr)
+            particleSystem->clear();
+        return;
+    }
     particleModeEnabled = shouldEnable;
     syncSpec3DTimerRate();
     if (particleModeEnabled)
         ensureParticleSystem();
+    else if (particleSystem != nullptr)
+        particleSystem->clear();
     markLookDirty();
+    markSoftContentDirty();
 }
 
 void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcept
@@ -5730,9 +5814,98 @@ void Spectrogram3DComponent::setParticleEmitMode (ParticleEmitMode mode) noexcep
     if (particleEmitMode == mode) return;
     particleEmitMode = mode;
     // Drop cross-mode spawn backlog so the new mode takes effect immediately.
-    // Do not clear live particles — that made Continuous feel "broken" on CPU.
+    // Do not clear live particles - that made Continuous feel "broken" on CPU.
     if (particleSystem != nullptr)
         particleSystem->resetEmissionAccumulators();
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitSurface (ParticleEmitSurface surface) noexcept
+{
+    // History-field emit is reserved for a future UI path. Force playhead so GPU/CPU
+    // always birth only at the live tip (trail fills by scrolling).
+    if (surface != ParticleEmitSurface::playhead && surface != ParticleEmitSurface::historyField)
+        surface = ParticleEmitSurface::playhead;
+    surface = ParticleEmitSurface::playhead;
+    if (particleEmitSurface == surface) return;
+    particleEmitSurface = surface;
+    if (particleSystem != nullptr)
+        particleSystem->resetEmissionAccumulators();
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitterType (ParticleEmitterType type) noexcept
+{
+    if (type < ParticleEmitterType::spectrogram || type > ParticleEmitterType::cone)
+        type = ParticleEmitterType::spectrogram;
+    if (particleEmitterType == type) return;
+    particleEmitterType = type;
+    // Geometric emitters need free binding (no waterfall column lock).
+    if (type != ParticleEmitterType::spectrogram
+        && particleBindingMode == ParticleBindingMode::spectrogramTrail)
+        particleBindingMode = ParticleBindingMode::freeVisualizer;
+    if (particleSystem != nullptr)
+        particleSystem->resetEmissionAccumulators();
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitDomain (ParticleEmitDomain domain) noexcept
+{
+    if (domain != ParticleEmitDomain::surface && domain != ParticleEmitDomain::volume)
+        domain = ParticleEmitDomain::surface;
+    if (particleEmitDomain == domain) return;
+    particleEmitDomain = domain;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleEmitterPos (float x, float y, float z) noexcept
+{
+    particleEmitterPosX = x;
+    particleEmitterPosY = y;
+    particleEmitterPosZ = z;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSprayYawDeg (float deg) noexcept
+{
+    while (deg > 180.0f) deg -= 360.0f;
+    while (deg < -180.0f) deg += 360.0f;
+    if (std::abs (particleSprayYawDeg - deg) < 1.0e-4f) return;
+    particleSprayYawDeg = deg;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSprayPitchDeg (float deg) noexcept
+{
+    deg = juce::jlimit (-90.0f, 90.0f, deg);
+    if (std::abs (particleSprayPitchDeg - deg) < 1.0e-4f) return;
+    particleSprayPitchDeg = deg;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpraySpreadDeg (float deg) noexcept
+{
+    deg = juce::jlimit (0.0f, 180.0f, deg);
+    if (std::abs (particleSpraySpreadDeg - deg) < 1.0e-4f) return;
+    particleSpraySpreadDeg = deg;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpraySpeedMin (float unitsPerSec) noexcept
+{
+    if (! std::isfinite (unitsPerSec)) return;
+    unitsPerSec = juce::jmax (0.0f, unitsPerSec);
+    if (std::abs (particleSpraySpeedMin - unitsPerSec) < 1.0e-6f) return;
+    particleSpraySpeedMin = unitsPerSec;
+    markSoftContentDirty();
+}
+
+void Spectrogram3DComponent::setParticleSpraySpeedMax (float unitsPerSec) noexcept
+{
+    if (! std::isfinite (unitsPerSec)) return;
+    unitsPerSec = juce::jmax (0.0f, unitsPerSec);
+    if (std::abs (particleSpraySpeedMax - unitsPerSec) < 1.0e-6f) return;
+    particleSpraySpeedMax = unitsPerSec;
     markSoftContentDirty();
 }
 
@@ -5747,7 +5920,7 @@ void Spectrogram3DComponent::setParticleBindingMode (ParticleBindingMode mode) n
 
 void Spectrogram3DComponent::setParticleEmission (float amount) noexcept
 {
-    // No artistic cap — extreme values allowed via manual text entry.
+    // No artistic cap - extreme values allowed via manual text entry.
     if (! std::isfinite (amount)) return;
     if (std::abs (particleEmission - amount) < 1.0e-6f) return;
     particleEmission = amount;
@@ -5790,21 +5963,21 @@ void Spectrogram3DComponent::initDefaultParticleModSlots() noexcept
     for (auto& s : particleModSlots)
         s = {};
 
-    // Slot 0: amplitude → emission (off by default — enable in matrix UI)
+    // Slot 0: amplitude -> emission (off by default - enable in matrix UI)
     particleModSlots[0].enabled = false;
     particleModSlots[0].source = ParticleModSource::amplitude;
     particleModSlots[0].dest = ParticleModDest::emission;
     particleModSlots[0].op = ParticleModOp::multiply;
     particleModSlots[0].amount = 1.0f;
 
-    // Slot 1: bin dB → colour gain
+    // Slot 1: bin dB -> colour gain
     particleModSlots[1].enabled = false;
     particleModSlots[1].source = ParticleModSource::binDb;
     particleModSlots[1].dest = ParticleModDest::colourGain;
     particleModSlots[1].op = ParticleModOp::multiply;
     particleModSlots[1].amount = 1.0f;
 
-    // Slot 2: bin freq → colour hue
+    // Slot 2: bin freq -> colour hue
     particleModSlots[2].enabled = false;
     particleModSlots[2].source = ParticleModSource::binFreq;
     particleModSlots[2].dest = ParticleModDest::colourHue;
@@ -5823,7 +5996,7 @@ void Spectrogram3DComponent::setParticleModSlot (int index, const ParticleModSlo
 {
     if (! juce::isPositiveAndBelow (index, kParticleModSlotCount))
         return;
-    // No artistic clamps — manual extremes (amount, map range, constant, thr, A/R) must stick.
+    // No artistic clamps - manual extremes (amount, map range, constant, thr, A/R) must stick.
     if (! std::isfinite (slot.amount) || ! std::isfinite (slot.constant)
         || ! std::isfinite (slot.mapMin) || ! std::isfinite (slot.mapMax)
         || ! std::isfinite (slot.curveShape) || ! std::isfinite (slot.threshold)
@@ -5931,8 +6104,17 @@ void Spectrogram3DComponent::setParticleForceStack (std::vector<ParticleForceMod
     markSoftContentDirty();
 }
 
+void Spectrogram3DComponent::setParticleGraphProgram (const ParticleNodeGraph::GraphProgram& program) noexcept
+{
+    particleGraphProgram = program;
+    markSoftContentDirty();
+}
+
 void Spectrogram3DComponent::setParticleMeshShape (ParticleMeshShape s) noexcept
 {
+    if (s != ParticleMeshShape::sphere && s != ParticleMeshShape::cube
+        && s != ParticleMeshShape::billboard)
+        s = ParticleMeshShape::sphere;
     if (particleMeshShape == s) return;
     particleMeshShape = s;
     markSoftContentDirty();
@@ -6081,7 +6263,7 @@ bool Spectrogram3DComponent::isParticleGpuSimAvailable() const noexcept
 
 void Spectrogram3DComponent::setParticleMaxAlive (int maxAlive) noexcept
 {
-    // Budget only — must not pre-allocate 70k particles on the UI thread (host crash).
+    // Budget only - must not pre-allocate 70k particles on the UI thread (host crash).
     maxAlive = juce::jlimit (Spec3DParticleSystem::kMinMaxAlive,
                              Spec3DParticleSystem::kHardCap,
                              maxAlive);
@@ -6833,7 +7015,7 @@ void Spectrogram3DComponent::setDofFocalLengthMm (float mm) noexcept
 
 void Spectrogram3DComponent::setDofAperture (float amount) noexcept
 {
-    // Legacy 0–3 openness → F-Stop (higher openness = lower f-number).
+    // Legacy 0-3 openness -> F-Stop (higher openness = lower f-number).
     amount = juce::jlimit (0.0f, kDofApertureMax, amount);
     const float t = amount / kDofApertureMax;
     setDofFStop (juce::jmap (t, kDofFStopMax, kDofFStopMin));
@@ -6854,7 +7036,7 @@ void Spectrogram3DComponent::setDofQuality (ShadowQuality q) noexcept
 
 void Spectrogram3DComponent::setDofBlurScale (float) noexcept
 {
-    // Removed — F-Stop + Focal Length drive CoC. Kept as no-op for prefs compat.
+    // Removed - F-Stop + Focal Length drive CoC. Kept as no-op for prefs compat.
 }
 
 void Spectrogram3DComponent::setDofCocDilate (float amount01) noexcept
@@ -6970,7 +7152,7 @@ void Spectrogram3DComponent::applyBackgroundTransparency() noexcept
 
 bool Spectrogram3DComponent::usesSoftComposite() const noexcept
 {
-    // Nested GL HWNDs often stay black under Direct2D. Soft FBO→Image is reliable for
+    // Nested GL HWNDs often stay black under Direct2D. Soft FBO->Image is reliable for
     // Soft BG floating overlays, docked Scope panes, and SSAO/bloom post passes.
     return transparentBackground || chromeMode == ChromeMode::docked || needsPostEffects();
 }
@@ -7020,7 +7202,7 @@ void Spectrogram3DComponent::layoutPresentation() noexcept
     {
         // Small peer keeps the GL context alive for FBO work (not used for display).
         // Park far outside this component so the native HWND is clipped by the
-        // plugin window — placing it in the shadow pad (or bottom-right) reads as
+        // plugin window - placing it in the shadow pad (or bottom-right) reads as
         // a black square over the chrome / resize grip under Direct2D.
         constexpr int kPeer = 4;
         constexpr int kPark = -20000;
@@ -7274,7 +7456,7 @@ void Spectrogram3DComponent::setAudioLevelModEnabled (bool shouldEnable) noexcep
     audioLevelModEnabled = shouldEnable;
     if (! shouldEnable)
         audioLevelLive01 = 0.0f;
-    markLookDirty(); // force soft-FBO redraw — target/factor changes must not stick
+    markLookDirty(); // force soft-FBO redraw - target/factor changes must not stick
 }
 
 void Spectrogram3DComponent::setAudioLevelTarget (AudioLevelTarget target) noexcept
@@ -7289,7 +7471,7 @@ void Spectrogram3DComponent::setAudioLevelTarget (AudioLevelTarget target) noexc
 
 void Spectrogram3DComponent::setAudioLevelMinPercent (float pct) noexcept
 {
-    // Independent of max — both may span the full range (allows invert / fine-tune).
+    // Independent of max - both may span the full range (allows invert / fine-tune).
     pct = juce::jlimit (kAudioLevelPercentMin, kAudioLevelPercentMax, pct);
     if (std::abs (audioLevelMinPercent - pct) < 1.0e-3f)
         return;
@@ -7419,7 +7601,7 @@ void Spectrogram3DComponent::computeTopSurfaceNormals (std::vector<Vertex>& vert
             return 0.0f;
         axv /= al; ayv /= al; azv /= al;
         bxv /= bl; byv /= bl; bzv /= bl;
-        // Cheap angle proxy (avoids acos in the hot path). Larger corners → larger weight.
+        // Cheap angle proxy (avoids acos in the hot path). Larger corners -> larger weight.
         const float d = juce::jlimit (-1.0f, 1.0f, axv * bxv + ayv * byv + azv * bzv);
         return 1.0f - d;
     };
@@ -7583,17 +7765,18 @@ void Spectrogram3DComponent::seedDefaultOrientation() noexcept
 
 void Spectrogram3DComponent::clampCamera() noexcept
 {
-    // Turntable / orbit framing ONLY. Freecam never uses this.
+    // Turntable / orbit framing ONLY. Freecam never uses this while active.
+    // No ground-plane clamp - freecam bake and free look keep full pitch / panY.
     camera.pitchDeg = juce::jlimit (kMinPitchDeg, kMaxPitchDeg, camera.pitchDeg);
     camera.distance = juce::jlimit (0.35f, 14.0f, camera.distance);
     camera.panX = juce::jlimit (-1.6f, 1.6f, camera.panX);
     camera.panZ = juce::jlimit (-1.6f, 1.6f, camera.panZ);
-    camera.panY = juce::jlimit (-0.05f, meshHeight * 1.4f, camera.panY);
+    camera.panY = juce::jlimit (-80.0f, 80.0f, camera.panY);
 }
 
 float Spectrogram3DComponent::freecamLevelToScale (float level1to8) noexcept
 {
-    // UE viewport chip is 1 (slowest) … 8 (full). Log-spaced so low levels are crawl-speed.
+    // UE viewport chip is 1 (slowest) ... 8 (full). Log-spaced so low levels are crawl-speed.
     const float t = juce::jlimit (0.0f, 1.0f, (level1to8 - 1.0f) / 7.0f);
     const float logMin = std::log (kFreecamSpeedMin);
     const float logMax = std::log (kFreecamSpeedMax);
@@ -7667,7 +7850,7 @@ void Spectrogram3DComponent::freecamBasis (juce::Vector3D<float>& outRight,
                                            juce::Vector3D<float>& outForward) const noexcept
 {
     // Independent freecam (not orbit): FPS pitch 0 = horizon, + = look up.
-    // yaw=0,pitch=0 → look −Z. Used for WASD and look-at target only.
+    // yaw=0,pitch=0 -> look −Z. Used for WASD and look-at target only.
     const float yaw = juce::degreesToRadians (freecamYawDeg);
     const float pitch = juce::degreesToRadians (freecamPitchDeg);
     const float cp = std::cos (pitch);
@@ -7676,7 +7859,7 @@ void Spectrogram3DComponent::freecamBasis (juce::Vector3D<float>& outRight,
     const float sy = std::sin (yaw);
 
     outForward = { sy * cp, sp, -cy * cp };
-    // right = normalize (forward × worldUp) fails at poles; use horizontal right.
+    // right = normalize (forward x worldUp) fails at poles; use horizontal right.
     outRight = { cy, 0.0f, sy };
     const float rLen = juce::jmax (1.0e-6f,
                                    std::sqrt (outRight.x * outRight.x + outRight.z * outRight.z));
@@ -7749,10 +7932,10 @@ juce::Vector3D<float> Spectrogram3DComponent::getCameraEyePosition() const noexc
 
 void Spectrogram3DComponent::enterFreecamFromTurntable() noexcept
 {
-    // Snapshot orbit eye + convert elevation → FPS look pitch. Orbit state left untouched.
+    // Snapshot orbit eye + convert elevation -> FPS look pitch. Orbit state left untouched.
     freecamEye = getCameraEyePosition(); // turntable-derived (freecam not active yet)
     freecamYawDeg = camera.yawDeg;
-    // Turntable elev+ looks down; FPS pitch+ looks up → invert.
+    // Turntable elev+ looks down; FPS pitch+ looks up -> invert.
     freecamPitchDeg = juce::jlimit (-kMaxPitchDeg, kMaxPitchDeg, -camera.pitchDeg);
     freecamActive = true;
     flyVel = { 0, 0, 0 };
@@ -7765,27 +7948,30 @@ void Spectrogram3DComponent::exitFreecamToTurntable() noexcept
         return;
 
     // Bake freecam pose into orbit rig so LMB orbit continues from the new view.
-    juce::Vector3D<float> right, up, forward;
-    freecamBasis (right, up, forward);
-    juce::ignoreUnused (right, up);
-
+    // Preserve freecamEye exactly - no ground-plane panY/distance rewrite on RMB release.
     camera.yawDeg = freecamYawDeg;
-    // Prefer true look pitch; clamp into orbit elev range for turntable framing.
+    // FPS pitch+ = look up -> orbit elevation is inverted.
     camera.pitchDeg = juce::jlimit (kMinPitchDeg, kMaxPitchDeg, -freecamPitchDeg);
-    camera.distance = juce::jlimit (0.35f, 14.0f, camera.distance);
 
-    // Re-derive look-at so orbit eye matches freecam eye under clamped elev.
+    float d = juce::jlimit (0.35f, 14.0f, camera.distance);
     const float yaw = juce::degreesToRadians (camera.yawDeg);
     const float pitch = juce::degreesToRadians (camera.pitchDeg);
     const float cp = std::cos (pitch);
     const float sp = std::sin (pitch);
     const float cy = std::cos (yaw);
     const float sy = std::sin (yaw);
-    // eye = pan + (-sy*cp, sp, cy*cp)*d  →  pan = eye - offset
-    camera.panX = freecamEye.x - (-sy * cp) * camera.distance;
-    camera.panY = freecamEye.y - sp * camera.distance;
-    camera.panZ = freecamEye.z - (cy * cp) * camera.distance;
-    clampCamera();
+
+    // eye = pan + (-sy*cp, sp, cy*cp)*d  ->  pan = eye - offset
+    camera.panX = freecamEye.x - (-sy * cp) * d;
+    camera.panY = freecamEye.y - sp * d;
+    camera.panZ = freecamEye.z - (cy * cp) * d;
+
+    camera.distance = d;
+    camera.panX = juce::jlimit (-1.6f, 1.6f, camera.panX);
+    camera.panY = juce::jlimit (-80.0f, 80.0f, camera.panY);
+    camera.panZ = juce::jlimit (-1.6f, 1.6f, camera.panZ);
+    camera.pitchDeg = juce::jlimit (kMinPitchDeg, kMaxPitchDeg, camera.pitchDeg);
+    camera.distance = juce::jlimit (0.35f, 14.0f, camera.distance);
 
     freecamActive = false;
     flyVel = { 0, 0, 0 };
@@ -7800,8 +7986,8 @@ void Spectrogram3DComponent::applyFreecamLookDelta (float dxPixels, float dyPixe
         return;
 
     // UE freecam mouse-look: rotate in place about freecamEye only.
-    // Never touch orbit camera.distance / pan — RMB must not dolly or zoom.
-    // Mouse right → turn right; mouse up → look up (unless invert Y).
+    // Never touch orbit camera.distance / pan - RMB must not dolly or zoom.
+    // Mouse right -> turn right; mouse up -> look up (unless invert Y).
     const float sens = freecamLookSensitivity;
     freecamYawDeg += dxPixels * sens;
     while (freecamYawDeg > 180.0f) freecamYawDeg -= 360.0f;
@@ -7812,7 +7998,7 @@ void Spectrogram3DComponent::applyFreecamLookDelta (float dxPixels, float dyPixe
 
 juce::Matrix3D<float> Spectrogram3DComponent::getTurntableViewMatrix() const noexcept
 {
-    // Orbit around the look-at (pan). LMB tumble only — never freecam.
+    // Orbit around the look-at (pan). LMB tumble only - never freecam.
     const float yaw = juce::degreesToRadians (camera.yawDeg);
     const float pitch = juce::degreesToRadians (camera.pitchDeg);
 
@@ -7830,7 +8016,7 @@ juce::Matrix3D<float> Spectrogram3DComponent::getFreecamViewMatrix() const noexc
 {
     /**
         Pure FPS freecam: eye = freecamEye (fixed during mouse-look); only yaw/pitch
-        change orientation. Do NOT reuse the orbit boom product (look-at + pull-back) —
+        change orientation. Do NOT reuse the orbit boom product (look-at + pull-back) -
         that drifted the effective eye when looking down and felt like a zoom-out.
         Column-major OpenGL view: rows of R are right, up, −forward; t = −R * eye.
     */
@@ -7851,7 +8037,7 @@ juce::Matrix3D<float> Spectrogram3DComponent::getFreecamViewMatrix() const noexc
 
 juce::Matrix3D<float> Spectrogram3DComponent::getActiveViewMatrix() const noexcept
 {
-    // Hard split: freecam OR normal orbit/pan/zoom — never blended.
+    // Hard split: freecam OR normal orbit/pan/zoom - never blended.
     return freecamActive ? getFreecamViewMatrix() : getTurntableViewMatrix();
 }
 
@@ -7896,7 +8082,7 @@ void Spectrogram3DComponent::tickFreecam (float dt) noexcept
 
     if (! freecamRmbHeld && flyVel.x * flyVel.x + flyVel.y * flyVel.y + flyVel.z * flyVel.z < 1.0e-8f)
     {
-        // Coast finished — hand pose back to orbit rig.
+        // Coast finished - hand pose back to orbit rig.
         exitFreecamToTurntable();
         return;
     }
@@ -7922,7 +8108,7 @@ void Spectrogram3DComponent::tickFreecam (float dt) noexcept
     if (wishLen > 1.0e-5f)
     {
         wish.x /= wishLen; wish.y /= wishLen; wish.z /= wishLen;
-        // Fixed base fly speed × user scale (not coupled to orbit dolly).
+        // Fixed base fly speed x user scale (not coupled to orbit dolly).
         constexpr float kBaseFly = 2.5f;
         const float maxSpeed = kBaseFly * freecamSpeedScale;
         const float accel = juce::jmax (0.05f, maxSpeed) * 9.0f;
@@ -8025,7 +8211,7 @@ void Spectrogram3DComponent::resized()
 
 void Spectrogram3DComponent::paint (juce::Graphics& g)
 {
-    // Match FramedFloatingScopeWindow (Osc / Gon / Spec 2D): shadow → plate → content → stroke.
+    // Match FramedFloatingScopeWindow (Osc / Gon / Spec 2D): shadow -> plate -> content -> stroke.
     // Soft BG plate lives in the soft FBO (drawSoftTint) so DOF can spill into it;
     // do not pre-fill a second translucent plate under a valid soft image.
     const auto inner = getInnerFrameLocal().toFloat();
@@ -8086,10 +8272,11 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
     {
         g.setColour (juce::Colours::whitesmoke.withAlpha (0.7f));
         g.setFont (12.0f);
-        g.drawFittedText (glHost->hasContextFailed() ? "3D spectrogram unavailable"
-                                                     : "Initialising 3D spectrogram...",
+        g.drawFittedText (glHost->hasContextFailed()
+                              ? "3D spectrogram unavailable (GPU busy? close game / retry Spec)"
+                              : "Initialising 3D spectrogram...",
                           inner.toNearestInt().reduced (8),
-                          juce::Justification::centred, 2);
+                          juce::Justification::centred, 3);
     }
 
     if (active && waterfallFrozen)
@@ -8119,7 +8306,7 @@ void Spectrogram3DComponent::paint (juce::Graphics& g)
         const char* emitLabel = (particleEmitMode == ParticleEmitMode::continuous)
                                     ? "cont" : "slice";
         const char* bindLabel = freeVis ? "free" : "trail";
-        // +sp = births this sim tick; load 0–3 = hitch recovery tier; fps = timer redraw rate.
+        // +sp = births this sim tick; load 0-3 = hitch recovery tier; fps = timer redraw rate.
         const juce::String line =
             juce::String (gpuPath ? "GPU  " : "CPU  ")
             + juce::String (alive) + "/" + juce::String (maxA)
@@ -8156,7 +8343,7 @@ void Spectrogram3DComponent::timerCallback()
 
     const double nowSec = juce::Time::getMillisecondCounterHiRes() * 0.001;
 
-    // Rolling display FPS (this timer's cadence — never need > 60 Hz).
+    // Rolling display FPS (this timer's cadence - never need > 60 Hz).
     if (particleFpsWindowStartSec <= 0.0)
         particleFpsWindowStartSec = nowSec;
     ++particleFpsFrameCount;
@@ -8373,7 +8560,7 @@ void Spectrogram3DComponent::meshSizeForQuality (int& outW, int& outH) const noe
         case MeshQuality::low:      outW = 64;  outH = 48;  break;
         case MeshQuality::high:     outW = 192; outH = 160; break;
         case MeshQuality::ultra:
-        case MeshQuality::overkill: outW = 288; outH = 240; break; // overkill → ultra
+        case MeshQuality::overkill: outW = 288; outH = 240; break; // overkill -> ultra
         case MeshQuality::medium:
         default:                    outW = 128; outH = 96;  break;
     }
@@ -8390,7 +8577,7 @@ int Spectrogram3DComponent::effectiveFreqMeshRows (int baseH) const noexcept
     const float B = freqMeshBiasB();
     if (B < 1.0e-5f)
         return baseH;
-    // Boost only above pivot P: ∫w = 1 + B*(1-P)/3 → fewer rows when P is higher.
+    // Boost only above pivot P: ∫w = 1 + B*(1-P)/3 -> fewer rows when P is higher.
     const float P = juce::jlimit (0.0f, 0.95f, freqMeshBiasPivot);
     const int n = (int) std::ceil ((double) baseH * (1.0 + (double) B * (1.0 - (double) P) / 3.0));
     return juce::jlimit (baseH, kMaxFreqMeshRows, n);
@@ -8448,7 +8635,7 @@ void Spectrogram3DComponent::fillMeshColumn (int meshCol, const float* histCol, 
     for (int z = 0; z < meshH; ++z)
     {
         const float t = meshH > 1 ? (float) z / (float) (meshH - 1) : 0.0f;
-        const float u = freqAxisFromMeshT (t, B, P); // 0=low … 1=high
+        const float u = freqAxisFromMeshT (t, B, P); // 0=low ... 1=high
         // History: yNorm 0 = high Hz (top), 1 = low Hz (bottom).
         const float yNorm = 1.0f - u;
         const int row = juce::jlimit (0, histH - 1, (int) std::round (yNorm * (float) (histH - 1)));
@@ -8465,7 +8652,7 @@ void Spectrogram3DComponent::seedMeshFromHistory (const std::vector<float>& hist
         fillMeshColumn (meshW - cols + i,
                         history.data() + (size_t) (srcStart + i) * (size_t) histH, histH);
 
-    // Full history reseed — drop particles so they do not sit on stale columns.
+    // Full history reseed - drop particles so they do not sit on stale columns.
     if (particleSystem != nullptr)
         particleSystem->clear();
 }
@@ -8554,7 +8741,7 @@ void Spectrogram3DComponent::ensureIndexBuffer (int w, int h)
             }
         }
 
-        // Walls: each border edge → quad between top and bottom.
+        // Walls: each border edge -> quad between top and bottom.
         auto wallQuad = [&] (uint32_t tA, uint32_t tB, uint32_t bA, uint32_t bB)
         {
             inds.push_back (tA); inds.push_back (bA); inds.push_back (tB);
@@ -8626,7 +8813,7 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     const int topCount = meshW * meshH;
     // Closed: top + bottom + dedicated playhead + waterfall-end walls (along Z).
     const int vertCount = closed ? (topCount * 2 + meshH * 4) : topCount;
-    // Reuse capacity — avoid multi-MB alloc on every scroll column / morph.
+    // Reuse capacity - avoid multi-MB alloc on every scroll column / morph.
     meshBuildVerts.resize ((size_t) vertCount);
     auto& verts = meshBuildVerts;
     const float denom = juce::jmax (1.0f, maxDb - minDb);
@@ -8640,7 +8827,7 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     auto freqUForRow = [&] (int z) -> float
     {
         const float t = meshH > 1 ? (float) z / (float) (meshH - 1) : 0.0f;
-        return freqAxisFromMeshT (t, B, P); // 0=low … 1=high
+        return freqAxisFromMeshT (t, B, P); // 0=low ... 1=high
     };
 
     auto worldZForU = [&] (float freqU) -> float
@@ -8688,7 +8875,7 @@ void Spectrogram3DComponent::rebuildVerticesFromMeshDb (float brightness, float 
     }
 
     // Weighted normals only matter when lit (or SSGI mesh-normals). Skip the
-    // triangle walk when flat shading — it was the main mesh-rebuild cost.
+    // triangle walk when flat shading - it was the main mesh-rebuild cost.
     if (lightingEnabled || (ssgiEnabled && ssgiMeshNormalsEnabled))
         computeTopSurfaceNormals (verts, meshW, meshH);
 
@@ -8761,7 +8948,7 @@ void Spectrogram3DComponent::setWaterfallFrozen (bool shouldFreeze) noexcept
     waterfallFrozen = shouldFreeze;
     if (! waterfallFrozen && dataSource != nullptr)
     {
-        // Resume at live head — don't burst-drain columns accumulated while frozen.
+        // Resume at live head - don't burst-drain columns accumulated while frozen.
         lastHistorySerial = dataSource->getHistoryColumnSerial();
     }
     markSoftContentDirty();
@@ -8832,7 +9019,7 @@ bool Spectrogram3DComponent::updateMeshFromSource()
     {
         // Spec can write up to kMaxColumnsPerTick per 60 Hz tick (and more when the
         // UI timer jitters). Consuming the whole serial delta scrolled several mesh
-        // columns in one frame → timebase bursts. Always advance exactly one column
+        // columns in one frame -> timebase bursts. Always advance exactly one column
         // per 3D tick at the live tip; if >1 behind, snap to latest-1 then append
         // the newest history column (stay realtime without multi-column shifts).
         if (serial - lastHistorySerial > 1)
@@ -8883,10 +9070,10 @@ void Spectrogram3DComponent::setReverseFrequencyAxis (bool shouldReverse) noexce
     if (reverseFrequencyAxis == shouldReverse)
         return;
     reverseFrequencyAxis = shouldReverse;
-    // Z mirror changes triangle winding — rebuild indices with the verts.
+    // Z mirror changes triangle winding - rebuild indices with the verts.
     indicesValid = false;
-    // Remap existing history — do not clear meshDb / serial.
-    // Colours stay intensity→ramp; only world Z / winding / normals update.
+    // Remap existing history - do not clear meshDb / serial.
+    // Colours stay intensity->ramp; only world Z / winding / normals update.
     if (meshW >= 2 && meshH >= 2 && ! meshDb.empty() && lastBrightness >= 0.0f)
         rebuildVerticesFromMeshDb (lastBrightness, lastMinDb, lastMaxDb);
     markSoftContentDirty();
@@ -8949,7 +9136,7 @@ namespace
         valueLabel.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
     }
 
-    /** Period slider under Turntable — does not dismiss the menu when dragged. */
+    /** Period slider under Turntable - does not dismiss the menu when dragged. */
     class AutoRotatePeriodMenuItem final : public juce::PopupMenu::CustomComponent
     {
     public:
@@ -8996,7 +9183,7 @@ namespace
         void refreshValueLabel()
         {
             const int sec = juce::roundToInt (owner.getAutoRotatePeriodSec());
-            valueLabel.setText ("1× / " + juce::String (sec) + " s", juce::dontSendNotification);
+            valueLabel.setText ("1x / " + juce::String (sec) + " s", juce::dontSendNotification);
         }
 
         Spectrogram3DComponent& owner;
@@ -9103,7 +9290,7 @@ namespace
         void refreshValueLabel()
         {
             const int sec = juce::roundToInt (owner.getZoomOscillatePeriodSec());
-            valueLabel.setText ("1× / " + juce::String (sec) + " s", juce::dontSendNotification);
+            valueLabel.setText ("1x / " + juce::String (sec) + " s", juce::dontSendNotification);
         }
 
         Spectrogram3DComponent& owner;
@@ -9215,7 +9402,7 @@ void Spectrogram3DComponent::applyMorphLightingAutomation() noexcept
         return;
 
     // Enable lighting once (normals rebuild once via lastBrightness). Never call
-    // markLookDirty / markSoftContentDirty here — that re-ran the full soft FBO+DOF
+    // markLookDirty / markSoftContentDirty here - that re-ran the full soft FBO+DOF
     // stack every envelope sample and was the sequencer stutter.
     if (! lightingEnabled)
     {
@@ -9269,7 +9456,7 @@ void Spectrogram3DComponent::applyMorphLightingAutomation() noexcept
                 if (rimColour != col) { rimColour = col; lightingUniformsDirty = true; }
             }
         });
-    // Soft composite reads these uniforms on the next mesh/soft draw — no extra FBO.
+    // Soft composite reads these uniforms on the next mesh/soft draw - no extra FBO.
 }
 
 void Spectrogram3DComponent::applyMorphRampIfNeeded() noexcept
@@ -9813,7 +10000,7 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     rightClickDragged = false;
 
     // Controls:
-    //  LMB drag           = orbit around look-at (yaw / elevation) — turntable only
+    //  LMB drag           = orbit around look-at (yaw / elevation) - turntable only
     //  RMB hold           = UE freecam: free look + WASD/QE fly (no orbit / ground limits)
     //  RMB click (no drag)= context menu
     //  RMB + wheel        = freecam speed (not zoom)
@@ -9835,7 +10022,7 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
     }
     else if (e.mods.isMiddleButtonDown() || e.mods.isShiftDown())
     {
-        // Ground-plane pan is turntable framing — not used in freecam.
+        // Ground-plane pan is turntable framing - not used in freecam.
         dragMode = DragMode::pan;
     }
     else if (e.mods.isLeftButtonDown()
@@ -9865,7 +10052,7 @@ void Spectrogram3DComponent::handleMouseDown (const juce::MouseEvent& e)
 
 void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
 {
-    // Live button state wins — some hosts drop popup flags mid-drag.
+    // Live button state wins - some hosts drop popup flags mid-drag.
     // RMB freecam look only (never steal LMB orbit because freecamActive is still true).
     if (isRightMouse (e) || freecamRmbHeld)
     {
@@ -9894,14 +10081,14 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
 
     if (dragMode == DragMode::orbit)
     {
-        // Normal 3D orbit about look-at (LMB) — completely separate from freecam.
+        // Normal 3D orbit about look-at (LMB) - completely separate from freecam.
         camera.yawDeg -= d.x * 0.35f;
         camera.pitchDeg += d.y * 0.35f;
         clampCamera();
     }
     else if (dragMode == DragMode::pan)
     {
-        // Normal 3D ground pan (MMB / Shift) — separate from freecam.
+        // Normal 3D ground pan (MMB / Shift) - separate from freecam.
         juce::Vector3D<float> right, up, forward;
         cameraBasis (right, up, forward);
         juce::ignoreUnused (up);
@@ -9929,7 +10116,7 @@ void Spectrogram3DComponent::handleMouseDrag (const juce::MouseEvent& e)
     }
     else if (dragMode == DragMode::dolly)
     {
-        // Normal 3D dolly (Alt+LMB) — separate from freecam speed wheel.
+        // Normal 3D dolly (Alt+LMB) - separate from freecam speed wheel.
         camera.distance *= (1.0f + d.y * 0.005f);
         clampCamera();
         if (zoomOscillateEnabled)
@@ -9967,8 +10154,8 @@ void Spectrogram3DComponent::handleMouseUp (const juce::MouseEvent& e)
 
 void Spectrogram3DComponent::applyUiZoomDrag (float deltaY) noexcept
 {
-    // Vertical drag only — same distance zoom as the scroll wheel (not orbit/pan).
-    // Drag down → zoom out; drag up → zoom in.
+    // Vertical drag only - same distance zoom as the scroll wheel (not orbit/pan).
+    // Drag down -> zoom out; drag up -> zoom in.
     if (zoomOscillateEnabled)
     {
         zoomOscillateBaseDistance *= (1.0f + deltaY * 0.012f);

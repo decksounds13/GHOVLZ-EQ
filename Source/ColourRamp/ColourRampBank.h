@@ -19,6 +19,8 @@ public:
         stereogram,
         histogram,
         spectrogram3D, // appended — keep prior ordinals stable for prefs / masks
+        meterPeak,     // level meter peak bar
+        meterRms,      // level meter RMS bar
         numTargets
     };
 

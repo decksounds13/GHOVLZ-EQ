@@ -106,6 +106,8 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "HISTOGRAM_GLOW_SPREAD_ID",
         "HISTOGRAM_GLOW_OPACITY_ID",
         "EQ_MULTICOLOR_BAND_FILL_ID",
+        "EQ_BAND_CHROME_MATCH_HANDLES_ID",
+        "SPECTRAL_METHOD_ID",
         "EQ_SHOW_CROSSHAIR_ID",
         "FFT_FULL_HEIGHT_ID",
         "FFT_RESOLUTION_ID",
@@ -125,7 +127,17 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "METER_FALL_ID",
         "METER_PEAK_HOLD_ID",
         "METER_CLIP_HOLD_ID",
-        "METER_CLIP_THRESHOLD_ID"
+        "METER_CLIP_THRESHOLD_ID",
+        "METER_PEAK_GLOW_ENABLE_ID",
+        "METER_PEAK_GLOW_THRESHOLD_ID",
+        "METER_PEAK_GLOW_RADIUS_ID",
+        "METER_PEAK_GLOW_SPREAD_ID",
+        "METER_PEAK_GLOW_OPACITY_ID",
+        "METER_RMS_GLOW_ENABLE_ID",
+        "METER_RMS_GLOW_THRESHOLD_ID",
+        "METER_RMS_GLOW_RADIUS_ID",
+        "METER_RMS_GLOW_SPREAD_ID",
+        "METER_RMS_GLOW_OPACITY_ID"
     };
 }
 

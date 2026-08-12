@@ -43,6 +43,26 @@ public:
     void setSampleRate (double sampleRate);
     double getSampleRate() const;
 
+    /** Display-range min/max used to map scope 0..1 ↔ dB (same as spectrum paint). */
+    void getVolumeRangeInDecibels (float& minDb, float& maxDb) noexcept;
+    /** Scope bin as absolute level in dB (post-EQ analyser path). */
+    float getScopeDataDb (size_t index);
+    /** Scope bin as absolute level in dB (pre-EQ analyser path). */
+    float getScopePreDataDb (size_t index);
+    /**
+        Copy scope levels in dB into dest[0..n) via display scope (message-thread safe).
+        Uses only m_scopeLock — never the analysis-thread lock (avoids host freezes).
+        @param pre  true = pre-EQ, false = post-EQ
+        @return number of bins written (0 if empty)
+    */
+    int copyScopeDataDb (bool pre, float* destDb, int maxBins);
+
+    /**
+        Peak bin level in dB for silence / activity checks (display scope).
+        Returns a very low value if no data.
+    */
+    float getScopePeakDb (bool pre) noexcept;
+
     /** BLOCK_ID menu index: 0=2048, 1=4096, 2=8192, 3=16384. */
     void setFFTBlockSize (int);
 

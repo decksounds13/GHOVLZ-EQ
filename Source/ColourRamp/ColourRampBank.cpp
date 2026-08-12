@@ -42,6 +42,7 @@ ColourRampBank::ColourRampBank()
             { 0.0f, juce::Colour::fromRGBA (58, 42, 32, 180) },
             { 1.0f, juce::Colour::fromRGBA (187, 219, 132, 200) }
         };
+        r.enabled = true; // product default: spectrum fill gradient on out of the box
         ramps[(int) Target::spectrumFill] = std::move (r);
     }
     {
@@ -84,9 +85,36 @@ ColourRampBank::ColourRampBank()
         };
         ramps[(int) Target::histogram] = std::move (r);
     }
+    {
+        // Default peak meter: green → yellow → orange → red (VU-style).
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+        r.stops = {
+            { 0.00f, juce::Colour::fromRGB (20, 140, 55) },
+            { 0.55f, juce::Colour::fromRGB (210, 200, 40) },
+            { 0.78f, juce::Colour::fromRGB (240, 130, 30) },
+            { 1.00f, juce::Colour::fromRGB (230, 40, 35) }
+        };
+        r.enabled = true; // product default: meters use ramps out of the box
+        ramps[(int) Target::meterPeak] = std::move (r);
+    }
+    {
+        // Default RMS meter: cooler blue → cyan → white.
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::intensityLowToHigh;
+        r.stops = {
+            { 0.00f, juce::Colour::fromRGB (25, 70, 160) },
+            { 0.55f, juce::Colour::fromRGB (40, 180, 220) },
+            { 1.00f, juce::Colour::fromRGB (230, 245, 255) }
+        };
+        r.enabled = true;
+        ramps[(int) Target::meterRms] = std::move (r);
+    }
 
     load();
     sanitizeMapModes();
+    // After disk load (which clears Use on most targets), keep meter ramps on unless
+    // the user explicitly saved them off — see applyFromValueTree.
 }
 
 juce::String ColourRampBank::targetName (Target t)
@@ -101,6 +129,8 @@ juce::String ColourRampBank::targetName (Target t)
         case Target::goniometer:    return "Goniometer";
         case Target::stereogram:    return "Stereogram";
         case Target::histogram:     return "Histogram";
+        case Target::meterPeak:     return "Meter Peak";
+        case Target::meterRms:      return "Meter RMS";
         default:                    return "Ramp";
     }
 }
@@ -303,6 +333,8 @@ juce::ValueTree ColourRampBank::toValueTree() const
     tree.appendChild (ramps[(int) Target::goniometer].toValueTree ("Goniometer"), nullptr);
     tree.appendChild (ramps[(int) Target::stereogram].toValueTree ("Stereogram"), nullptr);
     tree.appendChild (ramps[(int) Target::histogram].toValueTree ("Histogram"), nullptr);
+    tree.appendChild (ramps[(int) Target::meterPeak].toValueTree ("MeterPeak"), nullptr);
+    tree.appendChild (ramps[(int) Target::meterRms].toValueTree ("MeterRms"), nullptr);
     return tree;
 }
 
@@ -331,14 +363,22 @@ void ColourRampBank::applyFromValueTree (const juce::ValueTree& tree, bool force
     loadOne (Target::goniometer, "Goniometer");
     loadOne (Target::stereogram, "Stereogram");
     loadOne (Target::histogram, "Histogram");
+    loadOne (Target::meterPeak, "MeterPeak");
+    loadOne (Target::meterRms, "MeterRms");
     sanitizeMapModes();
 
     if (! forceCustomRampsOff)
         return;
 
-    // Disk load: keep stops, but never silently override built-in colour schemes.
+    // Disk load: keep stops, but never silently override built-in colour schemes
+    // (FFT/Spec/…). Spectrum fill + level meters keep Use as loaded (constructor
+    // default is on when the child was missing from colour_ramps.xml).
     for (int ti = 0; ti < (int) Target::numTargets; ++ti)
     {
+        if (ti == (int) Target::meterPeak || ti == (int) Target::meterRms
+            || ti == (int) Target::spectrumFill)
+            continue;
+
         if (ramps[ti].enabled)
         {
             ramps[ti].enabled = false;
@@ -362,7 +402,8 @@ void ColourRampBank::load()
         bool anyWereEnabled = false;
         for (auto id : { juce::Identifier ("FftBars"), juce::Identifier ("Spectrogram"), juce::Identifier ("Spectrogram3D"),
                          juce::Identifier ("SpectrumFill"), juce::Identifier ("Oscilloscope"), juce::Identifier ("Goniometer"),
-                         juce::Identifier ("Stereogram"), juce::Identifier ("Histogram") })
+                         juce::Identifier ("Stereogram"), juce::Identifier ("Histogram"),
+                         juce::Identifier ("MeterPeak"), juce::Identifier ("MeterRms") })
         {
             auto child = tree.getChildWithName (id);
             if (child.isValid() && (bool) child.getProperty ("enabled", false))
@@ -381,7 +422,7 @@ void ColourRampBank::sanitizeMapModes()
 {
     // FFT / Spec / Stereogram / Histogram = intensity; Osc = amp+freq; Fill = spatial; Gon = diversion.
     for (auto t : { Target::fftBars, Target::spectrogram, Target::spectrogram3D,
-                    Target::stereogram, Target::histogram })
+                    Target::stereogram, Target::histogram, Target::meterPeak, Target::meterRms })
     {
         auto& r = ramps[(int) t];
         if (! r.isIntensityMap())

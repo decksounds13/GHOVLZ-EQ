@@ -703,9 +703,9 @@ void SpectrogramComponent::advanceFromRing()
         }
 
         // Near-silence: deposit a solid floor column and skip FFT/reassignment.
-        // Tiny numerical noise at digital zero was colourising as sparkle/flicker
-        // (most visible in Scope when the waterfall is quiet; real signal masks it).
-        constexpr float kSilencePeak = 1.0e-6f; // ~-120 dBFS peak
+        // Residual host dither / denoise noise below this still sparked the LUT
+        // (most visible in Scope with no program audio). ~-86 dBFS peak.
+        constexpr float kSilencePeak = 5.0e-5f;
         if (peakAbs < kSilencePeak)
         {
             if ((int) columnScratch.size() != internalH)
@@ -741,7 +741,6 @@ void SpectrogramComponent::advanceFromRing()
 
         if (needEnhanced)
         {
-            constexpr float kTwoPi = juce::MathConstants<float>::twoPi;
             ++enhancedLfFrameCounter;
 
             // LF FFT every other column when detail > Off (reuse spectrum on skip frames).
@@ -750,11 +749,17 @@ void SpectrogramComponent::advanceFromRing()
             const bool computeMid = useMid && midFft != nullptr && midFftSize > 0;
 
             if (computeLf)
+            {
                 runComplexFft (*lfFft, *lfWindow, lfFftSize, windowEnd,
                                lfWindowed, lfFftWork, columnDbLf);
+                havePrevPhaseLf = true; // marks LF continuum available for every-other reuse
+            }
             if (computeMid)
+            {
                 runComplexFft (*midFft, *midWindow, midFftSize, windowEnd,
                                midWindowed, midFftWork, columnDbMid);
+                havePrevPhaseMid = true;
+            }
 
             // ---- Main STFT (always) ----
             fft->performRealOnlyForwardTransform (fftWork.data(), true);
@@ -851,10 +856,9 @@ void SpectrogramComponent::advanceFromRing()
             if (needClassic)
                 buildClassicDisplayColumn (columnDb.data(), numBins, columnClassic);
 
-            // Reassigned column starts as continuum; IF deposits sharpen on top.
-            columnSoftTmp = columnScratch;
+            // Classical reassignment: sparse ridge column (silence floor), then Strength blend.
+            // Strength 0 → continuum only (skip 3× FFT Auger).
             ensureHistoryBuffer();
-            // Time-reassignment writes into whichever history stores the enhanced view.
             std::vector<float>* enhancedHistory = enhanced2D ? &historyDb
                                                 : (enhanced3D ? &historyDb3D : nullptr);
             float* prevHistoryCol = (enhancedHistory != nullptr
@@ -864,120 +868,112 @@ void SpectrogramComponent::advanceFromRing()
                 : nullptr;
             bool touchedPrevColumn = false;
 
-            auto wrapPi = [] (float x)
+            if (enhancedStrength > 0.001f)
             {
-                while (x > juce::MathConstants<float>::pi)  x -= kTwoPi;
-                while (x < -juce::MathConstants<float>::pi) x += kTwoPi;
-                return x;
-            };
+                columnSoftTmp.assign ((size_t) internalH, -120.0f);
 
-            auto reassignRange = [&] (const float* work, std::vector<float>& colDb,
-                                      std::vector<float>& prevPh, bool& havePrev,
-                                      int thisFftSize, int thisBins,
-                                      float fMinHz, float fMaxHz)
-            {
-                if (work == nullptr || thisFftSize <= 0 || thisBins < 3)
-                    return;
-
-                if ((int) prevPh.size() != thisBins)
+                const int maxN = juce::jmax (fftSize, juce::jmax (lfFftSize, midFftSize));
+                if ((int) reassignWorkT.size() < maxN * 2)
                 {
-                    prevPh.assign ((size_t) thisBins, 0.0f);
-                    havePrev = false;
+                    reassignWorkT.assign ((size_t) juce::jmax (1, maxN * 2), 0.0f);
+                    reassignWorkD.assign ((size_t) juce::jmax (1, maxN * 2), 0.0f);
+                    reassignRaw.assign ((size_t) juce::jmax (1, maxN), 0.0f);
                 }
 
-                const float binHz = (float) sr / (float) thisFftSize;
-                const float expectedPerBin = kTwoPi * (float) hop / (float) thisFftSize;
-
-                for (int bin = 1; bin < thisBins - 1; ++bin)
+                auto augerDeposit = [&] (juce::dsp::FFT& transform,
+                                         int thisSize,
+                                         std::vector<float>& colDb,
+                                         float fMinHz, float fMaxHz,
+                                         float* workXScratch)
                 {
-                    const float centreHz = (float) bin * binHz;
-                    const float re = work[(size_t) (bin * 2)];
-                    const float im = work[(size_t) (bin * 2 + 1)];
-                    const float phase = std::atan2 (im, re);
-                    const float smoothedDb = colDb[(size_t) bin];
+                    if (thisSize < 8 || workXScratch == nullptr)
+                        return;
 
-                    if (centreHz < fMinHz || centreHz > fMaxHz || smoothedDb < -112.0f)
+                    const int thisBins = thisSize / 2 + 1;
+                    if ((int) colDb.size() < thisBins)
+                        return;
+
+                    reassignment.prepare (thisSize, sr);
+                    for (int i = 0; i < thisSize; ++i)
+                        reassignRaw[(size_t) i] = readChannelSample (windowEnd - thisSize + i);
+
+                    reassignment.compute (transform, reassignRaw.data(),
+                                          workXScratch,
+                                          reassignWorkT.data(),
+                                          reassignWorkD.data());
+
+                    const auto& ifs = reassignment.getIfHz();
+                    const auto& tOffs = reassignment.getTimeOffsetSamples();
+                    const float binHz = (float) sr / (float) thisSize;
+
+                    // Light consensus: require neighbour IFs near this bin's IF (ridge lock).
+                    for (int bin = 1; bin < thisBins - 1; ++bin)
                     {
-                        prevPh[(size_t) bin] = phase;
-                        continue;
-                    }
+                        const float centreHz = (float) bin * binHz;
+                        const float smoothedDb = colDb[(size_t) bin];
+                        if (centreHz < fMinHz || centreHz > fMaxHz || smoothedDb < -112.0f)
+                            continue;
 
-                    float ifHz = centreHz;
-                    float timeOffset = 0.0f;
-
-                    if (havePrev)
-                    {
-                        float dPhase = wrapPi (phase - prevPh[(size_t) bin]);
-                        float residual = wrapPi (dPhase - expectedPerBin * (float) bin);
-                        const float binOffset = juce::jlimit (-1.25f, 1.25f,
-                                                              residual / juce::jmax (1.0e-6f, expectedPerBin));
-                        ifHz = ((float) bin + binOffset) * binHz;
-                        if (! std::isfinite (ifHz) || ifHz < kMinDisplayHz * 0.25f)
+                        float ifHz = ifs[(size_t) bin];
+                        if (! std::isfinite (ifHz))
                             ifHz = centreHz;
+
+                        // Consensus gate: IF should agree with ±1 bins when on a sinusoid.
+                        const float ifL = ifs[(size_t) (bin - 1)];
+                        const float ifR = ifs[(size_t) (bin + 1)];
+                        const float consTol = binHz * 1.75f;
+                        const bool consensus = (std::abs (ifL - ifHz) < consTol
+                                               || std::abs (ifR - ifHz) < consTol
+                                               || std::abs (ifL - ifR) < consTol * 1.5f);
+                        if (! consensus && smoothedDb < -48.0f)
+                            continue; // weak noisy bins only
+
+                        if (ifHz < fMinHz * 0.85f || ifHz > fMaxHz * 1.15f)
+                            ifHz = juce::jlimit (fMinHz, fMaxHz, ifHz);
+
+                        float timeOffset = juce::jlimit (-(float) hop, (float) hop,
+                                                         tOffs[(size_t) bin]);
+
+                        if (depositEnhanced (columnSoftTmp.data(), prevHistoryCol,
+                                             ifHz, smoothedDb, sr, logFreq,
+                                             timeOffset, (float) hop))
+                            touchedPrevColumn = true;
                     }
+                };
 
-                    // Group delay from adjacent-bin phase (no extra FFT): τ ≈ −∂φ/∂ω.
-                    {
-                        const float reM = work[(size_t) ((bin - 1) * 2)];
-                        const float imM = work[(size_t) ((bin - 1) * 2 + 1)];
-                        const float reP = work[(size_t) ((bin + 1) * 2)];
-                        const float imP = work[(size_t) ((bin + 1) * 2 + 1)];
-                        const float phM = std::atan2 (imM, reM);
-                        const float phP = std::atan2 (imP, reP);
-                        const float dPhi = wrapPi (phP - phM) * 0.5f; // per bin
-                        timeOffset = juce::jlimit (-(float) hop, (float) hop,
-                                                   -dPhi * (float) thisFftSize / kTwoPi);
-                    }
+                // LF Auger only on compute frames (reuse would use stale ring alignment).
+                if (computeLf && lfBoost > 0 && lfFft != nullptr && lfFftSize > 0)
+                    augerDeposit (*lfFft, lfFftSize, columnDbLf,
+                                  kMinDisplayHz * 0.5f, lfHi, lfFftWork.data());
 
-                    prevPh[(size_t) bin] = phase;
+                if (computeMid && midFft != nullptr && midFftSize > 0)
+                    augerDeposit (*midFft, midFftSize, columnDbMid,
+                                  lfLo, midHi, midFftWork.data());
 
-                    if (ifHz < fMinHz * 0.85f || ifHz > fMaxHz * 1.15f)
-                        ifHz = juce::jlimit (fMinHz, fMaxHz, ifHz);
+                if (fft != nullptr)
+                    augerDeposit (*fft, fftSize, columnDb,
+                                  hfLo, (float) (sr * 0.49), fftWork.data());
 
-                    if (depositEnhanced (columnSoftTmp.data(), prevHistoryCol,
-                                         ifHz, smoothedDb, sr, logFreq,
-                                         timeOffset, (float) hop))
-                        touchedPrevColumn = true;
-                }
-
-                for (int bin : { 0, thisBins - 1 })
+                // Strength: 0 = continuum, 100 = sparse reassigned ridges.
+                if (enhancedStrength < 0.999f)
                 {
-                    if (bin < 0 || bin >= thisBins)
-                        continue;
-                    const float re = work[(size_t) (bin * 2)];
-                    const float im = work[(size_t) (bin * 2 + 1)];
-                    prevPh[(size_t) bin] = std::atan2 (im, re);
+                    for (int y = 0; y < internalH; ++y)
+                    {
+                        const float cont = columnScratch[(size_t) y];
+                        const float ridge = columnSoftTmp[(size_t) y];
+                        // Prefer ridge when present; otherwise keep continuum under blend.
+                        const float sparse = (ridge > -115.0f) ? ridge : cont;
+                        columnScratch[(size_t) y] = cont * (1.0f - enhancedStrength)
+                                                   + sparse * enhancedStrength;
+                    }
                 }
-
-                havePrev = true;
-            };
-
-            // Skip LF reassignment on reuse frames — stale complex spectrum would corrupt IF.
-            if (computeLf && lfBoost > 0 && lfFftSize > 0 && ! lfFftWork.empty())
-            {
-                reassignRange (lfFftWork.data(), columnDbLf, prevPhaseLf, havePrevPhaseLf,
-                               lfFftSize, lfBins, kMinDisplayHz * 0.5f, lfHi);
-            }
-
-            if (useMid && midFftSize > 0 && ! midFftWork.empty())
-            {
-                reassignRange (midFftWork.data(), columnDbMid, prevPhaseMid, havePrevPhaseMid,
-                               midFftSize, midBins, lfLo, midHi);
-            }
-
-            reassignRange (fftWork.data(), columnDb, prevPhase, havePrevPhase,
-                           fftSize, numBins, hfLo, (float) (sr * 0.49));
-
-            // Strength: 0 = continuum, 100 = fully reassigned.
-            if (enhancedStrength < 0.999f)
-            {
-                for (int y = 0; y < internalH; ++y)
-                    columnScratch[(size_t) y] = columnScratch[(size_t) y] * (1.0f - enhancedStrength)
-                                              + columnSoftTmp[(size_t) y] * enhancedStrength;
-            }
-            else
-            {
-                columnScratch.swap (columnSoftTmp);
+                else
+                {
+                    // Full strength: ridges on continuum floor (jmax) so gaps aren't pure black.
+                    for (int y = 0; y < internalH; ++y)
+                        columnScratch[(size_t) y] = juce::jmax (columnScratch[(size_t) y] - 6.0f,
+                                                                columnSoftTmp[(size_t) y]);
+                }
             }
 
             // Recolour 2D scroll only when the enhanced history is the 2D buffer.
@@ -990,9 +986,10 @@ void SpectrogramComponent::advanceFromRing()
                                           loadFloatParam ("SPEC_MAX_DB_ID", -6.0f));
             }
 
-            // Mild soften — hide row gaps without undoing ridges.
-            const float soften = juce::jlimit (0.0f, 0.45f,
-                                               loadFloatParam ("SPEC_SOFTEN_ID", 55.0f) / 100.0f * 0.45f);
+            // Mild soften — pull back when Strength is high so Auger ridges stay sharp.
+            const float softenBase = juce::jlimit (0.0f, 0.45f,
+                                                   loadFloatParam ("SPEC_SOFTEN_ID", 55.0f) / 100.0f * 0.45f);
+            const float soften = softenBase * (1.0f - 0.75f * enhancedStrength);
             if (soften > 0.001f && internalH > 2)
             {
                 columnSoftTmp = columnScratch;
@@ -1119,11 +1116,21 @@ void SpectrogramComponent::colouriseColumnIntoImage (int x, const float* dbRows,
     const float brightAdj = expanded ? brightness : brightness * 2.75f;
     const float dbGain = juce::Decibels::gainToDecibels (juce::jmax (brightAdj, 1.0e-3f), -100.0f);
     const float denom = juce::jmax (1.0f, maxDb - minDb);
+    // Floor colour (LUT 0) — used for pure silence so brightness never lifts digital floor.
+    const auto floorColour = juce::Colour (colourLut[0]);
 
     juce::Image::BitmapData pixels (scrollImage, juce::Image::BitmapData::readWrite);
     for (int y = 0; y < internalH; ++y)
     {
-        const float dbAdj = dbRows[y] + dbGain;
+        const float db = dbRows[y];
+        // Anything at/under display floor stays pure LUT 0 (no brightness boost sparkle).
+        if (db <= minDb + 0.01f || db <= -119.0f)
+        {
+            pixels.setPixelColour (x, y, floorColour);
+            continue;
+        }
+
+        const float dbAdj = db + dbGain;
         const float norm = juce::jlimit (0.0f, 1.0f, (dbAdj - minDb) / denom);
         const int lutIdx = juce::jlimit (0, kLutSize - 1,
                                          (int) std::lround (norm * (float) (kLutSize - 1)));
@@ -1430,15 +1437,7 @@ void SpectrogramComponent::timerCallback()
 void SpectrogramComponent::resized()
 {
     // Internal scroll buffer is resolution-setting sized; screen soften tracks component.
-    // Only dirty when the on-screen size actually changes (layout thrash used to force
-    // a full soften rebuild every parent resized() even when bounds were unchanged).
-    const int w = getWidth(), h = getHeight();
-    if (w != lastScreenW || h != lastScreenH)
-    {
-        lastScreenW = w;
-        lastScreenH = h;
-        screenSoftDirty = true;
-    }
+    screenSoftDirty = true;
 }
 
 void SpectrogramComponent::mouseDown (const juce::MouseEvent& e)
@@ -1480,8 +1479,6 @@ void SpectrogramComponent::rebuildScreenSoftened()
 
     // Soften 0..100 → blur radius 0..5 (screen pixels). 0 skips Melatonin path.
     // Compact: no soften — blur + downscale was washing the strip dark.
-    // Apply blur into screenImage itself so paint always draws one stable buffer
-    // (avoids flip-flopping between unblurred screenImage and blur dst).
     const float soften = expanded
                              ? juce::jlimit (0.0f, 100.0f, loadFloatParam ("SPEC_SOFTEN_ID", 55.0f))
                              : 0.0f;
@@ -1491,8 +1488,6 @@ void SpectrogramComponent::rebuildScreenSoftened()
     {
         screenBlur.setRadius ((size_t) radius);
         screenBlur.update (screenImage);
-        if (screenBlur.isValid())
-            screenImage = screenBlur.render().createCopy();
     }
 
     screenSoftDirty = false;
@@ -1530,7 +1525,8 @@ void SpectrogramComponent::paintFrequencyGrid (juce::Graphics& g, juce::Rectangl
 
         if (major && bounds.getWidth() > 120.0f)
         {
-            g.setColour (theme.graphAxisText.withAlpha (0.85f));
+            const auto labelBg = theme.oscBackground.darker (0.12f);
+            g.setColour (theme.legibleTextOn (theme.graphAxisText, labelBg).withAlpha (0.90f));
             g.setFont (juce::FontOptions (11.0f));
             g.drawText (formatGridHz (hz),
                         juce::Rectangle<float> (bounds.getX() + 6.0f, y - 8.0f, 44.0f, 16.0f),
@@ -1550,11 +1546,6 @@ void SpectrogramComponent::paint (juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     const auto& theme = colors();
 
-    // Scope / expanded panes must stay fully opaque so parent GL or underlay
-    // repaints cannot flash through between spectrogram frames.
-    if (expanded && ! isOpaque())
-        setOpaque (true);
-
     juce::Path window;
     if (! expanded)
     {
@@ -1567,7 +1558,8 @@ void SpectrogramComponent::paint (juce::Graphics& g)
     }
     else
     {
-        g.fillAll (theme.oscBackground);
+        // Expanded / Scope / maximize / F11: fully opaque so nothing shows through.
+        g.fillAll (theme.oscBackground.darker (0.12f));
     }
 
     if (scrollImage.isValid())
@@ -1599,7 +1591,6 @@ void SpectrogramComponent::paint (juce::Graphics& g)
             }
 
             // Screen-space path: upscale first, then stack blur (Gaussian-like).
-            // Only rebuild when content/size changed — not on every parent repaint.
             if (screenSoftDirty
                 || ! screenImage.isValid()
                 || screenImage.getWidth() != getWidth()
@@ -1608,12 +1599,10 @@ void SpectrogramComponent::paint (juce::Graphics& g)
                 rebuildScreenSoftened();
             }
 
-            // Prefer the stable pre-blurred screen buffer. Melatonin render() is fine,
-            // but drawing screenImage after update avoids an extra hop when dst is stale.
-            if (screenImage.isValid())
-                g.drawImage (screenImage, imageBounds);
-            else if (screenBlur.isValid())
+            if (screenBlur.isValid())
                 g.drawImage (screenBlur.render(), imageBounds);
+            else if (screenImage.isValid())
+                g.drawImage (screenImage, imageBounds);
         }
     }
 

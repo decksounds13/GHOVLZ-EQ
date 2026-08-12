@@ -44,6 +44,12 @@ void VerticalGradientMeter::setThemeColors (SharedResources* r) noexcept
     repaint();
 }
 
+void VerticalGradientMeter::setColourRamps (ColourRampBank* bank) noexcept
+{
+    colourRamps = bank;
+    repaint();
+}
+
 void VerticalGradientMeter::rebuildPeakGradient()
 {
     const auto& theme = colors();
@@ -54,6 +60,51 @@ void VerticalGradientMeter::rebuildPeakGradient()
                                        theme.meterFill.brighter (0.2f).withAlpha (230.0f / 255.0f),
                                        bounds.getTopLeft(),
                                        false };
+}
+
+juce::ColourGradient VerticalGradientMeter::makeRampGradient (const GradientRamp& ramp,
+                                                              juce::Rectangle<float> body,
+                                                              float alphaMul) const
+{
+    // Vertical meter: bottom = quiet (0), top = loud (1).
+    const juce::Point<float> p0 (body.getCentreX(), body.getBottom());
+    const juce::Point<float> p1 (body.getCentreX(), body.getY());
+    juce::ColourGradient grad (ramp.colourForDriver (0.0f).withMultipliedAlpha (alphaMul),
+                               p0.x, p0.y,
+                               ramp.colourForDriver (1.0f).withMultipliedAlpha (alphaMul),
+                               p1.x, p1.y, false);
+
+    constexpr int kSamples = 20;
+    for (int i = 1; i < kSamples; ++i)
+    {
+        const float t = (float) i / (float) kSamples;
+        grad.addColour ((double) t, ramp.colourForDriver (t).withMultipliedAlpha (alphaMul));
+    }
+    return grad;
+}
+
+void VerticalGradientMeter::paintBarGlow (juce::Graphics& g,
+                                          juce::Rectangle<float> bar,
+                                          juce::Colour colour,
+                                          float radiusPx,
+                                          float spreadPx,
+                                          float opacity01) const
+{
+    if (bar.getHeight() < 0.5f || opacity01 < 0.02f || radiusPx < 0.25f)
+        return;
+
+    if (! SharedResources::glowShadowEffectsEnabled())
+        return;
+
+    const int layers = juce::jlimit (2, 10, (int) std::ceil (radiusPx * 0.45f) + 2);
+    for (int i = layers; i >= 1; --i)
+    {
+        const float t = (float) i / (float) layers;
+        const float expand = (radiusPx + spreadPx) * t;
+        const float a = opacity01 * 0.18f * (1.0f - t * 0.85f);
+        g.setColour (colour.withAlpha (juce::jlimit (0.0f, 1.0f, a)));
+        g.fillRoundedRectangle (bar.expanded (expand * 0.55f, expand), 2.0f);
+    }
 }
 
 VerticalGradientMeter::MeterMode VerticalGradientMeter::getMeterMode() const
@@ -88,6 +139,13 @@ float VerticalGradientMeter::getParamFloat (const char* id, float fallback) cons
     if (auto* raw = treeState.getRawParameterValue (id))
         return raw->load();
 
+    return fallback;
+}
+
+bool VerticalGradientMeter::getParamBool (const char* id, bool fallback) const
+{
+    if (auto* raw = treeState.getRawParameterValue (id))
+        return raw->load() > 0.5f;
     return fallback;
 }
 
@@ -148,28 +206,104 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
     const bool showPeak = mode == MeterMode::Peak || mode == MeterMode::PeakAndRms;
     const bool showRms = mode == MeterMode::Rms || mode == MeterMode::PeakAndRms;
 
+    const GradientRamp* peakRamp = nullptr;
+    const GradientRamp* rmsRamp = nullptr;
+    if (colourRamps != nullptr)
+    {
+        const auto& pr = colourRamps->get (ColourRampBank::Target::meterPeak);
+        const auto& rr = colourRamps->get (ColourRampBank::Target::meterRms);
+        if (pr.isUsable())
+            peakRamp = &pr;
+        if (rr.isUsable())
+            rmsRamp = &rr;
+    }
+
+    auto fillBar = [&] (juce::Rectangle<float> bar, float levelDb,
+                        const GradientRamp* ramp, float solidAlpha,
+                        juce::Colour solidCol, bool useGlow,
+                        const char* glowEnId, const char* thrId,
+                        const char* radId, const char* sprId, const char* opaId)
+    {
+        if (bar.getHeight() < 0.5f)
+            return;
+
+        juce::Colour tipCol = solidCol;
+        if (ramp != nullptr)
+        {
+            const float t01 = juce::jlimit (
+                0.0f, 1.0f,
+                (juce::jlimit (kMeterFloorDb, kMeterCeilDb, levelDb) - kMeterFloorDb)
+                    / (kMeterCeilDb - kMeterFloorDb));
+            tipCol = ramp->colourForDriver (t01).withMultipliedAlpha (solidAlpha);
+            g.setGradientFill (makeRampGradient (*ramp, bounds, solidAlpha));
+        }
+        else
+        {
+            g.setColour (solidCol.withAlpha (solidAlpha));
+        }
+
+        if (useGlow && getParamBool (glowEnId, false)
+            && levelDb >= getParamFloat (thrId, -18.0f))
+        {
+            const float radius = getParamFloat (radId, 12.0f);
+            const float spread = getParamFloat (sprId, 4.0f);
+            const float opacity = juce::jlimit (0.0f, 1.0f, getParamFloat (opaId, 70.0f) * 0.01f);
+            paintBarGlow (g, bar, tipCol, radius, spread, opacity);
+        }
+
+        if (ramp != nullptr)
+            g.setGradientFill (makeRampGradient (*ramp, bounds, solidAlpha));
+        else
+            g.setColour (solidCol.withAlpha (solidAlpha));
+
+        g.fillRect (bar);
+    };
+
     if (showPeak)
     {
-        g.setGradientFill (gradient2);
         const float scaledY = dbToY (displayedPeakDb, bounds.getHeight());
-        g.fillRect (juce::Rectangle<float> (bounds.getX(),
-                                            bounds.getBottom() - scaledY,
-                                            bounds.getWidth(),
-                                            scaledY));
+        const auto bar = juce::Rectangle<float> (bounds.getX(),
+                                                 bounds.getBottom() - scaledY,
+                                                 bounds.getWidth(),
+                                                 scaledY);
+        if (peakRamp != nullptr)
+            fillBar (bar, displayedPeakDb, peakRamp, 0.95f, theme.meterFill, true,
+                     "METER_PEAK_GLOW_ENABLE_ID", "METER_PEAK_GLOW_THRESHOLD_ID",
+                     "METER_PEAK_GLOW_RADIUS_ID", "METER_PEAK_GLOW_SPREAD_ID",
+                     "METER_PEAK_GLOW_OPACITY_ID");
+        else
+        {
+            // Theme gradient (legacy).
+            g.setGradientFill (gradient2);
+            if (getParamBool ("METER_PEAK_GLOW_ENABLE_ID", false)
+                && displayedPeakDb >= getParamFloat ("METER_PEAK_GLOW_THRESHOLD_ID", -18.0f))
+            {
+                paintBarGlow (g, bar, theme.meterFill.brighter (0.2f),
+                              getParamFloat ("METER_PEAK_GLOW_RADIUS_ID", 12.0f),
+                              getParamFloat ("METER_PEAK_GLOW_SPREAD_ID", 4.0f),
+                              juce::jlimit (0.0f, 1.0f,
+                                            getParamFloat ("METER_PEAK_GLOW_OPACITY_ID", 70.0f) * 0.01f));
+            }
+            g.setGradientFill (gradient2);
+            g.fillRect (bar);
+        }
     }
 
     if (showRms)
     {
-        // Peak+RMS: brighter / more opaque so the RMS lane isn't washed by the peak fill under it.
         const float rmsAlpha = mode == MeterMode::PeakAndRms ? 0.92f : 1.0f;
-        g.setColour (theme.meterFill.brighter (mode == MeterMode::PeakAndRms ? 0.15f : 0.0f)
-                                 .withAlpha (rmsAlpha));
         const float scaledY = dbToY (displayedRmsDb, bounds.getHeight());
         const float barW = mode == MeterMode::PeakAndRms
                                ? juce::jmax (2.0f, bounds.getWidth() * 0.45f)
                                : bounds.getWidth();
         const float x = bounds.getCentreX() - barW * 0.5f;
-        g.fillRect (juce::Rectangle<float> (x, bounds.getBottom() - scaledY, barW, scaledY));
+        const auto bar = juce::Rectangle<float> (x, bounds.getBottom() - scaledY, barW, scaledY);
+        const auto solid = theme.meterFill.brighter (mode == MeterMode::PeakAndRms ? 0.15f : 0.0f);
+
+        fillBar (bar, displayedRmsDb, rmsRamp, rmsAlpha, solid, true,
+                 "METER_RMS_GLOW_ENABLE_ID", "METER_RMS_GLOW_THRESHOLD_ID",
+                 "METER_RMS_GLOW_RADIUS_ID", "METER_RMS_GLOW_SPREAD_ID",
+                 "METER_RMS_GLOW_OPACITY_ID");
     }
 
     // Peak-hold tick

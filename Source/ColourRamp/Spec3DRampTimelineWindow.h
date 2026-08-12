@@ -9,11 +9,9 @@ class ColourRampBank;
 class SharedResources;
 
 /**
-    Floating host for Spec3DRampTimelineComponent when Expanded from Look menu.
-
-    Treated like maximized analyser overlays (Osc / Gon / Spec frames):
-    soft child of MainComponent, same available-area clamp / tool-column inset,
-    drag + corner resize constrained to that rect — not a separate desktop peer.
+    Expanded sequencer host (Exp button).
+    Soft child of MainComponent — title-bar drag + border resize.
+    Movement clamped to framed-scope available area (same as maximized Osc/Gon/Spec).
 */
 class Spec3DRampTimelineWindow : public juce::Component
 {
@@ -28,17 +26,10 @@ public:
     void setThemeColors (SharedResources* r) noexcept;
     void setPlayheadSec (float sec) noexcept { timeline.setPlayheadSec (sec); }
 
-    /** Match FramedFloatingScopeWindow resize limits (parent-local max size). */
-    void setResizeLimits (int maxW, int maxH) noexcept;
-
-    /** Parent-local movement / size clamp rect (framed-scope available area). */
-    void setMovementBounds (juce::Rectangle<int> parentLocalArea) noexcept;
-
-    /** Pin size+position inside the current movement area (after host layout). */
+    /** Parent-local rect the window must stay inside (framed scope available area). */
+    void setMovementArea (juce::Rectangle<int> parentLocalArea) noexcept;
+    /** Apply max size from that area and pin current bounds inside it. */
     void clampToMovementArea() noexcept;
-
-    bool isFrameActive() const noexcept { return frameActive; }
-    void setFrameActive (bool shouldBeActive) noexcept;
 
     std::function<void()> onClose;
     std::function<void()> onSequenceChanged;
@@ -54,13 +45,11 @@ public:
     void mouseMove (const juce::MouseEvent& e) override;
 
 private:
-    static constexpr int kDragBarH = 26;
+    static constexpr int kDragBarH = 28;
     static constexpr float kCornerRadius = 12.0f;
     static constexpr int kMinW = 420;
     static constexpr int kMinH = 160;
-    static constexpr int kShadowPad = 14;
 
-    /** Keeps drag/resize inside parent-local movementBounds (like framed scopes). */
     struct AreaConstrainer final : public juce::ComponentBoundsConstrainer
     {
         juce::Rectangle<int> area;
@@ -73,9 +62,10 @@ private:
                           bool isStretchingBottom,
                           bool isStretchingRight) override
         {
-            juce::ComponentBoundsConstrainer::checkBounds (bounds, previousBounds, limits,
-                                                           isStretchingTop, isStretchingLeft,
-                                                           isStretchingBottom, isStretchingRight);
+            juce::ComponentBoundsConstrainer::checkBounds (
+                bounds, previousBounds, limits,
+                isStretchingTop, isStretchingLeft, isStretchingBottom, isStretchingRight);
+
             if (area.getWidth() < 32 || area.getHeight() < 32)
                 return;
 
@@ -97,7 +87,6 @@ private:
     std::unique_ptr<juce::ResizableCornerComponent> resizer;
     juce::Rectangle<int> movementArea;
     bool dragging = false;
-    bool frameActive = false;
 
     melatonin::DropShadow panelShadow {
         { juce::Colours::black.withAlpha (0.55f), 16, { 0, 6 }, 0 }

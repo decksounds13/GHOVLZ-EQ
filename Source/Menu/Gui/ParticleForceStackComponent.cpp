@@ -78,8 +78,8 @@ namespace
     }
 
     /**
-        Force sliders were ~100× too hot for world-unit particle sim.
-        Ranges are ~1% of the old ±20 / 0–20 spans; defaults match in ParticleForceModule.h.
+        Force sliders were ~100x too hot for world-unit particle sim.
+        Ranges are ~1% of the old +/-20 / 0-20 spans; defaults match in ParticleForceModule.h.
     */
     void configureParamsForType (ParticleForceType type,
                                  juce::Slider& p0, juce::Slider& p1, juce::Slider& p2,
@@ -95,12 +95,12 @@ namespace
         {
             case ParticleForceType::gravity:
                 styleForceSlider (p0, -0.20, 0.20, 0.001);
-                p0.setTooltip ("Gravity accel Y (world units/s²). Negative pulls down.\n"
+                p0.setTooltip ("Gravity accel Y (world units/s^2). Negative pulls down.\n"
                                "Drag range is gentle; type any value for stronger pull.");
                 break;
             case ParticleForceType::drag:
                 styleForceSlider (p0, 0.0, 0.20, 0.001);
-                p0.setTooltip ("Linear drag (vel *= exp(-k·dt)).\n"
+                p0.setTooltip ("Linear drag (vel *= exp(-k * dt)).\n"
                                "Drag range is gentle; type any value for stronger drag.");
                 break;
             case ParticleForceType::wind:
@@ -122,22 +122,22 @@ namespace
             case ParticleForceType::turbulence:
                 styleForceSlider (p0, 0.0, 0.20, 0.001);
                 p0.setTooltip ("Random turbulence strength.\n"
-                               "Drag range is gentle (0–0.2); type any value for more.");
+                               "Drag range is gentle (0-0.2); type any value for more.");
                 break;
             case ParticleForceType::rotation:
-                // rad/s: drag ±2; type higher for extreme spin.
+                // rad/s: drag +/-2; type higher for extreme spin.
                 styleForceSlider (p0, -2.0, 2.0, 0.01);
                 styleForceSlider (p1, -2.0, 2.0, 0.01);
                 styleForceSlider (p2, -2.0, 2.0, 0.01);
                 if (linkAxes)
                 {
-                    p0.setTooltip ("Spin rate (rad/s) on all enabled axes. Type beyond ±2 if needed.");
+                    p0.setTooltip ("Spin rate (rad/s) on all enabled axes. Type beyond +/-2 if needed.");
                 }
                 else
                 {
-                    p0.setTooltip ("Spin rate X (rad/s). Type beyond ±2 if needed.");
-                    p1.setTooltip ("Spin rate Y (rad/s). Type beyond ±2 if needed.");
-                    p2.setTooltip ("Spin rate Z (rad/s). Type beyond ±2 if needed.");
+                    p0.setTooltip ("Spin rate X (rad/s). Type beyond +/-2 if needed.");
+                    p1.setTooltip ("Spin rate Y (rad/s). Type beyond +/-2 if needed.");
+                    p2.setTooltip ("Spin rate Z (rad/s). Type beyond +/-2 if needed.");
                 }
                 break;
             default:
@@ -207,7 +207,7 @@ void ParticleForceStackComponent::setModules (const std::vector<ParticleForceMod
     if (next.size() > (size_t) kParticleForceStackMax)
         next.resize ((size_t) kParticleForceStackMax);
 
-    // In-place value update when structure matches — never destroy rows mid-drag
+    // In-place value update when structure matches - never destroy rows mid-drag
     // (Menu sync + force slider onValueChange used to rebuild and crash).
     const bool structureSame = next.size() == modules.size()
                                && next.size() == (size_t) rows.size()
@@ -272,7 +272,7 @@ void ParticleForceStackComponent::notifyChanged (bool structureChanged)
     modules = getModules();
     if (onChanged)
         onChanged (structureChanged);
-    // Only reflow when row count / height may have changed — not on every param scrub.
+    // Only reflow when row count / height may have changed - not on every param scrub.
     if (structureChanged)
     {
         if (auto* p = getParentComponent())
@@ -370,7 +370,7 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
 
     auto wireSlider = [this] (juce::Slider& s)
     {
-        // Param scrub only — do not rebuild rows or request Menu relayout (that crashed).
+        // Param scrub only - do not rebuild rows or request Menu relayout (that crashed).
         // Drag updates actual = thumb; typed out-of-range keeps actual from valueFromTextFunction.
         s.onValueChange = [this, &s]
         {
@@ -392,7 +392,7 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
         t.onClick = [this]
         {
             refreshRotationChrome();
-            // Link axes can show/hide p1/p2 — height may change for rotation rows.
+            // Link axes can show/hide p1/p2 - height may change for rotation rows.
             ownerRef.notifyChanged (true);
             ownerRef.resized();
             if (auto* p = ownerRef.getParentComponent())
@@ -406,7 +406,7 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
     wireToggle (linkAxes, "Link axes: one strength for all enabled axes");
     wireToggle (randomDir, "Per-particle random spin (-1 to 1 per axis). Each particle tumbles differently. Off = same rate for all.");
 
-    remove.setButtonText (juce::String::charToString ((juce::juce_wchar) 0x00D7));
+    remove.setButtonText ("x");
     remove.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     remove.setColour (juce::TextButton::buttonOnColourId, juce::Colours::indianred.withAlpha (0.35f));
     remove.setColour (juce::TextButton::textColourOffId, juce::Colours::indianred.brighter (0.25f));

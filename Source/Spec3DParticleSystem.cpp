@@ -441,8 +441,9 @@ void Spec3DParticleSystem::scrollHistory (int numCols)
     if (numCols <= 0 || pool.empty())
         return;
 
-    // Free visualizer: particles do not track waterfall columns.
-    if (owner.particleBindingMode == ParticleBindingMode::freeVisualizer)
+    // Free visualizer / geometric emitters: particles do not track waterfall columns.
+    if (owner.particleBindingMode == ParticleBindingMode::freeVisualizer
+        || owner.particleEmitterType != ParticleEmitterType::spectrogram)
         return;
 
     const juce::ScopedLock sl (simLock);
@@ -688,17 +689,60 @@ juce::Vector3D<float> Spec3DParticleSystem::sampleSourceVec (ParticleModSource s
 
     if (src == ParticleModSource::initVel)
     {
-        if (p == nullptr)
-            return {};
-        // Full birth velocity as Vec3 (Float dests use .x = speed via sampleSource).
-        return { p->velX, p->velY, p->velZ };
+        // Full birth velocity as Vec3. Prefer particle state (post-slider / mid-mod);
+        // fall back to Look init-vel sliders for system-stage rows (no particle yet).
+        if (p != nullptr)
+            return { p->velX, p->velY, p->velZ };
+        return { owner.particleInitVelX, owner.particleInitVelY, owner.particleInitVelZ };
+    }
+
+    if (src == ParticleModSource::initVelX
+        || src == ParticleModSource::initVelY
+        || src == ParticleModSource::initVelZ)
+    {
+        float axis = 0.0f;
+        if (p != nullptr)
+        {
+            axis = src == ParticleModSource::initVelX ? p->velX
+                 : (src == ParticleModSource::initVelY ? p->velY : p->velZ);
+        }
+        else
+        {
+            axis = src == ParticleModSource::initVelX ? owner.particleInitVelX
+                 : (src == ParticleModSource::initVelY ? owner.particleInitVelY
+                                                       : owner.particleInitVelZ);
+        }
+        return { axis, axis, axis };
     }
 
     float s = 0.0f;
     switch (src)
     {
         case ParticleModSource::amplitude: s = frame.amplitude; break;
-        case ParticleModSource::binDb:     s = p != nullptr ? p->binDb01 : 0.0f; break;
+        case ParticleModSource::binDb:
+            // FFT strength 0–1 = colour-ramp intensity at this particle's freq bin.
+            // Prefer live mesh sample (scrolls with trail col); fall back to birth bake.
+            if (p != nullptr)
+            {
+                if (owner.meshW >= 2 && owner.meshH >= 2 && ! owner.meshDb.empty()
+                    && owner.lastBrightness >= 0.0f)
+                {
+                    const int col = juce::jlimit (0, owner.meshW - 1, p->col);
+                    const float binF = juce::jlimit (0.0f, (float) juce::jmax (0, owner.meshH - 1), p->binF);
+                    const int b0 = juce::jlimit (0, owner.meshH - 1, (int) std::floor (binF));
+                    const int b1 = juce::jmin (owner.meshH - 1, b0 + 1);
+                    const float fr = binF - (float) b0;
+                    const float denom = juce::jmax (1.0f, owner.lastMaxDb - owner.lastMinDb);
+                    const float db0 = owner.meshDb[(size_t) col * (size_t) owner.meshH + (size_t) b0];
+                    const float db1 = owner.meshDb[(size_t) col * (size_t) owner.meshH + (size_t) b1];
+                    const float n0 = juce::jlimit (0.0f, 1.0f, (db0 - owner.lastMinDb) / denom);
+                    const float n1 = juce::jlimit (0.0f, 1.0f, (db1 - owner.lastMinDb) / denom);
+                    s = n0 * (1.0f - fr) + n1 * fr;
+                }
+                else
+                    s = p->binDb01;
+            }
+            break;
         case ParticleModSource::binFreq:   s = p != nullptr ? p->binFreq01 : 0.0f; break;
         case ParticleModSource::ageNorm:
             if (p == nullptr || p->maxLife < 1.0e-4f) s = 0.0f;
@@ -739,12 +783,11 @@ float Spec3DParticleSystem::sampleSource (ParticleModSource src, float constant,
 {
     if (src == ParticleModSource::initVel)
     {
-        if (p == nullptr)
-            return 0.0f;
-        // Speed magnitude (world units/s). Map-range / amount shape the scale.
-        const float sp = std::sqrt (p->velX * p->velX + p->velY * p->velY + p->velZ * p->velZ);
-        return sp;
+        // Speed magnitude (world units/s) for Float dests.
+        const auto v = sampleSourceVec (src, constant, p, frame);
+        return std::sqrt (v.x * v.x + v.y * v.y + v.z * v.z);
     }
+    // initVelX/Y/Z and other scalars: .x is the channel.
     return sampleSourceVec (src, constant, p, frame).x;
 }
 
@@ -966,8 +1009,17 @@ void Spec3DParticleSystem::applySpawnMods (Particle& p, float& lifespan, float& 
         switch (slot.dest)
         {
             case ParticleModDest::riseSpeed:
-                // Legacy float dest — Y only (same as rise-speed slider path).
+            case ParticleModDest::initVelY:
+                // Float dest — Y only (riseSpeed is legacy name for Init vel Y).
                 velY = applyOp (velY, src, slot.op, slot.amount);
+                syncVel();
+                break;
+            case ParticleModDest::initVelX:
+                velX = applyOp (velX, src, slot.op, slot.amount);
+                syncVel();
+                break;
+            case ParticleModDest::initVelZ:
+                velZ = applyOp (velZ, src, slot.op, slot.amount);
                 syncVel();
                 break;
             case ParticleModDest::initVel:
@@ -980,7 +1032,7 @@ void Spec3DParticleSystem::applySpawnMods (Particle& p, float& lifespan, float& 
                     v.z = 1.0f - v.z;
                 }
                 // Float sources broadcast via sampleSourceVec → isotropic push.
-                // Random Vec3 / Init vel source → full independent axes.
+                // Init vel (Vec3) / Random Vec3 → full independent axes.
                 velX = applyOp (velX, v.x, slot.op, slot.amount);
                 velY = applyOp (velY, v.y, slot.op, slot.amount);
                 velZ = applyOp (velZ, v.z, slot.op, slot.amount);
@@ -1022,6 +1074,134 @@ void Spec3DParticleSystem::applySpawnMods (Particle& p, float& lifespan, float& 
     }
 }
 
+float Spec3DParticleSystem::sampleGraphAttr01 (ParticleNodeGraph::AttrId id, const Particle& p,
+                                               const FrameSources& frame) const noexcept
+{
+    using ParticleNodeGraph::AttrId;
+    switch (id)
+    {
+        case AttrId::fft:           return juce::jlimit (0.0f, 1.0f, p.binDb01);
+        case AttrId::binFreq:       return juce::jlimit (0.0f, 1.0f, p.binFreq01);
+        case AttrId::history:
+            if (owner.meshW < 2) return 1.0f;
+            return juce::jlimit (0.0f, 1.0f, (float) p.col / (float) (owner.meshW - 1));
+        case AttrId::age:           return juce::jmax (0.0f, p.age);
+        case AttrId::normalizedAge:
+            if (p.maxLife < 1.0e-4f) return 0.0f;
+            return juce::jlimit (0.0f, 1.0f, p.age / p.maxLife);
+        case AttrId::life:          return juce::jmax (0.0f, p.maxLife);
+        case AttrId::speed:
+        {
+            const float s2 = p.velX * p.velX + p.velY * p.velY + p.velZ * p.velZ;
+            // Soft normalize: ~2 units/s → 1
+            return juce::jlimit (0.0f, 1.0f, std::sqrt (s2) * 0.5f);
+        }
+        case AttrId::size:          return juce::jlimit (0.0f, 1.0f, p.sizeScale);
+        case AttrId::alpha:         return juce::jlimit (0.0f, 1.0f, p.alpha);
+        case AttrId::emissive:      return juce::jlimit (0.0f, 1.0f, p.emissiveScale);
+        case AttrId::colourGain:    return juce::jlimit (0.0f, 1.0f, p.colourGain);
+        case AttrId::posY:          return juce::jlimit (0.0f, 1.0f, p.y);
+        case AttrId::targetY:       return juce::jlimit (0.0f, 1.0f, p.targetY);
+        case AttrId::particleId:
+        {
+            uint32_t n = p.id;
+            n ^= n >> 16; n *= 0x7feb352du; n ^= n >> 15; n *= 0x846ca68bu; n ^= n >> 16;
+            return (n & 0x00ffffffu) * (1.0f / 16777215.0f);
+        }
+        case AttrId::random0:       return juce::jlimit (0.0f, 1.0f, p.randV[0][0]);
+        case AttrId::random1:       return juce::jlimit (0.0f, 1.0f, p.randV[1][0]);
+        case AttrId::random2:       return juce::jlimit (0.0f, 1.0f, p.randV[2][0]);
+        case AttrId::position:
+        {
+            const float s2 = p.x * p.x + p.y * p.y + p.z * p.z;
+            return juce::jlimit (0.0f, 1.0f, std::sqrt (s2) * 0.25f);
+        }
+        case AttrId::velocity:      return sampleGraphAttr01 (AttrId::speed, p, frame);
+        case AttrId::colour:
+            return juce::jlimit (0.0f, 1.0f, 0.2126f * p.r + 0.7152f * p.g + 0.0722f * p.b);
+        case AttrId::orientation:
+            return juce::jlimit (0.0f, 1.0f, std::abs (p.rotY) / juce::MathConstants<float>::twoPi);
+        default:
+            juce::ignoreUnused (frame);
+            return 0.0f;
+    }
+}
+
+bool Spec3DParticleSystem::passesGraphFilters (const Particle& p, bool atSpawn,
+                                               const FrameSources& frame) const noexcept
+{
+    const auto& filters = owner.particleGraphProgram.filters;
+    if (filters.empty())
+        return true;
+
+    for (const auto& f : filters)
+    {
+        if (! f.enabled)
+            continue;
+        // stage: 0 spawn, 1 update, 2 both
+        if (f.stage == 0 && ! atSpawn) continue;
+        if (f.stage == 1 && atSpawn) continue;
+
+        float w = sampleGraphAttr01 (f.attr, p, frame);
+        w = ParticleNodeGraph::applyCurve01 (w, f.curveShape);
+        w = f.mapMin + (f.mapMax - f.mapMin) * w;
+        if (f.invert)
+            w = 1.0f - w;
+
+        bool pass = true;
+        if (f.thresholdEnabled)
+        {
+            const float thr = juce::jlimit (0.0f, 0.99f, f.threshold);
+            const bool above = w > thr;
+            pass = (f.keepMode == 0) ? above : ! above;
+        }
+
+        if (! pass)
+        {
+            // amount = cull probability (1 = hard reject)
+            const float amt = juce::jlimit (0.0f, 1.0f, f.amount);
+            if (amt >= 0.999f)
+                return false;
+            // Deterministic-ish hash from particle id so live reconnect is stable
+            uint32_t n = p.id * 747796405u + 2891336453u;
+            n = (n ^ (n >> 16)) * 0x7feb352du;
+            const float u = (n & 0x00ffffffu) * (1.0f / 16777215.0f);
+            if (u < amt)
+                return false;
+        }
+    }
+    return true;
+}
+
+void Spec3DParticleSystem::applyGraphColourRamps (Particle& p, bool atSpawn,
+                                                  const FrameSources& frame) const noexcept
+{
+    const auto& ramps = owner.particleGraphProgram.colourRamps;
+    if (ramps.empty())
+        return;
+
+    for (const auto& op : ramps)
+    {
+        if (! op.enabled)
+            continue;
+        if (op.stage == 0 && ! atSpawn) continue;
+        if (op.stage == 1 && atSpawn) continue;
+
+        float t = sampleGraphAttr01 (op.sourceAttr, p, frame);
+        t = ParticleNodeGraph::applyCurve01 (t, op.curveShape);
+        t = op.mapMin + (op.mapMax - op.mapMin) * t;
+        if (op.invert)
+            t = 1.0f - t;
+        t = juce::jlimit (0.0f, 1.0f, t);
+
+        p.r = op.c0[0] + (op.c1[0] - op.c0[0]) * t;
+        p.g = op.c0[1] + (op.c1[1] - op.c0[1]) * t;
+        p.b = op.c0[2] + (op.c1[2] - op.c0[2]) * t;
+        p.alpha = op.c0[3] + (op.c1[3] - op.c0[3]) * t;
+        p.baseR = p.r; p.baseG = p.g; p.baseB = p.b;
+    }
+}
+
 void Spec3DParticleSystem::applyUpdateMods (Particle& p, const FrameSources& frame) noexcept
 {
     p.colourGain = 1.0f;
@@ -1039,6 +1219,9 @@ void Spec3DParticleSystem::applyUpdateMods (Particle& p, const FrameSources& fra
         if (slot.dest == ParticleModDest::emission
             || slot.dest == ParticleModDest::riseSpeed
             || slot.dest == ParticleModDest::initVel
+            || slot.dest == ParticleModDest::initVelX
+            || slot.dest == ParticleModDest::initVelY
+            || slot.dest == ParticleModDest::initVelZ
             || slot.dest == ParticleModDest::lifespan
             || slot.dest == ParticleModDest::spawnJitter
             || particleModDestCanonical (slot.dest) == ParticleModDest::initRot
@@ -1289,13 +1472,75 @@ float Spec3DParticleSystem::pickPlayheadBinF() noexcept
     return juce::jlimit (0.0f, uMax, (float) b + frac);
 }
 
+void Spec3DParticleSystem::pickHistorySpawn (int& outCol, float& outBinF) noexcept
+{
+    outCol = juce::jmax (0, owner.meshW - 1);
+    outBinF = 0.0f;
+    const int cols = owner.meshW;
+    const int bins = owner.meshH;
+    if (cols < 1 || bins < 1 || owner.meshDb.empty() || owner.lastBrightness < 0.0f)
+    {
+        outBinF = pickPlayheadBinF();
+        return;
+    }
+
+    // Energy-weighted pick over the full W×H field (history surface emitter).
+    const float denom = juce::jmax (1.0f, owner.lastMaxDb - owner.lastMinDb);
+    const int n = cols * bins;
+    if ((int) playheadWeights.size() < n)
+        playheadWeights.assign ((size_t) n, 0.0f);
+
+    float sum = 0.0f;
+    for (int c = 0; c < cols; ++c)
+    {
+        for (int b = 0; b < bins; ++b)
+        {
+            const float db = owner.meshDb[(size_t) c * (size_t) bins + (size_t) b];
+            const float nn = juce::jlimit (0.0f, 1.0f, (db - owner.lastMinDb) / denom);
+            const float w = nn * nn + 0.05f;
+            sum += w;
+            playheadWeights[(size_t) (c * bins + b)] = sum;
+        }
+    }
+    if (sum <= 1.0e-8f)
+    {
+        outCol = rng.nextInt (cols);
+        outBinF = rng.nextFloat() * (float) juce::jmax (0, bins - 1);
+        return;
+    }
+
+    const float pick = rng.nextFloat() * sum;
+    int lo = 0, hi = n - 1;
+    while (lo < hi)
+    {
+        const int mid = (lo + hi) >> 1;
+        if (playheadWeights[(size_t) mid] < pick)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    outCol = lo / bins;
+    const int b = lo % bins;
+    outBinF = (float) b + rng.nextFloat() * 0.999f;
+    outCol = juce::jlimit (0, cols - 1, outCol);
+    outBinF = juce::jlimit (0.0f, (float) juce::jmax (0, bins - 1), outBinF);
+}
+
 void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
                                             float sizeBase, float spawnJitterScale)
 {
-    const int col = owner.meshW - 1;
+    // Default / playhead surface: only the live tip column (never history).
+    spawnAtColumn (owner.meshW - 1, binF, lifespanBase, sizeBase, spawnJitterScale);
+}
+
+void Spec3DParticleSystem::spawnAtColumn (int col, float binF, float lifespanBase,
+                                          float sizeBase, float spawnJitterScale)
+{
     const int bins = owner.meshH;
-    if (bins < 1)
+    if (bins < 1 || owner.meshW < 1)
         return;
+
+    col = juce::jlimit (0, owner.meshW - 1, col);
 
     binF = juce::jlimit (0.0f, (float) juce::jmax (0, bins - 1), binF);
     const int b0 = juce::jlimit (0, bins - 1, (int) std::floor (binF));
@@ -1317,6 +1562,163 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     const float db01 = db0 * (1.0f - fr) + db1 * fr;
     const float freq01 = f0 * (1.0f - fr) + f1 * fr;
 
+    // Spectrogram trail spawn (unchanged semantics): ground y, bake targetY, col scroll.
+    ParticleSpawnSample s;
+    s.x = columnToWorldX (col);
+    s.y = 0.0f;
+    s.z = z;
+    s.velX = owner.particleInitVelX;
+    s.velY = owner.particleInitVelY;
+    s.velZ = owner.particleInitVelZ;
+    {
+        const float velR = owner.particleVelRandom;
+        if (std::abs (velR) > 1.0e-5f)
+        {
+            s.velX *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
+            s.velY *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
+            s.velZ *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
+        }
+    }
+    s.targetY = juce::jmax (targetY, 0.01f);
+    s.r = r; s.g = g; s.b = bcol;
+    s.binDb01 = db01;
+    s.binFreq01 = freq01;
+    s.binF = binF;
+    s.col = col;
+    s.bin = b0;
+    // Trail binding only when spectrogram trail mode; free still births at y=0 (same as before).
+    s.trailBound = (owner.particleBindingMode != ParticleBindingMode::freeVisualizer);
+
+    finalizeSpawn (s, lifespanBase, sizeBase, spawnJitterScale);
+}
+
+void Spec3DParticleSystem::sampleSprayDirection (float& outX, float& outY, float& outZ) noexcept
+{
+    // Aim: yaw around Y, pitch from +Y (0 = horizon +Z-ish after yaw, 90 = +Y up).
+    const float yaw = juce::degreesToRadians (owner.particleSprayYawDeg);
+    const float pitch = juce::degreesToRadians (owner.particleSprayPitchDeg);
+    // Base direction: pitch 90 → (0,1,0); pitch 0 → (sin(yaw), 0, cos(yaw)).
+    const float cp = std::cos (pitch);
+    const float sp = std::sin (pitch);
+    juce::Vector3D<float> base { std::sin (yaw) * cp, sp, std::cos (yaw) * cp };
+    const float bl = std::sqrt (base.x * base.x + base.y * base.y + base.z * base.z);
+    if (bl > 1.0e-8f) { base.x /= bl; base.y /= bl; base.z /= bl; }
+    else { base = { 0, 1, 0 }; }
+
+    const float spreadRad = juce::degreesToRadians (juce::jlimit (0.0f, 180.0f, owner.particleSpraySpreadDeg));
+    if (spreadRad < 1.0e-6f)
+    {
+        outX = base.x; outY = base.y; outZ = base.z;
+        return;
+    }
+
+    // Uniform solid-angle cone around base.
+    const float cosMax = std::cos (spreadRad);
+    const float u = rng.nextFloat();
+    const float cosA = cosMax + (1.0f - cosMax) * u;
+    const float sinA = std::sqrt (juce::jmax (0.0f, 1.0f - cosA * cosA));
+    const float phi = rng.nextFloat() * juce::MathConstants<float>::twoPi;
+
+    // Orthonormal frame with base as Y'.
+    juce::Vector3D<float> arb = (std::abs (base.y) < 0.9f) ? juce::Vector3D<float> { 0, 1, 0 }
+                                                           : juce::Vector3D<float> { 1, 0, 0 };
+    juce::Vector3D<float> t { arb.y * base.z - arb.z * base.y,
+                              arb.z * base.x - arb.x * base.z,
+                              arb.x * base.y - arb.y * base.x };
+    float tl = std::sqrt (t.x * t.x + t.y * t.y + t.z * t.z);
+    if (tl > 1.0e-8f) { t.x /= tl; t.y /= tl; t.z /= tl; }
+    juce::Vector3D<float> b { base.y * t.z - base.z * t.y,
+                              base.z * t.x - base.x * t.z,
+                              base.x * t.y - base.y * t.x };
+
+    outX = base.x * cosA + t.x * (sinA * std::cos (phi)) + b.x * (sinA * std::sin (phi));
+    outY = base.y * cosA + t.y * (sinA * std::cos (phi)) + b.y * (sinA * std::sin (phi));
+    outZ = base.z * cosA + t.z * (sinA * std::cos (phi)) + b.z * (sinA * std::sin (phi));
+    const float ol = std::sqrt (outX * outX + outY * outY + outZ * outZ);
+    if (ol > 1.0e-8f) { outX /= ol; outY /= ol; outZ /= ol; }
+}
+
+bool Spec3DParticleSystem::samplePointEmitter (ParticleSpawnSample& out) noexcept
+{
+    out = {};
+    out.trailBound = false;
+    out.x = owner.particleEmitterPosX;
+    out.y = owner.particleEmitterPosY;
+    out.z = owner.particleEmitterPosZ;
+    out.targetY = out.y;
+    out.col = juce::jmax (0, owner.meshW - 1);
+    out.bin = 0;
+    out.binF = 0.0f;
+    out.r = out.g = out.b = 1.0f;
+
+    float dx, dy, dz;
+    sampleSprayDirection (dx, dy, dz);
+
+    float spdMin = owner.particleSpraySpeedMin;
+    float spdMax = owner.particleSpraySpeedMax;
+    if (spdMax < spdMin)
+        std::swap (spdMin, spdMax);
+    // If speeds unset, fall back to init-vel magnitude (spectrogram defaults still apply there).
+    if (spdMax < 1.0e-6f && spdMin < 1.0e-6f)
+    {
+        const float ix = owner.particleInitVelX, iy = owner.particleInitVelY, iz = owner.particleInitVelZ;
+        const float mag = std::sqrt (ix * ix + iy * iy + iz * iz);
+        spdMin = spdMax = (mag > 1.0e-6f ? mag : 1.0f);
+    }
+    float speed = spdMin;
+    if (spdMax > spdMin + 1.0e-6f)
+        speed = spdMin + rng.nextFloat() * (spdMax - spdMin);
+
+    out.velX = dx * speed;
+    out.velY = dy * speed;
+    out.velZ = dz * speed;
+    const float velR = owner.particleVelRandom;
+    if (std::abs (velR) > 1.0e-5f)
+    {
+        out.velX *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
+        out.velY *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
+        out.velZ *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
+    }
+    return true;
+}
+
+bool Spec3DParticleSystem::trySpawnOne (float lifespanBase, float sizeBase, float spawnJitterScale,
+                                        float binFOrNeg1)
+{
+    const auto type = owner.particleEmitterType;
+    if (type == ParticleEmitterType::point)
+    {
+        ParticleSpawnSample s;
+        if (! samplePointEmitter (s))
+            return false;
+        const int before = aliveCount;
+        finalizeSpawn (s, lifespanBase, sizeBase, spawnJitterScale);
+        return aliveCount > before;
+    }
+
+    // Spectrogram (default) + reserved shape types fall through to mesh until implemented.
+    if (type != ParticleEmitterType::spectrogram)
+    {
+        // Future sphere/box/disc/cone: for now behave as point so UI previews don't go silent.
+        ParticleSpawnSample s;
+        if (! samplePointEmitter (s))
+            return false;
+        const int before = aliveCount;
+        finalizeSpawn (s, lifespanBase, sizeBase, spawnJitterScale);
+        return aliveCount > before;
+    }
+
+    const int before = aliveCount;
+    if (binFOrNeg1 >= 0.0f)
+        spawnAtPlayhead (binFOrNeg1, lifespanBase, sizeBase, spawnJitterScale);
+    else
+        spawnAtPlayhead (pickPlayheadBinF(), lifespanBase, sizeBase, spawnJitterScale);
+    return aliveCount > before;
+}
+
+void Spec3DParticleSystem::finalizeSpawn (const ParticleSpawnSample& sample, float lifespanBase,
+                                          float sizeBase, float spawnJitterScale)
+{
     if (aliveCount >= maxAliveBudget)
         return;
 
@@ -1324,22 +1726,12 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     if (slot < 0)
         return;
 
-    // Base initial velocity (Vec3) + optional per-axis random scale.
-    float velX = owner.particleInitVelX;
-    float velY = owner.particleInitVelY;
-    float velZ = owner.particleInitVelZ;
-    const float velR = owner.particleVelRandom;
-    if (std::abs (velR) > 1.0e-5f)
-    {
-        velX *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
-        velY *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
-        velZ *= (1.0f + (rng.nextFloat() * 2.0f - 1.0f) * velR);
-    }
-
     float maxLife = -1.0f;
     float lifeSec = lifespanBase;
+    const bool freeMode = ! sample.trailBound
+                          || owner.particleBindingMode == ParticleBindingMode::freeVisualizer;
     // Free visualizer: default lifespan if indefinite to avoid infinite pool fill.
-    if (lifeSec <= 1.0e-4f && owner.particleBindingMode == ParticleBindingMode::freeVisualizer)
+    if (lifeSec <= 1.0e-4f && freeMode)
         lifeSec = 4.0f;
     if (lifeSec > 1.0e-4f)
     {
@@ -1364,38 +1756,34 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     }
     p.settled = false;
     p.id = nextParticleId++;
-    if (nextParticleId == 0) // skip 0 so hash never collapses on unset particles
+    if (nextParticleId == 0)
         nextParticleId = 1;
-    p.bin = b0;
-    p.binF = binF;
-    p.col = col;
-    p.x = columnToWorldX (col);
-    p.y = 0.0f;
-    p.z = z;
-    p.velX = velX;
-    p.velY = velY;
-    p.velZ = velZ;
-    // Bake absolute height once from the playhead sample (this frame's norm). Immutable after.
-    p.targetY = juce::jmax (targetY, 0.01f);
-    p.baseR = r; p.baseG = g; p.baseB = bcol;
-    p.r = r; p.g = g; p.b = bcol;
+    p.bin = sample.bin;
+    p.binF = sample.binF;
+    p.col = sample.col;
+    p.x = sample.x;
+    p.y = sample.y;
+    p.z = sample.z;
+    p.velX = sample.velX;
+    p.velY = sample.velY;
+    p.velZ = sample.velZ;
+    p.targetY = juce::jmax (sample.targetY, 0.01f);
+    p.baseR = sample.r; p.baseG = sample.g; p.baseB = sample.b;
+    p.r = sample.r; p.g = sample.g; p.b = sample.b;
     p.age = 0.0f;
     p.maxLife = maxLife;
     p.sizeScale = sizeBase;
     p.colourGain = 1.0f;
     p.emissiveScale = 1.0f;
     p.alpha = 1.0f;
-    p.binDb01 = db01;
-    p.binFreq01 = freq01;
+    p.binDb01 = sample.binDb01;
+    p.binFreq01 = sample.binFreq01;
     p.spawnOffX = p.spawnOffY = p.spawnOffZ = 0.0f;
 
-    // Initial rotation (degrees → radians) + optional random
     float rotX = juce::degreesToRadians (owner.particleInitRotX);
     float rotY = juce::degreesToRadians (owner.particleInitRotY);
     float rotZ = juce::degreesToRadians (owner.particleInitRotZ);
 
-    // Stable per-particle hash from slot + bin so every particle differs
-    // (not one shared random for the whole cloud).
     auto particleHash01 = [] (uint32_t n) noexcept
     {
         n ^= n >> 16;
@@ -1406,25 +1794,23 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
         return (n & 0x00ffffffu) * (1.0f / 16777215.0f);
     };
     const uint32_t seed = (uint32_t) slot * 0x9E3779B9u
-                        ^ (uint32_t) b0 * 747796405u
-                        ^ (uint32_t) (col * 1597334677u)
-                        ^ (uint32_t) (binF * 1000.0f);
+                        ^ (uint32_t) sample.bin * 747796405u
+                        ^ (uint32_t) (sample.col * 1597334677u)
+                        ^ (uint32_t) (sample.binF * 1000.0f)
+                        ^ (uint32_t) (sample.x * 1000.0f);
 
     const float rotRnd = owner.particleInitRotRandom;
     if (std::abs (rotRnd) > 1.0e-6f)
     {
         const float span = juce::MathConstants<float>::twoPi * rotRnd;
-        // Unique offset per axis × particle (hash-driven, not one cloud-wide roll).
         rotX += (particleHash01 (seed + 11u) * 2.0f - 1.0f) * span;
         rotY += (particleHash01 (seed + 29u) * 2.0f - 1.0f) * span;
         rotZ += (particleHash01 (seed + 47u) * 2.0f - 1.0f) * span;
     }
 
-    // Continuous −1…1 spin scales for rotation force (unique per particle & axis).
     p.spinScaleX = particleHash01 (seed + 101u) * 2.0f - 1.0f;
     p.spinScaleY = particleHash01 (seed + 203u) * 2.0f - 1.0f;
     p.spinScaleZ = particleHash01 (seed + 307u) * 2.0f - 1.0f;
-    // Avoid near-zero scales that look "stuck" while neighbours tumble.
     auto boostScale = [] (float s) noexcept
     {
         const float mag = juce::jmax (0.25f, std::abs (s));
@@ -1445,7 +1831,6 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
 
     float life = maxLife > 0.0f ? maxLife : 0.0f;
     float sizeSc = sizeBase;
-    // Per-particle size scale in [min, max] (multiplies base Particle size).
     {
         const float lo = juce::jmin (owner.particleSizeRandomMin, owner.particleSizeRandomMax);
         const float hi = juce::jmax (owner.particleSizeRandomMin, owner.particleSizeRandomMax);
@@ -1466,7 +1851,15 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     if (life > 1.0e-4f)
         p.maxLife = life;
 
-    // Scatter spawn (default kDefaultParticleSpawnJitter > 0 so particles don't stack).
+    // Graph program: colour ramps then filters (reject birth if fail).
+    applyGraphColourRamps (p, true, frame);
+    if (! passesGraphFilters (p, true, frame))
+    {
+        markDead (slot);
+        ++lastCulledCount;
+        return;
+    }
+
     const float jAmt = juce::jmax (0.0f, owner.particleSpawnJitter) * juce::jmax (0.0f, jitterSc);
     if (jAmt > 1.0e-6f)
     {
@@ -1476,18 +1869,13 @@ void Spec3DParticleSystem::spawnAtPlayhead (float binF, float lifespanBase,
     }
     p.x += p.spawnOffX;
     p.z += p.spawnOffZ;
-
-    // Emit from ground plane (y≈0 + jitter). Rise with init vel / forces toward baked
-    // targetY — mesh is never re-sampled after this spawn.
     p.y += p.spawnOffY;
     p.settled = false;
 
-    // Sparse birth upload for any GPU integrate path (trail or free).
     if (owner.particleGpuSimEnabled && gpuComputeReady
         && (int) pool.size() <= kHardCap)
     {
-        const bool freeModeSpawn = owner.particleBindingMode == ParticleBindingMode::freeVisualizer;
-        queueGpuSlotPatch (slot, freeModeSpawn);
+        queueGpuSlotPatch (slot, freeMode);
     }
 }
 
@@ -1674,16 +2062,21 @@ void Spec3DParticleSystem::update (float dtSeconds)
     const float totalRate = (spawnBudget > 0) ? emissionPerSec : 0.0f;
     float lifeBase = owner.particleLifespan;
     const float sizeBase = 1.0f;
-    const bool freeMode = owner.particleBindingMode == ParticleBindingMode::freeVisualizer;
-    const bool continuousEmit = (owner.particleEmitMode
-                                 == Spectrogram3DComponent::ParticleEmitMode::continuous);
+    // Geometric emitters always free-integrate (no waterfall column scroll).
+    const bool geoEmitter = (owner.particleEmitterType != ParticleEmitterType::spectrogram);
+    const bool freeMode = geoEmitter
+                          || owner.particleBindingMode == ParticleBindingMode::freeVisualizer;
+    // Slice is spectrogram-only; geometric emitters always use continuous rate clock.
+    const bool continuousEmit = geoEmitter
+                                || (owner.particleEmitMode
+                                    == Spectrogram3DComponent::ParticleEmitMode::continuous);
     lastSpawnedCount = 0;
 
     if (spawnBudget > 0 && totalRate > 1.0e-8f)
     {
         if (continuousEmit)
         {
-            // Continuous: random playhead samples (energy-weighted continuous binF).
+            // Continuous: spectrogram energy-weighted tip, or geometric emitter samples.
             for (auto& a : emitAccum)
                 a = 0.0f;
 
@@ -1697,9 +2090,7 @@ void Spec3DParticleSystem::update (float dtSeconds)
                    && aliveCount < maxAliveBudget)
             {
                 emitGlobal -= 1.0f;
-                const int before = aliveCount;
-                spawnAtPlayhead (pickPlayheadBinF(), lifeBase, sizeBase, spawnJitter);
-                if (aliveCount > before)
+                if (trySpawnOne (lifeBase, sizeBase, spawnJitter, -1.0f))
                 {
                     ++lastSpawnedCount;
                     failStreak = 0;
@@ -1715,7 +2106,7 @@ void Spec3DParticleSystem::update (float dtSeconds)
         }
         else
         {
-            // Slice: independent per-bin clocks → grid-like columns.
+            // Slice: independent per-bin clocks → grid-like columns on the playhead tip.
             emitGlobal = 0.0f;
             const float perBin = totalRate / (float) juce::jmax (1, bins);
             for (int bin = 0; bin < bins && lastSpawnedCount < spawnBudget
@@ -1733,9 +2124,7 @@ void Spec3DParticleSystem::update (float dtSeconds)
                 {
                     emitAccum[(size_t) bin] -= 1.0f;
                     const float binF = (float) bin + rng.nextFloat() * 0.999f;
-                    const int before = aliveCount;
-                    spawnAtPlayhead (binF, lifeBase, sizeBase, spawnJitter);
-                    if (aliveCount > before)
+                    if (trySpawnOne (lifeBase, sizeBase, spawnJitter, binF))
                     {
                         ++lastSpawnedCount;
                         failStreak = 0;
@@ -1762,7 +2151,10 @@ void Spec3DParticleSystem::update (float dtSeconds)
                                  && aliveCount <= maxAliveBudget
                                  && (int) pool.size() <= kHardCap;
 
-    // Trail height is baked at spawn — never re-sample mesh Y. Only trail X + optional colour.
+    // Trail X from history column. Height/z stay baked at spawn.
+    // Live FFT / colour mods: CPU integrate only — under GPU, CPU y/age/size are stale
+    // and must never be written back into the resident SSBO (that re-grounds scrolled
+    // particles and looks like the whole history is an emitter).
     {
         int colourStride = useGpuIntegrate ? 64
                          : (aliveCount > 50000 ? 16
@@ -1773,6 +2165,31 @@ void Spec3DParticleSystem::update (float dtSeconds)
         if (loadLevel >= 2) colourStride = juce::jmax (colourStride, 32);
         colourPassCursor = (colourPassCursor + 1) % juce::jmax (1, colourStride);
         int colourIdx = 0;
+
+        // Trail + CPU: any matrix row that needs live per-particle sources/dests.
+        bool needTrailModPass = false;
+        if (! freeMode && ! useGpuIntegrate)
+        {
+            for (int i = 0; i < kParticleModSlotCount; ++i)
+            {
+                const auto& slot = owner.particleModSlots[(size_t) i];
+                if (! slot.enabled || slot.source == ParticleModSource::none)
+                    continue;
+                if (slot.source == ParticleModSource::binDb
+                    || slot.source == ParticleModSource::ageNorm
+                    || slot.source == ParticleModSource::history
+                    || slot.dest == ParticleModDest::size
+                    || slot.dest == ParticleModDest::sizeScale
+                    || slot.dest == ParticleModDest::emissive
+                    || slot.dest == ParticleModDest::alpha
+                    || slot.dest == ParticleModDest::colourGain
+                    || slot.dest == ParticleModDest::colourHue)
+                {
+                    needTrailModPass = true;
+                    break;
+                }
+            }
+        }
 
         if ((int) aliveList.size() != aliveCount)
             rebuildAliveList();
@@ -1790,8 +2207,36 @@ void Spec3DParticleSystem::update (float dtSeconds)
                 p.x = columnToWorldX (p.col) + p.spawnOffX;
 
             // Trail: height/z baked at spawn — never touch targetY/y/z from mesh again.
-            if (! freeMode)
+            // GPU trail: stop here (GPU owns py/age; CPU pack must not drive draw).
+            if (! freeMode && useGpuIntegrate)
                 continue;
+
+            if (! freeMode)
+            {
+                // Trail + CPU: live FFT strength for mod matrix (no height re-bake).
+                if (! needTrailModPass)
+                    continue;
+                if ((colourIdx % colourStride) != (colourPassCursor % colourStride))
+                {
+                    ++colourIdx;
+                    continue;
+                }
+                ++colourIdx;
+
+                float r0, g0, bb0, z0, db0, f0;
+                float r1, g1, bb1, z1, db1, f1;
+                const int binsLocal = owner.meshH;
+                const float binF = juce::jlimit (0.0f, (float) juce::jmax (0, binsLocal - 1), p.binF);
+                const int b0 = juce::jlimit (0, juce::jmax (0, binsLocal - 1), (int) std::floor (binF));
+                const int b1 = juce::jmin (binsLocal - 1, b0 + 1);
+                const float fr = binF - (float) b0;
+                const int colS = juce::jlimit (0, juce::jmax (0, owner.meshW - 1), p.col);
+                sampleColumn (b0, colS, r0, g0, bb0, z0, db0, f0, false);
+                sampleColumn (b1, colS, r1, g1, bb1, z1, db1, f1, false);
+                p.binDb01 = db0 * (1.0f - fr) + db1 * fr;
+                applyUpdateMods (p, frame);
+                continue;
+            }
 
             // Free mode only: optional colour refresh (no height re-bake).
             const bool doColour = ! useGpuIntegrate
@@ -1812,7 +2257,33 @@ void Spec3DParticleSystem::update (float dtSeconds)
             p.baseR = r0 * (1.0f - fr) + r1 * fr;
             p.baseG = g0 * (1.0f - fr) + g1 * fr;
             p.baseB = bb0 * (1.0f - fr) + bb1 * fr;
+            p.binDb01 = db0 * (1.0f - fr) + db1 * fr;
             applyUpdateMods (p, frame);
+        }
+    }
+
+    // Graph update-stage filters/colour (always on CPU so Live Apply works under GPU sim).
+    // Full force integrate still uses cpuIntegrateAll / GPU path below.
+    if (! owner.particleGraphProgram.filters.empty()
+        || ! owner.particleGraphProgram.colourRamps.empty())
+    {
+        if ((int) aliveList.size() != aliveCount)
+            rebuildAliveList();
+        for (int ai = (int) aliveList.size() - 1; ai >= 0; --ai)
+        {
+            const int i = aliveList[(size_t) ai];
+            if (i < 0 || i >= (int) pool.size())
+                continue;
+            auto& p = pool[(size_t) i];
+            if (! p.alive)
+                continue;
+            applyGraphColourRamps (p, false, frame);
+            if (! passesGraphFilters (p, false, frame))
+            {
+                markDead (i);
+                if (owner.particleGpuSimEnabled && gpuComputeReady)
+                    queueGpuKill (i);
+            }
         }
     }
 
@@ -2249,15 +2720,17 @@ void Spec3DParticleSystem::drawInstancedMeshes (const juce::Matrix3D<float>& pro
     using namespace juce::gl;
     if (meshProgram == nullptr || meshVbo == 0 || instanceVbo == 0) return;
 
-    // Prefer GPU-compacted instances whenever the resident GPU path produced a valid buffer.
-    if (gpuInstancesValid && gpuDrawnInstances > 0 && instanceSsbo != 0
-        && owner.particleGpuSimEnabled && gpuComputeReady)
+    // GPU owns positions after birth. Never fall back to packing CPU y (stays 0 under the
+    // GPU path) — that re-grounds every scrolled particle across the trail and looks like
+    // the whole history is the emitter. Skip the frame if compact has no valid buffer yet.
+    if (owner.particleGpuSimEnabled && gpuComputeReady)
     {
-        drawInstancedMeshesFromGpu (projection, view);
+        if (gpuInstancesValid && gpuDrawnInstances > 0 && instanceSsbo != 0)
+            drawInstancedMeshesFromGpu (projection, view);
         return;
     }
 
-    // CPU instance pack — trail y is mesh-sampled under simLock in update().
+    // CPU instance pack (CPU integrate path only — y is integrated each update).
     const juce::ScopedLock sl (simLock);
 
     instances.clear();
@@ -2391,8 +2864,16 @@ void Spec3DParticleSystem::drawBillboards (const juce::Matrix3D<float>& projecti
     using namespace juce::gl;
     if (billboardProgram == nullptr || billboardVbo == 0) return;
 
+    // GPU path owns positions — CPU y stays at spawn. Packing billboards from the CPU
+    // pool would ground every scrolled particle; draw GPU-compacted meshes instead.
+    if (owner.particleGpuSimEnabled && gpuComputeReady)
+    {
+        if (gpuInstancesValid && gpuDrawnInstances > 0 && instanceSsbo != 0)
+            drawInstancedMeshesFromGpu (projection, view);
+        return;
+    }
+
     gpuVerts.clear();
-    // Billboard expands 6 verts/particle — draw all alive up to settings Max (no soft draw cap).
     const int drawCap = juce::jmin (aliveCount, maxAliveBudget);
     try
     {
