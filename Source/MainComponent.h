@@ -447,6 +447,12 @@ public:
     float getSpec3DParticleEmission() const noexcept;
     void setSpec3DParticleSpawnJitter (float amount, bool notifyPrefs = true);
     float getSpec3DParticleSpawnJitter() const noexcept;
+    void setSpec3DParticleEmitCatchupHz (float hz, bool notifyPrefs = true);
+    float getSpec3DParticleEmitCatchupHz() const noexcept;
+    void setSpec3DParticleSimCatchupHz (float hz, bool notifyPrefs = true);
+    float getSpec3DParticleSimCatchupHz() const noexcept;
+    void setSpec3DParticleSliceBacklogSec (float seconds, bool notifyPrefs = true);
+    float getSpec3DParticleSliceBacklogSec() const noexcept;
     void setSpec3DParticleModSlot (int index, const ParticleModSlot& slot, bool notifyPrefs = true);
     ParticleModSlot getSpec3DParticleModSlot (int index) const noexcept;
     void setSpec3DParticleRandomSource (int index, const ParticleRandomSource& src, bool notifyPrefs = true);

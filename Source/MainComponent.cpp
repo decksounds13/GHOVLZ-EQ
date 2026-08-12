@@ -3808,6 +3808,33 @@ float MainComponent::getSpec3DParticleSpawnJitter() const noexcept
 {
     return spectrogram3D.getParticleSpawnJitter();
 }
+void MainComponent::setSpec3DParticleEmitCatchupHz (float hz, bool notifyPrefs)
+{
+    spectrogram3D.setParticleEmitCatchupHz (hz);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleEmitCatchupHz() const noexcept
+{
+    return spectrogram3D.getParticleEmitCatchupHz();
+}
+void MainComponent::setSpec3DParticleSimCatchupHz (float hz, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSimCatchupHz (hz);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSimCatchupHz() const noexcept
+{
+    return spectrogram3D.getParticleSimCatchupHz();
+}
+void MainComponent::setSpec3DParticleSliceBacklogSec (float seconds, bool notifyPrefs)
+{
+    spectrogram3D.setParticleSliceBacklogSec (seconds);
+    if (notifyPrefs) editor.requestSaveUiPrefs();
+}
+float MainComponent::getSpec3DParticleSliceBacklogSec() const noexcept
+{
+    return spectrogram3D.getParticleSliceBacklogSec();
+}
 void MainComponent::setSpec3DParticleModSlot (int index, const ParticleModSlot& slot, bool notifyPrefs)
 {
     spectrogram3D.setParticleModSlot (index, slot);

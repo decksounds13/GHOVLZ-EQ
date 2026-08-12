@@ -1,16 +1,15 @@
 #include "CustomTabBarLookAndFeel.h"
 
-CustomTabBarLookAndFeel::CustomTabBarLookAndFeel()
-{
-}
+CustomTabBarLookAndFeel::CustomTabBarLookAndFeel() = default;
 
 int CustomTabBarLookAndFeel::getTabButtonBestWidth (juce::TabBarButton& button, int tabDepth)
 {
     juce::ignoreUnused (tabDepth);
-    // Fit the label tightly — only a few px of side padding past the text.
-    const juce::Font font (juce::FontOptions ("Lato Black", 14.0f, juce::Font::plain));
+    // Size to full label — never rely on JUCE ellipsis compression.
+    const auto font = tabFont();
     const float textW = juce::GlyphArrangement::getStringWidth (font, button.getButtonText());
-    return juce::jmax (28, juce::roundToInt (textW) + 12);
+    constexpr int pad = 16; // horizontal padding so last glyph never clips
+    return juce::jmax (36, juce::roundToInt (textW) + pad);
 }
 
 void CustomTabBarLookAndFeel::drawTabButton (juce::TabBarButton& button, juce::Graphics& g,
@@ -21,18 +20,27 @@ void CustomTabBarLookAndFeel::drawTabButton (juce::TabBarButton& button, juce::G
     const auto bounds = button.getLocalBounds().toFloat().reduced (1.0f, 2.0f);
     const bool isActive = button.isFrontTab();
 
-    auto textColour = juce::Colours::whitesmoke.withAlpha (isActive ? 1.0f : (isMouseOver ? 0.85f : 0.55f));
-
-    if (isActive || isMouseOver)
+    if (isActive)
     {
-        g.setColour (juce::Colours::whitesmoke.withAlpha (isActive ? 0.12f : 0.06f));
+        g.setColour (activePill);
+        g.fillRoundedRectangle (bounds, 5.0f);
+        // Active underline (clear selected state without ellipsis tricks)
+        g.setColour (ink.withAlpha (0.85f));
+        const float y = bounds.getBottom() - 2.0f;
+        g.fillRoundedRectangle (bounds.getX() + 6.0f, y, bounds.getWidth() - 12.0f, 2.0f, 1.0f);
+    }
+    else if (isMouseOver)
+    {
+        g.setColour (activePill.withMultipliedAlpha (0.55f));
         g.fillRoundedRectangle (bounds, 5.0f);
     }
 
-    g.setFont (juce::Font (juce::FontOptions ("Lato Black", 14.0f, juce::Font::plain)));
-    g.setColour (textColour);
+    const float alpha = isActive ? 1.0f : (isMouseOver ? 0.88f : 0.58f);
+    g.setFont (tabFont());
+    g.setColour (ink.withAlpha (alpha));
+    // false = no ellipsis — width is sized via getTabButtonBestWidth
     g.drawText (button.getButtonText(),
-                button.getLocalBounds().reduced (4, 0),
+                button.getLocalBounds().reduced (6, 0),
                 juce::Justification::centred,
                 false);
 }

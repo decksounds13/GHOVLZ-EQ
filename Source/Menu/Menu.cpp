@@ -38,13 +38,14 @@ Menu::Menu (SharedResources& resources,
         allTabs.push_back ({ name, ownedTabContents.back().get() });
     };
 
+    // Analyzer-only tabs (full plain labels — width measured, never ellipsized).
     addOwnedTab ("Spectrum", new SpectrumComponent (resources, state, colourRamps));
     addOwnedTab ("FFT", new FftComponent (resources, state, colourRamps));
     addOwnedTab ("Oscilloscope", new OscilloscopeSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Goniometer", new GoniometerSettingsComponent (resources, state, colourRamps));
     addOwnedTab ("Spectrogram", new SpectrogramSettingsComponent (resources, state, colourRamps));
-    addOwnedTab ("3D Spectrogram", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
-    addOwnedTab ("3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
+    addOwnedTab ("Spec3D", new Spectrogram3DSettingsComponent (resources, state, colourRamps));
+    addOwnedTab ("Spec3D Debug", new Spectrogram3DDebugComponent (resources, state, colourRamps));
     addOwnedTab ("Level Meters", new LevelMetersComponent (resources, state));
     addOwnedTab ("Loudness", new LoudnessSettingsComponent (resources, state));
     addOwnedTab ("Stereogram", new StereogramSettingsComponent (resources, state, colourRamps));
@@ -54,7 +55,7 @@ Menu::Menu (SharedResources& resources,
     appearanceComponentRef = dynamic_cast<AppearanceComponent*> (allTabs.back().content);
 
     tabBar.setLookAndFeel (&customTabBarLookAndFeel);
-    tabBar.setTabBarDepth (35);
+    tabBar.setTabBarDepth (36);
     // No content outline — the old 4px grey frame looked like a nested border,
     // especially once the Settings panel was resized wider than the page.
     juce::ignoreUnused (menuBorderColor);
@@ -100,8 +101,8 @@ Menu::Menu (SharedResources& resources,
     borderResizer->setBorderThickness ({ 5, 5, 5, 5 });
     addAndMakeVisible (*borderResizer);
 
-    // Title-bar close — Settings hamburger sits under the panel when open.
-    closeButton.setButtonText (juce::String::charToString ((juce::juce_wchar) 0x00D7)); // ×
+    // Title-bar close — plain ASCII (no ellipsis / missing-glyph risk).
+    closeButton.setButtonText ("X");
     closeButton.setTooltip ("Close settings");
     closeButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     closeButton.onClick = [this]
@@ -224,9 +225,11 @@ void Menu::styleCloseButton() noexcept
     const auto ink = sharedResources.sharedColors.menuLabelTextColor1;
     closeButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     closeButton.setColour (juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
-    closeButton.setColour (juce::TextButton::textColourOffId, ink.withAlpha (0.85f));
+    closeButton.setColour (juce::TextButton::textColourOffId, ink.withAlpha (0.9f));
     closeButton.setColour (juce::TextButton::textColourOnId, ink);
     closeButton.setColour (juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
+    // Never let JUCE squeeze the single glyph into ellipsis.
+    closeButton.setLookAndFeel (nullptr);
 }
 
 void Menu::layoutCloseButton() noexcept
@@ -292,6 +295,11 @@ void Menu::syncScrollBarColours()
     const auto ink = sharedResources.sharedColors.menuLabelTextColor1;
     tabPrevButton.setChromeColours (fill, ink);
     tabNextButton.setChromeColours (fill, ink);
+
+    // Theme-driven tab strip (no hardcoded whitesmoke).
+    customTabBarLookAndFeel.setTabColours (ink, ink.withAlpha (0.14f));
+    tabBar.getTabbedButtonBar().repaint();
+    styleCloseButton();
 }
 
 void Menu::layoutScrollBars()
@@ -380,12 +388,13 @@ void Menu::paint (juce::Graphics& g)
     g.fillRoundedRectangle (bar.getX() + 1.0f, bar.getY() + 1.0f,
                             bar.getWidth() - 2.0f, bar.getHeight() + 8.0f, 12.0f);
 
-    g.setColour (sharedResources.sharedColors.menuLabelTextColor1.withAlpha (0.9f));
-    g.setFont (juce::FontOptions().withHeight (13.0f).withStyle ("Bold"));
+    g.setColour (sharedResources.sharedColors.menuLabelTextColor1.withAlpha (0.92f));
+    g.setFont (juce::Font (juce::FontOptions (13.0f).withStyle ("Bold")));
     // Leave room for the title-bar close (X) on the right.
     auto titleArea = getLocalBounds().removeFromTop (kDragBarHeight).reduced (10, 0);
-    titleArea.removeFromRight (28);
-    g.drawText ("Settings", titleArea, juce::Justification::centredLeft, false);
+    titleArea.removeFromRight (30);
+    // Full title — no ellipsis (width is enough for this short string).
+    g.drawText ("Analyzer Settings", titleArea, juce::Justification::centredLeft, false);
 
     g.setColour (sharedResources.sharedColors.menuTabBarBorderColor.withAlpha (0.55f));
     g.drawRoundedRectangle (0.5f, 0.5f, (float) getWidth() - 1.0f, (float) getHeight() - 1.0f, 14.0f, 1.5f);
@@ -393,7 +402,7 @@ void Menu::paint (juce::Graphics& g)
 
 int Menu::getActiveTabPreferredContentHeight() const
 {
-    constexpr int tabBarDepth = 35;
+    constexpr int tabBarDepth = 36;
     auto* c = tabBar.getCurrentContentComponent();
     if (c == nullptr)
         return kContentHeight - tabBarDepth;
@@ -444,7 +453,7 @@ void Menu::disableSliderScrollWheelRecursive (juce::Component& root)
 
 void Menu::refreshContentPanelSize (bool preserveScrollPosition)
 {
-    constexpr int tabBarDepth = 35;
+    constexpr int tabBarDepth = 36;
 
     // Shrinking contentPanel for the provisional measure clamps the viewport to (0,0).
     // Capture first so toggles that grow/shrink Look rows don't kick the user to the top.
@@ -482,12 +491,13 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
     contentPanel.setSize (panelContentW, contentH);
     tabBar.setBounds (contentPanel.getLocalBounds());
 
-    // Page arrows sit on the tab strip (right), clear of tab labels on each page.
-    constexpr int arrowW = 22;
-    constexpr int arrowH = 22;
-    constexpr int arrowPad = 6;
-    constexpr int arrowGap = 3;
-    const int arrowY = (tabBarDepth - arrowH) / 2;
+    // Page arrows on the tab strip (right). Tabs size-to-text; leave gutter so labels never collide.
+    constexpr int arrowW = 24;
+    constexpr int arrowH = 24;
+    constexpr int arrowPad = 8;
+    constexpr int arrowGap = 4;
+    constexpr int tabBarDepthLocal = 36;
+    const int arrowY = (tabBarDepthLocal - arrowH) / 2;
     tabNextButton.setBounds (panelContentW - arrowPad - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.setBounds (tabNextButton.getX() - arrowGap - arrowW, arrowY, arrowW, arrowH);
     tabPrevButton.toFront (false);
