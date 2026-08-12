@@ -281,8 +281,7 @@ private:
                 ink = ink.brighter (0.08f);
             }
 
-            g.setColour (fill);
-            g.fillRoundedRectangle (bounds, 3.0f);
+            GraphOverlayButtonLookAndFeel::fillRoundedGradient (g, bounds, fill, 3.0f);
             g.setColour (ink.withAlpha (0.35f));
             g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
 

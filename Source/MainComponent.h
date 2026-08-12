@@ -752,8 +752,7 @@ private:
                 fill = fill.brighter (0.08f);
 
             GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, r, corner);
-            g.setColour (fill);
-            g.fillRoundedRectangle (r, corner);
+            GraphOverlayButtonLookAndFeel::fillRoundedGradient (g, r, fill, corner);
             // Match GraphOverlayButtonLookAndFeel / styleChromeButton (UI, Bypass, A-D, etc.).
             g.setColour (juce::Colours::black.withAlpha (0.35f));
             g.drawRoundedRectangle (r, corner, 1.0f);

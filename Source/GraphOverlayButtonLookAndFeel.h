@@ -4,10 +4,29 @@
 #include "MelatoninBlur/melatonin/shadows.h"
 #include "Menu/SharedResources.h"
 
-/** Slight Melatonin drop under graph / top-chrome TextButtons. */
+/** Melatonin drop + soft top→bottom form on graph / top-chrome TextButtons. */
 class GraphOverlayButtonLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
+    /** Soft vertical 3D form from a solid theme colour (matches TextButtonLookAndFeel fallback). */
+    static void fillRoundedGradient (juce::Graphics& g,
+                                     juce::Rectangle<float> bounds,
+                                     juce::Colour fill,
+                                     float corner = 3.0f)
+    {
+        auto top = fill.brighter (0.10f);
+        float h = 0.0f, s = 0.0f, v = 0.0f;
+        fill.getHSB (h, s, v);
+        auto bottom = juce::Colour::fromHSV (h,
+                                             juce::jlimit (0.0f, 1.0f, s * 0.88f),
+                                             juce::jlimit (0.0f, 1.0f, v * 0.82f),
+                                             fill.getFloatAlpha());
+        juce::ColourGradient grad (top, bounds.getX(), bounds.getY(),
+                                   bottom, bounds.getX(), bounds.getBottom(), false);
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (bounds, corner);
+    }
+
     void drawButtonBackground (juce::Graphics& g, juce::Button& button,
                                const juce::Colour& backgroundColour,
                                bool shouldDrawButtonAsHighlighted,
@@ -31,8 +50,7 @@ public:
         else if (shouldDrawButtonAsHighlighted)
             fill = fill.brighter (0.08f);
 
-        g.setColour (fill);
-        g.fillRoundedRectangle (bounds, 3.0f);
+        fillRoundedGradient (g, bounds, fill, 3.0f);
         g.setColour (juce::Colours::black.withAlpha (0.35f));
         g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
     }
