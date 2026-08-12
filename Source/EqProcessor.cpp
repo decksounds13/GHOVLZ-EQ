@@ -1263,11 +1263,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_MULTICOLOR_BAND_FILL_ID", "MulticolorBandFill",
         analyserDefaults.getBool ("EQ_MULTICOLOR_BAND_FILL_ID", true)));
-    // Spectral S method: Lattice (default, zero latency) or FFT (STFT, reports latency).
+    // Spectral S method: FFT (STFT, reports latency) default; Lattice = zero latency.
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         SpectralMethod::paramId(), "SpectralMethod",
         SpectralMethod::choiceNames(),
-        analyserDefaults.getInt (SpectralMethod::paramId(), 0)));
+        analyserDefaults.getInt (SpectralMethod::paramId(), SpectralMethod::defaultChoiceIndex())));
     // Faceplate power rings + knob glow arcs follow graph handle multicolours (default off).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "EQ_BAND_CHROME_MATCH_HANDLES_ID", "BandChromeMatchHandles",

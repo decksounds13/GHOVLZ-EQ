@@ -4,8 +4,8 @@
 
 /**
     Global spectral dynamics method (Settings → Spectrum).
-    Lattice = existing IIR bandpass bank (default, zero latency).
-    Fft = STFT magnitude GR (reports latency).
+    Fft = STFT magnitude GR (default; reports latency).
+    Lattice = IIR bandpass bank (zero latency).
 */
 namespace SpectralMethod
 {
@@ -16,6 +16,9 @@ namespace SpectralMethod
     };
 
     inline constexpr const char* paramId() noexcept { return "SPECTRAL_METHOD_ID"; }
+
+    /** Default choice index for new sessions / factory (FFT). */
+    inline constexpr int defaultChoiceIndex() noexcept { return 1; }
 
     inline juce::StringArray choiceNames()
     {

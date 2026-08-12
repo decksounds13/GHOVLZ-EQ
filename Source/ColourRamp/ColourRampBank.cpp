@@ -94,6 +94,7 @@ ColourRampBank::ColourRampBank()
             { 0.78f, juce::Colour::fromRGB (240, 130, 30) },
             { 1.00f, juce::Colour::fromRGB (230, 40, 35) }
         };
+        r.enabled = true; // product default: meters use ramps out of the box
         ramps[(int) Target::meterPeak] = std::move (r);
     }
     {
@@ -105,11 +106,14 @@ ColourRampBank::ColourRampBank()
             { 0.55f, juce::Colour::fromRGB (40, 180, 220) },
             { 1.00f, juce::Colour::fromRGB (230, 245, 255) }
         };
+        r.enabled = true;
         ramps[(int) Target::meterRms] = std::move (r);
     }
 
     load();
     sanitizeMapModes();
+    // After disk load (which clears Use on most targets), keep meter ramps on unless
+    // the user explicitly saved them off — see applyFromValueTree.
 }
 
 juce::String ColourRampBank::targetName (Target t)
@@ -365,9 +369,14 @@ void ColourRampBank::applyFromValueTree (const juce::ValueTree& tree, bool force
     if (! forceCustomRampsOff)
         return;
 
-    // Disk load: keep stops, but never silently override built-in colour schemes.
+    // Disk load: keep stops, but never silently override built-in colour schemes
+    // (FFT/Spec/…). Level meters have no alternate scheme — leave Use as loaded
+    // (or constructor default on when the child was missing from colour_ramps.xml).
     for (int ti = 0; ti < (int) Target::numTargets; ++ti)
     {
+        if (ti == (int) Target::meterPeak || ti == (int) Target::meterRms)
+            continue;
+
         if (ramps[ti].enabled)
         {
             ramps[ti].enabled = false;

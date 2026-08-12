@@ -227,7 +227,7 @@ private:
     /** Off = legacy global lattice; on = SpectralPerBandLattice local placement. */
     bool perBandLatticeEnabled = false;
 
-    SpectralMethod::Kind method = SpectralMethod::Kind::lattice;
+    SpectralMethod::Kind method = SpectralMethod::Kind::fft;
     SpectralFftEngine fftEngine;
 
     int publishBlockCounter = 0;
