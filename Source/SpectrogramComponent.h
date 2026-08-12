@@ -8,6 +8,7 @@
 #include "Menu/SharedResources.h"
 #include "ColourRamp/GradientRamp.h"
 #include "MelatoninBlur/melatonin/cached_blur.h"
+#include "SpectrogramReassignment.h"
 
 /** Compact scrolling spectrogram strip for the top chrome (dice ↔ preset bar). */
 class SpectrogramComponent : public juce::Component,
@@ -133,7 +134,7 @@ private:
     /** Scroll-only 3D history column (no 2D image update) when 2D/3D enhanced modes differ. */
     void appendHistory3DColumn (const float* displayDbRows);
     void buildClassicDisplayColumn (const float* magnitudesDb, int numBins, std::vector<float>& outRows);
-    /** Scatter energy at IF into log rows; optional previous-column time reassignment.
+    /** Scatter energy at reassigned IF into log rows; optional previous-column time reassignment.
         Returns true if the previous history column was written. */
     bool depositEnhanced (float* columnRows, float* prevColumnRows,
                           float ifHz, float db, double sr, bool logFreq,
@@ -197,7 +198,7 @@ private:
     /** Fractional FFT bin per display row (for interpolated magnitude). */
     std::vector<float> binForRow;
     std::vector<float> binForRowLf, binForRowMid;
-    /** Previous-frame unwrapped phase per bin (Enhanced Frequency IF). */
+    /** Legacy phase storage (reset on mode change; Auger path does not use hop phase). */
     std::vector<float> prevPhase;
     std::vector<float> prevPhaseLf, prevPhaseMid;
     bool havePrevPhase = false;
@@ -206,6 +207,12 @@ private:
     int lastHopSamples = 0;
     int lfFftSizeCachedForBins = 0, midFftSizeCachedForBins = 0;
     int enhancedLfFrameCounter = 0;
+
+    /** Classical Auger–Flandrin reassignment (shared main / LF / mid sizes). */
+    SpectrogramReassignment reassignment;
+    std::vector<float> reassignWorkT;
+    std::vector<float> reassignWorkD;
+    std::vector<float> reassignRaw;
 
     int internalW = 1280;
     int internalH = 720;

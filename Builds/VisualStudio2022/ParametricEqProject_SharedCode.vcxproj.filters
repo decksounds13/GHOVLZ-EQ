@@ -1027,6 +1027,9 @@
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Source\SpectrogramReassignment.cpp">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp">
       <Filter>ParametricEqProject\Source</Filter>
     </ClCompile>
@@ -4807,6 +4810,9 @@
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h">
+      <Filter>ParametricEqProject\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\SpectrogramReassignment.h">
       <Filter>ParametricEqProject\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h">

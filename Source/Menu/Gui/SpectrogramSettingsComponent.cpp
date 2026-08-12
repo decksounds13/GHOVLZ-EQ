@@ -291,16 +291,18 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
 
     styleToggle (enhancedFreqToggle);
     enhancedFreqToggle.setTooltip (
-        "2D waterfall: multi-resolution analysis + instantaneous-frequency reassignment "
-        "(thinner tonal ridges, especially bass). Uses more CPU  -  tune Strength / LF Detail below. "
-        "Independent of the 3D toggle.");
+        "2D waterfall: multi-resolution STFT + classical time-frequency reassignment "
+        "(Auger-Flandrin IF + group delay) for thin harmonic ridges. "
+        "Uses more CPU - tune Strength / LF Detail. Independent of the 3D toggle.");
     addAndMakeVisible (enhancedFreqToggle);
     enhancedFreqAttachment = std::make_unique<ButtonAttachment> (treeState, "SPEC_ENHANCED_FREQ_ID", enhancedFreqToggle);
 
     enhancedStrengthLabel.setText ("Enhanced Strength", juce::dontSendNotification);
     styleSlider (enhancedStrengthSlider);
     enhancedStrengthSlider.setTextValueSuffix (" %");
-    enhancedStrengthSlider.setTooltip ("0% = multi-res continuum only; 100% = full frequency/time reassignment.");
+    enhancedStrengthSlider.setTooltip (
+        "0% = multi-res continuum only (no reassignment FFTs). "
+        "100% = full Auger-Flandrin frequency/time reassignment ridges.");
     addAndMakeVisible (enhancedStrengthLabel);
     addAndMakeVisible (enhancedStrengthSlider);
     enhancedStrengthAttachment = std::make_unique<SliderAttachment> (

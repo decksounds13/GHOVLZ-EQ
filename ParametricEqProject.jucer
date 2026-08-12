@@ -60,6 +60,10 @@
             file="Source/SpectrogramComponent.cpp"/>
       <FILE id="sP3cHd" name="SpectrogramComponent.h" compile="0" resource="0"
             file="Source/SpectrogramComponent.h"/>
+      <FILE id="sP3rAs" name="SpectrogramReassignment.cpp" compile="1" resource="0"
+            file="Source/SpectrogramReassignment.cpp"/>
+      <FILE id="sP3rAh" name="SpectrogramReassignment.h" compile="0" resource="0"
+            file="Source/SpectrogramReassignment.h"/>
       <FILE id="sP3dCp" name="Spectrogram3DComponent.cpp" compile="1" resource="0"
             file="Source/Spectrogram3DComponent.cpp"/>
       <FILE id="sP3dHd" name="Spectrogram3DComponent.h" compile="0" resource="0"

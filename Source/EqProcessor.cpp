@@ -1133,7 +1133,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_LOG_FREQ_ID", "SpecLogFreq",
         analyserDefaults.getBool ("SPEC_LOG_FREQ_ID", true)));
-    // Wave Candy–style frequency reassignment (thin LF ridges). Off = classic STFT.
+    // Enhanced Frequency: multi-res STFT + classical Auger–Flandrin reassignment (2D/3D).
     // 2D waterfall and 3D heightfield can enable this independently.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPEC_ENHANCED_FREQ_ID", "SpecEnhancedFreq",

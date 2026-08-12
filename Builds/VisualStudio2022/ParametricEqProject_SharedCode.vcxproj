@@ -240,6 +240,7 @@
     <ClCompile Include="..\..\Source\OptionBoxMenu.cpp"/>
     <ClCompile Include="..\..\Source\Spectral\SpectralDynamicsProcessor.cpp"/>
     <ClCompile Include="..\..\Source\Spectral\SpectralFftEngine.cpp"/>
+    <ClCompile Include="..\..\Source\SpectrogramReassignment.cpp"/>
     <ClCompile Include="..\..\Source\StructuralSplit\StructuralSplitEngine.cpp"/>
     <ClCompile Include="..\..\Source\Match\MatchProcessor.cpp"/>
     <ClCompile Include="..\..\Source\Learn\BiquadMagnitude.cpp"/>
@@ -3501,6 +3502,7 @@
     <ClInclude Include="..\..\Source\Menu\Gui\Spectrogram3DDebugComponent.h"/>
     <ClInclude Include="..\..\Source\GoniometerComponent.h"/>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h"/>
+    <ClInclude Include="..\..\Source\SpectrogramReassignment.h"/>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h"/>
     <ClInclude Include="..\..\Source\Spec3DParticleSystem.h"/>
     <ClInclude Include="..\..\Source\ParticleNodeGraph\ParticleDataTypes.h"/>

@@ -48,8 +48,8 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
 
     styleToggle (enhancedFreq3DToggle);
     enhancedFreq3DToggle.setTooltip (
-        "3D heightfield: same enhanced-frequency analysis as the 2D toggle, but independent. "
-        "When 2D and 3D disagree, both classic and enhanced columns are computed (extra CPU). "
+        "3D heightfield: same multi-res + classical reassignment analysis as 2D Enhanced, independent toggle. "
+        "When 2D and 3D disagree, both classic and enhanced columns run (extra CPU). "
         "Strength / LF Detail / Crossover are shared.");
     addAndMakeVisible (enhancedFreq3DToggle);
     enhancedFreq3DAttachment = std::make_unique<ButtonAttachment> (
