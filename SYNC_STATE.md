@@ -9,11 +9,11 @@
 | Analyzer default branch | `analyzer/main` |
 | Analyzer sync branch pattern | `sync/eq-<shortsha>` → PR into `analyzer/main` |
 | Last EQ SHA Port claimed to absorb | `df4e49c7011c507c8098a66a4e9c6c9e5ffd6f95` |
-| Last EQ SHA Port observed (any poll) | `df4e49c7011c507c8098a66a4e9c6c9e5ffd6f95` |
-| Last EQ change time (UTC) | `2026-08-08T02:01:15Z` |
-| Ports completed today (date + count) | `2026-08-11: 1` |
-| First-change-of-day port done | yes |
-| Dirty after last port | no |
+| Last EQ SHA Port observed (any poll) | `a3cc2ed76fa82d8a8f5f68ca014363cdb09d063a` |
+| Last EQ change time (UTC) | `2026-08-12T18:48:37Z` |
+| Ports completed today (date + count) | `2026-08-12: 0` |
+| First-change-of-day port done | no |
+| Dirty after last port | yes |
 | **Mode** | **`auto`** (poll → port → Review → merge on PASS) |
 | Timezone for “day” | `America/Chicago` |
 | Human notify | **Always** — success **and** failure (app/OS notification + message in this group) |
