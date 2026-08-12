@@ -1601,8 +1601,8 @@ void OptionBoxMenu::updateDynamicControlsVisibility()
         {
             spectralBandwidthSlider.setTooltip (
                 isPerBandLatticeEnabled()
-                    ? "Res (this band) - FFT spectral density: coarse = broader peak detection, fine = more surgical log-neighbour resolution (same Res control as Lattice)"
-                    : "Res (global / linked) - FFT spectral density for all S bands. Coarse = broader, fine = surgical. Same slider as Lattice method.");
+                    ? "Res (this band) - FFT GR lobe count inside Q: coarse ~6 wide notches, fine ~64 surgical (visible on the graph)"
+                    : "Res (global / linked) - FFT GR lobe density for all S bands: coarse few wide notches, fine many surgical. Same Res slider as Lattice.");
         }
         else
         {

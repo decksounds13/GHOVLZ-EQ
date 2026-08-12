@@ -43,8 +43,13 @@ void SpectralFftEngine::reset()
     std::fill (outFifoR.begin(), outFifoR.end(), 0.0f);
     for (auto& e : envDbSlot)
         e.fill (DynamicEq::kSilenceFloorDb);
-    for (auto& g : grDbSmoothSlot)
+    for (auto& g : grDbSmoothSlice)
         g.fill (0.0f);
+    for (auto& c : sliceCenterHz)
+        c.fill (0.0f);
+    for (auto& g : sliceGrDb)
+        g.fill (0.0f);
+    sliceCount.fill (0);
     grDbBin.fill (0.0f);
     grLinBin.fill (1.0f);
 
@@ -103,14 +108,58 @@ float SpectralFftEngine::binFrequencyHz (int bin) const noexcept
     return (float) bin * (float) sampleRate / (float) kFftSize;
 }
 
-float SpectralFftEngine::logNeighbourStep (float bandwidthHz) const noexcept
+int SpectralFftEngine::sliceCountForRes (float bandwidthHz) noexcept
 {
-    // Same budget curve as lattice BP count (48 @ coarse … 128 @ fine).
-    // One lattice step across the hearing-range log grid → log-neighbour gap.
+    // Same Res curve as lattice budget, remapped to a dramatic visible range:
+    // coarse (2.0 Hz) → kMinSlices, fine (0.5 Hz) → kMaxSlices.
     const int budget = SpectralBinning::bandpassBudgetForBandwidth (bandwidthHz);
-    const float fMax = juce::jmax (40.0f, safeMaxCenterHz());
-    const float logSpan = std::log (fMax / 20.0f);
-    return logSpan / (float) juce::jmax (8, budget);
+    const float t = (float) (budget - SpectralBinning::kMinBandpassBudget)
+                  / (float) juce::jmax (1, SpectralBinning::kMaxBandpasses
+                                           - SpectralBinning::kMinBandpassBudget);
+    const float tClamped = juce::jlimit (0.0f, 1.0f, t);
+    const int n = (int) std::lround (
+        (double) kMinSlices + (double) tClamped * (double) (kMaxSlices - kMinSlices));
+    return juce::jlimit (kMinSlices, kMaxSlices, n);
+}
+
+void SpectralFftEngine::computeInfluenceRange (const SpectralDynamics::BandSettings& settings,
+                                               float& fLo, float& fHi) const noexcept
+{
+    const float maxHz = safeMaxCenterHz();
+    const float fc = juce::jlimit (20.0f, maxHz, settings.frequencyHz);
+    const float q = juce::jmax (0.05f, settings.q);
+    const float sigma = juce::jmax (0.04f, 0.55f / q);
+    const float logHalf = sigma * 2.45f;
+
+    float loMul = std::exp (-logHalf);
+    float hiMul = std::exp (+logHalf);
+    switch (settings.shape)
+    {
+        case SpectralDynamics::BandShape::highShelf:
+            loMul = std::exp (-0.8f * logHalf);
+            hiMul = std::exp (+1.2f * logHalf);
+            break;
+        case SpectralDynamics::BandShape::lowShelf:
+            loMul = std::exp (-1.2f * logHalf);
+            hiMul = std::exp (+0.8f * logHalf);
+            break;
+        case SpectralDynamics::BandShape::bell:
+        default:
+            break;
+    }
+
+    fLo = juce::jlimit (20.0f, maxHz, fc * loMul);
+    fHi = juce::jlimit (20.0f, maxHz, fc * hiMul);
+    if (fHi < fLo)
+        std::swap (fLo, fHi);
+
+    if (fHi <= fLo * 1.001f)
+    {
+        fLo = juce::jmax (20.0f, fc * 0.97f);
+        fHi = juce::jmin (maxHz, fc * 1.03f);
+        if (fHi <= fLo)
+            fHi = juce::jmin (maxHz, fLo * 1.03f);
+    }
 }
 
 float SpectralFftEngine::sampleEnvAtHz (const float* envDb, int numBins, float frequencyHz,
@@ -131,7 +180,6 @@ float SpectralFftEngine::bandMask (float frequencyHz, const SpectralDynamics::Ba
     const float fc = juce::jlimit (20.0f, safeMaxCenterHz(), settings.frequencyHz);
     const float f = juce::jmax (1.0f, frequencyHz);
     const float q = juce::jmax (0.05f, settings.q);
-    // Soft Q aperture (band handle). Res mainly drives log-neighbour density, not mask width.
     const float sigma = juce::jmax (0.04f, 0.55f / q);
     const float x = std::log (f / fc) / sigma;
 
@@ -175,7 +223,6 @@ void SpectralFftEngine::process (juce::dsp::AudioBlock<float>& block,
     {
         if (stftWasRunning)
         {
-            // Drop OLA residue so handoff into pure delay is silent.
             std::fill (outFifoL.begin(), outFifoL.end(), 0.0f);
             std::fill (outFifoR.begin(), outFifoR.end(), 0.0f);
             hopCount = 0;
@@ -243,11 +290,9 @@ void SpectralFftEngine::processSample (float& wetL, float& wetR,
 
 void SpectralFftEngine::processFrame() noexcept
 {
-    // --- Detect FFT (mid) for envelopes / GR ---
     float* work = fftWork.data();
     copyFifoToLinear (detFifo.data(), pos, work, kFftSize);
 
-    // If any slot wants SC, blend is per-slot at GR time; we also FFT SC once.
     bool anySc = false;
     for (int s = 0; s < SpectralDynamics::kNumSlots; ++s)
         if (bands[(size_t) s].active && bands[(size_t) s].settings.detectFromSidechain)
@@ -276,20 +321,23 @@ void SpectralFftEngine::processFrame() noexcept
             scMag[(size_t) k] = std::abs (cdata[k]);
     }
 
-    // Envelope + log-neighbour prominence → GR per bin (sum slots), then lin.
-    // Res (bandwidthHz) sets log-neighbour spacing via the same BP budget curve
-    // as the lattice (48…128). A/R smooth detect env and GR depth.
     const int hopSamples = kHopSize;
-    grDbBin.fill (0.0f);
+    // Stack GR in linear domain: H = 1 + Σ (g_i - 1) * lobe_i  (matches UI lobe sum).
+    std::array<float, kNumBins> hLin {};
+    hLin.fill (1.0f);
 
     for (int s = 0; s < SpectralDynamics::kNumSlots; ++s)
     {
+        auto& nSlices = sliceCount[(size_t) s];
+        auto& centres = sliceCenterHz[(size_t) s];
+        auto& grs = sliceGrDb[(size_t) s];
+        auto& smooth = grDbSmoothSlice[(size_t) s];
+
         if (! bands[(size_t) s].active)
         {
-            // Idle slots: release any residual smoothed GR so re-arm is clean.
-            auto& smooth = grDbSmoothSlot[(size_t) s];
-            for (int k = 0; k < kNumBins; ++k)
-                smooth[(size_t) k] *= 0.5f;
+            nSlices = 0;
+            for (int i = 0; i < kMaxSlices; ++i)
+                smooth[(size_t) i] *= 0.5f;
             continue;
         }
 
@@ -298,16 +346,12 @@ void SpectralFftEngine::processFrame() noexcept
 
         const float atkMs = DynamicEq::clampAttackMs (settings.attackMs);
         const float relMs = DynamicEq::clampReleaseMs (settings.releaseMs);
-        // One hop ≈ one "block" for coeff (A/R knobs control hop-rate envelope + GR).
         const float atk = DynamicEq::coeffForTimeMs (atkMs, sampleRate, hopSamples);
         const float rel = DynamicEq::coeffForTimeMs (relMs, sampleRate, hopSamples);
 
         auto& slotEnv = envDbSlot[(size_t) s];
-        auto& slotGrSm = grDbSmoothSlot[(size_t) s];
-        const float dLog = logNeighbourStep (settings.bandwidthHz);
-        const float expStep = std::exp (dLog);
 
-        // Detect envelope with A/R.
+        // Full-bin detect envelope (A/R).
         for (int k = 1; k < kNumBins - 1; ++k)
         {
             const float mag = magSrc[k] * (2.0f / (float) kFftSize);
@@ -317,18 +361,36 @@ void SpectralFftEngine::processFrame() noexcept
             e = coeff * e + (1.0f - coeff) * levelDb;
         }
 
+        // Res → how many GR centres inside the Q footprint (graph density).
+        const int n = sliceCountForRes (settings.bandwidthHz);
+        nSlices = n;
+
+        float fLo = 20.0f, fHi = safeMaxCenterHz();
+        computeInfluenceRange (settings, fLo, fHi);
+        const float logLo = std::log (fLo);
+        const float logHi = std::log (fHi);
+        const float logSpan = juce::jmax (1.0e-4f, logHi - logLo);
+        // Neighbour gap = one lattice step (prominence scale tracks Res).
+        const float dLog = logSpan / (float) juce::jmax (1, n);
+        const float halfLog = juce::jmax (1.0e-4f, 0.5f * dLog);
+        const float invHalfLog = 1.0f / halfLog;
+        const float expStep = std::exp (dLog);
+
         const float signedMax = (settings.expand ? 1.0f : -1.0f)
                               * settings.amount * SpectralDynamics::kMaxCutDb;
 
-        // Log-neighbour Laplacian (lattice-equivalent density via Res) + A/R on GR.
-        for (int k = 1; k < kNumBins - 1; ++k)
+        for (int i = 0; i < n; ++i)
         {
-            const float env = slotEnv[(size_t) k];
-            float engage = 0.0f;
+            // Log lattice inside Q; Pack warps placement (same as lattice).
+            const float u = ((float) i + 0.5f) / (float) n;
+            const float t = SpectralBinning::warpLatticeT (u, settings.pack);
+            const float f = std::exp (logLo + t * logSpan);
+            centres[(size_t) i] = f;
 
+            float engage = 0.0f;
+            const float env = sampleEnvAtHz (slotEnv.data(), kNumBins, f, sampleRate, kFftSize);
             if (env >= SpectralDynamics::kDetectFloorDb)
             {
-                const float f = juce::jmax (1.0f, binFrequencyHz (k));
                 const float left = sampleEnvAtHz (slotEnv.data(), kNumBins, f / expStep,
                                                   sampleRate, kFftSize);
                 const float right = sampleEnvAtHz (slotEnv.data(), kNumBins, f * expStep,
@@ -339,27 +401,53 @@ void SpectralFftEngine::processFrame() noexcept
                     0.0f, 1.0f, prominence / SpectralDynamics::kResonanceFullRangeDb);
             }
 
-            const float f = binFrequencyHz (k);
             const float mask = bandMask (f, settings);
             const float targetGr = signedMax * engage * mask;
 
-            // Smooth GR with same A/R: rising |GR| uses attack, falling uses release.
-            float& sm = slotGrSm[(size_t) k];
+            float& sm = smooth[(size_t) i];
             const bool engaging = std::abs (targetGr) > std::abs (sm);
             const float grCoeff = engaging ? atk : rel;
             sm = grCoeff * sm + (1.0f - grCoeff) * targetGr;
-            grDbBin[(size_t) k] += sm;
+            grs[(size_t) i] = sm;
+
+            // Paint Hann lobe into bin response (audio = graph reconstruction).
+            if (std::abs (sm) < 0.01f)
+                continue;
+
+            const float gLinMinus1 = juce::Decibels::decibelsToGain (sm) - 1.0f;
+            const float logC = std::log (juce::jmax (1.0f, f));
+            // Bin range covered by this lobe.
+            const float fMinL = juce::jmax (1.0f, f * std::exp (-halfLog));
+            const float fMaxL = f * std::exp (+halfLog);
+            const int k0 = juce::jlimit (1, kNumBins - 2,
+                                         (int) std::floor (fMinL * (float) kFftSize / (float) sampleRate));
+            const int k1 = juce::jlimit (1, kNumBins - 2,
+                                         (int) std::ceil (fMaxL * (float) kFftSize / (float) sampleRate));
+
+            for (int k = k0; k <= k1; ++k)
+            {
+                const float logF = std::log (juce::jmax (1.0f, binFrequencyHz (k)));
+                const float x = (logF - logC) * invHalfLog;
+                if (x < -1.0f || x > 1.0f)
+                    continue;
+                const float w = 0.5f * (1.0f + std::cos (juce::MathConstants<float>::pi * x));
+                hLin[(size_t) k] += gLinMinus1 * w * w;
+            }
         }
+
+        // Clear unused smooth slots when Res drops.
+        for (int i = n; i < kMaxSlices; ++i)
+            smooth[(size_t) i] = 0.0f;
     }
 
     for (int k = 0; k < kNumBins; ++k)
     {
+        const float h = juce::jmax (1.0e-6f, hLin[(size_t) k]);
         grDbBin[(size_t) k] = juce::jlimit (SpectralDynamics::kGrDbFloor,
                                             SpectralDynamics::kGrDbCeiling,
-                                            grDbBin[(size_t) k]);
+                                            juce::Decibels::gainToDecibels (h, -100.0f));
         grLinBin[(size_t) k] = juce::Decibels::decibelsToGain (grDbBin[(size_t) k]);
     }
-    // DC / Nyquist untouched
     grLinBin[0] = 1.0f;
     grLinBin[(size_t) (kNumBins - 1)] = 1.0f;
     grDbBin[0] = 0.0f;
@@ -367,7 +455,6 @@ void SpectralFftEngine::processFrame() noexcept
 
     publishGrCurves();
 
-    // --- Apply GR to wet L ---
     auto processChannel = [this] (float* inFifo, float* outFifo, float* workBuf)
     {
         copyFifoToLinear (inFifo, pos, workBuf, kFftSize);
@@ -389,7 +476,6 @@ void SpectralFftEngine::processFrame() noexcept
         for (int i = 0; i < kFftSize; ++i)
             workBuf[i] *= window[(size_t) i] * windowCorrection;
 
-        // Overlap-add into circular output FIFO at current pos (write index = pos = oldest).
         for (int i = 0; i < pos; ++i)
             outFifo[i] += workBuf[i + kFftSize - pos];
         for (int i = 0; i < kFftSize - pos; ++i)
@@ -415,33 +501,16 @@ void SpectralFftEngine::publishGrCurves() noexcept
         if (bands[(size_t) s].active)
         {
             ++armed;
-            const auto& settings = bands[(size_t) s].settings;
-            for (int k = 1; k < kNumBins - 1; k += kPublishStride)
+            const int n = juce::jlimit (0, kMaxSlices, sliceCount[(size_t) s]);
+            for (int i = 0; i < n; ++i)
             {
-                const float f = binFrequencyHz (k);
-                const float mask = bandMask (f, settings);
-                if (mask < 0.02f)
-                    continue;
-                if (dest.count >= kMaxPublishPoints)
-                    break;
-
-                // Slot-local estimate: recompute single-slot GR contribution for display.
-                const float signedMax = (settings.expand ? 1.0f : -1.0f)
-                                      * settings.amount * SpectralDynamics::kMaxCutDb;
-                // Use combined bin gr scaled by relative mask weight (approx).
-                const float g = grDbBin[(size_t) k] * mask
-                                / juce::jmax (0.15f, mask); // keep sign/mag of total when masked
-                // Prefer total gr in band for simplicity:
-                const float gShow = grDbBin[(size_t) k] * (mask > 0.05f ? 1.0f : 0.0f);
-                juce::ignoreUnused (signedMax, g);
-
-                dest.centerHz[(size_t) dest.count] = f;
-                dest.grDb[(size_t) dest.count] = gShow;
-                if (std::abs (gShow) > std::abs (peak))
-                    peak = gShow;
-                ++dest.count;
+                dest.centerHz[(size_t) i] = sliceCenterHz[(size_t) s][(size_t) i];
+                dest.grDb[(size_t) i] = sliceGrDb[(size_t) s][(size_t) i];
+                if (std::abs (dest.grDb[(size_t) i]) > std::abs (peak))
+                    peak = dest.grDb[(size_t) i];
             }
-            pts = juce::jmax (pts, dest.count);
+            dest.count = n;
+            pts = juce::jmax (pts, n);
         }
 
         publishedIndex[(size_t) s].store (writeIdx, std::memory_order_release);
