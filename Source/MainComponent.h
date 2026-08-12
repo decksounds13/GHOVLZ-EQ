@@ -68,6 +68,8 @@ public:
 
     /** Select a ramp target, close Settings if open, then start UI path sampling. */
     void beginRampSamplingForTarget (ColourRampBank::Target target);
+    /** Push ColourRampBank ramps to scopes / level meters (message thread). */
+    void applyColourRampsToMeters();
     void setOrderedRampGradation (bool shouldEnable, bool notifyPrefs = true);
     bool isOrderedRampGradation() const noexcept;
 
@@ -680,7 +682,6 @@ private:
     bool collapseAnyExpandedScope();
     void syncExpandedOscOverlayStack();
     void beginRampSampling();
-    void applyColourRampsToMeters();
     /**
         When open: reparent OptionBox onto EqEditor so it stacks above Phase/SideCheck/Scope
         (siblings of MainComponent). When closed: restore under FrequencyResponseComponent.
