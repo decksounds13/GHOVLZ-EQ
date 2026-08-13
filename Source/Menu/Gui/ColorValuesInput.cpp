@@ -127,7 +127,7 @@ void ColorValuesInput::createSliderAndLabel(const juce::String& shortLabel, cons
     // Create and setup the label
     auto* label = new juce::Label();
     label->setText(fullLabel, juce::NotificationType::dontSendNotification);
-    label->setFont(juce::Font("Lato Black", 16.0f, juce::Font::plain));
+    label->setFont(SharedResources::uiFont (16.0f));
     label->setColour(juce::Label::textColourId, labelTextColor);
 
     // Calculate the bounds based on the text and font size

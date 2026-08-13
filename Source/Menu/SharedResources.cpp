@@ -1,6 +1,8 @@
 #include "SharedResources.h"
 #include "../KnobThemeHelpers.h"
+#include "BinaryData.h"
 #include <cmath>
+#include <initializer_list>
 
 SharedResources* SharedResources::activeInstance = nullptr;
 
@@ -22,6 +24,8 @@ namespace ThemeColorRegistry
         { "Menu Scroll Outline",          "MenuScrollBarOutlineColor1",         &SharedColors::menuScrollBarOutlineColor1 },
         { "Menu Scroll Thumb",            "MenuScrollBarThumbColor1",           &SharedColors::menuScrollBarThumbColor1 },
         { "Menu Scroll Track",            "MenuScrollBarTrackColor1",           &SharedColors::menuScrollBarTrackColor1 },
+        { "Menu Section Header",          "MenuSectionHeader",                  &SharedColors::menuSectionHeader },
+        { "Menu Section Text",            "MenuSectionText",                    &SharedColors::menuSectionText },
         { "Menu Slider Fill",             "MenuSliderFillColor",                &SharedColors::menuSliderFillColor },
         { "Menu TextBox Text",            "MenuTextBoxTextColor1",              &SharedColors::menuTextBoxTextColor1 },
         { "Menu Thin Border",             "MenuThinBorderColor",                &SharedColors::menuThinBorderColor },
@@ -38,6 +42,7 @@ namespace ThemeColorRegistry
 
         // Graph
         { "Graph Axis Text",              "GraphAxisText",                      &SharedColors::graphAxisText },
+        { "Graph Cursor Info",            "GraphCursorInfo",                    &SharedColors::graphCursorInfoText },
         { "Graph Background",             "GraphBackground",                    &SharedColors::graphBackground },
         { "Graph Background 2",           "GraphBackground2",                   &SharedColors::graphBackground2 },
         { "Graph Band 1",                 "GraphBand1",                         &SharedColors::graphBand1 },
@@ -104,7 +109,15 @@ namespace ThemeColorRegistry
         { "Spectrum Background 2",        "SpectrumBackground2",                &SharedColors::spectrumBackground2 },
         { "Spectrum Fill",                "SpectrumFill",                       &SharedColors::spectrumFill },
         { "Spectrum Grid",                "SpectrumGrid",                       &SharedColors::spectrumGrid },
+        { "Spectrum L Fill",              "SpectrumLFill",                      &SharedColors::spectrumFillL },
+        { "Spectrum L Line",              "SpectrumLLine",                      &SharedColors::spectrumLineL },
         { "Spectrum Line",                "SpectrumLine",                       &SharedColors::spectrumLine },
+        { "Spectrum Mid Fill",            "SpectrumMidFill",                    &SharedColors::spectrumFillMid },
+        { "Spectrum Mid Line",            "SpectrumMidLine",                    &SharedColors::spectrumLineMid },
+        { "Spectrum R Fill",              "SpectrumRFill",                      &SharedColors::spectrumFillR },
+        { "Spectrum R Line",              "SpectrumRLine",                      &SharedColors::spectrumLineR },
+        { "Spectrum Side Fill",           "SpectrumSideFill",                   &SharedColors::spectrumFillSide },
+        { "Spectrum Side Line",           "SpectrumSideLine",                   &SharedColors::spectrumLineSide },
         { "Spectrum Text",                "SpectrumText",                       &SharedColors::spectrumText },
     };
 
@@ -167,6 +180,9 @@ bool SharedColors::shouldRandomizeIndex (int index) const noexcept
         return false;
 
     const auto name = juce::String (ThemeColorRegistry::getEntries()[index].displayName);
+    if (name == "Graph Cursor Info")
+        return randomizeGraphCursorInfo;
+
     switch (moduleForDisplayName (name))
     {
         case RandomizeModule::Menu:         return randomizeMenuModule;
@@ -386,6 +402,28 @@ juce::Colour ensureTextOnBackground (juce::Colour text, juce::Colour background,
     return best;
 }
 
+juce::Colour ensureTextOnBackgrounds (juce::Colour text,
+                                      std::initializer_list<juce::Colour> backgrounds,
+                                      float minRatio) noexcept
+{
+    auto out = text;
+    for (int pass = 0; pass < 4; ++pass)
+    {
+        bool allOk = true;
+        for (auto bg : backgrounds)
+        {
+            if (contrastRatio (out, bg.withAlpha (1.0f)) < minRatio)
+            {
+                out = ensureTextOnBackground (out, bg.withAlpha (1.0f), minRatio);
+                allOk = false;
+            }
+        }
+        if (allOk)
+            break;
+    }
+    return out;
+}
+
 juce::Colour nudgeFillAwayFromBackground (juce::Colour fill, juce::Colour background,
                                           float minRatio) noexcept
 {
@@ -433,8 +471,13 @@ void SharedColors::enforceLegibleTextContrast() noexcept
         text = ensureTextOnBackground (text, bg, minRatio);
     };
 
+    const auto menuBg = blendBg (menuBackgroundGradientColor1, menuBackgroundGradientColor2);
+    const auto menuTitleBg = menuBackgroundGradientColor1.brighter (0.08f);
+
     fix (menuButtonTextColor1, blendBg (menuButtonGradientColor1, menuButtonGradientColor2));
-    fix (menuLabelTextColor1, blendBg (menuBackgroundGradientColor1, menuBackgroundGradientColor2));
+    fix (menuSectionText, menuSectionHeader);
+    fix (menuLabelTextColor1, menuBg);
+    fix (menuLabelTextColor1, menuTitleBg);
     fix (menuListBoxTextColor1, blendBg (menuListBoxBackgroundGradientColor1, menuListBoxBackgroundGradientColor2));
     fix (menuListBoxTextColor1, menuListBoxSelectionColor1);
     fix (menuTextBoxTextColor1, blendBg (menuBackgroundGradientColor1, menuBackgroundGradientColor2));
@@ -451,6 +494,10 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     fix (pluginBrandText, pluginBackground);
 
     fix (graphAxisText, graphBg);
+    fix (graphCursorInfoText, graphBackground);
+    fix (graphCursorInfoText, graphBackground2);
+    fix (graphCursorInfoText, graphBg);
+    fix (graphCursorInfoText, graphOverlayBackground);
     // Handle numbers are drawn on band-coloured disks (not the graph); global
     // graphHandleText is only a seed — per-handle ink is resolved at paint time.
     // Still fix vs graph for crosshairs / fallbacks that use the same slot.
@@ -460,7 +507,14 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     // Option box + combo / graph-top UI menus (PluginMenuTheme + PopupMenu LAF).
     fix (optionText, optionBackground);
     fix (optionText, optionBackground.darker (0.35f));
-    fix (optionComboText, optionComboBackground);
+    // Dropdown field must sit off the Settings wash, then ink vs that field
+    // and vs Menu Background / Background 2 (the page the list sits on).
+    optionComboBackground = nudgeFillAwayFromBackground (
+        optionComboBackground.withAlpha (1.0f), menuBg, minRatio);
+    optionComboText = ensureTextOnBackgrounds (
+        optionComboText,
+        { optionComboBackground, menuBackgroundGradientColor1, menuBackgroundGradientColor2, menuBg },
+        minRatio);
 
     // Mod panel: full strip gradient + brighter button faces + column cards.
     fix (modText, modBackground);
@@ -482,6 +536,336 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     fix (scopeDropOutline, scopeWell);
 }
 
+namespace
+{
+    const juce::StringArray& installedTypefaceNames()
+    {
+        static const juce::StringArray names = []
+        {
+            auto list = juce::Font::findAllTypefaceNames();
+            list.sort (true);
+            return list;
+        }();
+        return names;
+    }
+
+    juce::String alnumLower (const juce::String& s)
+    {
+        return s.retainCharacters ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+            .toLowerCase();
+    }
+
+    juce::Typeface::Ptr bundledPirulenTypeface()
+    {
+        static juce::Typeface::Ptr tf =
+            juce::Typeface::createSystemTypefaceFor (BinaryData::pirulen_ttf,
+                                                     BinaryData::pirulen_ttfSize);
+        return tf;
+    }
+
+    juce::Typeface::Ptr typefaceFromFamilyName (const juce::String& family)
+    {
+        if (family.isEmpty())
+            return {};
+
+        const juce::Font probe (juce::FontOptions().withName (family).withHeight (16.0f));
+        auto tf = probe.getTypefacePtr();
+        if (tf == nullptr)
+            return {};
+
+        // JUCE silently substitutes a default face when the family is missing.
+        const auto bound = tf->getName();
+        if (bound.isNotEmpty()
+            && ! bound.equalsIgnoreCase (family)
+            && ! bound.containsIgnoreCase (family)
+            && ! family.containsIgnoreCase (bound)
+            && alnumLower (bound) != alnumLower (family))
+            return {};
+
+        return tf;
+    }
+}
+
+juce::String SharedColors::resolveUiTypefaceName (const juce::String& requested) noexcept
+{
+    if (requested.isEmpty() || requested.equalsIgnoreCase ("Pirulen"))
+        return requested;
+
+    const auto& installed = installedTypefaceNames();
+
+    auto findExact = [&] (const juce::String& query) -> juce::String
+    {
+        for (const auto& n : installed)
+            if (n.equalsIgnoreCase (query))
+                return n;
+        return {};
+    };
+
+    if (auto hit = findExact (requested); hit.isNotEmpty())
+        return hit;
+
+    const auto want = alnumLower (requested);
+    if (want.isNotEmpty())
+    {
+        for (const auto& n : installed)
+            if (alnumLower (n) == want)
+                return n;
+    }
+
+    // Shortest installed name that starts with the request ("Segoe UI Variable" → Display).
+    juce::String prefixHit;
+    for (const auto& n : installed)
+    {
+        if (n.startsWithIgnoreCase (requested)
+            && (prefixHit.isEmpty() || n.length() < prefixHit.length()))
+            prefixHit = n;
+    }
+    if (prefixHit.isNotEmpty())
+        return prefixHit;
+
+    static const std::pair<const char*, const char*> aliases[] = {
+        { "Segoe UI Variable", "Segoe UI" },
+        { "Helvetica Neue",    "Helvetica" },
+        { "Avenir Next",       "Avenir" },
+        { "Source Sans 3",     "Source Sans Pro" },
+        { "Cascadia Code",     "Cascadia Mono" },
+        { "IBM Plex Sans",     "IBM Plex Sans Regular" },
+        { "Roboto Condensed",  "Roboto" },
+    };
+
+    for (const auto& alias : aliases)
+        if (requested.equalsIgnoreCase (alias.first))
+            if (auto hit = findExact (alias.second); hit.isNotEmpty())
+                return hit;
+
+    return {};
+}
+
+bool SharedColors::isUiFontAvailable (const juce::String& catalogueName) noexcept
+{
+    if (catalogueName.equalsIgnoreCase ("Pirulen"))
+        return bundledPirulenTypeface() != nullptr;
+
+    return typefaceFromFamilyName (resolveUiTypefaceName (catalogueName)) != nullptr;
+}
+
+juce::StringArray SharedColors::getUiFontCatalogue() noexcept
+{
+    // Favourites first (Lato / Lato Black / Pirulen / …), then every other
+    // installed family so the list can scroll.
+    static const juce::String favourites[] = {
+        "Lato",
+        "Lato Black",
+        "Pirulen",
+        "Bahnschrift",
+        "Segoe UI",
+        "Segoe UI Variable",
+        "Segoe UI Semibold",
+        "Calibri",
+        "Candara",
+        "Corbel",
+        "Century Gothic",
+        "Arial",
+        "Arial Narrow",
+        "Helvetica Neue",
+        "Futura",
+        "Avenir",
+        "Avenir Next",
+        "Montserrat",
+        "Inter",
+        "Roboto",
+        "Roboto Condensed",
+        "Roboto Medium",
+        "Poppins",
+        "Manrope",
+        "Outfit",
+        "DM Sans",
+        "Plus Jakarta Sans",
+        "Urbanist",
+        "Space Grotesk",
+        "Space Mono",
+        "IBM Plex Sans",
+        "IBM Plex Mono",
+        "Source Sans 3",
+        "Source Sans Pro",
+        "Noto Sans",
+        "Exo 2",
+        "Orbitron",
+        "Rajdhani",
+        "Titillium Web",
+        "Saira",
+        "Saira Condensed",
+        "Oxanium",
+        "Audiowide",
+        "Michroma",
+        "Syncopate",
+        "Chakra Petch",
+        "Teko",
+        "Quantico",
+        "Electrolize",
+        "Share Tech Mono",
+        "Cascadia Code",
+        "Consolas",
+        "JetBrains Mono"
+    };
+
+    juce::StringArray out;
+    auto addUnique = [&out] (const juce::String& name)
+    {
+        if (name.isNotEmpty() && out.indexOf (name, true) < 0)
+            out.add (name);
+    };
+
+    for (const auto& name : favourites)
+        if (isUiFontAvailable (name))
+            addUnique (name);
+
+    for (const auto& name : installedTypefaceNames())
+        addUnique (name);
+
+    if (auto* active = SharedResources::getActive())
+        addUnique (active->sharedColors.uiFontName);
+
+    if (out.isEmpty())
+        out.add ("Segoe UI");
+
+    return out;
+}
+
+juce::Font SharedColors::makeNamedUiFont (const juce::String& catalogueName,
+                                          float height,
+                                          bool bold)
+{
+    height = juce::jmax (1.0f, height);
+    const juce::String requested = catalogueName.isNotEmpty() ? catalogueName : juce::String ("Lato");
+
+    juce::Typeface::Ptr tf;
+    if (requested.equalsIgnoreCase ("Pirulen"))
+        tf = bundledPirulenTypeface();
+
+    if (tf == nullptr)
+    {
+        juce::String face = resolveUiTypefaceName (requested);
+        if (bold)
+        {
+            if (requested.equalsIgnoreCase ("Lato") || face.equalsIgnoreCase ("Lato"))
+            {
+                if (auto black = resolveUiTypefaceName ("Lato Black"); black.isNotEmpty())
+                    face = black;
+            }
+            else if (requested.equalsIgnoreCase ("Segoe UI"))
+            {
+                if (auto semi = resolveUiTypefaceName ("Segoe UI Semibold"); semi.isNotEmpty())
+                    face = semi;
+            }
+            else if (requested.equalsIgnoreCase ("Roboto"))
+            {
+                if (auto med = resolveUiTypefaceName ("Roboto Medium"); med.isNotEmpty())
+                    face = med;
+            }
+        }
+        tf = typefaceFromFamilyName (face);
+    }
+
+    if (tf == nullptr)
+        tf = typefaceFromFamilyName (resolveUiTypefaceName ("Lato"));
+    if (tf == nullptr)
+        tf = typefaceFromFamilyName (resolveUiTypefaceName ("Segoe UI"));
+    if (tf == nullptr)
+        tf = typefaceFromFamilyName ("Arial");
+
+    if (tf != nullptr)
+    {
+        auto f = juce::Font (juce::FontOptions (tf).withHeight (height));
+        const bool alreadyBoldFace = tf->getName().containsIgnoreCase ("Black")
+                                     || tf->getName().containsIgnoreCase ("Bold")
+                                     || tf->getName().containsIgnoreCase ("Semibold")
+                                     || tf->getName().containsIgnoreCase ("Medium");
+        return (bold && ! alreadyBoldFace) ? f.boldened() : f;
+    }
+
+    return juce::Font (juce::FontOptions().withHeight (height));
+}
+
+juce::Font SharedColors::makeUiFont (float height, bool boldExtra) const
+{
+    return makeNamedUiFont (uiFontName, height, uiFontBold || boldExtra);
+}
+
+bool SharedResources::isSettingsSectionOpen (const juce::String& id, bool defaultOpen) const
+{
+    const auto it = settingsSectionOpen.find (id);
+    if (it == settingsSectionOpen.end())
+        return defaultOpen;
+    return it->second;
+}
+
+void SharedResources::setSettingsSectionOpen (const juce::String& id, bool open)
+{
+    settingsSectionOpen[id] = open;
+}
+
+juce::String SharedResources::encodeSettingsSectionState() const
+{
+    juce::StringArray parts;
+    for (const auto& kv : settingsSectionOpen)
+        parts.add (kv.first + "=" + (kv.second ? "1" : "0"));
+    return parts.joinIntoString (";");
+}
+
+void SharedResources::decodeSettingsSectionState (const juce::String& encoded)
+{
+    settingsSectionOpen.clear();
+    auto parts = juce::StringArray::fromTokens (encoded, ";", "");
+    for (const auto& p : parts)
+    {
+        const int eq = p.indexOfChar ('=');
+        if (eq <= 0)
+            continue;
+        settingsSectionOpen[p.substring (0, eq)] = p.substring (eq + 1).getIntValue() != 0;
+    }
+}
+
+void SharedResources::applyUiFontsRecursively (juce::Component& root)
+{
+    // Never walk a live CallOutBox — font hover used to do this and ComboBox
+    // lookAndFeelChanged() dismissed the box mid-event (plugin crash).
+    if (dynamic_cast<juce::CallOutBox*> (&root) != nullptr)
+        return;
+
+    if (auto* label = dynamic_cast<juce::Label*> (&root))
+    {
+        const float h = label->getFont().getHeight() > 1.0f ? label->getFont().getHeight() : 12.0f;
+        // Preserve intentional bold section headers via boldExtra if already boldened height style
+        // is unknown — use global bold flag only.
+        label->setFont (uiFont (h));
+        label->setMinimumHorizontalScale (1.0f);
+    }
+    else if (auto* editor = dynamic_cast<juce::TextEditor*> (&root))
+    {
+        const float h = editor->getFont().getHeight() > 1.0f ? editor->getFont().getHeight() : 13.0f;
+        editor->applyFontToAllText (uiFont (h));
+    }
+    else if (auto* button = dynamic_cast<juce::Button*> (&root))
+    {
+        juce::ignoreUnused (button);
+        root.repaint();
+    }
+    else if (dynamic_cast<juce::ComboBox*> (&root) != nullptr)
+    {
+        // ComboBox::lookAndFeelChanged() hides the popup. Just repaint.
+        root.repaint();
+    }
+    else
+    {
+        root.repaint();
+    }
+
+    for (int i = 0; i < root.getNumChildComponents(); ++i)
+        if (auto* child = root.getChildComponent (i))
+            applyUiFontsRecursively (*child);
+}
+
 juce::Colour SharedColors::legibleTextOn (juce::Colour text, juce::Colour background) const noexcept
 {
     if (! enforceLegibleText)
@@ -489,6 +873,29 @@ juce::Colour SharedColors::legibleTextOn (juce::Colour text, juce::Colour backgr
 
     return ensureTextOnBackground (text, background.withAlpha (1.0f),
                                    minRatioFromAmount (textContrastAmount));
+}
+
+juce::Colour SharedColors::dropdownTextOn (juce::Colour text, juce::Colour fieldFill) const noexcept
+{
+    if (! enforceLegibleText)
+        return text;
+
+    const float minRatio = minRatioFromAmount (textContrastAmount);
+    const auto menuBg = blendBg (menuBackgroundGradientColor1, menuBackgroundGradientColor2);
+    return ensureTextOnBackgrounds (
+        text,
+        { fieldFill, menuBackgroundGradientColor1, menuBackgroundGradientColor2, menuBg },
+        minRatio);
+}
+
+juce::Colour SharedColors::legibleFillOn (juce::Colour fill, juce::Colour background) const noexcept
+{
+    if (! enforceLegibleText)
+        return fill;
+
+    return nudgeFillAwayFromBackground (fill.withAlpha (juce::jmax (fill.getFloatAlpha(), 0.92f)),
+                                        background.withAlpha (1.0f),
+                                        minRatioFromAmount (textContrastAmount));
 }
 
 juce::Colour SharedColors::legibleHandleFill (juce::Colour fill, juce::Colour graphBackground) const noexcept

@@ -34,6 +34,8 @@ public:
     void setThemeColors (SharedResources* r) noexcept { themeColors = r; repaint(); }
 
     void resetIntegrated() noexcept;
+    float getIntegratedLufs() const noexcept { return integratedLufs.load (std::memory_order_relaxed); }
+    float getShortTermLufs() const noexcept { return shortTermLufs.load (std::memory_order_relaxed); }
 
     std::function<void()> onShowContextMenu;
     std::function<void()> onDoubleClick;

@@ -13,6 +13,7 @@
 #include "ParticleForceStackComponent.h"
 #include "CustomTwoValueSliderLookAndFeel.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class Spectrogram3DSettingsComponent : public juce::Component,
                                        private juce::ChangeListener
@@ -410,6 +411,13 @@ private:
 
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection meshSection;
+        SettingsSection audioSection;
+        SettingsSection lookSection;
+        SettingsSection particlesSection;
+        SettingsSection rampSection;
     };
 
     SharedResources& sharedResources;

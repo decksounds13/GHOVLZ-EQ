@@ -7,6 +7,7 @@
 #include "../../ComboBoxLookAndFeel.h"
 #include "../../SpectrogramComponent.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 /** Colour-scheme combo: ramp swatch + name (matches Gradients Load preset rows). */
 class ColourSchemeComboLookAndFeel : public ComboBoxLookAndFeel
@@ -151,6 +152,11 @@ private:
 
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection lookSection;
+        SettingsSection behaviourSection;
+        SettingsSection rampSection;
     };
 
     SharedResources& sharedResources;

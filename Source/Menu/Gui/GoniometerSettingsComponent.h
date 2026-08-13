@@ -6,6 +6,7 @@
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class GoniometerSettingsComponent : public juce::Component,
                                     private juce::ChangeListener
@@ -104,6 +105,11 @@ private:
         juce::Label expandedGlowOpacityLabel;
         juce::Slider expandedGlowOpacitySlider;
         std::unique_ptr<SliderAttachment> expandedGlowOpacityAttachment;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection displaySection;
+        SettingsSection glowSection;
+        SettingsSection rampSection;
     };
 
     SharedResources& sharedResources;

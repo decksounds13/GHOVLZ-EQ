@@ -118,7 +118,7 @@ ModSectionComponent::LfoColumn::LfoColumn (juce::AudioProcessorValueTreeState& s
     title.setText ("LFO " + juce::String (index + 1), juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centred);
     title.setColour (juce::Label::textColourId, juce::Colour::fromRGB (210, 190, 150));
-    title.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
+    title.setFont (SharedResources::uiFont (11.0f, true));
     addAndMakeVisible (title);
 
     shapeCombo.setTooltip ("LFO waveform shape");
@@ -366,7 +366,7 @@ ModSectionComponent::ShapeColumn::ShapeColumn (EqProcessor& proc, ModSectionComp
     title.setText ("Shape", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centredLeft);
     title.setColour (juce::Label::textColourId, juce::Colour::fromRGB (210, 190, 150));
-    title.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
+    title.setFont (SharedResources::uiFont (11.0f, true));
     title.setTooltip ("Custom shape modulator. Use as a mod matrix source");
     addAndMakeVisible (title);
 
@@ -572,7 +572,7 @@ ModSectionComponent::EnvFollowerColumn::EnvFollowerColumn (EqProcessor& proc,
     title.setText ("Env", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centred);
     title.setColour (juce::Label::textColourId, ownerSection.getSharedColors().modText);
-    title.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
+    title.setFont (SharedResources::uiFont (11.0f, true));
     title.setTooltip ("Envelope follower. Use as a mod matrix source");
     addAndMakeVisible (title);
 
@@ -657,7 +657,7 @@ ModSectionComponent::MatrixRow::MatrixRow (juce::AudioProcessorValueTreeState& s
     indexLabel.setText (juce::String (slotIndex + 1).paddedLeft ('0', 2), juce::dontSendNotification);
     indexLabel.setJustificationType (juce::Justification::centred);
     indexLabel.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.55f));
-    indexLabel.setFont (juce::FontOptions (10.0f));
+    indexLabel.setFont (SharedResources::uiFont (10.0f));
     indexLabel.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (indexLabel);
 
@@ -777,7 +777,7 @@ ModSectionComponent::ModSectionComponent (EqProcessor& proc)
     matrixTitle.setText ("Mod Matrix", juce::dontSendNotification);
     matrixTitle.setJustificationType (juce::Justification::centredLeft);
     matrixTitle.setColour (juce::Label::textColourId, colors().modText);
-    matrixTitle.setFont (juce::FontOptions (13.0f).withStyle ("Bold"));
+    matrixTitle.setFont (SharedResources::uiFont (13.0f, true));
     addAndMakeVisible (matrixTitle);
 
     matrixContent = std::make_unique<MatrixContent> (treeState, sharedButtonLf);

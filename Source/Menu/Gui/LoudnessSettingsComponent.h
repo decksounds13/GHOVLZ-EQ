@@ -4,6 +4,7 @@
 
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class LoudnessSettingsComponent : public juce::Component
 {
@@ -31,15 +32,22 @@ private:
         void styleCombo (juce::ComboBox& combo);
         void syncTargetComboFromParam();
         void applyTargetFromCombo();
+        void syncAutoGainModeFromParam();
+        void applyAutoGainModeFromCombo();
 
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
         ComboBoxLookAndFeel comboLookAndFeel;
 
         juce::Label titleLabel;
+        juce::Label autoGainModeLabel;
+        juce::ComboBox autoGainModeCombo;
         juce::Label targetLabel;
         juce::ComboBox targetCombo;
         juce::Label resetNoteLabel;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection meterSection;
     };
 
     SharedResources& sharedResources;

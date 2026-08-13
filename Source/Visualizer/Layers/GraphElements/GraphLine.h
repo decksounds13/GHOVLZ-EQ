@@ -4,6 +4,7 @@
 #include "../../Analyser.h"
 #include "SpectrumBinOverlay.h"
 #include "../../../ColourRamp/GradientRamp.h"
+#include "../../../Menu/SharedResources.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 
 // ****************************************************************************
@@ -25,7 +26,13 @@ public:
     void setHoldColour (const juce::Colour& colour) noexcept { m_holdColour = colour; }
     void setBinOverlayColour (juce::Colour colour) noexcept { m_binOverlay.setBaseColour (colour); }
     void setBinOverlayColourRamp (const GradientRamp* ramp) noexcept { m_binOverlay.setColourRamp (ramp); }
-    void setSpectrumFillRamp (const GradientRamp* ramp) noexcept { m_spectrumFillRamp = ramp; }
+    void setSpectrumFillRamp (const GradientRamp* ramp) noexcept { m_spectrumPostFillRamp = ramp; }
+    void setSpectrumCurveRamp (const GradientRamp* ramp) noexcept { m_spectrumPostCurveRamp = ramp; }
+    void setSpectrumPreFillRamp (const GradientRamp* ramp) noexcept { m_spectrumPreFillRamp = ramp; }
+    void setSpectrumPreCurveRamp (const GradientRamp* ramp) noexcept { m_spectrumPreCurveRamp = ramp; }
+    void setSpectrumHoldFillRamp (const GradientRamp* ramp) noexcept { m_spectrumHoldFillRamp = ramp; }
+    void setSpectrumHoldCurveRamp (const GradientRamp* ramp) noexcept { m_spectrumHoldCurveRamp = ramp; }
+    void setSharedResources (SharedResources* resources) noexcept { m_sharedResources = resources; }
     void setAudioProcessorValueTreeState (juce::AudioProcessorValueTreeState* state);
 
 protected:
@@ -47,8 +54,14 @@ protected:
     // ========================================================================
     Analyser& mr_analyser;
     juce::AudioProcessorValueTreeState* mr_valueTree = nullptr;
+    SharedResources* m_sharedResources = nullptr;
     SpectrumBinOverlay m_binOverlay;
-    const GradientRamp* m_spectrumFillRamp = nullptr;
+    const GradientRamp* m_spectrumPostFillRamp = nullptr;
+    const GradientRamp* m_spectrumPostCurveRamp = nullptr;
+    const GradientRamp* m_spectrumPreFillRamp = nullptr;
+    const GradientRamp* m_spectrumPreCurveRamp = nullptr;
+    const GradientRamp* m_spectrumHoldFillRamp = nullptr;
+    const GradientRamp* m_spectrumHoldCurveRamp = nullptr;
     // Dual-layer Melatonin glow (bloom + core), same approach as FFT bins.
     melatonin::DropShadow m_curveGlow {
         {
@@ -65,6 +78,12 @@ protected:
     std::vector<float> m_columnPre;
     std::vector<float> m_columnPost;
     std::vector<float> m_columnHold;
+    std::vector<float> m_columnPreB;
+    std::vector<float> m_columnPostB;
+    std::vector<float> m_columnHoldB;
+    std::vector<float> m_fadePreCurve, m_fadePreFill, m_fadePostCurve, m_fadePostFill, m_fadeHoldCurve, m_fadeHoldFill;
+    std::vector<float> m_fadePreCurveB, m_fadePreFillB, m_fadePostCurveB, m_fadePostFillB, m_fadeHoldCurveB, m_fadeHoldFillB;
+    double m_lastFadeTimeMs = 0.0;
     std::vector<float> m_smoothScratch;
     std::vector<float> m_peakScratch;
     std::vector<char> m_hasBinScratch;

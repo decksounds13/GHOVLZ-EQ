@@ -36,6 +36,7 @@ void Visualizer::applyThemeColours()
     const auto& c = colors();
     m_grid.setGridColour (c.spectrumGrid);
     m_grid.setTextColour (c.spectrumText);
+    m_graph.setSharedResources (themeColors);
     m_graph.setGraphColour (c.spectrumLine.withAlpha (0.6f));
     m_graph.setGraphFillColour (c.spectrumFill.withAlpha (0.55f));
     m_graph.setGraphMaximumsColour (c.spectrumLine.brighter (0.2f).withAlpha (0.65f));
@@ -51,6 +52,36 @@ void Visualizer::setBinOverlayColourRamp (const GradientRamp* ramp)
 void Visualizer::setSpectrumFillRamp (const GradientRamp* ramp)
 {
     m_graph.setSpectrumFillRamp (ramp);
+    repaint();
+}
+
+void Visualizer::setSpectrumCurveRamp (const GradientRamp* ramp)
+{
+    m_graph.setSpectrumCurveRamp (ramp);
+    repaint();
+}
+
+void Visualizer::setSpectrumPreFillRamp (const GradientRamp* ramp)
+{
+    m_graph.setSpectrumPreFillRamp (ramp);
+    repaint();
+}
+
+void Visualizer::setSpectrumPreCurveRamp (const GradientRamp* ramp)
+{
+    m_graph.setSpectrumPreCurveRamp (ramp);
+    repaint();
+}
+
+void Visualizer::setSpectrumHoldFillRamp (const GradientRamp* ramp)
+{
+    m_graph.setSpectrumHoldFillRamp (ramp);
+    repaint();
+}
+
+void Visualizer::setSpectrumHoldCurveRamp (const GradientRamp* ramp)
+{
+    m_graph.setSpectrumHoldCurveRamp (ramp);
     repaint();
 }
 

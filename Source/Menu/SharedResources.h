@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <array>
+#include <map>
 #include <vector>
 #include "ThemeColorRegistry.h"
 
@@ -47,6 +48,9 @@ public:
     juce::Colour menuListBoxSelectionColor1 = createColorWithOptionalAlpha (220, 220, 220, 255);
     juce::Colour menuTextBoxTextColor1 = createColorWithOptionalAlpha (245, 245, 245, 217);
     juce::Colour menuSliderFillColor = createColorWithOptionalAlpha (218, 165, 32, 255); // goldenrod
+    /** Settings accordion header fill / title (dice Menu scope). */
+    juce::Colour menuSectionHeader = createColorWithOptionalAlpha (72, 62, 48, 255);
+    juce::Colour menuSectionText = createColorWithOptionalAlpha (245, 245, 245, 230);
 
     //--------------------------------------------------------------------------
     // Plugin chrome
@@ -67,6 +71,8 @@ public:
     juce::Colour graphBackground2 = createColorWithOptionalAlpha (60, 55, 50, 255);
     juce::Colour graphGrid = createColorWithOptionalAlpha (245, 245, 245, 40);
     juce::Colour graphAxisText = createColorWithOptionalAlpha (245, 245, 245, 180);
+    /** Floating cursor / crosshair readout next to the pointer. Default white. */
+    juce::Colour graphCursorInfoText = createColorWithOptionalAlpha (255, 255, 255, 255);
     juce::Colour graphSumCurve = createColorWithOptionalAlpha (218, 165, 32, 204);
     juce::Colour graphSumFillTop = createColorWithOptionalAlpha (255, 130, 30, 180);
     juce::Colour graphSumFillBottom = createColorWithOptionalAlpha (139, 105, 20, 102);
@@ -152,6 +158,14 @@ public:
     juce::Colour spectrumText = createColorWithOptionalAlpha (132, 132, 132, 255);
     juce::Colour spectrumLine = createColorWithOptionalAlpha (90, 160, 90, 255);
     juce::Colour spectrumFill = createColorWithOptionalAlpha (255, 90, 40, 160);
+    juce::Colour spectrumLineL = createColorWithOptionalAlpha (70, 190, 220, 255);
+    juce::Colour spectrumFillL = createColorWithOptionalAlpha (70, 190, 220, 130);
+    juce::Colour spectrumLineR = createColorWithOptionalAlpha (230, 140, 70, 255);
+    juce::Colour spectrumFillR = createColorWithOptionalAlpha (230, 140, 70, 130);
+    juce::Colour spectrumLineMid = createColorWithOptionalAlpha (90, 200, 120, 255);
+    juce::Colour spectrumFillMid = createColorWithOptionalAlpha (90, 200, 120, 130);
+    juce::Colour spectrumLineSide = createColorWithOptionalAlpha (200, 90, 210, 255);
+    juce::Colour spectrumFillSide = createColorWithOptionalAlpha (200, 90, 210, 130);
 
     /** Per-slot randomization gates (index = ThemeColorRegistry entry order). */
     std::vector<uint8_t> colorRandomizationFlags;
@@ -160,12 +174,23 @@ public:
     bool randomizeFaceplateMod = true;
     bool randomizeGraphModule = true;
     bool randomizeMenuModule = true;
+    /** Dice: cursor / crosshair info label colour (separate from Graph). */
+    bool randomizeGraphCursorInfo = true;
 
     /** Dice: per colour-ramp randomization gates (left-click honours these). */
     bool randomizeRampFftBars = true;
     bool randomizeRampSpectrogram = true;
     bool randomizeRampSpectrogram3D = true;
-    bool randomizeRampSpectrumFill = true;
+    bool randomizeRampSpectrumFill = true;       // Post Fill
+    bool randomizeRampSpectrumCurve = true;      // Post Curve
+    bool randomizeRampSpectrumPreFill = true;
+    bool randomizeRampSpectrumPreCurve = true;
+    bool randomizeRampSpectrumHoldFill = true;
+    bool randomizeRampSpectrumHoldCurve = true;
+    bool randomizeRampEqCurve = true;            // Sum Curve
+    bool randomizeRampEqSumFill = true;
+    bool randomizeRampEqBandCurve = true;
+    bool randomizeRampEqBandFill = true;
     /** Peak + RMS meter bar ramps (both targets). */
     bool randomizeRampLevelMeters = true;
 
@@ -190,6 +215,75 @@ public:
         peeks through. Not a theme colour; persisted in ui_prefs. Dice does not touch it.
     */
     float optionBoxOpacity = 0.90f;
+
+    /**
+        Chrome button corner radius (px). Appearance → Chrome. Also drives Melatonin
+        outline-blur softness so the rim reads against the background. Default 6.
+        Does not change graph band handles (those stay circular).
+    */
+    float buttonCornerRadius = 6.0f;
+
+    /**
+        Popup / dropdown panel corner radius (px). Independent of button radius.
+        Appearance → Chrome. Default 6. 0 = square menus.
+    */
+    float menuPopupCornerRadius = 6.0f;
+    /** Draw a 1 px outline around popup / dropdown panels. Default on. */
+    bool menuPopupOutline = true;
+
+    /**
+        Soft Melatonin edge glow on chrome buttons (Appearance → Chrome).
+        Still requires the global glow/shadow master switch. Default on.
+    */
+    bool buttonGlowEnabled = true;
+    /**
+        When true, button edge glow only paints while hovered or pressed.
+        When false, glow is always on (if buttonGlowEnabled). Default on.
+    */
+    bool buttonGlowOnlyOnHover = true;
+
+    /**
+        Global UI typeface name (Appearance → Chrome → UI font).
+        System families when installed; "Pirulen" is bundled. Default Lato.
+        Used plugin-wide for chrome, menus, scopes, OptionBox, Appearance, etc.
+    */
+    juce::String uiFontName { "Lato" };
+
+    /**
+        When true, makeUiFont() uses a bold weight (or bold style) globally.
+        Appearance → Chrome → Bold text. Default off.
+    */
+    bool uiFontBold = false;
+
+    /**
+        Font height for the floating cursor / crosshair info label (Appearance).
+        Default 12. Not a theme colour; persisted in ui_prefs.
+    */
+    float graphCursorInfoFontSize = 12.0f;
+
+    /** Lato / Pirulen / other favourites first, then every installed family. */
+    static juce::StringArray getUiFontCatalogue() noexcept;
+
+    /** True if makeNamedUiFont will bind a real face (not a silent default fallback). */
+    static bool isUiFontAvailable (const juce::String& catalogueName) noexcept;
+
+    /** Installed family that matches a catalogue name, or empty if none. */
+    static juce::String resolveUiTypefaceName (const juce::String& requested) noexcept;
+
+    /**
+        Build a UI font by catalogue / family name at height.
+        Resolves aliases and installed family names. Missing faces fall back to Lato / Segoe UI.
+    */
+    static juce::Font makeNamedUiFont (const juce::String& catalogueName,
+                                       float height,
+                                       bool bold = false);
+
+    /**
+        Build the global UI font at height.
+        @param boldExtra  force bold even when uiFontBold is off (e.g. section headers).
+                          When uiFontBold is on, result is always bold.
+    */
+    juce::Font makeUiFont (float height, bool boldExtra = false) const;
 
     /**
         When true, Graph Band 1–8 (and matching faceplate power/glow chrome) never
@@ -268,6 +362,18 @@ public:
     juce::Colour legibleTextOn (juce::Colour text, juce::Colour background) const noexcept;
 
     /**
+        Dropdown / popup ink: readable on the field fill and on both Settings
+        Menu Background colours (the wash the list sits over).
+    */
+    juce::Colour dropdownTextOn (juce::Colour text, juce::Colour fieldFill) const noexcept;
+
+    /**
+        Nudge a fill (dropdown, chip) off a wash so it still reads as a field.
+        No-op when enforceLegibleText is off.
+    */
+    juce::Colour legibleFillOn (juce::Colour fill, juce::Colour background) const noexcept;
+
+    /**
         Nudge an opaque handle fill so it still reads on the graph background
         without fully discarding the band colour. No-op when enforceLegibleText is off.
     */
@@ -314,6 +420,31 @@ public:
     void makeActive() noexcept { activeInstance = this; }
     static SharedResources* getActive() noexcept { return activeInstance; }
 
+    /**
+        Plugin-wide UI font from the active SharedColors (Appearance selector + bold).
+        Safe when no instance is active (plain default height).
+        Prefer this over hardcoded "Lato" / FontOptions name strings.
+    */
+    static juce::Font uiFont (float height, bool boldExtra = false)
+    {
+        if (auto* active = getActive())
+            return active->sharedColors.makeUiFont (height, boldExtra);
+        return juce::Font (juce::FontOptions (juce::jmax (1.0f, height)));
+    }
+
+    /**
+        Walk a component tree and push the global UI font onto Labels / TextEditors,
+        then repaint Buttons / ComboBoxes so paint-time fonts refresh.
+        Call after Appearance font/bold changes.
+    */
+    static void applyUiFontsRecursively (juce::Component& root);
+
+    /** Settings accordion open flags (ui_prefs). Missing id → defaultOpen. */
+    bool isSettingsSectionOpen (const juce::String& id, bool defaultOpen) const;
+    void setSettingsSectionOpen (const juce::String& id, bool open);
+    juce::String encodeSettingsSectionState() const;
+    void decodeSettingsSectionState (const juce::String& encoded);
+
     /** Global UI toggle — skips Melatonin glow / drop-shadow passes when false. */
     bool disableGlowShadowEffects = false;
 
@@ -331,4 +462,5 @@ public:
 
 private:
     static SharedResources* activeInstance;
+    std::map<juce::String, bool> settingsSectionOpen;
 };

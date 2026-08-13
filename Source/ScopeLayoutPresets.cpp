@@ -40,6 +40,9 @@ static ScopeLayoutPreset parseLayout (const juce::XmlElement& xml)
     p.splitX = (float) xml.getDoubleAttribute ("splitX", 0.5);
     p.splitY = (float) xml.getDoubleAttribute ("splitY", 0.5);
     p.stripFractions = decodeFractions (xml.getStringAttribute ("fractions"), (int) p.modules.size());
+    p.factoryId = xml.getStringAttribute ("factoryId");
+    if (auto* pane = xml.getChildByName ("Pane"))
+        p.viewportXml = pane->toString();
 
     if (auto* rampsXml = xml.getChildByName ("ColourRamps"))
         p.colourRamps = juce::ValueTree::fromXml (*rampsXml);
@@ -57,6 +60,12 @@ static std::unique_ptr<juce::XmlElement> toXml (const ScopeLayoutPreset& p)
     xml->setAttribute ("stripHeightPx", p.stripHeightPx);
     xml->setAttribute ("splitX", (double) p.splitX);
     xml->setAttribute ("splitY", (double) p.splitY);
+    if (p.factoryId.isNotEmpty())
+        xml->setAttribute ("factoryId", p.factoryId);
+    if (p.viewportXml.isNotEmpty())
+        if (auto pane = juce::parseXML (p.viewportXml))
+            if (pane->hasTagName ("Pane"))
+                xml->addChildElement (pane.release());
 
     if (p.colourRamps.isValid() && p.colourRamps.hasType ("ColourRamps"))
         if (auto rampsXml = p.colourRamps.createXml())

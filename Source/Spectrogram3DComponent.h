@@ -746,6 +746,8 @@ public:
     std::function<void()> onDefaultViewChanged;
     /** Toggle OS-level F11 fullscreen (borderless desktop window). */
     std::function<void()> onToggleFullscreen;
+    /** S — open Settings (not while RMB freecam is flying). */
+    std::function<void()> onToggleSettings;
     /** True while Spec3D is in OS fullscreen (for menu tick / label). */
     std::function<bool()> isFullscreenQuery;
     /** Append look-preset items (ids >= 100). Fullscreen uses id 20. */

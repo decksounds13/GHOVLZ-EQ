@@ -23,10 +23,13 @@ OscilloscopeSettingsComponent::Content::Content (SharedResources& resources,
     : sharedResources (resources),
       treeState (state),
       colourRamps (ramps),
-      gradientEditor (resources, GradientStripEditor::ModeFamily::oscilloscope, &ramps.getPresets())
+      gradientEditor (resources, GradientStripEditor::ModeFamily::oscilloscope, &ramps.getPresets()),
+      displaySection (resources, "osc.display", "Display", false),
+      glowSection (resources, "osc.glow", "Glow", false),
+      rampSection (resources, "osc.ramp", "Ramp", false)
 {
     titleLabel.setText ("Oscilloscope", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -164,6 +167,21 @@ OscilloscopeSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (expandedGlowOpacityLabel);
 
     syncRampControlsEnabled();
+
+    wireSection (displaySection);
+    wireSection (glowSection);
+    wireSection (rampSection);
+}
+
+void OscilloscopeSettingsComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
+    };
 }
 
 OscilloscopeSettingsComponent::Content::~Content()
@@ -185,14 +203,14 @@ void OscilloscopeSettingsComponent::Content::styleSlider (juce::Slider& slider)
 
 void OscilloscopeSettingsComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
 }
 
 void OscilloscopeSettingsComponent::Content::styleSectionLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (16.0f));
+    label.setFont (SharedResources::uiFont (16.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
 }
@@ -209,7 +227,6 @@ void OscilloscopeSettingsComponent::Content::styleQualityCombo (juce::ComboBox& 
 {
     qualityLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&qualityLookAndFeel);
-    combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }
 
 void OscilloscopeSettingsComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
@@ -269,17 +286,12 @@ void OscilloscopeSettingsComponent::Content::syncRampControlsEnabled()
 
 int OscilloscopeSettingsComponent::Content::getPreferredHeight() const
 {
-    const int sharedRows = 2; // quality, line opacity
-    const int perModeRows = 4; // line width + 3 glow sliders
-    const int perModeExtras = kSectionH + kSectionGap + 22 + 6; // section + glow toggle
-
-    return kPadY * 2
-           + 24 + 8
-           + 22 + kRowGap // use ramp
-           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight()
-           + kSectionGap
-           + sharedRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
-           + 2 * (perModeExtras + perModeRows * (kLabelH + kLabelGap + kSliderH + kRowGap));
+    const int row = kLabelH + kLabelGap + kSliderH + kRowGap;
+    const int tog = 22 + 6;
+    return kPadY * 2 + 24 + 8
+           + displaySection.heightFor (2 * row + 2 * (kSectionH + kLabelGap + row))
+           + glowSection.heightFor (2 * (tog + 3 * row + kSectionGap))
+           + rampSection.heightFor (tog + kLabelH + kLabelGap + gradientEditor.getPreferredHeight());
 }
 
 void OscilloscopeSettingsComponent::Content::resized()
@@ -293,50 +305,56 @@ void OscilloscopeSettingsComponent::Content::resized()
 
     const int controlW = juce::jmin (520, area.getWidth());
 
-    // Ramp first so it is visible without scrolling.
-    useRampToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    gradientLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kLabelGap);
-    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
-                                  .removeFromLeft (controlW));
-    area.removeFromTop (kSectionGap);
-
-    layoutComboRow (area, qualityLabel, qualityCombo);
-    layoutSliderRow (area, lineOpacityLabel, lineOpacitySlider);
-
-    auto layoutModeBlock = [this] (juce::Rectangle<int>& areaIn,
-                                   juce::Label& section,
-                                   juce::Label& widthLabel, juce::Slider& widthSlider,
-                                   juce::ToggleButton& glowToggle,
-                                   juce::Label& radiusLabel, juce::Slider& radiusSlider,
-                                   juce::Label& spreadLabel, juce::Slider& spreadSlider,
-                                   juce::Label& opacityLabel, juce::Slider& opacitySlider)
+    displaySection.applyVisible ({
+        &qualityLabel, &qualityCombo, &lineOpacityLabel, &lineOpacitySlider,
+        &compactSectionLabel, &compactLineWidthLabel, &compactLineWidthSlider,
+        &expandedSectionLabel, &expandedLineWidthLabel, &expandedLineWidthSlider });
+    displaySection.placeHeader (area);
+    if (displaySection.isOpen())
     {
-        section.setBounds (areaIn.removeFromTop (kSectionH));
-        areaIn.removeFromTop (kLabelGap);
-        layoutSliderRow (areaIn, widthLabel, widthSlider);
-        glowToggle.setBounds (areaIn.removeFromTop (22).removeFromLeft (juce::jmin (220, areaIn.getWidth())));
-        areaIn.removeFromTop (6);
-        layoutSliderRow (areaIn, radiusLabel, radiusSlider);
-        layoutSliderRow (areaIn, spreadLabel, spreadSlider);
-        layoutSliderRow (areaIn, opacityLabel, opacitySlider);
-        areaIn.removeFromTop (kSectionGap);
-    };
+        layoutComboRow (area, qualityLabel, qualityCombo);
+        layoutSliderRow (area, lineOpacityLabel, lineOpacitySlider);
+        compactSectionLabel.setBounds (area.removeFromTop (kSectionH));
+        area.removeFromTop (kLabelGap);
+        layoutSliderRow (area, compactLineWidthLabel, compactLineWidthSlider);
+        expandedSectionLabel.setBounds (area.removeFromTop (kSectionH));
+        area.removeFromTop (kLabelGap);
+        layoutSliderRow (area, expandedLineWidthLabel, expandedLineWidthSlider);
+    }
 
-    layoutModeBlock (area, compactSectionLabel,
-                     compactLineWidthLabel, compactLineWidthSlider,
-                     compactGlowToggle,
-                     compactGlowRadiusLabel, compactGlowRadiusSlider,
-                     compactGlowSpreadLabel, compactGlowSpreadSlider,
-                     compactGlowOpacityLabel, compactGlowOpacitySlider);
+    glowSection.applyVisible ({
+        &compactGlowToggle, &compactGlowRadiusLabel, &compactGlowRadiusSlider,
+        &compactGlowSpreadLabel, &compactGlowSpreadSlider,
+        &compactGlowOpacityLabel, &compactGlowOpacitySlider,
+        &expandedGlowToggle, &expandedGlowRadiusLabel, &expandedGlowRadiusSlider,
+        &expandedGlowSpreadLabel, &expandedGlowSpreadSlider,
+        &expandedGlowOpacityLabel, &expandedGlowOpacitySlider });
+    glowSection.placeHeader (area);
+    if (glowSection.isOpen())
+    {
+        compactGlowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+        area.removeFromTop (6);
+        layoutSliderRow (area, compactGlowRadiusLabel, compactGlowRadiusSlider);
+        layoutSliderRow (area, compactGlowSpreadLabel, compactGlowSpreadSlider);
+        layoutSliderRow (area, compactGlowOpacityLabel, compactGlowOpacitySlider);
+        expandedGlowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+        area.removeFromTop (6);
+        layoutSliderRow (area, expandedGlowRadiusLabel, expandedGlowRadiusSlider);
+        layoutSliderRow (area, expandedGlowSpreadLabel, expandedGlowSpreadSlider);
+        layoutSliderRow (area, expandedGlowOpacityLabel, expandedGlowOpacitySlider);
+    }
 
-    layoutModeBlock (area, expandedSectionLabel,
-                     expandedLineWidthLabel, expandedLineWidthSlider,
-                     expandedGlowToggle,
-                     expandedGlowRadiusLabel, expandedGlowRadiusSlider,
-                     expandedGlowSpreadLabel, expandedGlowSpreadSlider,
-                     expandedGlowOpacityLabel, expandedGlowOpacitySlider);
+    rampSection.applyVisible ({ &useRampToggle, &gradientLabel, &gradientEditor });
+    rampSection.placeHeader (area);
+    if (rampSection.isOpen())
+    {
+        useRampToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        gradientLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                      .removeFromLeft (controlW));
+    }
 }
 
 OscilloscopeSettingsComponent::OscilloscopeSettingsComponent (SharedResources& resources,

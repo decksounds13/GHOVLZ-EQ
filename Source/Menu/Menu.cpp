@@ -72,6 +72,7 @@ Menu::Menu (SharedResources& resources,
     contentPanel.addAndMakeVisible (tabPrevButton);
     contentPanel.addAndMakeVisible (tabNextButton);
 
+    recomputeTabPageStarts (kContentWidth);
     rebuildTabsForCurrentPage();
 
     viewport.setViewedComponent (&contentPanel, false);
@@ -150,28 +151,144 @@ Menu::~Menu()
 
 int Menu::getNumTabPages() const noexcept
 {
-    return juce::jmax (1, ((int) allTabs.size() + kTabsPerPage - 1) / kTabsPerPage);
+    return juce::jmax (1, (int) tabPageStarts.size());
+}
+
+int Menu::currentPageStart() const noexcept
+{
+    if (tabPageStarts.empty())
+        return 0;
+    const int p = juce::jlimit (0, (int) tabPageStarts.size() - 1, tabPageIndex);
+    return tabPageStarts[(size_t) p];
+}
+
+int Menu::currentPageEnd() const noexcept
+{
+    if (tabPageStarts.empty())
+        return (int) allTabs.size();
+    const int p = juce::jlimit (0, (int) tabPageStarts.size() - 1, tabPageIndex);
+    if (p + 1 < (int) tabPageStarts.size())
+        return tabPageStarts[(size_t) p + 1];
+    return (int) allTabs.size();
+}
+
+int Menu::pageIndexContainingTab (int tabIndex) const noexcept
+{
+    if (tabPageStarts.empty() || tabIndex < 0)
+        return 0;
+    int page = 0;
+    for (int i = 0; i < (int) tabPageStarts.size(); ++i)
+        if (tabPageStarts[(size_t) i] <= tabIndex)
+            page = i;
+    return page;
+}
+
+void Menu::recomputeTabPageStarts (int availableWidth)
+{
+    const int n = (int) allTabs.size();
+    tabPageStarts.clear();
+    if (n <= 0)
+    {
+        tabPageStarts.push_back (0);
+        return;
+    }
+
+    std::vector<int> widths;
+    widths.reserve ((size_t) n);
+    int sum = 0;
+    for (const auto& t : allTabs)
+    {
+        const int w = CustomTabBarLookAndFeel::bestWidthForLabel (t.name);
+        widths.push_back (w);
+        sum += w;
+    }
+
+    constexpr int kFudge = 8;
+    if (sum + kFudge <= availableWidth)
+    {
+        tabPageStarts.push_back (0);
+        return;
+    }
+
+    constexpr int arrowW = 22;
+    constexpr int arrowPad = 6;
+    constexpr int arrowGap = 3;
+    const int arrowReserve = arrowPad + arrowW + arrowGap + arrowW + arrowPad;
+    const int avail = juce::jmax (widths[0], availableWidth - arrowReserve);
+
+    int i = 0;
+    while (i < n)
+    {
+        tabPageStarts.push_back (i);
+        int used = 0;
+        int j = i;
+        while (j < n)
+        {
+            const int next = used + widths[(size_t) j];
+            if (j > i && next + kFudge > avail)
+                break;
+            used = next;
+            ++j;
+        }
+        i = juce::jmax (j, i + 1);
+    }
+}
+
+void Menu::syncTabPagesToWidth (int availableWidth)
+{
+    juce::String keepName = selectedTabName;
+    if (keepName.isEmpty() && tabBar.getNumTabs() > 0)
+        keepName = tabBar.getCurrentTabName();
+
+    const auto oldStarts = tabPageStarts;
+    const int oldPage = tabPageIndex;
+    recomputeTabPageStarts (availableWidth);
+
+    int keepIndex = -1;
+    if (keepName.isNotEmpty())
+    {
+        for (int i = 0; i < (int) allTabs.size(); ++i)
+            if (allTabs[(size_t) i].name == keepName)
+            {
+                keepIndex = i;
+                break;
+            }
+    }
+    if (keepIndex >= 0)
+        tabPageIndex = pageIndexContainingTab (keepIndex);
+    else
+        tabPageIndex = juce::jlimit (0, getNumTabPages() - 1, tabPageIndex);
+
+    if (oldStarts != tabPageStarts || oldPage != tabPageIndex)
+        rebuildTabsForCurrentPage();
 }
 
 void Menu::setTabPage (int page)
 {
     const int pages = getNumTabPages();
-    tabPageIndex = juce::jlimit (0, pages - 1, page);
+    const int next = juce::jlimit (0, pages - 1, page);
+    if (next == tabPageIndex)
+        return;
+    tabPageIndex = next;
     rebuildTabsForCurrentPage();
-    resized();
+    if (tabBar.getNumTabs() > 0)
+        selectedTabName = tabBar.getCurrentTabName();
+    refreshContentPanelSize (true);
 }
 
 void Menu::rebuildTabsForCurrentPage()
 {
-    juce::String keepName;
-    if (tabBar.getNumTabs() > 0)
+    juce::String keepName = selectedTabName;
+    if (keepName.isEmpty() && tabBar.getNumTabs() > 0)
         keepName = tabBar.getCurrentTabName();
+
+    const juce::ScopedValueSetter<bool> guard (rebuildingTabs, true);
 
     // clearTabs detaches the panel without deleting (we never set deleteByTabComp_).
     tabBar.clearTabs();
 
-    const int start = tabPageIndex * kTabsPerPage;
-    const int end = juce::jmin (start + kTabsPerPage, (int) allTabs.size());
+    const int start = currentPageStart();
+    const int end = currentPageEnd();
     int selectIdx = 0;
 
     for (int i = start; i < end; ++i)
@@ -197,14 +314,17 @@ void Menu::rebuildTabsForCurrentPage()
     }
 
     if (tabBar.getNumTabs() > 0)
+    {
         tabBar.setCurrentTabIndex (juce::jlimit (0, tabBar.getNumTabs() - 1, selectIdx), false);
+        if (keepName.isNotEmpty() && tabBar.getCurrentTabName() == keepName)
+            selectedTabName = keepName;
+    }
 
     const int pages = getNumTabPages();
     tabPrevButton.setEnabled (tabPageIndex > 0);
     tabNextButton.setEnabled (tabPageIndex + 1 < pages);
     tabPrevButton.setVisible (pages > 1);
     tabNextButton.setVisible (pages > 1);
-    // Hover: "Page 1 of 3" (1-based index).
     const juce::String pageTip = "Page " + juce::String (tabPageIndex + 1)
                                  + " of " + juce::String (pages);
     tabPrevButton.setTooltip (pageTip);
@@ -396,7 +516,7 @@ void Menu::paint (juce::Graphics& g)
     g.fillRect (0.0f, (float) kDragBarHeight - 1.0f, (float) getWidth(), 1.0f);
 
     g.setColour (sharedResources.sharedColors.menuLabelTextColor1.withAlpha (0.92f));
-    g.setFont (juce::Font (juce::FontOptions (13.0f).withStyle ("Bold")));
+    g.setFont (SharedResources::uiFont (13.0f, true));
     // Leave room for the title-bar close (X) on the right.
     auto titleArea = getLocalBounds().removeFromTop (kDragBarHeight).reduced (10, 0);
     titleArea.removeFromRight (30);
@@ -436,8 +556,10 @@ int Menu::getActiveTabPreferredContentHeight() const
         return t->getPreferredContentHeight();
     if (auto* t = dynamic_cast<HistogramSettingsComponent*> (c))
         return t->getPreferredContentHeight();
+    if (auto* t = dynamic_cast<AppearanceComponent*> (c))
+        return t->getPreferredContentHeight();
 
-    // Appearance (and any future tabs without preferred-height API).
+    // Future tabs without a preferred-height API.
     return kContentHeight - tabBarDepth;
 }
 
@@ -478,6 +600,7 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
     // Content fills the panel viewport. Wider Settings -> wider content; never
     // forces the outer frame wider (that used to shove the right edge off-screen).
     const int panelContentW = juce::jmax (1, viewport.getWidth());
+    syncTabPagesToWidth (panelContentW);
 
     // Provisional size so tab content can sync/layout before we measure height.
     contentPanel.setSize (panelContentW, juce::jmax (kContentHeight, viewport.getHeight()));
@@ -526,6 +649,16 @@ void Menu::refreshContentPanelSize (bool preserveScrollPosition)
 void Menu::notifyContentHeightChanged()
 {
     refreshContentPanelSize (true);
+}
+
+void Menu::refreshUiFonts()
+{
+    SharedResources::applyUiFontsRecursively (*this);
+    tabBar.getTabbedButtonBar().resized();
+    tabBar.repaint();
+    if (viewport.getWidth() > 0)
+        syncTabPagesToWidth (viewport.getWidth());
+    repaint();
 }
 
 void Menu::setResizeLimitsWithinParent (juce::Rectangle<int> parentLocalBounds) noexcept

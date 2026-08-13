@@ -44,7 +44,7 @@ void CustomHeader2::paint (juce::Graphics& g)
     g.fillRect (headerBounds);
     customShadow->drawInnerShadowForPath (g, headerPath);
 
-    g.setFont (juce::Font (juce::FontOptions().withName ("Lato Black").withHeight (14.0f).withStyle ("Bold")));
+    g.setFont (SharedResources::uiFont (14.0f, true));
     g.setColour (sharedResources.sharedColors.menuLabelTextColor1);
 
     juce::String label = "Element Name";

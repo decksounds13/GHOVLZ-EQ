@@ -243,9 +243,23 @@ struct GradientRamp
         }
     }
 
-    /** Spectrum-fill gradient across a paint rectangle (spatial map modes). */
-    juce::ColourGradient makeSpatialGradient (juce::Rectangle<float> bounds, float alphaMul) const
+    /** Spectrum-fill / curve gradient across a paint rectangle (spatial map modes).
+        Optional tint (channel / band colour) and darkerAmount so overlay layers stay distinct. */
+    juce::ColourGradient makeSpatialGradient (juce::Rectangle<float> bounds,
+                                              float alphaMul,
+                                              juce::Colour tint = {},
+                                              float darkerAmount = 0.0f) const
     {
+        auto mapColour = [this, tint, darkerAmount, alphaMul] (float t) -> juce::Colour
+        {
+            auto c = colourAt (t);
+            if (tint.getAlpha() > 0)
+                c = c.interpolatedWith (tint.withAlpha (c.getFloatAlpha()), 0.58f);
+            if (darkerAmount > 0.001f)
+                c = c.darker (darkerAmount);
+            return c.withMultipliedAlpha (alphaMul);
+        };
+
         juce::Point<float> p0, p1;
         switch (mapMode)
         {
@@ -269,8 +283,8 @@ struct GradientRamp
         }
 
         // Spatial endpoints already encode direction — sample stops 0→1 along that axis.
-        juce::ColourGradient grad (colourAt (0.0f).withMultipliedAlpha (alphaMul), p0.x, p0.y,
-                                   colourAt (1.0f).withMultipliedAlpha (alphaMul), p1.x, p1.y, false);
+        juce::ColourGradient grad (mapColour (0.0f), p0.x, p0.y,
+                                   mapColour (1.0f), p1.x, p1.y, false);
 
         if (interpMode == InterpMode::soft)
         {
@@ -279,14 +293,13 @@ struct GradientRamp
             for (int i = 1; i < kSamples; ++i)
             {
                 const float t = (float) i / (float) kSamples;
-                grad.addColour ((double) t, colourAt (t).withMultipliedAlpha (alphaMul));
+                grad.addColour ((double) t, mapColour (t));
             }
         }
         else
         {
             for (size_t i = 1; i + 1 < stops.size(); ++i)
-                grad.addColour ((double) stops[i].position,
-                                stops[i].colour.withMultipliedAlpha (alphaMul));
+                grad.addColour ((double) stops[i].position, mapColour (stops[i].position));
         }
         return grad;
     }

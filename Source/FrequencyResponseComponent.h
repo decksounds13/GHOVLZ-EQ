@@ -8,6 +8,7 @@
 #include <JuceHeader.h>
 #include "BinaryData.h"
 #include "MelatoninBlur/melatonin/shadows.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 #include <array>
 #include <bitset>
 #include <cmath>
@@ -16,6 +17,7 @@
 
 class EqProcessor; // Forward declaration
 class EqEditor;    // Forward declaration
+struct GradientRamp;
 
 class CustomTimer; // Forward declaration
 
@@ -34,16 +36,8 @@ public:
     {
         const bool on = getToggleState();
         auto fill = findColour (on ? buttonOnColourId : buttonColourId);
-        if (isButtonDown)
-            fill = fill.darker (0.15f);
-        else if (isMouseOverButton)
-            fill = fill.brighter (0.08f);
-
         auto r = getLocalBounds().toFloat().reduced (0.5f);
-        g.setColour (fill);
-        g.fillRoundedRectangle (r, 3.0f);
-        g.setColour (findColour (on ? textColourOnId : textColourOffId).withAlpha (0.35f));
-        g.drawRoundedRectangle (r, 3.0f, 1.0f);
+        GraphOverlayButtonLookAndFeel::paintChromeButton (g, r, fill, isMouseOverButton, isButtonDown);
 
         auto keys = r.reduced (3.5f, 4.0f);
         const auto ink = findColour (on ? textColourOnId : textColourOffId);
@@ -86,16 +80,8 @@ public:
     {
         const bool on = getToggleState();
         auto fill = findColour (on ? buttonOnColourId : buttonColourId);
-        if (isButtonDown)
-            fill = fill.darker (0.15f);
-        else if (isMouseOverButton)
-            fill = fill.brighter (0.08f);
-
         auto r = getLocalBounds().toFloat().reduced (0.5f);
-        g.setColour (fill);
-        g.fillRoundedRectangle (r, 3.0f);
-        g.setColour (findColour (on ? textColourOnId : textColourOffId).withAlpha (0.35f));
-        g.drawRoundedRectangle (r, 3.0f, 1.0f);
+        GraphOverlayButtonLookAndFeel::paintChromeButton (g, r, fill, isMouseOverButton, isButtonDown);
 
         const auto ink = findColour (on ? textColourOnId : textColourOffId)
                              .withAlpha (on ? 0.95f : 0.88f);
@@ -241,6 +227,9 @@ public:
     void mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
     void mouseMove(const juce::MouseEvent& event) override;
 
+    /** Faceplate knob / power-button hover: pulse that band's graph handle. -1 clears. */
+    void setFaceplateHoverBand (int globalBand);
+
     /** Clear marquee multi-selection of band handles. */
     void clearMultiBandSelection() noexcept;
 
@@ -315,6 +304,10 @@ public:
     void paint(juce::Graphics& g) override;
 
     void setThemeColors (SharedResources* r) noexcept;
+    void setEqCurveRamp (const GradientRamp* ramp) noexcept { eqCurveRamp = ramp; }
+    void setEqSumFillRamp (const GradientRamp* ramp) noexcept { eqSumFillRamp = ramp; }
+    void setEqBandCurveRamp (const GradientRamp* ramp) noexcept { eqBandCurveRamp = ramp; }
+    void setEqBandFillRamp (const GradientRamp* ramp) noexcept { eqBandFillRamp = ramp; }
 
     void setEditor(EqEditor* newEditor) {
         editor = newEditor;
@@ -327,6 +320,8 @@ public:
     juce::Rectangle<int> layoutMatchChromeAt (juce::Point<int> leftTopInLocal, int btnH, int matchBtnW);
     /** Bottom inset reserved for piano strip (0 or 50). Window grows by this when enabled. */
     int getPianoStripHeight() const noexcept;
+    /** Right edge of the left dB axis labels (local X), for parking input meters. */
+    int getDbAxisRightX() const;
     /**
         Height of Match / Mod / P chrome row above the piano (margin + button).
         OpenGL expanded Spec must stay clear of this - native peers ignore z-order.
@@ -346,9 +341,18 @@ public:
 private:
 
     SharedResources* themeColors = nullptr;
+    const GradientRamp* eqCurveRamp = nullptr;
+    const GradientRamp* eqSumFillRamp = nullptr;
+    const GradientRamp* eqBandCurveRamp = nullptr;
+    const GradientRamp* eqBandFillRamp = nullptr;
 
     const SharedColors& colors() const noexcept;
     void applyThemeToChildControls();
+    void strokeEqCurve (juce::Graphics& g, const juce::Path& path,
+                        juce::Colour solid, juce::PathStrokeType stroke,
+                        bool bandStroke = false) const;
+    void fillEqArea (juce::Graphics& g, const juce::Path& path, juce::Colour solid,
+                     bool bandFill) const;
 
     juce::dsp::IIR::Coefficients<float> coefficients;
 
@@ -479,36 +483,50 @@ private:
     EqProcessor& processor;
 
     bool isAnyHandleMouseOver = false;
+    int faceplateHoverBand = -1;
     bool anyHandleDragging = false;
 
     int downsamplingStep = 8;  // Only add a point every 5 steps
 
-    juce::Path band1ResponsePath;
+    juce::Path band1ResponsePath, band1FillPath;
     bool needsUpdateBand1 = true;
     
-    juce::Path band2ResponsePath;
+    juce::Path band2ResponsePath, band2FillPath;
     bool needsUpdateBand2 = true;
   
-    juce::Path band3ResponsePath;
+    juce::Path band3ResponsePath, band3FillPath;
     bool needsUpdateBand3 = true;
   
-    juce::Path band4ResponsePath;
+    juce::Path band4ResponsePath, band4FillPath;
     bool needsUpdateBand4 = true;
   
-    juce::Path highpassResponsePath;
+    juce::Path highpassResponsePath, highpassFillPath;
     bool needsUpdateHighpass = true;
   
-    juce::Path lowpassResponsePath;
+    juce::Path lowpassResponsePath, lowpassFillPath;
     bool needsUpdateLowpass = true;
    
-    juce::Path highShelfResponsePath;
+    juce::Path highShelfResponsePath, highShelfFillPath;
     bool needsUpdateHighShelf = true;
   
-    juce::Path lowShelfResponsePath;
+    juce::Path lowShelfResponsePath, lowShelfFillPath;
     bool needsUpdateLowShelf = true;
   
-    juce::Path combinedResponsePath;
+    juce::Path combinedResponsePath, combinedFillPath;
     bool needsUpdateCombined = true;
+
+    struct EqFadePair
+    {
+        std::vector<float> curve;
+        std::vector<float> fill;
+    };
+    EqFadePair eqFadeBand[8];
+    EqFadePair eqFadeCombined;
+    EqFadePair eqFadeGhostT, eqFadeGhostS;
+    std::array<EqFadePair, EqBand::kMaxBands - EqBand::kBankSize> eqFadeExtended {};
+    std::array<EqFadePair, SpectralDynamics::kNumSlots> eqFadeSpectral {};
+    double lastEqFadeMs = 0.0;
+    bool eqDisplayFading = false;
 
     // Melatonin dual-layer glow for the cumulative EQ sum curve.
     melatonin::DropShadow sumCurveGlow {
@@ -573,6 +591,9 @@ private:
     std::vector<float> responseBand1, responseBand2, responseBand3, responseBand4;
     std::vector<float> responseHighpass, responseLowpass, responseHighShelf, responseLowShelf;
     std::vector<float> responseCombined;
+    std::vector<float> responseTransientGhost;
+    std::vector<float> responseSustainGhost;
+    juce::Path transientGhostPath, sustainGhostPath;
     /** Alt+drag bandpass audition magnitude (dB) + path. */
     bool auditionBandpassDragging = false;
     std::vector<float> responseAuditionBp;
@@ -651,6 +672,10 @@ private:
     float getSumPathWidth() const; // from EQ_SUM_PATH_WIDTH_ID, default 3
     bool isMulticolorBandFill() const; // EQ_MULTICOLOR_BAND_FILL_ID, default true
     bool isShowCrosshair() const; // EQ_SHOW_CROSSHAIR_ID, default true
+    bool isShowEqCurves() const;  // EQ_SHOW_CURVES_ID, default true
+    bool isAnalyserOverlayMode() const; // Mid+Side or Left+Right
+    void applyEqDisplayFades (float dt);
+    void ensureEqFadeTimer() noexcept;
     /** Per-band fill: multicolor palette when on; mono golden boost/cut when off. */
     juce::Colour resolveBandFillColour (juce::Colour multicolorFill, bool isBoostOrPass) const;
     bool bandGainIsBoost (const char* gainParamId, const char* typeParamId) const;
@@ -813,9 +838,39 @@ private:
     int lastOptionBoxBandIndex = -1;
     bool lastHandlePopupWasOptionBox = false;
 
-    juce::TextButton uiModeButton { "^" }; // collapse when full
+    class UiModeChevronButton : public juce::Button
+    {
+    public:
+        UiModeChevronButton() : juce::Button ("uiMode")
+        {
+            setPaintingIsUnclipped (true);
+        }
+
+        void setExpandGlyph (bool shouldExpand) noexcept
+        {
+            if (expandGlyph == shouldExpand)
+                return;
+            expandGlyph = shouldExpand;
+            repaint();
+        }
+
+        void paintButton (juce::Graphics& g, bool highlighted, bool down) override
+        {
+            auto r = getLocalBounds().toFloat().reduced (0.5f);
+            auto fill = findColour (juce::TextButton::buttonColourId);
+            GraphOverlayButtonLookAndFeel::paintChromeButton (g, r, fill, highlighted, down);
+            const auto ink = findColour (juce::TextButton::textColourOffId).withAlpha (0.92f);
+            GraphOverlayButtonLookAndFeel::paintChevron (g, r, ink, expandGlyph);
+        }
+
+    private:
+        bool expandGlyph = false; // false = collapse (up), true = expand (down)
+    };
+
+    UiModeChevronButton uiModeButton;
     juce::TextButton eqRangeMinusButton { "-" };
     juce::TextButton eqRangePlusButton { "+" };
+    GraphOverlayButtonLookAndFeel graphChromeLookAndFeel;
     juce::Label eqRangeLabel;
     /** Animated +/-dB scale for smooth zoom (lerps toward getEqDisplayRangeDb()). */
     float eqDisplayRangeDbVisual = 24.0f;

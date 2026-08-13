@@ -1,4 +1,5 @@
 #include "LoudnessSettingsComponent.h"
+#include "../Menu.h"
 
 namespace
 {
@@ -15,14 +16,28 @@ namespace
 LoudnessSettingsComponent::Content::Content (SharedResources& resources,
                                              juce::AudioProcessorValueTreeState& state)
     : sharedResources (resources),
-      treeState (state)
+      treeState (state),
+      meterSection (resources, "loudness.meter", "Meter", false)
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
 
     titleLabel.setText ("Loudness", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
+
+    autoGainModeLabel.setText ("Auto Gain", juce::dontSendNotification);
+    styleCombo (autoGainModeCombo);
+    autoGainModeCombo.addItem ("RMS (match input)", 1);
+    autoGainModeCombo.addItem ("LUFS (target)", 2);
+    autoGainModeCombo.setTooltip (
+        "RMS matches output loudness to the pre-EQ level. "
+        "LUFS aims the output at the Target LUFS value below. "
+        "Same choice as right-click on the Auto Gain button.");
+    autoGainModeCombo.onChange = [this] { applyAutoGainModeFromCombo(); };
+    addAndMakeVisible (autoGainModeLabel);
+    addAndMakeVisible (autoGainModeCombo);
+    syncAutoGainModeFromParam();
 
     targetLabel.setText ("Target LUFS", juce::dontSendNotification);
     styleCombo (targetCombo);
@@ -44,17 +59,32 @@ LoudnessSettingsComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (resetNoteLabel);
 
     styleLabel (titleLabel);
+    styleLabel (autoGainModeLabel);
     styleLabel (targetLabel);
+
+    wireSection (meterSection);
+}
+
+void LoudnessSettingsComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
+    };
 }
 
 LoudnessSettingsComponent::Content::~Content()
 {
+    autoGainModeCombo.setLookAndFeel (nullptr);
     targetCombo.setLookAndFeel (nullptr);
 }
 
 void LoudnessSettingsComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
 }
@@ -62,7 +92,6 @@ void LoudnessSettingsComponent::Content::styleLabel (juce::Label& label)
 void LoudnessSettingsComponent::Content::styleCombo (juce::ComboBox& combo)
 {
     combo.setLookAndFeel (&comboLookAndFeel);
-    combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }
 
 void LoudnessSettingsComponent::Content::syncTargetComboFromParam()
@@ -94,9 +123,28 @@ void LoudnessSettingsComponent::Content::applyTargetFromCombo()
         p->setValueNotifyingHost (p->convertTo0to1 (kTargetLufs[(size_t) (id - 1)]));
 }
 
+void LoudnessSettingsComponent::Content::syncAutoGainModeFromParam()
+{
+    const bool aimLufs = treeState.getRawParameterValue ("targetLufsEnable") != nullptr
+                         && treeState.getRawParameterValue ("targetLufsEnable")->load() > 0.5f;
+    autoGainModeCombo.setSelectedId (aimLufs ? 2 : 1, juce::dontSendNotification);
+}
+
+void LoudnessSettingsComponent::Content::applyAutoGainModeFromCombo()
+{
+    const bool aimLufs = autoGainModeCombo.getSelectedId() == 2;
+    if (auto* p = dynamic_cast<juce::AudioParameterBool*> (treeState.getParameter ("targetLufsEnable")))
+    {
+        if (p->get() != aimLufs)
+            p->setValueNotifyingHost (aimLufs ? 1.0f : 0.0f);
+    }
+}
+
 int LoudnessSettingsComponent::Content::getPreferredHeight() const
 {
-    return kPadY * 2 + 24 + 8 + kLabelH + kLabelGap + kRowH + kRowGap + 44;
+    const int comboBlock = kLabelH + kLabelGap + kRowH + kRowGap;
+    return kPadY * 2 + 24 + 8
+           + meterSection.heightFor (comboBlock * 2 + 44);
 }
 
 void LoudnessSettingsComponent::Content::resized()
@@ -104,11 +152,22 @@ void LoudnessSettingsComponent::Content::resized()
     auto area = getLocalBounds().reduced (kPadX, kPadY);
     titleLabel.setBounds (area.removeFromTop (24));
     area.removeFromTop (8);
-    targetLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kLabelGap);
-    targetCombo.setBounds (area.removeFromTop (kRowH).removeFromLeft (juce::jmin (220, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    resetNoteLabel.setBounds (area.removeFromTop (44));
+
+    meterSection.applyVisible ({
+        &autoGainModeLabel, &autoGainModeCombo, &targetLabel, &targetCombo, &resetNoteLabel });
+    meterSection.placeHeader (area);
+    if (meterSection.isOpen())
+    {
+        autoGainModeLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        autoGainModeCombo.setBounds (area.removeFromTop (kRowH).removeFromLeft (juce::jmin (220, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        targetLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        targetCombo.setBounds (area.removeFromTop (kRowH).removeFromLeft (juce::jmin (220, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        resetNoteLabel.setBounds (area.removeFromTop (44));
+    }
 }
 
 LoudnessSettingsComponent::LoudnessSettingsComponent (SharedResources& resources,

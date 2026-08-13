@@ -1,6 +1,7 @@
 #include "CustomTextButton1.h"
 #include "shadows-main/source/StackShadow.h"
 #include "shadows-main/shadows.h"
+#include "../../GraphOverlayButtonLookAndFeel.h"
 
 CustomTextButton::CustomTextButton(const juce::String& buttonText)
     : juce::TextButton(buttonText),
@@ -14,24 +15,25 @@ CustomTextButton::~CustomTextButton() {
 }
 
 void CustomTextButton::paint(juce::Graphics& g) {
-    // Render the shadow based on the button path
-   
+    // Keep path corner radius in sync with Appearance (live slider).
+    rebuildButtonPath();
+
     // Call the base class paint method to draw the rest of the button
     TextButton::paint(g);
 
     customShadow->drawInnerShadowForPath(g, buttonPath);
+}
 
-    // innerShadow.render(g, buttonPath);
+void CustomTextButton::rebuildButtonPath()
+{
+    juce::Rectangle<float> buttonBounds = getLocalBounds().toFloat();
+    const float cornerSize = GraphOverlayButtonLookAndFeel::cornerRadius();
+    buttonPath.clear();
+    buttonPath.addRoundedRectangle (buttonBounds, cornerSize);
 }
 
 void CustomTextButton::resized() {
-    // Calculate the button bounds and update the path
-    juce::Rectangle<float> buttonBounds = getLocalBounds().toFloat().reduced(0, 0);
-    float cornerSize = 6.0f; // Same as in the LookAndFeel
-    buttonPath.clear();
-    buttonPath.addRoundedRectangle(buttonBounds.reduced(0, 0), cornerSize);
-    buttonPath.createPathWithRoundedCorners(6.0f);
-
+    rebuildButtonPath();
 }
 
 void CustomTextButton::mouseDown (const juce::MouseEvent& e)

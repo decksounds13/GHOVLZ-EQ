@@ -1,4 +1,5 @@
 #include "PathSampleOverlay.h"
+#include "../Menu/SharedResources.h"
 
 PathSampleOverlay::PathSampleOverlay()
 {
@@ -33,7 +34,7 @@ void PathSampleOverlay::paint (juce::Graphics& g)
     g.fillAll (juce::Colours::black.withAlpha (0.18f));
 
     g.setColour (juce::Colours::whitesmoke.withAlpha (0.85f));
-    g.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
+    g.setFont (SharedResources::uiFont (14.0f));
     g.drawText ("Drag to sample UI colours - Esc to cancel",
                 getLocalBounds().removeFromTop (28).reduced (10, 4),
                 juce::Justification::centredLeft, false);

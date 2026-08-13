@@ -1,5 +1,7 @@
 #include "BandNumberButton.h"
 #include "KnobThemeHelpers.h"
+#include "GraphOverlayButtonLookAndFeel.h"
+#include "Menu/SharedResources.h"
 
 BandNumberButton::BandNumberButton (juce::AudioProcessorValueTreeState& state,
                                     const juce::String& parameterIDIn)
@@ -35,15 +37,10 @@ void BandNumberButton::paintButton (juce::Graphics& g,
 {
     juce::ignoreUnused (shouldDrawButtonAsDown);
 
-    // Same active/inactive language as faceplate knob glow arcs (KnobTheme::chrome*).
-    // baseColor is the band chrome base (Knob Arc, or handle multicolor when mode is on).
-    juce::Colour ink;
-    if (isButtonDown)
-        ink = KnobTheme::chromeActive (baseColor);
-    else if (shouldDrawButtonAsHighlighted)
-        ink = brighterAndMoreSaturated (KnobTheme::chromeInactive (baseColor), 1.15f, 1.1f);
-    else
-        ink = KnobTheme::chromeInactive (baseColor);
+    juce::Colour ink = isButtonDown ? KnobTheme::chromeActive (baseColor)
+                                    : KnobTheme::chromeInactive (baseColor);
+    ink = GraphOverlayButtonLookAndFeel::adjustForInteraction (ink, shouldDrawButtonAsHighlighted,
+                                                               shouldDrawButtonAsDown);
 
     const float lineWidth = 3.0f;
     const float circleDiameter = (float) getWidth() * 0.7f - 2.0f * lineWidth;
@@ -62,7 +59,10 @@ void BandNumberButton::paintButton (juce::Graphics& g,
     const auto numberText = juce::String (bandNumber);
     const float fontScale = numberText.length() >= 2 ? 0.95f : 1.15f;
     const float fontH = juce::jmax (8.0f, radius * fontScale);
-    g.setFont (juce::FontOptions().withHeight (fontH).withStyle ("Bold"));
+    if (auto* active = SharedResources::getActive())
+        g.setFont (active->sharedColors.makeUiFont (fontH, true));
+    else
+        g.setFont (juce::FontOptions().withHeight (fontH).withStyle ("Bold"));
     g.drawFittedText (numberText,
                       getLocalBounds().reduced (juce::roundToInt (lineWidth + 1.0f)),
                       juce::Justification::centred,

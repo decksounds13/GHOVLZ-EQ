@@ -6,6 +6,7 @@
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class StereogramSettingsComponent : public juce::Component,
                                     private juce::ChangeListener
@@ -81,6 +82,11 @@ private:
         std::unique_ptr<ButtonAttachment> useRampAttachment;
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection displaySection;
+        SettingsSection glowSection;
+        SettingsSection rampSection;
     };
 
     SharedResources& sharedResources;

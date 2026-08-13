@@ -153,7 +153,7 @@ ParticleForceStackComponent::ParticleForceStackComponent (SharedResources& resou
     juce::ignoreUnused (shared);
 
     title.setText ("Force stack", juce::dontSendNotification);
-    title.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
+    title.setFont (SharedResources::uiFont (14.0f));
     title.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
     title.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (title);
@@ -362,7 +362,7 @@ ParticleForceStackComponent::ForceRow::ForceRow (ParticleForceStackComponent& o,
     enable.onClick = [this] { ownerRef.notifyChanged (false); };
     addAndMakeVisible (enable);
 
-    typeLabel.setFont (juce::FontOptions().withName ("Lato").withHeight (12.5f));
+    typeLabel.setFont (SharedResources::uiFont (12.5f));
     typeLabel.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.92f));
     typeLabel.setJustificationType (juce::Justification::centredLeft);
     typeLabel.setInterceptsMouseClicks (false, false);

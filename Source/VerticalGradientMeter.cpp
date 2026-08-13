@@ -1,4 +1,6 @@
 #include "VerticalGradientMeter.h"
+#include "GraphOverlayButtonLookAndFeel.h"
+#include "Menu/SharedResources.h"
 
 namespace
 {
@@ -199,6 +201,8 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
     const auto mode = getMeterMode();
     rebuildPeakGradient();
 
+    GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, bounds, 2.0f);
+
     const juce::Colour customColor = theme.meterBackground.withAlpha (100.0f / 255.0f);
     g.setColour (customColor);
     g.fillRect (bounds);
@@ -324,12 +328,12 @@ void VerticalGradientMeter::paint (juce::Graphics& g)
     // Readout: 0.1 dB resolution, painted unclipped so it is never "..."
     const float textDb = std::max (readoutDb, -99.9f);
     const auto text = juce::String (textDb, 1);
-    g.setFont (juce::FontOptions ("Lato Black", 10.0f, juce::Font::plain));
+    g.setFont (SharedResources::uiFont (10.0f));
     g.setColour (clipState.clipping ? theme.meterClip
                                     : theme.meterReadoutText.withAlpha (0.95f));
     g.drawText (text, getReadoutBounds(), juce::Justification::centred, false);
 
-    g.setFont (juce::FontOptions ("Lato Black", 11.0f, juce::Font::plain));
+    g.setFont (SharedResources::uiFont (11.0f));
     g.setColour (theme.graphAxisText.withAlpha (0.75f));
     g.drawText (getChannelLabel(), getChannelLabelBounds(), juce::Justification::centred, false);
 }

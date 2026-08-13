@@ -5,7 +5,176 @@
 #include "../../TextButtonLookAndFeel.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "QuadPickerOverlayComponent.h"
-#include "../Menu.h"  
+#include "../Menu.h"
+
+
+namespace
+{
+    juce::Font typefaceForCatalogueName (const juce::String& name, float height)
+    {
+        return SharedColors::makeNamedUiFont (name, height, false);
+    }
+
+    constexpr int kFontRowH = 22;
+
+    /** Desktop list so the catalogue can be taller than the Settings panel. */
+    class FontCatalogueWindow : public juce::Component,
+                                public juce::ListBoxModel
+    {
+    public:
+        FontCatalogueWindow (juce::StringArray fontsIn,
+                             int selectedIdIn,
+                             juce::Component* comboIn,
+                             std::function<void (const juce::String&)> onHoverIn,
+                             std::function<void (int)> onPickIn,
+                             std::function<void()> onClickAwayIn)
+            : fonts (std::move (fontsIn)),
+              selectedId (selectedIdIn),
+              combo (comboIn),
+              onHover (std::move (onHoverIn)),
+              onPick (std::move (onPickIn)),
+              onClickAway (std::move (onClickAwayIn))
+        {
+            list.setModel (this);
+            list.setRowHeight (kFontRowH);
+            list.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
+            list.setColour (juce::ListBox::outlineColourId, juce::Colours::transparentBlack);
+            list.setMouseMoveSelectsRows (true);
+            addAndMakeVisible (list);
+            if (auto* vp = list.getViewport())
+            {
+                vp->setScrollBarsShown (true, false);
+                vp->setScrollBarThickness (11);
+            }
+            list.updateContent();
+            const int sel = juce::jlimit (0, juce::jmax (0, fonts.size() - 1), selectedId - 1);
+            list.selectRow (sel);
+            list.scrollToEnsureRowIsOnscreen (sel);
+
+            juce::Desktop::getInstance().addGlobalMouseListener (this);
+            juce::Timer::callAfterDelay (80, [safe = juce::Component::SafePointer<FontCatalogueWindow> (this)]
+            {
+                if (safe != nullptr)
+                    safe->armed = true;
+            });
+        }
+
+        ~FontCatalogueWindow() override
+        {
+            juce::Desktop::getInstance().removeGlobalMouseListener (this);
+            list.setModel (nullptr);
+        }
+
+        int getNumRows() override { return fonts.size(); }
+
+        void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool rowIsSelected) override
+        {
+            if (! juce::isPositiveAndBelow (row, fonts.size()))
+                return;
+            auto bounds = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height);
+            if (rowIsSelected)
+            {
+                ComboBoxLookAndFeel::fillMenuGradient (g, bounds.reduced (1.0f, 1.0f),
+                                                       PluginMenuTheme::highlight(),
+                                                       juce::jmin (3.0f, PluginMenuTheme::popupCorner() * 0.75f));
+                g.setColour (PluginMenuTheme::textOnHighlight());
+            }
+            else
+            {
+                g.setColour (PluginMenuTheme::text());
+            }
+            if (row + 1 == selectedId)
+            {
+                auto tick = bounds.removeFromLeft (16.0f).reduced (3.0f, 5.0f);
+                juce::Path p;
+                p.startNewSubPath (tick.getX(), tick.getCentreY());
+                p.lineTo (tick.getX() + tick.getWidth() * 0.35f, tick.getBottom());
+                p.lineTo (tick.getRight(), tick.getY());
+                g.strokePath (p, juce::PathStrokeType (1.6f));
+            }
+            else
+            {
+                bounds.removeFromLeft (16.0f);
+            }
+            g.setFont (typefaceForCatalogueName (fonts[row], 13.0f));
+            g.drawText (fonts[row], bounds.toNearestInt(), juce::Justification::centredLeft, false);
+        }
+
+        void listBoxItemClicked (int row, const juce::MouseEvent&) override
+        {
+            if (! juce::isPositiveAndBelow (row, fonts.size()) || onPick == nullptr)
+                return;
+            const int id = row + 1;
+            // Leave the ListBox click stack before the window is torn down / theme applied.
+            juce::MessageManager::callAsync ([fn = onPick, id] { fn (id); });
+        }
+
+        void selectedRowsChanged (int lastRow) override
+        {
+            if (juce::isPositiveAndBelow (lastRow, fonts.size()) && onHover != nullptr)
+                onHover (fonts[lastRow]);
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const float corner = PluginMenuTheme::popupCorner();
+            ComboBoxLookAndFeel::fillMenuGradient (g, getLocalBounds().toFloat(),
+                                                   PluginMenuTheme::background(), corner);
+            if (PluginMenuTheme::popupDrawOutline())
+            {
+                g.setColour (PluginMenuTheme::outline().withAlpha (0.85f));
+                if (corner > 0.5f)
+                    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), corner, 1.0f);
+                else
+                    g.drawRect (getLocalBounds().toFloat().reduced (0.5f), 1.0f);
+            }
+        }
+
+        void resized() override
+        {
+            list.setBounds (getLocalBounds().reduced (4));
+            list.updateContent();
+        }
+
+        void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+        {
+            if (auto* vp = list.getViewport())
+            {
+                const float rowH = (float) juce::jmax (18, list.getRowHeight());
+                float axis = std::abs (wheel.deltaX) > std::abs (wheel.deltaY) ? wheel.deltaX : wheel.deltaY;
+                if (wheel.isReversed)
+                    axis = -axis;
+                const auto pos = vp->getViewPosition();
+                vp->setViewPosition (pos.x, pos.y + juce::roundToInt (-axis * rowH * (wheel.isSmooth ? 1.0f : 3.5f)));
+            }
+        }
+
+    private:
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (! armed)
+                return;
+            auto* c = e.eventComponent;
+            if (c == nullptr)
+                return;
+            if (c == this || isParentOf (c))
+                return;
+            if (combo != nullptr && (c == combo || combo->isParentOf (c)))
+                return;
+            if (onClickAway != nullptr)
+                onClickAway();
+        }
+
+        juce::StringArray fonts;
+        int selectedId = 1;
+        juce::Component* combo = nullptr;
+        juce::ListBox list;
+        std::function<void (const juce::String&)> onHover;
+        std::function<void (int)> onPick;
+        std::function<void()> onClickAway;
+        bool armed = false;
+    };
+}
 
 AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::AudioProcessorValueTreeState& state)
 	: sharedResources(resources),  // Initialize the member variable
@@ -16,7 +185,8 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	colorSwatch(*this),
 	textButtonLookAndFeel(14.0f),
 	overlayComponent(quadPicker, brightnessRangeSlider, saturationRangeSlider),
-	overlayComponent2(hueSelector, hueRangeSlider)
+	overlayComponent2(hueSelector, hueRangeSlider),
+	chromeSection (resources, "appearance.chrome", "Chrome", false)
 {
 	//juce::Colour menuThinBorderColor = juce::Colours::transparentBlack;
 	initializeComponents();  // Set up the callbacks
@@ -242,16 +412,17 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	// Section: Randomize (header only - buttons laid out in resized)
 	randomizeSectionLabel.setText ("Randomize", juce::dontSendNotification);
 	randomizeSectionLabel.setJustificationType (juce::Justification::centredLeft);
-	randomizeSectionLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
+	randomizeSectionLabel.setFont (SharedResources::uiFont (14.0f));
 	randomizeSectionLabel.setMinimumHorizontalScale (1.0f);
 	addAndMakeVisible (randomizeSectionLabel);
 
-	// Section: Chrome - legible text + floating panel opacity
-	chromeSectionLabel.setText ("Chrome", juce::dontSendNotification);
-	chromeSectionLabel.setJustificationType (juce::Justification::centredLeft);
-	chromeSectionLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
-	chromeSectionLabel.setMinimumHorizontalScale (1.0f);
-	addAndMakeVisible (chromeSectionLabel);
+	addAndMakeVisible (chromeSection);
+	chromeSection.onChanged = [this]
+	{
+		resized();
+		if (auto* menu = findParentComponentOfClass<Menu>())
+			menu->notifyContentHeightChanged();
+	};
 
 	enforceLegibleTextToggle.setClickingTogglesState (true);
 	enforceLegibleTextToggle.setToggleState (sharedResources.sharedColors.enforceLegibleText,
@@ -303,6 +474,180 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	optionBoxOpacityPercentLabel.setMinimumHorizontalScale (1.0f);
 	optionBoxOpacityPercentLabel.setInterceptsMouseClicks (false, false);
 	addAndMakeVisible (optionBoxOpacityPercentLabel);
+
+	buttonCornerRadiusLabel.setText ("Button radius", juce::dontSendNotification);
+	buttonCornerRadiusLabel.setJustificationType (juce::Justification::centredLeft);
+	buttonCornerRadiusLabel.setMinimumHorizontalScale (1.0f);
+	addAndMakeVisible (buttonCornerRadiusLabel);
+
+	buttonCornerRadiusSlider.setRange (2.0, 16.0, 0.5);
+	buttonCornerRadiusSlider.setValue (sharedResources.sharedColors.buttonCornerRadius,
+	                                   juce::dontSendNotification);
+	buttonCornerRadiusSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+	buttonCornerRadiusSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+	buttonCornerRadiusSlider.setTooltip (
+	    "Corner roundness for plugin chrome buttons. Also softens the Melatonin "
+	    "outline blur so the rim sits against the background (interior is filled over).");
+	buttonCornerRadiusSlider.addListener (this);
+	addAndMakeVisible (buttonCornerRadiusSlider);
+
+	buttonCornerRadiusValueLabel.setJustificationType (juce::Justification::centredRight);
+	buttonCornerRadiusValueLabel.setMinimumHorizontalScale (1.0f);
+	buttonCornerRadiusValueLabel.setInterceptsMouseClicks (false, false);
+	addAndMakeVisible (buttonCornerRadiusValueLabel);
+
+	menuPopupRadiusLabel.setText ("Menu radius", juce::dontSendNotification);
+	menuPopupRadiusLabel.setJustificationType (juce::Justification::centredLeft);
+	menuPopupRadiusLabel.setMinimumHorizontalScale (1.0f);
+	addAndMakeVisible (menuPopupRadiusLabel);
+
+	menuPopupRadiusSlider.setRange (0.0, 16.0, 0.5);
+	menuPopupRadiusSlider.setValue (sharedResources.sharedColors.menuPopupCornerRadius,
+	                                juce::dontSendNotification);
+	menuPopupRadiusSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+	menuPopupRadiusSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+	menuPopupRadiusSlider.setTooltip (
+	    "Corner roundness for dropdown and popup menus. Separate from button radius.");
+	menuPopupRadiusSlider.addListener (this);
+	addAndMakeVisible (menuPopupRadiusSlider);
+
+	menuPopupRadiusValueLabel.setJustificationType (juce::Justification::centredRight);
+	menuPopupRadiusValueLabel.setMinimumHorizontalScale (1.0f);
+	menuPopupRadiusValueLabel.setInterceptsMouseClicks (false, false);
+	menuPopupRadiusValueLabel.setText (
+	    juce::String (juce::roundToInt (sharedResources.sharedColors.menuPopupCornerRadius)) + " px",
+	    juce::dontSendNotification);
+	addAndMakeVisible (menuPopupRadiusValueLabel);
+
+	menuPopupOutlineToggle.setClickingTogglesState (true);
+	menuPopupOutlineToggle.setToggleState (sharedResources.sharedColors.menuPopupOutline,
+	                                       juce::dontSendNotification);
+	menuPopupOutlineToggle.setTooltip ("Draw a 1 px outline around dropdown and popup menus.");
+	menuPopupOutlineToggle.onClick = [this]
+	{
+		sharedResources.sharedColors.menuPopupOutline = menuPopupOutlineToggle.getToggleState();
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	};
+	addAndMakeVisible (menuPopupOutlineToggle);
+
+	uiFontLabel.setText ("UI font", juce::dontSendNotification);
+	uiFontLabel.setJustificationType (juce::Justification::centredLeft);
+	uiFontLabel.setMinimumHorizontalScale (1.0f);
+	addAndMakeVisible (uiFontLabel);
+
+	uiFontCombo.setTooltip (
+	    "Global typeface for buttons, labels, and chrome text. "
+	    "Hover a name to preview; click to keep it. "
+	    "Pirulen is bundled; other names use system fonts when installed.");
+	uiFontCombo.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+	const auto fonts = SharedColors::getUiFontCatalogue();
+	for (int i = 0; i < fonts.size(); ++i)
+		uiFontCombo.addItem (fonts[i], i + 1);
+	{
+		const int idx = fonts.indexOf (sharedResources.sharedColors.uiFontName);
+		uiFontCombo.setSelectedId (idx >= 0 ? idx + 1 : 1, juce::dontSendNotification);
+	}
+	committedUiFontName = sharedResources.sharedColors.uiFontName;
+	uiFontCombo.onHoverPreview = [this] (const juce::String& name)
+	{
+		// Preview on this page only. Walking the editor (and ComboBox::lookAndFeelChanged)
+		// while the CallOutBox is open dismissed the menu and crashed.
+		if (name.isNotEmpty())
+			sharedResources.sharedColors.uiFontName = name;
+		sharedResources.makeActive();
+		SharedResources::applyUiFontsRecursively (*this);
+		themeList.repaint();
+		uiElementsList.repaint();
+		repaint();
+	};
+	uiFontCombo.onMenuDismissedWithoutChoice = [this]
+	{
+		applyUiFontPreview (committedUiFontName, false);
+	};
+	uiFontCombo.onChange = [this]
+	{
+		const int id = uiFontCombo.getSelectedId();
+		if (id <= 0)
+			return;
+		const auto fonts = SharedColors::getUiFontCatalogue();
+		const int i = id - 1;
+		if (! juce::isPositiveAndBelow (i, fonts.size()))
+			return;
+		committedUiFontName = fonts[i];
+		applyUiFontPreview (fonts[i], true);
+	};
+	addAndMakeVisible (uiFontCombo);
+
+	uiFontBoldToggle.setClickingTogglesState (true);
+	uiFontBoldToggle.setToggleState (sharedResources.sharedColors.uiFontBold, juce::dontSendNotification);
+	uiFontBoldToggle.setTooltip ("Use a bold weight for the global UI font plugin-wide.");
+	uiFontBoldToggle.onClick = [this]
+	{
+		sharedResources.sharedColors.uiFontBold = uiFontBoldToggle.getToggleState();
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	};
+	addAndMakeVisible (uiFontBoldToggle);
+
+	cursorInfoSizeLabel.setText ("Cursor info size", juce::dontSendNotification);
+	cursorInfoSizeLabel.setJustificationType (juce::Justification::centredLeft);
+	cursorInfoSizeLabel.setMinimumHorizontalScale (1.0f);
+	addAndMakeVisible (cursorInfoSizeLabel);
+
+	cursorInfoSizeSlider.setRange (8.0, 24.0, 0.5);
+	cursorInfoSizeSlider.setValue (sharedResources.sharedColors.graphCursorInfoFontSize,
+	                               juce::dontSendNotification);
+	cursorInfoSizeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+	cursorInfoSizeSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+	cursorInfoSizeSlider.setTooltip (
+	    "Font size for the floating dB / Hz / Q label next to the cursor and crosshair.");
+	cursorInfoSizeSlider.addListener (this);
+	addAndMakeVisible (cursorInfoSizeSlider);
+
+	cursorInfoSizeValueLabel.setJustificationType (juce::Justification::centredRight);
+	cursorInfoSizeValueLabel.setMinimumHorizontalScale (1.0f);
+	cursorInfoSizeValueLabel.setInterceptsMouseClicks (false, false);
+	cursorInfoSizeValueLabel.setText (
+	    juce::String (sharedResources.sharedColors.graphCursorInfoFontSize, 1) + " pt",
+	    juce::dontSendNotification);
+	addAndMakeVisible (cursorInfoSizeValueLabel);
+
+	buttonGlowToggle.setClickingTogglesState (true);
+	buttonGlowToggle.setToggleState (sharedResources.sharedColors.buttonGlowEnabled,
+	                                 juce::dontSendNotification);
+	buttonGlowToggle.setTooltip (
+	    "Soft Melatonin edge glow on chrome buttons (also needs global glow/shadow on).");
+	buttonGlowToggle.onClick = [this]
+	{
+		sharedResources.sharedColors.buttonGlowEnabled = buttonGlowToggle.getToggleState();
+		buttonGlowHoverOnlyToggle.setEnabled (sharedResources.sharedColors.buttonGlowEnabled);
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	};
+	addAndMakeVisible (buttonGlowToggle);
+
+	buttonGlowHoverOnlyToggle.setClickingTogglesState (true);
+	buttonGlowHoverOnlyToggle.setToggleState (sharedResources.sharedColors.buttonGlowOnlyOnHover,
+	                                          juce::dontSendNotification);
+	buttonGlowHoverOnlyToggle.setTooltip (
+	    "When on, button glow only appears while the pointer is over the button (or pressed).");
+	buttonGlowHoverOnlyToggle.setEnabled (sharedResources.sharedColors.buttonGlowEnabled);
+	buttonGlowHoverOnlyToggle.onClick = [this]
+	{
+		sharedResources.sharedColors.buttonGlowOnlyOnHover = buttonGlowHoverOnlyToggle.getToggleState();
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	};
+	addAndMakeVisible (buttonGlowHoverOnlyToggle);
 
 	syncAccessibilityControls();
 
@@ -452,6 +797,9 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 
 AppearanceComponent::~AppearanceComponent()  // Destructor
 {
+	uiFontCombo.hidePopup();
+	uiFontCombo.setLookAndFeel (nullptr);
+
 	for (auto* button : buttonsUsingCustomLookAndFeel)
 		if (button != nullptr)
 			button->setLookAndFeel (nullptr);
@@ -482,6 +830,53 @@ AppearanceComponent::~AppearanceComponent()  // Destructor
 	slidersUsingCustomLookAndFeel.clear();
 }
 
+namespace
+{
+    constexpr int kAppPad = 16;
+    constexpr int kAppSectionH = 16;
+    constexpr int kAppSectionGap = 8;
+    constexpr int kAppRowH = 22;
+    constexpr int kAppThemeBtnH = 30;
+    constexpr int kAppRandomRowH = 24;
+    constexpr int kAppMinListH = 140;
+
+    constexpr int kChromeLabelH = 18;
+    constexpr int kChromeSliderH = 24;
+    constexpr int kChromeRowGap = 6;
+    constexpr int kChromeLabelGap = 2;
+    constexpr int kChromeTogH = 22;
+
+    int appearanceChromeBodyH() noexcept
+    {
+        const int sliderRow = kChromeLabelH + kChromeLabelGap + kChromeSliderH + kChromeRowGap;
+        const int togRow = kChromeTogH + kChromeRowGap;
+        // sliders: contrast, opacity, button radius, menu radius, cursor size
+        // combo: UI font (+ optional bold wrap)
+        // toggles: legible, outline, glow
+        return sliderRow * 5 + sliderRow + togRow * 3 + 8;
+    }
+
+    int appearancePreferredHeightForList (int listH) noexcept
+    {
+        int h = kAppPad;
+        h += kAppSectionH + 4 + listH + kAppSectionGap;          // Colours list
+        h += kAppSectionH + 4 + kAppRandomRowH + kAppSectionGap; // Randomize
+        h += kAppSectionH + 4 + listH + 6;                       // Themes list
+        h += kAppThemeBtnH + kAppSectionGap + 2;                 // New / Overwrite / Delete
+        h += kAppPad;
+        return h;
+    }
+}
+
+int AppearanceComponent::getPreferredContentHeight() const
+{
+    // Same floor as Menu used before Appearance had a preferred-height API
+    // (kContentHeight - tab bar), so the page still scrolls in a typical frame.
+    const int fitted = appearancePreferredHeightForList (kAppMinListH)
+                       + chromeSection.heightFor (appearanceChromeBodyH());
+    return juce::jmax (Menu::kContentHeight - 36, fitted);
+}
+
 void AppearanceComponent::paint(juce::Graphics& g)
 {
 	quadPickerShadow.render(g, quadPickerShadowPath);
@@ -492,21 +887,15 @@ void AppearanceComponent::paint(juce::Graphics& g)
 	deletePresetButtonShadow.render(g, deletePresetButtonShadowPath);
 	randomColorsButtonShadow.render(g, randomColorsButtonShadowPath);
 	randomSelectedColorsButtonShadow.render(g, randomSelectedColorsButtonShadowPath);
-
-
 }
 
 void AppearanceComponent::resized()
 {
 	DBG("AppearanceComponent::resized Called");
-	const int padding = 16;
-	const int sectionHeaderH = 16;
-	const int sectionGap = 8;
-	const int rowH = 22;
-	// Legible + Option box opacity
-	const int chromeBlockH = sectionHeaderH + sectionGap + rowH + 4 + rowH;
-	const int randomizeBlockH = sectionHeaderH + 4 + 24;
-	const int themeBtnH = 30;
+	const int padding = kAppPad;
+	const int sectionHeaderH = kAppSectionH;
+	const int sectionGap = kAppSectionGap;
+	const int themeBtnH = kAppThemeBtnH;
 
 	const int quadPickerScaleX = getWidth() / 3;
 	const int hueSelectorScaleX = juce::roundToInt ((float) padding * 3.5f);
@@ -514,13 +903,18 @@ void AppearanceComponent::resized()
 	const int listBoxWidth = juce::jmax (160, getWidth() - quadPickerScaleX - hueSelectorScaleX - juce::roundToInt ((float) swatchSize * 1.6f));
 	const int themesListX = padding;
 
+	// Lists share the left column above Chrome — never steal Chrome's reserved
+	// height or preferred-height (that clipped the page and hid the scrollbar).
 	const int leftTop = padding;
 	const int leftBottom = getHeight() - padding;
-	const int leftBottomReserve = chromeBlockH + randomizeBlockH + themeBtnH + sectionGap * 4 + 12;
+	const int leftBottomReserve = chromeSection.heightFor (appearanceChromeBodyH())
+	                              + kAppRandomRowH + kAppThemeBtnH + sectionHeaderH
+	                              + sectionGap * 4 + 12;
 	const int leftUsable = juce::jmax (120, leftBottom - leftTop - leftBottomReserve);
-	const int listHeight = juce::jmax (64, (leftUsable - sectionHeaderH * 2 - sectionGap * 2) / 2);
+	const int listHeight = juce::jmax (kAppMinListH,
+	                                   (leftUsable - sectionHeaderH * 2 - sectionGap * 2) / 2);
 
-	int y = leftTop;
+	int y = padding;
 	coloursSectionLabel.setBounds (padding, y, listBoxWidth, sectionHeaderH);
 	y += sectionHeaderH + 4;
 	const int elementsListY = y;
@@ -534,7 +928,7 @@ void AppearanceComponent::resized()
 	const int chipGap = 4;
 	const int chipsBlockW = chipW * 4 + chipGap * 3;
 	// Size randomize buttons to full plain captions (no "..." from a too-narrow box).
-	const juce::Font randFont (juce::FontOptions().withName ("Lato Black").withHeight (12.0f));
+	const juce::Font randFont (SharedResources::uiFont (12.0f));
 	const int randSelW = juce::jmax (56, (int) std::ceil (
 	    juce::GlyphArrangement::getStringWidth (randFont, "Rand sel")) + 12);
 	const int randAllW = juce::jmax (56, (int) std::ceil (
@@ -567,39 +961,88 @@ void AppearanceComponent::resized()
 	deletePresetButton.setBounds (padding + (themeBtnW + 6) * 2, y, themeBtnW, themeBtnH);
 	y += themeBtnH + sectionGap + 2;
 
-	chromeSectionLabel.setBounds (padding, y, listBoxWidth, sectionHeaderH);
-	y += sectionHeaderH + 4;
+	const int chromeW = juce::jmax (160, getWidth() - padding * 2);
+	auto chromeArea = juce::Rectangle<int> (padding, y, chromeW, 8000);
+	chromeSection.applyVisible ({
+		&enforceLegibleTextToggle, &textContrastLabel, &textContrastSlider,
+		&optionBoxOpacityLabel, &optionBoxOpacitySlider, &optionBoxOpacityPercentLabel,
+		&buttonCornerRadiusLabel, &buttonCornerRadiusSlider, &buttonCornerRadiusValueLabel,
+		&menuPopupRadiusLabel, &menuPopupRadiusSlider, &menuPopupRadiusValueLabel,
+		&menuPopupOutlineToggle, &uiFontLabel, &uiFontCombo, &uiFontBoldToggle,
+		&cursorInfoSizeLabel, &cursorInfoSizeSlider, &cursorInfoSizeValueLabel,
+		&buttonGlowToggle, &buttonGlowHoverOnlyToggle });
+	chromeSection.placeHeader (chromeArea);
+	y = chromeArea.getY();
 
 	const juce::Font bodyFont (juce::FontOptions (12.0f));
-	const int legibleW = juce::jmax (88, (int) std::ceil (
-	    juce::GlyphArrangement::getStringWidth (bodyFont, "Legible text")) + 28);
-	const int contrastLabW = juce::jmax (52, (int) std::ceil (
-	    juce::GlyphArrangement::getStringWidth (bodyFont, "Contrast")) + 8);
-	enforceLegibleTextToggle.setBounds (padding, y, legibleW, rowH);
-	textContrastLabel.setBounds (padding + legibleW + 6, y, contrastLabW, rowH);
-	textContrastSlider.setBounds (padding + legibleW + contrastLabW + 10, y,
-	                              juce::jmax (60, listBoxWidth - legibleW - contrastLabW - 10), rowH);
-	y += rowH + 4;
-
-	const int opacityLabW = juce::jmax (120, (int) std::ceil (
-	    juce::GlyphArrangement::getStringWidth (bodyFont, "Option box opacity")) + 8);
-	// Full percent readout ("100%") - never ellipsize to "..."
 	const int percentW = juce::jmax (36, (int) std::ceil (
 	    juce::GlyphArrangement::getStringWidth (bodyFont, "100%")) + 6);
-	optionBoxOpacityLabel.setBounds (padding, y, opacityLabW, rowH);
-	optionBoxOpacitySlider.setBounds (padding + opacityLabW + 6, y,
-	                                  juce::jmax (50, listBoxWidth - opacityLabW - percentW - 10), rowH);
-	optionBoxOpacityPercentLabel.setBounds (padding + listBoxWidth - percentW, y, percentW, rowH);
+	const int radiusValW = juce::jmax (40, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (bodyFont, "16 px")) + 6);
+	const int cursorValW = juce::jmax (44, (int) std::ceil (
+	    juce::GlyphArrangement::getStringWidth (bodyFont, "24 pt")) + 6);
 
-	// Right column: SV pad + hue strip scale with the Appearance panel (menu resize).
+	if (chromeSection.isOpen())
+	{
+		auto placeSlider = [&] (juce::Label& lab, juce::Slider& sl, juce::Label* valueLab, int valueW)
+		{
+			lab.setBounds (padding, y, chromeW, kChromeLabelH);
+			y += kChromeLabelH + kChromeLabelGap;
+			if (valueLab != nullptr)
+			{
+				sl.setBounds (padding, y, juce::jmax (50, chromeW - valueW - 8), kChromeSliderH);
+				valueLab->setBounds (padding + chromeW - valueW, y, valueW, kChromeSliderH);
+			}
+			else
+			{
+				sl.setBounds (padding, y, chromeW, kChromeSliderH);
+			}
+			y += kChromeSliderH + kChromeRowGap;
+		};
+
+		enforceLegibleTextToggle.setBounds (padding, y, chromeW, kChromeTogH);
+		y += kChromeTogH + kChromeRowGap;
+		placeSlider (textContrastLabel, textContrastSlider, nullptr, 0);
+		placeSlider (optionBoxOpacityLabel, optionBoxOpacitySlider, &optionBoxOpacityPercentLabel, percentW);
+		placeSlider (buttonCornerRadiusLabel, buttonCornerRadiusSlider, &buttonCornerRadiusValueLabel, radiusValW);
+		placeSlider (menuPopupRadiusLabel, menuPopupRadiusSlider, &menuPopupRadiusValueLabel, radiusValW);
+
+		const int outlineW = juce::jmax (100, (int) std::ceil (
+		    juce::GlyphArrangement::getStringWidth (bodyFont, "Menu outline")) + 28);
+		menuPopupOutlineToggle.setBounds (padding, y, juce::jmin (outlineW, chromeW), kChromeTogH);
+		y += kChromeTogH + kChromeRowGap;
+
+		uiFontLabel.setBounds (padding, y, chromeW, kChromeLabelH);
+		y += kChromeLabelH + kChromeLabelGap;
+		const int boldW = juce::jmax (88, (int) std::ceil (
+		    juce::GlyphArrangement::getStringWidth (bodyFont, "Bold text")) + 36);
+		uiFontCombo.setBounds (padding, y, juce::jmax (80, chromeW - boldW - 10), kChromeSliderH);
+		uiFontBoldToggle.setBounds (padding + chromeW - boldW, y, boldW, kChromeSliderH);
+		uiFontBoldToggle.toFront (false);
+		y += kChromeSliderH + kChromeRowGap;
+
+		placeSlider (cursorInfoSizeLabel, cursorInfoSizeSlider, &cursorInfoSizeValueLabel, cursorValW);
+
+		const int glowW = juce::jmax (90, (int) std::ceil (
+		    juce::GlyphArrangement::getStringWidth (bodyFont, "Button glow")) + 28);
+		const int glowHoverW = juce::jmax (120, (int) std::ceil (
+		    juce::GlyphArrangement::getStringWidth (bodyFont, "Glow on hover only")) + 28);
+		buttonGlowToggle.setBounds (padding, y, glowW, kChromeTogH);
+		buttonGlowHoverOnlyToggle.setBounds (padding + glowW + 8, y,
+		                                     juce::jmin (glowHoverW, chromeW - glowW - 8), kChromeTogH);
+		y += kChromeTogH + kChromeRowGap;
+	}
+
+	// Right column: SV pad + hue strip + brightness slider (pre-accordion layout).
+	// Pad and brightness strip run down to the themes-list bottom.
 	const int rangeSliderWidth = 40;
-	const int quadPickerScaleY = juce::jmax (180, juce::roundToInt ((float) getHeight() * 0.9f));
-	const int hueSelectorScaleY = quadPickerScaleY;
 	const int hueSelectorX = getWidth() - quadPickerScaleX - padding - hueSelectorScaleX;
 	const int hueSelectorY = padding;
 	const int quadPickerX = getWidth() - quadPickerScaleX - padding;
 	const int quadPickerY = padding;
-	// Saturation range strip sits above the pad (not covering it) so pad hits stay clean.
+	const int themesListBottom = themesListY + listHeight;
+	const int quadPickerScaleY = juce::jmax (180, themesListBottom - quadPickerY);
+	const int hueSelectorScaleY = quadPickerScaleY;
 	const int saturationRangeSliderY = juce::jmax (0, quadPickerY - rangeSliderWidth);
 	const int hueRangeSliderX = hueSelectorX + hueSelectorScaleX - 20;
 	const int brightnessRangeSliderX = juce::roundToInt ((float) getWidth() - (float) padding * 1.825f);
@@ -646,15 +1089,12 @@ void AppearanceComponent::resized()
 	hueRangeSlider.setBounds (hueRangeSliderX - 8, hueSelectorY - 3, rangeSliderWidth, hueSelectorScaleY + 10);
 	brightnessRangeSlider.setBounds (brightnessRangeSliderX, hueSelectorY - 7, rangeSliderWidth, hueSelectorScaleY + 22);
 
-	// Overlay is display-only; keep it aligned and non-intercepting so the pad receives drag.
 	overlayComponent.setInterceptsMouseClicks (false, false);
 	overlayComponent2.setInterceptsMouseClicks (false, false);
 	overlayComponent.setBounds (quadPicker.getBounds());
 	overlayComponent2.setBounds (hueSelector.getBounds());
-	// Pad receives hits; overlay paints on top only for randomize guides (often empty).
 	quadPicker.toFront (false);
 	overlayComponent.toFront (false);
-	// Keep range sliders above the pad so their chrome is not confused with a pad edge line.
 	saturationRangeSlider.toFront (false);
 	brightnessRangeSlider.toFront (false);
 	hueRangeSlider.toFront (false);
@@ -723,7 +1163,7 @@ void AppearanceComponent::updateComponents(juce::Colour newColor)
 	coloursSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	themesLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	randomizeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
-	chromeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	chromeSection.repaint();
 
 	// Enable write for selected palette slots, then apply.
 	auto paletteIndices = uiElementsList.getSelectedPaletteIndices();
@@ -957,9 +1397,16 @@ void AppearanceComponent::onPresetApplied(const Theme& theme)
 	coloursSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	themesLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	randomizeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
-	chromeSectionLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	chromeSection.repaint();
 	optionBoxOpacityLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	optionBoxOpacityPercentLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	buttonCornerRadiusLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	buttonCornerRadiusValueLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	menuPopupRadiusLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	menuPopupRadiusValueLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	uiFontLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	cursorInfoSizeLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	cursorInfoSizeValueLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	textContrastLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 
 	juce::Colour trackColor = sharedResources.sharedColors.menuScrollBarTrackColor1;
@@ -1023,8 +1470,8 @@ void AppearanceComponent::repaintNewPresetButton() {
 void AppearanceComponent::setupLabels() {
 	DBG("setupLabels Called");
 	const auto menuLabelTextColor = sharedResources.sharedColors.menuLabelTextColor1;
-	const auto sectionFont = juce::Font (juce::FontOptions().withName ("Lato Black").withHeight (14.0f));
-	const auto bodyFont = juce::Font (juce::FontOptions (12.0f));
+	const auto sectionFont = sharedResources.sharedColors.makeUiFont (14.0f, true);
+	const auto bodyFont = sharedResources.sharedColors.makeUiFont (12.0f);
 
 	auto styleSection = [&] (juce::Label& lab, const juce::String& text)
 	{
@@ -1039,7 +1486,6 @@ void AppearanceComponent::setupLabels() {
 	styleSection (coloursSectionLabel, "Colours");
 	styleSection (themesLabel, "Themes");
 	styleSection (randomizeSectionLabel, "Randomize");
-	styleSection (chromeSectionLabel, "Chrome");
 
 	textContrastLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	textContrastLabel.setFont (bodyFont);
@@ -1054,12 +1500,60 @@ void AppearanceComponent::setupLabels() {
 	optionBoxOpacityPercentLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
 	optionBoxOpacityPercentLabel.setMinimumHorizontalScale (1.0f);
 
+	buttonCornerRadiusLabel.setText ("Button radius", juce::dontSendNotification);
+	buttonCornerRadiusLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	buttonCornerRadiusLabel.setFont (bodyFont);
+	buttonCornerRadiusLabel.setMinimumHorizontalScale (1.0f);
+
+	buttonCornerRadiusValueLabel.setFont (bodyFont);
+	buttonCornerRadiusValueLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	buttonCornerRadiusValueLabel.setMinimumHorizontalScale (1.0f);
+
+	menuPopupRadiusLabel.setText ("Menu radius", juce::dontSendNotification);
+	menuPopupRadiusLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	menuPopupRadiusLabel.setFont (bodyFont);
+	menuPopupRadiusLabel.setMinimumHorizontalScale (1.0f);
+
+	menuPopupRadiusValueLabel.setFont (bodyFont);
+	menuPopupRadiusValueLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	menuPopupRadiusValueLabel.setMinimumHorizontalScale (1.0f);
+
+	menuPopupOutlineToggle.setColour (juce::ToggleButton::textColourId, menuLabelTextColor);
+	menuPopupOutlineToggle.setColour (juce::ToggleButton::tickColourId, sharedResources.sharedColors.menuSliderFillColor);
+
+	uiFontLabel.setText ("UI font", juce::dontSendNotification);
+	uiFontLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	uiFontLabel.setFont (bodyFont);
+	uiFontLabel.setMinimumHorizontalScale (1.0f);
+
+	cursorInfoSizeLabel.setText ("Cursor info size", juce::dontSendNotification);
+	cursorInfoSizeLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	cursorInfoSizeLabel.setFont (bodyFont);
+	cursorInfoSizeLabel.setMinimumHorizontalScale (1.0f);
+
+	cursorInfoSizeValueLabel.setFont (bodyFont);
+	cursorInfoSizeValueLabel.setColour (juce::Label::textColourId, menuLabelTextColor);
+	cursorInfoSizeValueLabel.setMinimumHorizontalScale (1.0f);
+
+	uiFontBoldToggle.setColour (juce::ToggleButton::textColourId, menuLabelTextColor);
+	uiFontBoldToggle.setColour (juce::ToggleButton::tickColourId, sharedResources.sharedColors.menuSliderFillColor);
+	buttonGlowToggle.setColour (juce::ToggleButton::textColourId, menuLabelTextColor);
+	buttonGlowToggle.setColour (juce::ToggleButton::tickColourId, sharedResources.sharedColors.menuSliderFillColor);
+	buttonGlowHoverOnlyToggle.setColour (juce::ToggleButton::textColourId, menuLabelTextColor);
+	buttonGlowHoverOnlyToggle.setColour (juce::ToggleButton::tickColourId, sharedResources.sharedColors.menuSliderFillColor);
+
 	enforceLegibleTextToggle.setColour (juce::ToggleButton::textColourId, menuLabelTextColor);
 	enforceLegibleTextToggle.setColour (juce::ToggleButton::tickColourId, sharedResources.sharedColors.menuSliderFillColor);
 	optionBoxOpacitySlider.setColour (juce::Slider::trackColourId, sharedResources.sharedColors.menuSliderFillColor);
 	optionBoxOpacitySlider.setColour (juce::Slider::thumbColourId, sharedResources.sharedColors.menuSliderFillColor.brighter (0.15f));
+	buttonCornerRadiusSlider.setColour (juce::Slider::trackColourId, sharedResources.sharedColors.menuSliderFillColor);
+	buttonCornerRadiusSlider.setColour (juce::Slider::thumbColourId, sharedResources.sharedColors.menuSliderFillColor.brighter (0.15f));
+	menuPopupRadiusSlider.setColour (juce::Slider::trackColourId, sharedResources.sharedColors.menuSliderFillColor);
+	menuPopupRadiusSlider.setColour (juce::Slider::thumbColourId, sharedResources.sharedColors.menuSliderFillColor.brighter (0.15f));
 	textContrastSlider.setColour (juce::Slider::trackColourId, sharedResources.sharedColors.menuSliderFillColor);
 	textContrastSlider.setColour (juce::Slider::thumbColourId, sharedResources.sharedColors.menuSliderFillColor.brighter (0.15f));
+	cursorInfoSizeSlider.setColour (juce::Slider::trackColourId, sharedResources.sharedColors.menuSliderFillColor);
+	cursorInfoSizeSlider.setColour (juce::Slider::thumbColourId, sharedResources.sharedColors.menuSliderFillColor.brighter (0.15f));
 }
 
 void AppearanceComponent::updateAllComponents() {
@@ -1115,10 +1609,13 @@ void AppearanceComponent::applyColourSideEffects (const juce::String& elementNam
 		coloursSectionLabel.setColour (juce::Label::textColourId, newColor);
 		themesLabel.setColour (juce::Label::textColourId, newColor);
 		randomizeSectionLabel.setColour (juce::Label::textColourId, newColor);
-		chromeSectionLabel.setColour (juce::Label::textColourId, newColor);
+		chromeSection.repaint();
 		textContrastLabel.setColour (juce::Label::textColourId, newColor);
 		optionBoxOpacityLabel.setColour (juce::Label::textColourId, newColor);
 		optionBoxOpacityPercentLabel.setColour (juce::Label::textColourId, newColor);
+		buttonCornerRadiusLabel.setColour (juce::Label::textColourId, newColor);
+		buttonCornerRadiusValueLabel.setColour (juce::Label::textColourId, newColor);
+		uiFontLabel.setColour (juce::Label::textColourId, newColor);
 	}
 	else if (elementName == "Menu Scroll Track")
 	{
@@ -1161,6 +1658,30 @@ void AppearanceComponent::notifyThemeLiveChanged()
 {
 	if (onThemeLiveChanged)
 		onThemeLiveChanged();
+}
+
+void AppearanceComponent::applyUiFontPreview (const juce::String& fontName, bool persist)
+{
+	if (fontName.isNotEmpty())
+		sharedResources.sharedColors.uiFontName = fontName;
+
+	sharedResources.makeActive();
+	SharedResources::applyUiFontsRecursively (*this);
+
+	if (auto* menu = findParentComponentOfClass<Menu>())
+		menu->refreshUiFonts();
+
+	if (auto* top = getTopLevelComponent())
+		if (top != this)
+			SharedResources::applyUiFontsRecursively (*top);
+
+	themeList.repaint();
+	uiElementsList.repaint();
+
+	if (persist)
+		notifyThemeLiveChanged();
+	else
+		repaint();
 }
 
 void AppearanceComponent::refreshAfterRandomize()
@@ -1307,6 +1828,43 @@ void AppearanceComponent::sliderValueChanged(juce::Slider* slider) {
 		else
 			refreshAfterRandomize();
 	}
+
+	if (slider == &buttonCornerRadiusSlider)
+	{
+		sharedResources.sharedColors.buttonCornerRadius =
+		    juce::jlimit (2.0f, 16.0f, (float) buttonCornerRadiusSlider.getValue());
+		const int px = juce::roundToInt (sharedResources.sharedColors.buttonCornerRadius);
+		buttonCornerRadiusValueLabel.setText (juce::String (px) + " px", juce::dontSendNotification);
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	}
+
+	if (slider == &menuPopupRadiusSlider)
+	{
+		sharedResources.sharedColors.menuPopupCornerRadius =
+		    juce::jlimit (0.0f, 16.0f, (float) menuPopupRadiusSlider.getValue());
+		const int px = juce::roundToInt (sharedResources.sharedColors.menuPopupCornerRadius);
+		menuPopupRadiusValueLabel.setText (juce::String (px) + " px", juce::dontSendNotification);
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	}
+
+	if (slider == &cursorInfoSizeSlider)
+	{
+		sharedResources.sharedColors.graphCursorInfoFontSize =
+		    juce::jlimit (8.0f, 24.0f, (float) cursorInfoSizeSlider.getValue());
+		const juce::String sizeText = juce::String (sharedResources.sharedColors.graphCursorInfoFontSize, 1)
+		                            + " pt";
+		cursorInfoSizeValueLabel.setText (sizeText, juce::dontSendNotification);
+		if (onThemeLiveChanged)
+			onThemeLiveChanged();
+		else
+			refreshAfterRandomize();
+	}
 }
 
 void AppearanceComponent::syncAccessibilityControls()
@@ -1320,6 +1878,34 @@ void AppearanceComponent::syncAccessibilityControls()
 	optionBoxOpacitySlider.setValue (sharedResources.sharedColors.optionBoxOpacity, juce::dontSendNotification);
 	const int pct = juce::roundToInt (sharedResources.sharedColors.optionBoxOpacity * 100.0f);
 	optionBoxOpacityPercentLabel.setText (juce::String (pct) + "%", juce::dontSendNotification);
+	buttonCornerRadiusSlider.setValue (sharedResources.sharedColors.buttonCornerRadius,
+	                                   juce::dontSendNotification);
+	const int px = juce::roundToInt (sharedResources.sharedColors.buttonCornerRadius);
+	buttonCornerRadiusValueLabel.setText (juce::String (px) + " px", juce::dontSendNotification);
+	menuPopupRadiusSlider.setValue (sharedResources.sharedColors.menuPopupCornerRadius,
+	                                juce::dontSendNotification);
+	menuPopupRadiusValueLabel.setText (
+	    juce::String (juce::roundToInt (sharedResources.sharedColors.menuPopupCornerRadius)) + " px",
+	    juce::dontSendNotification);
+	menuPopupOutlineToggle.setToggleState (sharedResources.sharedColors.menuPopupOutline,
+	                                       juce::dontSendNotification);
+	{
+		const auto fonts = SharedColors::getUiFontCatalogue();
+		const int idx = fonts.indexOf (sharedResources.sharedColors.uiFontName);
+		uiFontCombo.setSelectedId (idx >= 0 ? idx + 1 : 1, juce::dontSendNotification);
+		committedUiFontName = sharedResources.sharedColors.uiFontName;
+	}
+	uiFontBoldToggle.setToggleState (sharedResources.sharedColors.uiFontBold, juce::dontSendNotification);
+	cursorInfoSizeSlider.setValue (sharedResources.sharedColors.graphCursorInfoFontSize,
+	                               juce::dontSendNotification);
+	cursorInfoSizeValueLabel.setText (
+	    juce::String (sharedResources.sharedColors.graphCursorInfoFontSize, 1) + " pt",
+	    juce::dontSendNotification);
+	buttonGlowToggle.setToggleState (sharedResources.sharedColors.buttonGlowEnabled,
+	                                 juce::dontSendNotification);
+	buttonGlowHoverOnlyToggle.setToggleState (sharedResources.sharedColors.buttonGlowOnlyOnHover,
+	                                          juce::dontSendNotification);
+	buttonGlowHoverOnlyToggle.setEnabled (sharedResources.sharedColors.buttonGlowEnabled);
 }
 
 void AppearanceComponent::applyAccessibilityTextContrast()
@@ -1375,10 +1961,18 @@ void AppearanceComponent::repaintComponents()
 	themesLabel.repaint();
 	coloursSectionLabel.repaint();
 	randomizeSectionLabel.repaint();
-	chromeSectionLabel.repaint();
+	chromeSection.repaint();
 	optionBoxOpacityLabel.repaint();
 	optionBoxOpacityPercentLabel.repaint();
 	optionBoxOpacitySlider.repaint();
+	buttonCornerRadiusLabel.repaint();
+	buttonCornerRadiusValueLabel.repaint();
+	buttonCornerRadiusSlider.repaint();
+	uiFontLabel.repaint();
+	uiFontCombo.repaint();
+	uiFontBoldToggle.repaint();
+	buttonGlowToggle.repaint();
+	buttonGlowHoverOnlyToggle.repaint();
 	textContrastLabel.repaint();
 	textContrastSlider.repaint();
 	enforceLegibleTextToggle.repaint();
@@ -1393,4 +1987,89 @@ void AppearanceComponent::repaintComponents()
 
 juce::Rectangle<int> AppearanceComponent::getThemeListBounds() const {
 	return themeList.getBounds(); // Assuming themeList is a member
+}
+
+void AppearanceComponent::UiFontPreviewCombo::mouseDown (const juce::MouseEvent&)
+{
+	if (isEnabled())
+		toggleFontList();
+}
+
+void AppearanceComponent::UiFontPreviewCombo::showPopup()
+{
+	toggleFontList();
+}
+
+void AppearanceComponent::UiFontPreviewCombo::hidePopup()
+{
+	dismissFontList (true);
+}
+
+void AppearanceComponent::UiFontPreviewCombo::toggleFontList()
+{
+	if (fontWindow != nullptr)
+		dismissFontList (false);
+	else
+		launchFontList();
+}
+
+void AppearanceComponent::UiFontPreviewCombo::dismissFontList (bool committed)
+{
+	if (auto* w = fontWindow.getComponent())
+	{
+		fontWindow = nullptr;
+		w->setVisible (false);
+		if (w->isOnDesktop())
+			w->removeFromDesktop();
+		// Never delete from a list-click stack frame on this window.
+		juce::MessageManager::callAsync ([w] { delete w; });
+	}
+	else
+	{
+		fontWindow = nullptr;
+	}
+
+	if (! committed && onMenuDismissedWithoutChoice != nullptr)
+		onMenuDismissedWithoutChoice();
+}
+
+void AppearanceComponent::UiFontPreviewCombo::launchFontList()
+{
+	const auto fonts = SharedColors::getUiFontCatalogue();
+	if (fonts.isEmpty())
+		return;
+
+	auto* win = new FontCatalogueWindow (
+	    fonts,
+	    getSelectedId(),
+	    this,
+	    onHoverPreview,
+	    [safe = juce::Component::SafePointer<UiFontPreviewCombo> (this)] (int id)
+	    {
+	        if (safe == nullptr)
+	            return;
+	        safe->dismissFontList (true);
+	        juce::MessageManager::callAsync ([safe, id]
+	        {
+	            if (safe != nullptr)
+	                safe->setSelectedId (id, juce::sendNotificationSync);
+	        });
+	    },
+	    [safe = juce::Component::SafePointer<UiFontPreviewCombo> (this)]
+	    {
+	        if (safe != nullptr)
+	            safe->dismissFontList (false);
+	    });
+
+	const auto screen = localAreaToGlobal (getLocalBounds());
+	constexpr int kVisibleRows = 16;
+	const int h = juce::jmin (fonts.size(), kVisibleRows) * kFontRowH + 12;
+	win->setBounds (screen.getX(), screen.getBottom(),
+	                juce::jmax (screen.getWidth(), 280), juce::jmax (h, kFontRowH * 8 + 12));
+	win->setAlwaysOnTop (true);
+	win->addToDesktop (juce::ComponentPeer::windowIsTemporary
+	                   | juce::ComponentPeer::windowHasDropShadow);
+	win->setVisible (true);
+	win->toFront (false);
+	fontWindow = win;
 }

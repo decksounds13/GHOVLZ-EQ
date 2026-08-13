@@ -1,5 +1,7 @@
 #include "TextButtonLookAndFeel.h"
 #include "Menu/Gui/CustomTextButton1.h"
+#include "GraphOverlayButtonLookAndFeel.h"
+#include "Menu/SharedResources.h"
 
 TextButtonLookAndFeel::TextButtonLookAndFeel(float textSize)
     : buttonTextSize(textSize),
@@ -12,7 +14,7 @@ TextButtonLookAndFeel::TextButtonLookAndFeel(float textSize)
     buttonTextColor = juce::Colours::whitesmoke.withAlpha(0.8f);
     buttonOutlineColor = juce::Colours::black;
 
-    customLabel.setFont(juce::Font("Lato Black", textSize, juce::Font::plain)); // Initialize the custom label
+    customLabel.setFont (SharedResources::uiFont (textSize));
     customLabel.setColour(juce::Label::textColourId, buttonTextColor);
     customLabel.setJustificationType(juce::Justification::centred);
 
@@ -31,72 +33,52 @@ void TextButtonLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button
     juce::Colour mediumBrightOrange = juce::Colour::fromRGBA(255, 210, 50, 200.0f);
     juce::ignoreUnused (mediumBrightOrange, backgroundColour);
 
+    const float corner = GraphOverlayButtonLookAndFeel::cornerRadius();
+
     auto* customButton = dynamic_cast<CustomTextButton*>(&button);
     if (customButton) {
-        const auto& buttonPath = customButton->getButtonPath();  // Use the path from CustomTextButton
+        const auto& buttonPath = customButton->getButtonPath();
+        auto g1 = GraphOverlayButtonLookAndFeel::adjustForInteraction (
+            gradientColor1, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown || button.isMouseButtonDown());
+        auto g2 = GraphOverlayButtonLookAndFeel::adjustForInteraction (
+            gradientColor2, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown || button.isMouseButtonDown());
 
-        // Render the shadow using the button path
-        //shadow.render(g, buttonPath);
+        const bool hot = shouldDrawButtonAsHighlighted || shouldDrawButtonAsDown
+                         || button.isMouseButtonDown();
+        if (GraphOverlayButtonLookAndFeel::shouldShowButtonGlow (hot))
+            GraphOverlayButtonLookAndFeel::renderOutlineBlur (
+                g, button.getLocalBounds().toFloat().reduced (0.5f), corner, g1.brighter (0.25f));
 
-        // Set the gradient fill based on the button's state
-        juce::ColourGradient gradient;
-        if (button.isMouseButtonDown()) {
-            gradient = juce::ColourGradient(gradientColor1.withMultipliedBrightness(1.7f),
-                button.getLocalBounds().getCentreX(), button.getLocalBounds().getY(),
-                gradientColor2.withMultipliedBrightness(1.7f),
-                button.getLocalBounds().getCentreX(), button.getLocalBounds().getBottom(),
-                false);
-        }
-        else if (shouldDrawButtonAsHighlighted) {
-            gradient = juce::ColourGradient(gradientColor1.withMultipliedBrightness(1.4f),
-                button.getLocalBounds().getCentreX(), button.getLocalBounds().getY(),
-                gradientColor2.withMultipliedBrightness(1.35f),
-                button.getLocalBounds().getCentreX(), button.getLocalBounds().getBottom(),
-                false);
-        }
-        else {
-            gradient = juce::ColourGradient(gradientColor1,
-                button.getLocalBounds().getCentreX(), button.getLocalBounds().getY(),
-                gradientColor2,
-                button.getLocalBounds().getCentreX(), button.getLocalBounds().getBottom(),
-                false);
-        }
-
-        g.setGradientFill(gradient);
-        g.fillPath(buttonPath);
+        juce::ColourGradient gradient (g1,
+            button.getLocalBounds().getCentreX(), (float) button.getLocalBounds().getY(),
+            g2,
+            button.getLocalBounds().getCentreX(), (float) button.getLocalBounds().getBottom(),
+            false);
+        g.setGradientFill (gradient);
+        g.fillPath (buttonPath);
         return;
     }
 
-    // Fallback for plain TextButtons (OptionBox M/S/L/R, Sat, etc.):
-    // subtle top→bottom form (slight brighten / darken + desat) for soft 3D.
+    // Fallback for plain TextButtons (OptionBox M/S/L/R, Sat, etc.).
     auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
     juce::Colour fill = button.getToggleState()
                             ? button.findColour (juce::TextButton::buttonOnColourId)
                             : button.findColour (juce::TextButton::buttonColourId);
 
-    if (shouldDrawButtonAsDown)
-        fill = fill.brighter (0.14f);
-    else if (shouldDrawButtonAsHighlighted)
-        fill = fill.brighter (0.08f);
+    fill = GraphOverlayButtonLookAndFeel::adjustForInteraction (fill,
+                                                                shouldDrawButtonAsHighlighted,
+                                                                shouldDrawButtonAsDown);
+    GraphOverlayButtonLookAndFeel::paintChromeFace (
+        g, bounds, fill, corner,
+        shouldDrawButtonAsHighlighted || shouldDrawButtonAsDown);
 
-    auto top = fill.brighter (0.08f);
-    float h = 0.0f, s = 0.0f, v = 0.0f;
-    fill.getHSB (h, s, v);
-    auto bottom = juce::Colour::fromHSV (h,
-                                         juce::jlimit (0.0f, 1.0f, s * 0.90f),
-                                         juce::jlimit (0.0f, 1.0f, v * 0.88f),
-                                         fill.getFloatAlpha());
-    juce::ColourGradient grad (top, bounds.getX(), bounds.getY(),
-                               bottom, bounds.getX(), bounds.getBottom(), false);
-    g.setGradientFill (grad);
-    g.fillRoundedRectangle (bounds, 3.0f);
-
-    // Prefer LAF outline colour when set (OptionBox themes optionBorder); else soft dark edge.
+    // Prefer LAF outline colour when set (OptionBox themes optionBorder).
     auto outline = buttonOutlineColor;
-    if (outline.getFloatAlpha() < 0.02f)
-        outline = juce::Colours::black.withAlpha (0.55f);
-    g.setColour (outline.withAlpha (juce::jmin (1.0f, outline.getFloatAlpha() * 0.95f)));
-    g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
+    if (outline.getFloatAlpha() >= 0.02f)
+    {
+        g.setColour (outline.withAlpha (juce::jmin (1.0f, outline.getFloatAlpha() * 0.95f)));
+        g.drawRoundedRectangle (bounds, corner, 1.0f);
+    }
 }
 
 void TextButtonLookAndFeel::resized(juce::Component& component)
@@ -109,14 +91,11 @@ void TextButtonLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& 
     bool shouldDrawButtonAsHighlighted,
     bool shouldDrawButtonAsDown)
 {
-    // Save the original button text
+    juce::ignoreUnused (shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
     juce::String originalButtonText = button.getButtonText();
 
-    // Use member color for text
     g.setColour(buttonTextColor);
-
-    // Set the font for button text
-    g.setFont(juce::Font("Lato Black", buttonTextSize, juce::Font::plain));
+    g.setFont (SharedResources::uiFont (buttonTextSize));
 
     // Never ellipsize chrome captions to "..." — layout must fit the full plain string.
     g.drawText (originalButtonText, button.getLocalBounds().reduced (2, 0),

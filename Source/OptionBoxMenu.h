@@ -314,7 +314,7 @@ private:
             g.setColour (button.getToggleState()
                              ? button.findColour (juce::TextButton::textColourOnId)
                              : button.findColour (juce::TextButton::textColourOffId));
-            g.setFont (juce::Font ("Lato Black", 14.0f, juce::Font::plain));
+            g.setFont (SharedResources::uiFont (14.0f));
             g.drawText (button.getButtonText(), button.getLocalBounds(),
                         juce::Justification::centred, true);
         }
@@ -336,7 +336,7 @@ private:
             g.setColour (button.getToggleState()
                              ? button.findColour (juce::TextButton::textColourOnId)
                              : button.findColour (juce::TextButton::textColourOffId));
-            g.setFont (juce::Font ("Lato Black", 9.0f, juce::Font::plain));
+            g.setFont (SharedResources::uiFont (9.0f));
             g.drawText (button.getButtonText(), button.getLocalBounds().reduced (1, 0),
                         juce::Justification::centred, false);
         }

@@ -88,16 +88,19 @@ void ColourSchemeComboLookAndFeel::drawPopupMenuItem (juce::Graphics& g,
     auto bounds = area.toFloat().reduced (4.0f, 3.0f);
     if (isHighlighted && isActive)
     {
-        g.setColour (colors().optionComboHighlight.withAlpha (0.85f));
-        g.fillRoundedRectangle (bounds.expanded (2.0f), 3.0f);
+        GraphOverlayButtonLookAndFeel::fillRoundedGradient (
+            g, bounds.expanded (2.0f), colors().optionComboHighlight, 3.0f);
     }
 
     auto swatch = bounds.removeFromLeft (bounds.getWidth() * 0.55f).reduced (0.0f, 2.0f);
     paintSchemeSwatch (g, swatch, schemeFromName (text));
 
     bounds.removeFromLeft (8.0f);
-    g.setColour (isHighlighted ? juce::Colours::black
-                               : colors().optionComboText.withAlpha (isActive ? 0.95f : 0.45f));
+    const auto& pal = colors();
+    const auto rowInk = isHighlighted
+                            ? pal.legibleTextOn (juce::Colours::black, pal.optionComboHighlight)
+                            : pal.dropdownTextOn (pal.optionComboText, pal.optionComboBackground);
+    g.setColour (rowInk.withAlpha (isActive ? 0.95f : 0.45f));
     g.setFont (juce::FontOptions (12.5f));
     g.drawText (text, bounds.toNearestIntEdges(), juce::Justification::centredLeft, true);
 
@@ -113,14 +116,17 @@ void ColourSchemeComboLookAndFeel::drawComboBox (juce::Graphics& g, int width, i
                                                 int buttonX, int buttonY, int buttonW, int buttonH,
                                                 juce::ComboBox& box)
 {
-    juce::ignoreUnused (isButtonDown, buttonX, buttonY, buttonW, buttonH);
+    juce::ignoreUnused (buttonX, buttonY, buttonW, buttonH);
 
     const auto& c = colors();
     auto bounds = juce::Rectangle<int> (0, 0, width, height).toFloat();
-    g.setColour (c.optionComboBackground);
-    g.fillRoundedRectangle (bounds, 2.0f);
+    const float corner = GraphOverlayButtonLookAndFeel::cornerRadius();
+    const bool hot = box.isMouseOver (true) || isButtonDown || box.isPopupActive();
+    auto fill = GraphOverlayButtonLookAndFeel::adjustForInteraction (
+        c.optionComboBackground, box.isMouseOver (true), isButtonDown || box.isPopupActive());
+    GraphOverlayButtonLookAndFeel::paintChromeFace (g, bounds, fill, corner, hot);
     g.setColour (c.optionBorder);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 2.0f, 1.0f);
+    g.drawRoundedRectangle (bounds.reduced (0.5f), corner, 1.0f);
 
     auto inner = bounds.reduced (4.0f, 3.0f);
     auto swatch = inner.removeFromLeft (juce::jmin (inner.getWidth() * 0.42f, 72.0f));
@@ -128,8 +134,10 @@ void ColourSchemeComboLookAndFeel::drawComboBox (juce::Graphics& g, int width, i
     inner.removeFromLeft (6.0f);
     inner.removeFromRight (14.0f);
 
-    g.setColour (c.optionComboText.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
-    g.setFont (juce::Font ("Lato Black", 11.0f, juce::Font::plain));
+    const auto ink = c.dropdownTextOn (c.optionComboText, fill)
+                         .withAlpha (box.isEnabled() ? 0.95f : 0.35f);
+    g.setColour (ink);
+    g.setFont (c.makeUiFont (11.0f));
     g.drawText (box.getText(), inner.toNearestIntEdges(), juce::Justification::centredLeft, true);
 
     juce::Rectangle<int> arrowZone (width - 14, 0, 12, height);
@@ -137,7 +145,7 @@ void ColourSchemeComboLookAndFeel::drawComboBox (juce::Graphics& g, int width, i
     path.startNewSubPath ((float) arrowZone.getX() + 2.0f, (float) arrowZone.getCentreY() - 2.0f);
     path.lineTo ((float) arrowZone.getCentreX(), (float) arrowZone.getCentreY() + 2.5f);
     path.lineTo ((float) arrowZone.getRight() - 2.0f, (float) arrowZone.getCentreY() - 2.0f);
-    g.setColour (c.optionComboText.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
+    g.setColour (ink);
     g.strokePath (path, juce::PathStrokeType (1.4f));
 }
 
@@ -154,13 +162,16 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     : sharedResources (resources),
       treeState (state),
       colourRamps (ramps),
-      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
+      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
+      lookSection (resources, "spec.look", "Look", false),
+      behaviourSection (resources, "spec.behaviour", "Behaviour", false),
+      rampSection (resources, "spec.ramp", "Ramp", false)
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
     colourSchemeLookAndFeel.setThemeColors (&sharedResources);
 
     titleLabel.setText ("Spectrogram", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -174,7 +185,6 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
 
     colourSchemeLabel.setText ("Colour Scheme", juce::dontSendNotification);
     colourSchemeCombo.setLookAndFeel (&colourSchemeLookAndFeel);
-    colourSchemeCombo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
     {
         const auto names = SpectrogramComponent::getColourSchemeNames();
         for (int i = 0; i < names.size(); ++i)
@@ -349,6 +359,21 @@ SpectrogramSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (enhancedStrengthLabel);
     styleLabel (enhancedLfDetailLabel);
     styleLabel (enhancedCrossoverLabel);
+
+    wireSection (lookSection);
+    wireSection (behaviourSection);
+    wireSection (rampSection);
+}
+
+void SpectrogramSettingsComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
+    };
 }
 
 SpectrogramSettingsComponent::Content::~Content()
@@ -374,14 +399,14 @@ void SpectrogramSettingsComponent::Content::styleSlider (juce::Slider& slider)
 
 void SpectrogramSettingsComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
 }
 
 void SpectrogramSettingsComponent::Content::styleSectionLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (16.0f));
+    label.setFont (SharedResources::uiFont (16.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
 }
@@ -398,7 +423,6 @@ void SpectrogramSettingsComponent::Content::styleCombo (juce::ComboBox& combo)
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&comboLookAndFeel);
-    combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }
 
 void SpectrogramSettingsComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
@@ -449,18 +473,12 @@ void SpectrogramSettingsComponent::Content::syncGradientFromBank()
 
 int SpectrogramSettingsComponent::Content::getPreferredHeight() const
 {
-    const int comboRows = 5;   // colour, fft, display, channel, enhanced LF detail
-    const int sliderRows = 8;  // brightness, speed, min/max, smooth, soften, strength, crossover
-    const int toggles = 3;     // log, enhanced 2D, freeze
-    const int sections = 2;    // look, behaviour
-
-    return kPadY * 2
-           + 24 + 8
-           + sections * (kSectionH + kLabelGap + kSectionGap)
-           + comboRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
-           + sliderRows * (kLabelH + kLabelGap + kSliderH + kRowGap)
-           + toggles * (22 + 6)
-           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
+    const int row = kLabelH + kLabelGap + kSliderH + kRowGap;
+    const int tog = 22 + 6;
+    return kPadY * 2 + 24 + 8
+           + lookSection.heightFor (row * 2)
+           + behaviourSection.heightFor (row * 3 + row * 5 + tog * 3 + row * 3)
+           + rampSection.heightFor (kLabelH + kLabelGap + gradientEditor.getPreferredHeight());
 }
 
 void SpectrogramSettingsComponent::Content::resized()
@@ -472,37 +490,58 @@ void SpectrogramSettingsComponent::Content::resized()
     titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
 
-    gradientLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kLabelGap);
-    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
-                                  .removeFromLeft (juce::jmin (520, area.getWidth())));
-    area.removeFromTop (kSectionGap);
+    lookSectionLabel.setVisible (false);
+    behaviourSectionLabel.setVisible (false);
 
-    lookSectionLabel.setBounds (area.removeFromTop (kSectionH));
-    area.removeFromTop (kLabelGap);
-    layoutComboRow (area, colourSchemeLabel, colourSchemeCombo);
-    layoutSliderRow (area, brightnessLabel, brightnessSlider);
-    area.removeFromTop (kSectionGap);
+    lookSection.applyVisible ({
+        &colourSchemeLabel, &colourSchemeCombo, &brightnessLabel, &brightnessSlider });
+    lookSection.placeHeader (area);
+    if (lookSection.isOpen())
+    {
+        layoutComboRow (area, colourSchemeLabel, colourSchemeCombo);
+        layoutSliderRow (area, brightnessLabel, brightnessSlider);
+    }
 
-    behaviourSectionLabel.setBounds (area.removeFromTop (kSectionH));
-    area.removeFromTop (kLabelGap);
-    layoutComboRow (area, fftSizeLabel, fftSizeCombo);
-    layoutComboRow (area, displayResLabel, displayResCombo);
-    layoutComboRow (area, channelLabel, channelCombo);
-    layoutSliderRow (area, speedLabel, speedSlider);
-    layoutSliderRow (area, minDbLabel, minDbSlider);
-    layoutSliderRow (area, maxDbLabel, maxDbSlider);
-    layoutSliderRow (area, smoothLabel, smoothSlider);
-    layoutSliderRow (area, softenLabel, softenSlider);
+    behaviourSection.applyVisible ({
+        &fftSizeLabel, &fftSizeCombo, &displayResLabel, &displayResCombo,
+        &channelLabel, &channelCombo, &speedLabel, &speedSlider,
+        &minDbLabel, &minDbSlider, &maxDbLabel, &maxDbSlider,
+        &smoothLabel, &smoothSlider, &softenLabel, &softenSlider,
+        &logFreqToggle, &enhancedFreqToggle,
+        &enhancedStrengthLabel, &enhancedStrengthSlider,
+        &enhancedLfDetailLabel, &enhancedLfDetailCombo,
+        &enhancedCrossoverLabel, &enhancedCrossoverSlider, &freezeToggle });
+    behaviourSection.placeHeader (area);
+    if (behaviourSection.isOpen())
+    {
+        layoutComboRow (area, fftSizeLabel, fftSizeCombo);
+        layoutComboRow (area, displayResLabel, displayResCombo);
+        layoutComboRow (area, channelLabel, channelCombo);
+        layoutSliderRow (area, speedLabel, speedSlider);
+        layoutSliderRow (area, minDbLabel, minDbSlider);
+        layoutSliderRow (area, maxDbLabel, maxDbSlider);
+        layoutSliderRow (area, smoothLabel, smoothSlider);
+        layoutSliderRow (area, softenLabel, softenSlider);
 
-    logFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
-    area.removeFromTop (6);
-    enhancedFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
-    area.removeFromTop (6);
-    layoutSliderRow (area, enhancedStrengthLabel, enhancedStrengthSlider);
-    layoutComboRow (area, enhancedLfDetailLabel, enhancedLfDetailCombo);
-    layoutSliderRow (area, enhancedCrossoverLabel, enhancedCrossoverSlider);
-    freezeToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+        logFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+        area.removeFromTop (6);
+        enhancedFreqToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
+        area.removeFromTop (6);
+        layoutSliderRow (area, enhancedStrengthLabel, enhancedStrengthSlider);
+        layoutComboRow (area, enhancedLfDetailLabel, enhancedLfDetailCombo);
+        layoutSliderRow (area, enhancedCrossoverLabel, enhancedCrossoverSlider);
+        freezeToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+    }
+
+    rampSection.applyVisible ({ &gradientLabel, &gradientEditor });
+    rampSection.placeHeader (area);
+    if (rampSection.isOpen())
+    {
+        gradientLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                      .removeFromLeft (juce::jmin (520, area.getWidth())));
+    }
 }
 
 SpectrogramSettingsComponent::SpectrogramSettingsComponent (SharedResources& resources,

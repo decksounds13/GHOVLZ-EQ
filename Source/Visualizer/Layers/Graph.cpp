@@ -60,11 +60,25 @@ Graph::Graph(
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_POST_CURVE_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_POST_FILL_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_HOLD_FILL_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_USE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_CURVE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_PRE_FILL_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_PRE_CURVE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_HOLD_FILL_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_HOLD_CURVE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_PRE_CURVE_FADE_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_PRE_FILL_FADE_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_POST_CURVE_FADE_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_POST_FILL_FADE_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_HOLD_CURVE_FADE_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_HOLD_FILL_FADE_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_OPACITY_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_FILL_OPACITY_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_PATH_WIDTH_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_RESOLUTION_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_CURVE_RES_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_CHANNEL_ID", this );
+    mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_OCTAVE_SMOOTH_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "SPECTRUM_FFT_BINS_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "FFT_FULL_HEIGHT_ID", this );
     mr_audioProcessorValueTreeState.addParameterListener( "FFT_RESOLUTION_ID", this );
@@ -102,11 +116,25 @@ Graph::~Graph()
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_POST_CURVE_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_POST_FILL_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_HOLD_FILL_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_USE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_CURVE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_PRE_FILL_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_PRE_CURVE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_HOLD_FILL_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_HOLD_CURVE_RAMP_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_PRE_CURVE_FADE_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_PRE_FILL_FADE_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_POST_CURVE_FADE_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_POST_FILL_FADE_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_HOLD_CURVE_FADE_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_HOLD_FILL_FADE_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_OPACITY_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_FILL_OPACITY_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_PATH_WIDTH_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_RESOLUTION_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_CURVE_RES_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_CHANNEL_ID", this );
+    mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_OCTAVE_SMOOTH_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "SPECTRUM_FFT_BINS_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "FFT_FULL_HEIGHT_ID", this );
     mr_audioProcessorValueTreeState.removeParameterListener( "FFT_RESOLUTION_ID", this );
@@ -242,6 +270,36 @@ void Graph::setSpectrumFillRamp (const GradientRamp* ramp)
     m_graphLine.setSpectrumFillRamp (ramp);
 }
 
+void Graph::setSpectrumCurveRamp (const GradientRamp* ramp)
+{
+    m_graphLine.setSpectrumCurveRamp (ramp);
+}
+
+void Graph::setSpectrumPreFillRamp (const GradientRamp* ramp)
+{
+    m_graphLine.setSpectrumPreFillRamp (ramp);
+}
+
+void Graph::setSpectrumPreCurveRamp (const GradientRamp* ramp)
+{
+    m_graphLine.setSpectrumPreCurveRamp (ramp);
+}
+
+void Graph::setSpectrumHoldFillRamp (const GradientRamp* ramp)
+{
+    m_graphLine.setSpectrumHoldFillRamp (ramp);
+}
+
+void Graph::setSpectrumHoldCurveRamp (const GradientRamp* ramp)
+{
+    m_graphLine.setSpectrumHoldCurveRamp (ramp);
+}
+
+void Graph::setSharedResources (SharedResources* resources)
+{
+    m_graphLine.setSharedResources (resources);
+}
+
 void Graph::setGraphMaximumsColour( juce::Colour colour )
 {
     m_volumeMaximumsGraphColour = colour;
@@ -344,11 +402,25 @@ void Graph::parameterChanged(
              || parameterID == "SPECTRUM_PATH_WIDTH_ID"
              || parameterID == "SPECTRUM_RESOLUTION_ID"
              || parameterID == "SPECTRUM_CURVE_RES_ID"
+             || parameterID == "SPECTRUM_CHANNEL_ID"
+             || parameterID == "SPECTRUM_OCTAVE_SMOOTH_ID"
              || parameterID == "SPECTRUM_PRE_CURVE_ID"
              || parameterID == "SPECTRUM_PRE_FILL_ID"
              || parameterID == "SPECTRUM_POST_CURVE_ID"
              || parameterID == "SPECTRUM_POST_FILL_ID"
              || parameterID == "SPECTRUM_HOLD_FILL_ID"
+             || parameterID == "SPECTRUM_USE_RAMP_ID"
+             || parameterID == "SPECTRUM_CURVE_RAMP_ID"
+             || parameterID == "SPECTRUM_PRE_FILL_RAMP_ID"
+             || parameterID == "SPECTRUM_PRE_CURVE_RAMP_ID"
+             || parameterID == "SPECTRUM_HOLD_FILL_RAMP_ID"
+             || parameterID == "SPECTRUM_HOLD_CURVE_RAMP_ID"
+             || parameterID == "SPECTRUM_PRE_CURVE_FADE_ID"
+             || parameterID == "SPECTRUM_PRE_FILL_FADE_ID"
+             || parameterID == "SPECTRUM_POST_CURVE_FADE_ID"
+             || parameterID == "SPECTRUM_POST_FILL_FADE_ID"
+             || parameterID == "SPECTRUM_HOLD_CURVE_FADE_ID"
+             || parameterID == "SPECTRUM_HOLD_FILL_FADE_ID"
              || parameterID == "SPECTRUM_FFT_BINS_ID"
              || parameterID == "FFT_FULL_HEIGHT_ID"
              || parameterID == "FFT_RESOLUTION_ID"

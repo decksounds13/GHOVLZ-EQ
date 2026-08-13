@@ -61,7 +61,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     startTimer(50);
 
     mainComponent = std::make_unique<MainComponent>(p, analyser, treeState, *this);
-  
+    setWantsKeyboardFocus (true);
+
     frequencyResponseComponent = std::make_unique<FrequencyResponseComponent>(p);
 
     //treeState.addParameterListener("highpassOnOff", this);
@@ -345,11 +346,16 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     outputGainAttachment = std::make_unique<SliderAttachment> (audioProcessor.treeState, "outputGain", outputGainKnob);
 
     autoGainButton.setClickingTogglesState (true);
-    autoGainButton.setTooltip ("Auto Gain - match output loudness to pre-EQ level");
+    autoGainButton.setTooltip (
+        "Auto Gain. Left click toggles. Right click: RMS (match input) or LUFS (target). "
+        "Same option as Settings - Loudness.");
+    autoGainButton.onPopupMenu = [this] { showAutoGainModeMenu(); };
     autoGainButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
     autoGainButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
     autoGainButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
     autoGainButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    autoGainButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
+    autoGainButton.setPaintingIsUnclipped (true);
     addAndMakeVisible (autoGainButton);
     autoGainAttachment = std::make_unique<ButtonAttachment> (audioProcessor.treeState, "autoGain", autoGainButton);
 
@@ -471,7 +477,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     {
         label.setText (text, juce::NotificationType::dontSendNotification);
         // Same caption style as Match AMT / HP / LP (11 pt, centred).
-        label.setFont (juce::Font (11.0f));
+        label.setFont (SharedResources::uiFont (11.0f));
         label.setJustificationType (juce::Justification::centred);
         label.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.85f));
         label.setInterceptsMouseClicks (false, false);
@@ -603,6 +609,15 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     onOffButton8->setToggleState(true, juce::NotificationType::dontSendNotification);
     onOffButton8->addListener(this);
 
+    {
+        BandNumberButton* powerBtns[] = {
+            onOffButton1.get(), onOffButton2.get(), onOffButton3.get(), onOffButton4.get(),
+            onOffButton5.get(), onOffButton6.get(), onOffButton7.get(), onOffButton8.get()
+        };
+        for (auto* b : powerBtns)
+            if (b != nullptr)
+                b->addMouseListener (static_cast<juce::Component*> (this), false);
+    }
 
     addAndMakeVisible(border1);
     addAndMakeVisible(border2);
@@ -753,6 +768,7 @@ EqEditor::~EqEditor()
     saveUiPrefs();
 
     helpTooltipsButton.setLookAndFeel (nullptr);
+    autoGainButton.setLookAndFeel (nullptr);
     sideCheckButton.setLookAndFeel (nullptr);
     scopeModeButton.setLookAndFeel (nullptr);
     sideCheckSpeedButton.setLookAndFeel (nullptr);
@@ -768,6 +784,7 @@ EqEditor::~EqEditor()
     sideCheckLpKnob.removeListener (this);
     sideCheckHpKnob.onPopupMenu = nullptr;
     sideCheckLpKnob.onPopupMenu = nullptr;
+    autoGainButton.onPopupMenu = nullptr;
     sideCheckHpAttachment.reset();
     sideCheckLpAttachment.reset();
     sideCheckAmountAttachment.reset();
@@ -797,6 +814,14 @@ EqEditor::~EqEditor()
 
 
 
+}
+
+bool EqEditor::keyPressed (const juce::KeyPress& key)
+{
+    if (mainComponent != nullptr)
+        return mainComponent->keyPressed (key);
+
+    return false;
 }
 
 void EqEditor::paint(juce::Graphics& g)
@@ -1860,6 +1885,33 @@ void EqEditor::showSideCheckHpLpSlopeMenu (bool forHp)
         });
 }
 
+void EqEditor::showAutoGainModeMenu()
+{
+    const bool aimLufs = audioProcessor.treeState.getRawParameterValue ("targetLufsEnable") != nullptr
+                         && audioProcessor.treeState.getRawParameterValue ("targetLufsEnable")->load() > 0.5f;
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Auto Gain");
+    menu.addItem (1, "RMS (match input)", true, ! aimLufs);
+    menu.addItem (2, "LUFS (target)", true, aimLufs);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&autoGainButton),
+        [safe = juce::Component::SafePointer<EqEditor> (this)] (int result)
+        {
+            if (safe == nullptr || result <= 0)
+                return;
+
+            const bool aimLufs = (result == 2);
+            if (auto* p = dynamic_cast<juce::AudioParameterBool*> (
+                    safe->audioProcessor.treeState.getParameter ("targetLufsEnable")))
+            {
+                if (p->get() != aimLufs)
+                    p->setValueNotifyingHost (aimLufs ? 1.0f : 0.0f);
+            }
+        });
+}
+
 void EqEditor::enforceSideCheckHpLpOrder (juce::Slider* changed)
 {
     if (changed != &sideCheckHpKnob && changed != &sideCheckLpKnob)
@@ -1953,15 +2005,33 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
     const bool keepFace = live.randomizeFaceplateMod;
     const bool keepGraph = live.randomizeGraphModule;
     const bool keepMenu = live.randomizeMenuModule;
+    const bool keepCursorInfo = live.randomizeGraphCursorInfo;
     const bool keepRampFft = live.randomizeRampFftBars;
     const bool keepRampSpec = live.randomizeRampSpectrogram;
     const bool keepRampSpec3D = live.randomizeRampSpectrogram3D;
     const bool keepRampFill = live.randomizeRampSpectrumFill;
+    const bool keepRampCurve = live.randomizeRampSpectrumCurve;
+    const bool keepRampEqCurve = live.randomizeRampEqCurve;
+    const bool keepRampPreFill = live.randomizeRampSpectrumPreFill;
+    const bool keepRampPreCurve = live.randomizeRampSpectrumPreCurve;
+    const bool keepRampHoldFill = live.randomizeRampSpectrumHoldFill;
+    const bool keepRampHoldCurve = live.randomizeRampSpectrumHoldCurve;
+    const bool keepRampEqSumFill = live.randomizeRampEqSumFill;
+    const bool keepRampEqBandCurve = live.randomizeRampEqBandCurve;
+    const bool keepRampEqBandFill = live.randomizeRampEqBandFill;
     const bool keepRampMeters = live.randomizeRampLevelMeters;
     const bool keepOrdered = live.orderedRampGradation;
     const bool keepLegible = live.enforceLegibleText;
     const float keepContrast = live.textContrastAmount;
     const float keepOptionBoxOpacity = live.optionBoxOpacity;
+    const float keepButtonCornerRadius = live.buttonCornerRadius;
+    const float keepMenuPopupRadius = live.menuPopupCornerRadius;
+    const bool keepMenuPopupOutline = live.menuPopupOutline;
+    const bool keepButtonGlow = live.buttonGlowEnabled;
+    const bool keepButtonGlowHover = live.buttonGlowOnlyOnHover;
+    const juce::String keepUiFontName = live.uiFontName;
+    const bool keepUiFontBold = live.uiFontBold;
+    const float keepCursorInfoSize = live.graphCursorInfoFontSize;
     const bool keepGraphBandMinSatEn = live.graphBandRandomMinSatEnabled;
     const float keepGraphBandMinSat = live.graphBandRandomMinSaturation;
     const bool keepH = live.randomizeHue, keepS = live.randomizeSaturation;
@@ -1975,15 +2045,33 @@ bool EqEditor::loadLastUiThemeFromDisk (SharedResources* into)
     live.randomizeFaceplateMod = keepFace;
     live.randomizeGraphModule = keepGraph;
     live.randomizeMenuModule = keepMenu;
+    live.randomizeGraphCursorInfo = keepCursorInfo;
     live.randomizeRampFftBars = keepRampFft;
     live.randomizeRampSpectrogram = keepRampSpec;
     live.randomizeRampSpectrogram3D = keepRampSpec3D;
     live.randomizeRampSpectrumFill = keepRampFill;
+    live.randomizeRampSpectrumCurve = keepRampCurve;
+    live.randomizeRampEqCurve = keepRampEqCurve;
+    live.randomizeRampSpectrumPreFill = keepRampPreFill;
+    live.randomizeRampSpectrumPreCurve = keepRampPreCurve;
+    live.randomizeRampSpectrumHoldFill = keepRampHoldFill;
+    live.randomizeRampSpectrumHoldCurve = keepRampHoldCurve;
+    live.randomizeRampEqSumFill = keepRampEqSumFill;
+    live.randomizeRampEqBandCurve = keepRampEqBandCurve;
+    live.randomizeRampEqBandFill = keepRampEqBandFill;
     live.randomizeRampLevelMeters = keepRampMeters;
     live.orderedRampGradation = keepOrdered;
     live.enforceLegibleText = keepLegible;
     live.textContrastAmount = keepContrast;
     live.optionBoxOpacity = keepOptionBoxOpacity;
+    live.buttonCornerRadius = keepButtonCornerRadius;
+    live.menuPopupCornerRadius = keepMenuPopupRadius;
+    live.menuPopupOutline = keepMenuPopupOutline;
+    live.buttonGlowEnabled = keepButtonGlow;
+    live.buttonGlowOnlyOnHover = keepButtonGlowHover;
+    live.uiFontName = keepUiFontName;
+    live.uiFontBold = keepUiFontBold;
+    live.graphCursorInfoFontSize = keepCursorInfoSize;
     live.graphBandRandomMinSatEnabled = keepGraphBandMinSatEn;
     live.graphBandRandomMinSaturation = keepGraphBandMinSat;
     live.randomizeHue = keepH;
@@ -2329,15 +2417,29 @@ void EqEditor::loadUiPrefs()
     float scopeSplitX = 0.5f;
     float scopeSplitY = 0.5f;
     juce::String scopeFractionsStr;
+    juce::String scopeViewportXml;
+    juce::String scopeViewportFactory;
     std::vector<ScopeModuleId> scopeModules = ScopeModules::defaultEnabledOrder();
-    bool randFaceplate = true, randGraph = true, randMenu = true;
+    bool randFaceplate = true, randGraph = true, randMenu = true, randCursorInfo = true;
     bool randRampFft = true, randRampSpec = true, randRampSpec3D = true, randRampFill = true;
+    bool randRampCurve = true, randRampEqCurve = true;
+    bool randRampPreFill = true, randRampPreCurve = true, randRampHoldFill = true, randRampHoldCurve = true;
+    bool randRampEqSumFill = true, randRampEqBandCurve = true, randRampEqBandFill = true;
     bool randRampMeters = true;
     bool orderedRampGradation = true;
     // Accessibility - on by default globally (Appearance can still toggle).
     bool enforceLegibleText = true;
     float textContrastAmount = 0.55f;
     float optionBoxOpacity = 0.90f;
+    float buttonCornerRadius = 6.0f;
+    float menuPopupCornerRadius = 6.0f;
+    bool menuPopupOutline = true;
+    juce::String settingsSectionsStr;
+    bool buttonGlowEnabled = true;
+    bool buttonGlowOnlyOnHover = true;
+    juce::String uiFontName = "Lato";
+    bool uiFontBold = false;
+    float graphCursorInfoFontSize = 12.0f;
     bool graphBandRandomMinSatEnabled = true;
     float graphBandRandomMinSaturation = 0.25f;
     bool pianoDisplayOnLoad = false;
@@ -2532,6 +2634,8 @@ void EqEditor::loadUiPrefs()
                 scopeSplitX = (float) xml->getDoubleAttribute ("scopeSplitX", 0.5);
                 scopeSplitY = (float) xml->getDoubleAttribute ("scopeSplitY", 0.5);
                 scopeFractionsStr = xml->getStringAttribute ("scopeStripFractions", {});
+                scopeViewportXml = xml->getStringAttribute ("scopeViewportXml", {});
+                scopeViewportFactory = xml->getStringAttribute ("scopeViewportFactory", {});
                 lastScopeWidth = xml->getIntAttribute ("lastScopeWidth", 0);
                 lastScopeHeight = xml->getIntAttribute ("lastScopeHeight", 0);
                 lastScopeWasStrip = xml->getBoolAttribute ("lastScopeWasStrip", false);
@@ -2585,10 +2689,20 @@ void EqEditor::loadUiPrefs()
                 randFaceplate = xml->getBoolAttribute ("randFaceplateMod", true);
                 randGraph = xml->getBoolAttribute ("randGraph", true);
                 randMenu = xml->getBoolAttribute ("randMenu", true);
+                randCursorInfo = xml->getBoolAttribute ("randCursorInfo", true);
                 randRampFft = xml->getBoolAttribute ("randRampFft", true);
                 randRampSpec = xml->getBoolAttribute ("randRampSpec", true);
                 randRampSpec3D = xml->getBoolAttribute ("randRampSpec3D", true);
                 randRampFill = xml->getBoolAttribute ("randRampFill", true);
+                randRampCurve = xml->getBoolAttribute ("randRampCurve", true);
+                randRampEqCurve = xml->getBoolAttribute ("randRampEqCurve", true);
+                randRampPreFill = xml->getBoolAttribute ("randRampPreFill", true);
+                randRampPreCurve = xml->getBoolAttribute ("randRampPreCurve", true);
+                randRampHoldFill = xml->getBoolAttribute ("randRampHoldFill", true);
+                randRampHoldCurve = xml->getBoolAttribute ("randRampHoldCurve", true);
+                randRampEqSumFill = xml->getBoolAttribute ("randRampEqSumFill", true);
+                randRampEqBandCurve = xml->getBoolAttribute ("randRampEqBandCurve", true);
+                randRampEqBandFill = xml->getBoolAttribute ("randRampEqBandFill", true);
                 randRampMeters = xml->getBoolAttribute ("randRampMeters", true);
                 orderedRampGradation = xml->getBoolAttribute ("orderedRampGradation", true);
                 enforceLegibleText = xml->getBoolAttribute ("enforceLegibleText", true);
@@ -2596,6 +2710,20 @@ void EqEditor::loadUiPrefs()
                 textContrastAmount = juce::jlimit (0.0f, 1.0f, textContrastAmount);
                 optionBoxOpacity = (float) xml->getDoubleAttribute ("optionBoxOpacity", 0.90);
                 optionBoxOpacity = juce::jlimit (0.30f, 1.0f, optionBoxOpacity);
+                buttonCornerRadius = (float) xml->getDoubleAttribute ("buttonCornerRadius", 6.0);
+                buttonCornerRadius = juce::jlimit (2.0f, 16.0f, buttonCornerRadius);
+                menuPopupCornerRadius = (float) xml->getDoubleAttribute ("menuPopupCornerRadius", 6.0);
+                menuPopupCornerRadius = juce::jlimit (0.0f, 16.0f, menuPopupCornerRadius);
+                menuPopupOutline = xml->getBoolAttribute ("menuPopupOutline", true);
+                settingsSectionsStr = xml->getStringAttribute ("settingsSections");
+                buttonGlowEnabled = xml->getBoolAttribute ("buttonGlowEnabled", true);
+                buttonGlowOnlyOnHover = xml->getBoolAttribute ("buttonGlowOnlyOnHover", true);
+                uiFontName = xml->getStringAttribute ("uiFontName", "Lato");
+                if (uiFontName.isEmpty())
+                    uiFontName = "Lato";
+                uiFontBold = xml->getBoolAttribute ("uiFontBold", false);
+                graphCursorInfoFontSize = (float) xml->getDoubleAttribute ("graphCursorInfoFontSize", 12.0);
+                graphCursorInfoFontSize = juce::jlimit (8.0f, 24.0f, graphCursorInfoFontSize);
                 graphBandRandomMinSatEnabled = xml->getBoolAttribute ("graphBandRandomMinSatEnabled", true);
                 graphBandRandomMinSaturation = (float) xml->getDoubleAttribute (
                     "graphBandRandomMinSaturation", 0.25);
@@ -2969,6 +3097,18 @@ void EqEditor::loadUiPrefs()
         if (scopeFractionsStr.isNotEmpty())
             mainComponent->setScopeStripFractions (
                 ScopeLayoutPresets::decodeFractions (scopeFractionsStr, (int) scopeModules.size()));
+        if (scopeViewportXml.isNotEmpty() || scopeViewportFactory.isNotEmpty())
+        {
+            ScopeLayoutPreset vp;
+            vp.name = "_session";
+            vp.strip = scopeStrip;
+            vp.modules = scopeModules;
+            vp.splitX = scopeSplitX;
+            vp.splitY = scopeSplitY;
+            vp.viewportXml = scopeViewportXml;
+            vp.factoryId = scopeViewportFactory;
+            mainComponent->applyScopeLayoutPreset (vp, false);
+        }
         // Restore Scope mode as last left (geometry above already applied).
         mainComponent->setScopeMode (scopeModeOnLoad, false);
         mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (pianoDisplayOnLoad, false);
@@ -3215,15 +3355,34 @@ void EqEditor::loadUiPrefs()
         c.randomizeFaceplateMod = randFaceplate;
         c.randomizeGraphModule = randGraph;
         c.randomizeMenuModule = randMenu;
+        c.randomizeGraphCursorInfo = randCursorInfo;
         c.randomizeRampFftBars = randRampFft;
         c.randomizeRampSpectrogram = randRampSpec;
         c.randomizeRampSpectrogram3D = randRampSpec3D;
         c.randomizeRampSpectrumFill = randRampFill;
+        c.randomizeRampSpectrumCurve = randRampCurve;
+        c.randomizeRampEqCurve = randRampEqCurve;
+        c.randomizeRampSpectrumPreFill = randRampPreFill;
+        c.randomizeRampSpectrumPreCurve = randRampPreCurve;
+        c.randomizeRampSpectrumHoldFill = randRampHoldFill;
+        c.randomizeRampSpectrumHoldCurve = randRampHoldCurve;
+        c.randomizeRampEqSumFill = randRampEqSumFill;
+        c.randomizeRampEqBandCurve = randRampEqBandCurve;
+        c.randomizeRampEqBandFill = randRampEqBandFill;
         c.randomizeRampLevelMeters = randRampMeters;
         c.orderedRampGradation = orderedRampGradation;
         c.enforceLegibleText = enforceLegibleText;
         c.textContrastAmount = textContrastAmount;
         c.optionBoxOpacity = optionBoxOpacity;
+        c.buttonCornerRadius = buttonCornerRadius;
+        c.menuPopupCornerRadius = menuPopupCornerRadius;
+        c.menuPopupOutline = menuPopupOutline;
+        mainComponent->getSharedResources().decodeSettingsSectionState (settingsSectionsStr);
+        c.buttonGlowEnabled = buttonGlowEnabled;
+        c.buttonGlowOnlyOnHover = buttonGlowOnlyOnHover;
+        c.uiFontName = uiFontName;
+        c.uiFontBold = uiFontBold;
+        c.graphCursorInfoFontSize = graphCursorInfoFontSize;
         c.graphBandRandomMinSatEnabled = graphBandRandomMinSatEnabled;
         c.graphBandRandomMinSaturation = graphBandRandomMinSaturation;
         // Re-apply text vs background contrast (Scope + global) after theme restore.
@@ -3279,6 +3438,13 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("scopeStripLayout", mainComponent->isScopeStripLayout());
         xml->setAttribute ("scopeSplitX", (double) mainComponent->getScopeSplitX());
         xml->setAttribute ("scopeSplitY", (double) mainComponent->getScopeSplitY());
+        {
+            auto preset = mainComponent->captureScopeLayoutPreset ("_session");
+            if (preset.viewportXml.isNotEmpty())
+                xml->setAttribute ("scopeViewportXml", preset.viewportXml);
+            if (preset.factoryId.isNotEmpty())
+                xml->setAttribute ("scopeViewportFactory", preset.factoryId);
+        }
         xml->setAttribute ("scopeStripFractions",
                            ScopeLayoutPresets::encodeFractions (mainComponent->getScopeStripFractions()));
         xml->setAttribute ("scopeModules",
@@ -3287,15 +3453,35 @@ void EqEditor::saveUiPrefs() const
         xml->setAttribute ("randFaceplateMod", c.randomizeFaceplateMod);
         xml->setAttribute ("randGraph", c.randomizeGraphModule);
         xml->setAttribute ("randMenu", c.randomizeMenuModule);
+        xml->setAttribute ("randCursorInfo", c.randomizeGraphCursorInfo);
         xml->setAttribute ("randRampFft", c.randomizeRampFftBars);
         xml->setAttribute ("randRampSpec", c.randomizeRampSpectrogram);
         xml->setAttribute ("randRampSpec3D", c.randomizeRampSpectrogram3D);
         xml->setAttribute ("randRampFill", c.randomizeRampSpectrumFill);
+        xml->setAttribute ("randRampCurve", c.randomizeRampSpectrumCurve);
+        xml->setAttribute ("randRampEqCurve", c.randomizeRampEqCurve);
+        xml->setAttribute ("randRampPreFill", c.randomizeRampSpectrumPreFill);
+        xml->setAttribute ("randRampPreCurve", c.randomizeRampSpectrumPreCurve);
+        xml->setAttribute ("randRampHoldFill", c.randomizeRampSpectrumHoldFill);
+        xml->setAttribute ("randRampHoldCurve", c.randomizeRampSpectrumHoldCurve);
+        xml->setAttribute ("randRampEqSumFill", c.randomizeRampEqSumFill);
+        xml->setAttribute ("randRampEqBandCurve", c.randomizeRampEqBandCurve);
+        xml->setAttribute ("randRampEqBandFill", c.randomizeRampEqBandFill);
         xml->setAttribute ("randRampMeters", c.randomizeRampLevelMeters);
         xml->setAttribute ("orderedRampGradation", c.orderedRampGradation);
         xml->setAttribute ("enforceLegibleText", c.enforceLegibleText);
         xml->setAttribute ("textContrastAmount", (double) c.textContrastAmount);
         xml->setAttribute ("optionBoxOpacity", (double) c.optionBoxOpacity);
+        xml->setAttribute ("buttonCornerRadius", (double) c.buttonCornerRadius);
+        xml->setAttribute ("menuPopupCornerRadius", (double) c.menuPopupCornerRadius);
+        xml->setAttribute ("menuPopupOutline", c.menuPopupOutline);
+        xml->setAttribute ("settingsSections",
+                           mainComponent->getSharedResources().encodeSettingsSectionState());
+        xml->setAttribute ("buttonGlowEnabled", c.buttonGlowEnabled);
+        xml->setAttribute ("buttonGlowOnlyOnHover", c.buttonGlowOnlyOnHover);
+        xml->setAttribute ("uiFontName", c.uiFontName);
+        xml->setAttribute ("uiFontBold", c.uiFontBold);
+        xml->setAttribute ("graphCursorInfoFontSize", (double) c.graphCursorInfoFontSize);
         xml->setAttribute ("graphBandRandomMinSatEnabled", c.graphBandRandomMinSatEnabled);
         xml->setAttribute ("graphBandRandomMinSaturation", (double) c.graphBandRandomMinSaturation);
     }
@@ -3659,6 +3845,88 @@ void EqEditor::wireFaceplateKnobInteraction (juce::Slider& knob)
     knob.addMouseListener (static_cast<juce::Component*> (this), false);
 }
 
+int EqEditor::faceplateBandFromComponent (const juce::Component* c) const noexcept
+{
+    for (auto* p = c; p != nullptr && p != this; p = p->getParentComponent())
+        if (auto* sl = dynamic_cast<const juce::Slider*> (p))
+            return faceplateBandIndexForSlider (sl);
+
+    BandNumberButton* buttons[8] = {
+        onOffButton1.get(), onOffButton4.get(), onOffButton5.get(), onOffButton6.get(),
+        onOffButton7.get(), onOffButton8.get(), onOffButton3.get(), onOffButton2.get()
+    };
+    for (int col = 0; col < 8; ++col)
+    {
+        if (c == buttons[col])
+        {
+            if (faceplateBank <= 0)
+            {
+                constexpr int internalByCol[8] = { 4, 7, 0, 1, 2, 3, 6, 5 };
+                return internalByCol[col];
+            }
+            return EqBand::globalFromBankSlot (faceplateBank, col);
+        }
+    }
+
+    return -1;
+}
+
+int EqEditor::faceplateBandUnderMouse() const noexcept
+{
+    const juce::Slider* knobs[] = {
+        &knob1, &knobHpGain, &knob2,
+        &knob3, &knobLpGain, &knob4,
+        &knob5, &knob6, &knob7,
+        &knob8, &knob9, &knob10,
+        &knob11, &knob12, &knob13,
+        &knob14, &knob15, &knob16,
+        &knob17, &knob18, &knob19,
+        &knob20, &knob21, &knob22
+    };
+    for (auto* k : knobs)
+        if (k->isVisible() && k->isMouseOver (true))
+            return faceplateBandIndexForSlider (k);
+
+    BandNumberButton* buttons[8] = {
+        onOffButton1.get(), onOffButton4.get(), onOffButton5.get(), onOffButton6.get(),
+        onOffButton7.get(), onOffButton8.get(), onOffButton3.get(), onOffButton2.get()
+    };
+    for (int col = 0; col < 8; ++col)
+    {
+        if (buttons[col] != nullptr && buttons[col]->isVisible() && buttons[col]->isMouseOver (true))
+        {
+            if (faceplateBank <= 0)
+            {
+                constexpr int internalByCol[8] = { 4, 7, 0, 1, 2, 3, 6, 5 };
+                return internalByCol[col];
+            }
+            return EqBand::globalFromBankSlot (faceplateBank, col);
+        }
+    }
+
+    return -1;
+}
+
+void EqEditor::applyFaceplateHandleHover (int bandIndex)
+{
+    if (mainComponent == nullptr)
+        return;
+    mainComponent->getFrequencyResponseComponent().setFaceplateHoverBand (bandIndex);
+}
+
+void EqEditor::mouseEnter (const juce::MouseEvent& event)
+{
+    const int band = faceplateBandFromComponent (event.eventComponent);
+    if (band >= 0)
+        applyFaceplateHandleHover (band);
+}
+
+void EqEditor::mouseExit (const juce::MouseEvent& event)
+{
+    juce::ignoreUnused (event);
+    applyFaceplateHandleHover (faceplateBandUnderMouse());
+}
+
 int EqEditor::faceplateColumnForSlider (const juce::Slider* slider) const noexcept
 {
     if (slider == &knob1 || slider == &knobHpGain || slider == &knob2) return 0; // Band 1 / col0
@@ -3711,6 +3979,7 @@ void EqEditor::setFaceplateBank (int bankIndex, bool savePrefs)
         mainComponent->getFrequencyResponseComponent().setPreferredCreateBank (faceplateBank);
 
     resized();
+    applyFaceplateHandleHover (faceplateBandUnderMouse());
     if (savePrefs)
         saveUiPrefs();
 }
@@ -4206,6 +4475,7 @@ void EqEditor::applyFaceplateTheme()
     styleChrome (sideCheckSpeedButton);
     styleChrome (sideCheckHqButton);
     attachGraphShadow (helpTooltipsButton);
+    attachGraphShadow (autoGainButton);
     attachGraphShadow (sideCheckButton);
     attachGraphShadow (scopeModeButton);
     attachGraphShadow (sideCheckSpeedButton);
@@ -4490,6 +4760,8 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
     phaseModeCombo.setVisible (! hideDsp);
     sideCheckButton.setVisible (! hideDsp);
     updateSideCheckAmountVisibility();
+
+    applyFaceplateHandleHover (shouldShow ? faceplateBandUnderMouse() : -1);
 }
 
 void EqEditor::applyCompactUi()

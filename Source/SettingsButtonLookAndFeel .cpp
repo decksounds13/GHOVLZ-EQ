@@ -1,4 +1,5 @@
 #include "SettingsButtonLookAndFeel.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 
 SettingsButtonLookAndFeel::SettingsButtonLookAndFeel() = default;
 
@@ -20,25 +21,24 @@ void SettingsButtonLookAndFeel::drawButtonBackground (juce::Graphics& g,
     auto reducedBounds = button.getLocalBounds().toFloat().reduced (button.getWidth() * 0.1f,
                                                                     button.getHeight() * 0.1f);
 
+    // Gear icon is small — cap radius so the control stays readable.
+    const float cornerSize = juce::jmin (GraphOverlayButtonLookAndFeel::cornerRadius(),
+                                         juce::jmin (reducedBounds.getWidth(),
+                                                     reducedBounds.getHeight()) * 0.35f);
+
+    juce::Colour face = idle;
+    if (button.isMouseButtonDown() || shouldDrawButtonAsDown)
+        face = down;
+    else if (shouldDrawButtonAsHighlighted)
+        face = hover;
+
+    const bool hot = shouldDrawButtonAsHighlighted || shouldDrawButtonAsDown
+                     || button.isMouseButtonDown();
+    GraphOverlayButtonLookAndFeel::paintChromeFace (g, reducedBounds, face, cornerSize, hot);
+
     juce::Path path;
-    const float cornerSize = 2.0f;
     path.addRoundedRectangle (reducedBounds, cornerSize);
     shadowPath = path;
-
-    if (SharedResources::glowShadowEffectsEnabled())
-        shadow.render (g, path);
-
-    if (button.isMouseButtonDown() || shouldDrawButtonAsDown)
-        g.setColour (down);
-    else if (shouldDrawButtonAsHighlighted)
-        g.setColour (hover);
-    else
-        g.setColour (idle);
-
-    g.fillRoundedRectangle (reducedBounds, cornerSize);
-
-    g.setColour (c.pluginButtonBackground.darker (0.55f));
-    g.drawRoundedRectangle (reducedBounds.reduced (1.0f), cornerSize, 2.0f);
 }
 
 void SettingsButtonLookAndFeel::drawButtonText (juce::Graphics& g,
@@ -55,8 +55,9 @@ void SettingsButtonLookAndFeel::drawButtonText (juce::Graphics& g,
     const int paddingX = juce::roundToInt (button.getWidth() * 0.23f);
     const int paddingY = juce::roundToInt (button.getHeight() * 0.23f);
     const int lineLength = button.getWidth() - 2 * paddingX;
-    const int lineHeight = 3;
-    const int gapBetweenLines = (button.getHeight() - 2 * paddingY - (3 * lineHeight)) / 2;
+    const int innerH = juce::jmax (3, button.getHeight() - 2 * paddingY);
+    const int lineHeight = juce::jlimit (1, 3, innerH / 5);
+    const int gapBetweenLines = juce::jmax (1, (innerH - 3 * lineHeight) / 2);
 
     for (int i = 0; i < 3; ++i)
         g.fillRect (paddingX, paddingY + i * (lineHeight + gapBetweenLines), lineLength, lineHeight);

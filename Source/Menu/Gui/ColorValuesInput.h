@@ -125,7 +125,7 @@ private:
 
             if (!label.isBeingEdited()) {
                 auto alpha = label.isEnabled() ? 1.0f : 0.5f;
-                const juce::Font customFont("Lato Black", 16.0f, juce::Font::plain);
+                const juce::Font customFont = SharedResources::uiFont (16.0f);
 
                 g.setColour(label.findColour(juce::Label::textColourId).withMultipliedAlpha(alpha));
                 g.setFont(customFont);

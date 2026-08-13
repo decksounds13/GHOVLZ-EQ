@@ -1,5 +1,6 @@
 #include "Spectrogram3DDebugComponent.h"
 #include "../../MainComponent.h"
+#include "../Menu.h"
 
 namespace
 {
@@ -17,12 +18,13 @@ Spectrogram3DDebugComponent::Content::Content (SharedResources& resources,
                                                ColourRampBank& ramps)
     : sharedResources (resources),
       treeState (state),
-      colourRamps (ramps)
+      colourRamps (ramps),
+      sphereSection (resources, "spec3d.debug.sphere", "Sphere", false)
 {
     juce::ignoreUnused (treeState, colourRamps);
 
     titleLabel.setText ("3D Debug", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -97,6 +99,19 @@ Spectrogram3DDebugComponent::Content::Content (SharedResources& resources,
         if (safe != nullptr)
             safe->syncControlsFromMain();
     });
+
+    wireSection (sphereSection);
+}
+
+void Spectrogram3DDebugComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
+    };
 }
 
 Spectrogram3DDebugComponent::Content::~Content() = default;
@@ -111,7 +126,7 @@ void Spectrogram3DDebugComponent::Content::styleSlider (juce::Slider& slider)
 
 void Spectrogram3DDebugComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
 }
@@ -201,25 +216,41 @@ void Spectrogram3DDebugComponent::Content::applyControlsToMain()
 int Spectrogram3DDebugComponent::Content::getPreferredHeight() const
 {
     const int row = kLabelH + kLabelGap + kSliderH + kRowGap;
-    return kPadY * 2 + 24 + 8 + 52 + (kToggleH + 6) + row * 7 + 28 + 8;
+    return kPadY * 2 + 24 + 8
+           + sphereSection.heightFor (52 + 8 + (kToggleH + 6) + row * 7 + 28 + 8);
 }
 
 void Spectrogram3DDebugComponent::Content::resized()
 {
     auto area = getLocalBounds().reduced (kPadX, kPadY);
     titleLabel.setBounds (area.removeFromTop (24));
-    area.removeFromTop (6);
-    noteLabel.setBounds (area.removeFromTop (52));
     area.removeFromTop (8);
-    layoutToggle (area, sphereToggle);
-    layoutSliderRow (area, sphereSizeLabel, sphereSizeSlider);
-    layoutSliderRow (area, sphereXLabel, sphereXSlider);
-    layoutSliderRow (area, sphereYLabel, sphereYSlider);
-    layoutSliderRow (area, sphereZLabel, sphereZSlider);
-    layoutColourEditor (area, albedoEditor);
-    layoutSliderRow (area, specularLabel, specularSlider);
-    layoutSliderRow (area, roughLabel, roughSlider);
-    layoutSliderRow (area, metalLabel, metalSlider);
+
+    sphereSection.applyVisible ({
+        &noteLabel, &sphereToggle,
+        &sphereSizeLabel, &sphereSizeSlider,
+        &sphereXLabel, &sphereXSlider,
+        &sphereYLabel, &sphereYSlider,
+        &sphereZLabel, &sphereZSlider,
+        &albedoEditor,
+        &specularLabel, &specularSlider,
+        &roughLabel, &roughSlider,
+        &metalLabel, &metalSlider });
+    sphereSection.placeHeader (area);
+    if (sphereSection.isOpen())
+    {
+        noteLabel.setBounds (area.removeFromTop (52));
+        area.removeFromTop (8);
+        layoutToggle (area, sphereToggle);
+        layoutSliderRow (area, sphereSizeLabel, sphereSizeSlider);
+        layoutSliderRow (area, sphereXLabel, sphereXSlider);
+        layoutSliderRow (area, sphereYLabel, sphereYSlider);
+        layoutSliderRow (area, sphereZLabel, sphereZSlider);
+        layoutColourEditor (area, albedoEditor);
+        layoutSliderRow (area, specularLabel, specularSlider);
+        layoutSliderRow (area, roughLabel, roughSlider);
+        layoutSliderRow (area, metalLabel, metalSlider);
+    }
 }
 
 Spectrogram3DDebugComponent::Spectrogram3DDebugComponent (SharedResources& resources,
@@ -241,5 +272,6 @@ void Spectrogram3DDebugComponent::paint (juce::Graphics& g)
 
 void Spectrogram3DDebugComponent::resized()
 {
-    content.setBounds (getLocalBounds());
+    content.setBounds (0, 0, getWidth(), content.getPreferredHeight());
+    content.resized();
 }

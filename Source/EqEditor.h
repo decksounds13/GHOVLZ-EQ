@@ -50,6 +50,8 @@ public:
     void sliderDragStarted (juce::Slider* slider) override;
     void sliderDragEnded (juce::Slider* slider) override;
     void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
+    void mouseEnter (const juce::MouseEvent& event) override;
+    void mouseExit (const juce::MouseEvent& event) override;
 
     void buttonClicked(juce::Button* button) override;
 
@@ -100,6 +102,7 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress& key) override;
 
     std::function<void()> handle1DragStart;
     std::function<void()> handle1DragEnd;
@@ -123,6 +126,9 @@ private:
     /** Display column 0–7 for a faceplate knob, or -1. */
     int faceplateColumnForSlider (const juce::Slider* slider) const noexcept;
     void wireFaceplateKnobInteraction (juce::Slider& knob);
+    int faceplateBandFromComponent (const juce::Component* c) const noexcept;
+    int faceplateBandUnderMouse() const noexcept;
+    void applyFaceplateHandleHover (int bandIndex);
     void openOptionBoxForFaceplateBand (int bandIndex);
     void rebindFaceplateAttachments();
     void updateFaceplateBandNumbers();
@@ -136,6 +142,7 @@ private:
     void layoutSideCheckButton();
     void layoutScopeModeButton();
     void showSideCheckHpLpSlopeMenu (bool forHp);
+    void showAutoGainModeMenu();
     void updateSideCheckAmountVisibility();
     void updateSideCheckSpeedButtonText();
     void toggleSideCheckSpeed();
@@ -202,7 +209,27 @@ private:
 
     // Output gain (faceplate, expanded mode)
     RotaryImageKnob3 outputGainKnob;
-    juce::TextButton autoGainButton { "A" };
+    /** Faceplate Auto Gain with right-click RMS / LUFS (same as Settings - Loudness). */
+    class AutoGainButton : public juce::TextButton
+    {
+    public:
+        AutoGainButton() : juce::TextButton ("A") {}
+
+        std::function<void()> onPopupMenu;
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+            {
+                if (onPopupMenu != nullptr)
+                    onPopupMenu();
+                return;
+            }
+
+            juce::TextButton::mouseDown (e);
+        }
+    };
+    AutoGainButton autoGainButton;
     juce::TextButton sideCheckButton { "SideCheck" };
 
     /** TextButton with right-click Pre/Post menu for Scope mode. */
@@ -270,20 +297,13 @@ private:
                 fill = fill.withMultipliedAlpha (0.45f);
                 ink = ink.withMultipliedAlpha (0.4f);
             }
-            else if (down)
+            else
             {
-                fill = fill.brighter (0.15f);
-                ink = ink.brighter (0.1f);
-            }
-            else if (highlighted)
-            {
-                fill = fill.brighter (0.1f);
-                ink = ink.brighter (0.08f);
+                fill = GraphOverlayButtonLookAndFeel::adjustForInteraction (fill, highlighted, down);
+                ink = GraphOverlayButtonLookAndFeel::adjustForInteraction (ink, highlighted, down);
             }
 
-            GraphOverlayButtonLookAndFeel::fillRoundedGradient (g, bounds, fill, 3.0f);
-            g.setColour (ink.withAlpha (0.35f));
-            g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
+            GraphOverlayButtonLookAndFeel::paintChromeButton (g, bounds, fill);
 
             // Chevron
             const float cx = bounds.getCentreX();

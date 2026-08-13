@@ -1,4 +1,5 @@
 #include "HistogramComponent.h"
+#include "Menu/SharedResources.h"
 #include <algorithm>
 #include <cmath>
 
@@ -510,7 +511,7 @@ void HistogramComponent::paint (juce::Graphics& g)
         const auto lineCol = themeColors != nullptr ? themeColors->sharedColors.meterClip
                                                     : juce::Colour::fromRGB (220, 40, 40);
         const float labelH = 11.0f;
-        auto labelFont = juce::Font (juce::FontOptions (labelH).withName ("Lato Black"));
+        auto labelFont = SharedResources::uiFont (labelH);
         g.setFont (labelFont);
 
         for (const auto& m : markersCopy)

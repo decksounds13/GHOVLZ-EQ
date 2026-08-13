@@ -2,6 +2,7 @@
 #include "ColourRampBank.h"
 #include "RampPresetPicker.h"
 #include "../ComboBoxLookAndFeel.h"
+#include "../GraphOverlayButtonLookAndFeel.h"
 #include <algorithm>
 #include <cmath>
 
@@ -280,25 +281,11 @@ namespace
 
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
-            // Square face, tight radius (editor chrome - not pill labels).
             auto r = getLocalBounds().toFloat().reduced (0.5f);
             const bool on = getToggleState();
             auto fill = findColour (on ? juce::TextButton::buttonOnColourId
                                        : juce::TextButton::buttonColourId);
-            if (down) fill = fill.darker (0.15f);
-            else if (over) fill = fill.brighter (0.10f);
-
-            g.setColour (fill);
-            g.fillRoundedRectangle (r, 2.0f);
-
-            // Inner top edge highlight
-            g.setColour (juce::Colours::white.withAlpha (on ? 0.14f : (over ? 0.10f : 0.06f)));
-            g.drawLine (r.getX() + 1.0f, r.getY() + 1.0f, r.getRight() - 1.0f, r.getY() + 1.0f, 1.0f);
-
-            g.setColour (juce::Colours::black.withAlpha (0.45f));
-            g.drawRoundedRectangle (r, 2.0f, 1.0f);
-            g.setColour (juce::Colours::white.withAlpha (on ? 0.22f : 0.10f));
-            g.drawRoundedRectangle (r.reduced (0.5f), 1.5f, 1.0f);
+            GraphOverlayButtonLookAndFeel::paintChromeButton (g, r, fill, over, down);
 
             const auto ink = (on ? juce::Colours::black
                                  : findColour (juce::TextButton::textColourOffId))

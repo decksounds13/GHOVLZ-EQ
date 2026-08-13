@@ -248,7 +248,7 @@ void UIElementsList::paintListBoxItem(int rowNumber, juce::Graphics& g,
         g.setColour(listTextColor);
 
         // Set the font to Lato Black, size 16
-        g.setFont(juce::Font("Lato Black", 16.0f, juce::Font::plain));
+        g.setFont(SharedResources::uiFont (16.0f));
 
         const int textIndent = 10;  // Add an indent for the text
         const int textWidth = width - swatchSize - 15 - textIndent;  // Adjust text width for the indent

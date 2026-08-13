@@ -1,5 +1,6 @@
 #include "ScopeLevelMeterModule.h"
 #include "EqProcessor.h"
+#include "Menu/SharedResources.h"
 
 namespace
 {
@@ -165,7 +166,7 @@ void ScopeLevelMeterModule::timerCallback()
 int ScopeLevelMeterModule::computeReadoutWidth (int availableW) const
 {
     const float numH = tiledPresentation ? 13.0f : 10.5f;
-    auto numFont = juce::Font (juce::FontOptions (numH).withName ("Lato Black"));
+    auto numFont = SharedResources::uiFont (numH);
 
     // Labels sit above values — only two value columns need horizontal room.
     const int valueColW = juce::jmax (54,
@@ -225,7 +226,7 @@ void ScopeLevelMeterModule::paint (juce::Graphics& g)
                                      (float) readoutCol.getHeight() * 0.10f);
     // Peak / RMS / T.P. name labels — 2× the previous size.
     const float labH = juce::jmax (15.0f, numH * 1.24f);
-    auto numFont = juce::Font (juce::FontOptions (numH).withName ("Lato Black"));
+    auto numFont = SharedResources::uiFont (numH);
     auto labFont = juce::Font (juce::FontOptions (labH));
 
     const int valueColW = juce::jmax (1, readoutCol.getWidth() / 2);
@@ -281,7 +282,7 @@ void ScopeLevelMeterModule::paint (juce::Graphics& g)
     auto holdRArea = holdRow.removeFromLeft (barW);
 
     const float holdFontH = juce::jlimit (8.0f, 11.0f, (float) kPeakHoldH - 2.0f);
-    g.setFont (juce::Font (juce::FontOptions (holdFontH).withName ("Lato Black")));
+    g.setFont (SharedResources::uiFont (holdFontH));
     g.setColour (textCol.withAlpha (0.9f));
     g.drawText (formatDbfs (holdL),
                 holdLArea.withSizeKeepingCentre (juce::jmax (holdLArea.getWidth(), 64), holdLArea.getHeight()),

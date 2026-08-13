@@ -5,6 +5,7 @@
 #include "../../ColourRamp/ColourRampBank.h"
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class HistogramSettingsComponent : public juce::Component,
                                    private juce::ChangeListener
@@ -95,6 +96,12 @@ private:
         juce::Label glowOpacityLabel;
         juce::Slider glowOpacitySlider;
         std::unique_ptr<SliderAttachment> glowOpacityAttachment;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection displaySection;
+        SettingsSection tracesSection;
+        SettingsSection glowSection;
+        SettingsSection rampSection;
     };
 
     SharedResources& sharedResources;

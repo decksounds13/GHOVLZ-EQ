@@ -1,6 +1,7 @@
 #include "LevelMetersComponent.h"
 
 #include "../../MainComponent.h"
+#include "../SharedResources.h"
 #include "../../ModuleLookPresets.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
@@ -23,10 +24,13 @@ LevelMetersComponent::Content::Content (SharedResources& resources,
       treeState (state),
       colourRamps (ramps),
       peakRampEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
-      rmsRampEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
+      rmsRampEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
+      displaySection (resources, "meters.display", "Display", false),
+      peakSection (resources, "meters.peak", "Peak", false),
+      rmsSection (resources, "meters.rms", "RMS", false)
 {
     titleLabel.setText ("Level Meters", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions ("Lato Black", 20.0f, juce::Font::plain));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -218,6 +222,20 @@ LevelMetersComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (clipThresholdLabel);
 
     updateGlowVisibility();
+
+    wireSection (displaySection);
+    wireSection (peakSection);
+    wireSection (rmsSection);
+}
+
+void LevelMetersComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        requestParentRelayout();
+    };
 }
 
 LevelMetersComponent::Content::~Content()
@@ -273,7 +291,7 @@ void LevelMetersComponent::Content::styleSlider (juce::Slider& slider)
 
 void LevelMetersComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions ("Lato Black", 15.0f, juce::Font::plain));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
     label.setMinimumHorizontalScale (1.0f);
@@ -282,7 +300,7 @@ void LevelMetersComponent::Content::styleLabel (juce::Label& label)
 void LevelMetersComponent::Content::styleSectionLabel (juce::Label& label)
 {
     styleLabel (label);
-    label.setFont (juce::FontOptions ("Lato Black", 16.0f, juce::Font::plain));
+    label.setFont (SharedResources::uiFont (16.0f));
     label.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.9f));
 }
 
@@ -364,19 +382,15 @@ int LevelMetersComponent::Content::getPreferredHeight() const
     const int toggleRow = kMeterToggleH + 6;
     const int peakGlowRows = peakGlowToggle.getToggleState() ? 4 : 0;
     const int rmsGlowRows = rmsGlowToggle.getToggleState() ? 4 : 0;
+    const int rampBlock = kMeterLabelH + kMeterLabelGap;
 
     return kMeterPadY * 2
            + 24 + 8
-           + 2 * sliderRow // mode + channel
-           + 5 * sliderRow // behaviour
-           + kMeterLabelH + 6 // peak section
-           + kMeterLabelH + kMeterLabelGap + peakRampEditor.getPreferredHeight() + kMeterRowGap
-           + toggleRow
-           + peakGlowRows * sliderRow
-           + kMeterLabelH + 6 // rms section
-           + kMeterLabelH + kMeterLabelGap + rmsRampEditor.getPreferredHeight() + kMeterRowGap
-           + toggleRow
-           + rmsGlowRows * sliderRow;
+           + displaySection.heightFor (7 * sliderRow)
+           + peakSection.heightFor (rampBlock + peakRampEditor.getPreferredHeight()
+                                    + kMeterRowGap + toggleRow + peakGlowRows * sliderRow)
+           + rmsSection.heightFor (rampBlock + rmsRampEditor.getPreferredHeight()
+                                   + kMeterRowGap + toggleRow + rmsGlowRows * sliderRow);
 }
 
 void LevelMetersComponent::Content::resized()
@@ -388,41 +402,86 @@ void LevelMetersComponent::Content::resized()
     titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
 
-    layoutComboRow (area, modeLabel, modeCombo);
-    layoutComboRow (area, channelModeLabel, channelModeCombo);
-    layoutSliderRow (area, readoutIntegrationLabel, readoutIntegrationSlider);
-    layoutSliderRow (area, fallLabel, fallSlider);
-    layoutSliderRow (area, peakHoldLabel, peakHoldSlider);
-    layoutSliderRow (area, clipHoldLabel, clipHoldSlider);
-    layoutSliderRow (area, clipThresholdLabel, clipThresholdSlider);
+    peakRampSectionLabel.setVisible (false);
+    rmsRampSectionLabel.setVisible (false);
 
-    peakRampSectionLabel.setBounds (area.removeFromTop (kMeterLabelH));
-    area.removeFromTop (6);
-    peakRampLabel.setBounds (area.removeFromTop (kMeterLabelH));
-    area.removeFromTop (kMeterLabelGap);
-    peakRampEditor.setBounds (area.removeFromTop (peakRampEditor.getPreferredHeight())
-                                  .removeFromLeft (juce::jmin (520, area.getWidth())));
-    area.removeFromTop (kMeterRowGap);
+    displaySection.applyVisible ({
+        &modeLabel, &modeCombo, &channelModeLabel, &channelModeCombo,
+        &readoutIntegrationLabel, &readoutIntegrationSlider,
+        &fallLabel, &fallSlider, &peakHoldLabel, &peakHoldSlider,
+        &clipHoldLabel, &clipHoldSlider, &clipThresholdLabel, &clipThresholdSlider });
+    displaySection.placeHeader (area);
+    if (displaySection.isOpen())
+    {
+        layoutComboRow (area, modeLabel, modeCombo);
+        layoutComboRow (area, channelModeLabel, channelModeCombo);
+        layoutSliderRow (area, readoutIntegrationLabel, readoutIntegrationSlider);
+        layoutSliderRow (area, fallLabel, fallSlider);
+        layoutSliderRow (area, peakHoldLabel, peakHoldSlider);
+        layoutSliderRow (area, clipHoldLabel, clipHoldSlider);
+        layoutSliderRow (area, clipThresholdLabel, clipThresholdSlider);
+    }
 
-    layoutToggle (area, peakGlowToggle);
-    layoutSliderRow (area, peakGlowThresholdLabel, peakGlowThresholdSlider);
-    layoutSliderRow (area, peakGlowRadiusLabel, peakGlowRadiusSlider);
-    layoutSliderRow (area, peakGlowSpreadLabel, peakGlowSpreadSlider);
-    layoutSliderRow (area, peakGlowOpacityLabel, peakGlowOpacitySlider);
+    peakSection.applyVisible ({
+        &peakRampLabel, &peakRampEditor, &peakGlowToggle,
+        &peakGlowThresholdLabel, &peakGlowThresholdSlider,
+        &peakGlowRadiusLabel, &peakGlowRadiusSlider,
+        &peakGlowSpreadLabel, &peakGlowSpreadSlider,
+        &peakGlowOpacityLabel, &peakGlowOpacitySlider });
+    peakSection.placeHeader (area);
+    if (peakSection.isOpen())
+    {
+        peakRampLabel.setBounds (area.removeFromTop (kMeterLabelH));
+        area.removeFromTop (kMeterLabelGap);
+        peakRampEditor.setBounds (area.removeFromTop (peakRampEditor.getPreferredHeight())
+                                      .removeFromLeft (juce::jmin (520, area.getWidth())));
+        area.removeFromTop (kMeterRowGap);
 
-    rmsRampSectionLabel.setBounds (area.removeFromTop (kMeterLabelH));
-    area.removeFromTop (6);
-    rmsRampLabel.setBounds (area.removeFromTop (kMeterLabelH));
-    area.removeFromTop (kMeterLabelGap);
-    rmsRampEditor.setBounds (area.removeFromTop (rmsRampEditor.getPreferredHeight())
-                                 .removeFromLeft (juce::jmin (520, area.getWidth())));
-    area.removeFromTop (kMeterRowGap);
+        layoutToggle (area, peakGlowToggle);
+        updateGlowVisibility();
+        layoutSliderRow (area, peakGlowThresholdLabel, peakGlowThresholdSlider);
+        layoutSliderRow (area, peakGlowRadiusLabel, peakGlowRadiusSlider);
+        layoutSliderRow (area, peakGlowSpreadLabel, peakGlowSpreadSlider);
+        layoutSliderRow (area, peakGlowOpacityLabel, peakGlowOpacitySlider);
+    }
 
-    layoutToggle (area, rmsGlowToggle);
-    layoutSliderRow (area, rmsGlowThresholdLabel, rmsGlowThresholdSlider);
-    layoutSliderRow (area, rmsGlowRadiusLabel, rmsGlowRadiusSlider);
-    layoutSliderRow (area, rmsGlowSpreadLabel, rmsGlowSpreadSlider);
-    layoutSliderRow (area, rmsGlowOpacityLabel, rmsGlowOpacitySlider);
+    rmsSection.applyVisible ({
+        &rmsRampLabel, &rmsRampEditor, &rmsGlowToggle,
+        &rmsGlowThresholdLabel, &rmsGlowThresholdSlider,
+        &rmsGlowRadiusLabel, &rmsGlowRadiusSlider,
+        &rmsGlowSpreadLabel, &rmsGlowSpreadSlider,
+        &rmsGlowOpacityLabel, &rmsGlowOpacitySlider });
+    rmsSection.placeHeader (area);
+    if (rmsSection.isOpen())
+    {
+        rmsRampLabel.setBounds (area.removeFromTop (kMeterLabelH));
+        area.removeFromTop (kMeterLabelGap);
+        rmsRampEditor.setBounds (area.removeFromTop (rmsRampEditor.getPreferredHeight())
+                                     .removeFromLeft (juce::jmin (520, area.getWidth())));
+        area.removeFromTop (kMeterRowGap);
+
+        layoutToggle (area, rmsGlowToggle);
+        updateGlowVisibility();
+        layoutSliderRow (area, rmsGlowThresholdLabel, rmsGlowThresholdSlider);
+        layoutSliderRow (area, rmsGlowRadiusLabel, rmsGlowRadiusSlider);
+        layoutSliderRow (area, rmsGlowSpreadLabel, rmsGlowSpreadSlider);
+        layoutSliderRow (area, rmsGlowOpacityLabel, rmsGlowOpacitySlider);
+    }
+
+    if (! peakSection.isOpen())
+        peakSection.applyVisible ({
+            &peakRampLabel, &peakRampEditor, &peakGlowToggle,
+            &peakGlowThresholdLabel, &peakGlowThresholdSlider,
+            &peakGlowRadiusLabel, &peakGlowRadiusSlider,
+            &peakGlowSpreadLabel, &peakGlowSpreadSlider,
+            &peakGlowOpacityLabel, &peakGlowOpacitySlider });
+    if (! rmsSection.isOpen())
+        rmsSection.applyVisible ({
+            &rmsRampLabel, &rmsRampEditor, &rmsGlowToggle,
+            &rmsGlowThresholdLabel, &rmsGlowThresholdSlider,
+            &rmsGlowRadiusLabel, &rmsGlowRadiusSlider,
+            &rmsGlowSpreadLabel, &rmsGlowSpreadSlider,
+            &rmsGlowOpacityLabel, &rmsGlowOpacitySlider });
 }
 
 LevelMetersComponent::LevelMetersComponent (SharedResources& resources,

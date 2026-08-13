@@ -1,5 +1,7 @@
 #include "Analyser.h"
 #include <JuceHeader.h>
+#include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -37,11 +39,16 @@ Analyser::Analyser (juce::AudioProcessorValueTreeState& audioProcessorValueTreeS
     mr_valueTree.addParameterListener ("LEFT_ID", this);
     mr_valueTree.addParameterListener ("RIGHT_ID", this);
     mr_valueTree.addParameterListener ("BOTH_ID", this);
+    mr_valueTree.addParameterListener (SpectrumAnalysis::channelParamId(), this);
+    mr_valueTree.addParameterListener (SpectrumAnalysis::octaveSmoothParamId(), this);
     mr_valueTree.addParameterListener ("AVG_ID", this);
     mr_valueTree.addParameterListener ("RANGE_ID", this);
     mr_valueTree.addParameterListener ("MAXIMUM_ID", this);
     mr_valueTree.addParameterListener ("MINIMUM_ID", this);
     mr_valueTree.addParameterListener ("REFRESH_ID", this);
+
+    readChannelParamsFromTree();
+    readOctaveSmoothFromTree();
 
     startThread (juce::Thread::Priority::low);
 }
@@ -54,6 +61,8 @@ Analyser::~Analyser()
     mr_valueTree.removeParameterListener ("LEFT_ID", this);
     mr_valueTree.removeParameterListener ("RIGHT_ID", this);
     mr_valueTree.removeParameterListener ("BOTH_ID", this);
+    mr_valueTree.removeParameterListener (SpectrumAnalysis::channelParamId(), this);
+    mr_valueTree.removeParameterListener (SpectrumAnalysis::octaveSmoothParamId(), this);
     mr_valueTree.removeParameterListener ("AVG_ID", this);
     mr_valueTree.removeParameterListener ("RANGE_ID", this);
     mr_valueTree.removeParameterListener ("MAXIMUM_ID", this);
@@ -201,6 +210,36 @@ float Analyser::getScopeMaximumsData (size_t index)
     return m_scopeMaximumData[index];
 }
 
+float Analyser::getScopeSecondaryData (size_t index)
+{
+    const juce::ScopedLock lock (m_scopeLock);
+
+    if (index >= m_scopeDynamicDataB.size())
+        return 0.0f;
+
+    return m_scopeDynamicDataB[index];
+}
+
+float Analyser::getScopeSecondaryPreData (size_t index)
+{
+    const juce::ScopedLock lock (m_scopeLock);
+
+    if (index >= m_scopePreDataB.size())
+        return 0.0f;
+
+    return m_scopePreDataB[index];
+}
+
+float Analyser::getScopeSecondaryMaximumsData (size_t index)
+{
+    const juce::ScopedLock lock (m_scopeLock);
+
+    if (index >= m_scopeMaximumDataB.size())
+        return 0.0f;
+
+    return m_scopeMaximumDataB[index];
+}
+
 float Analyser::getOffset()
 {
     return m_offset.load();
@@ -323,30 +362,21 @@ float Analyser::getModifiedScopeData (size_t index)
 }
 
 // ============================================================================
-void Analyser::pushIntoRing (std::array<float, kRingCapacity>& ring,
-                             std::atomic<size_t>& writePosAtom,
-                             std::atomic<size_t>& filledAtom,
-                             const float* left,
-                             const float* right,
-                             int numSamples) noexcept
+void Analyser::pushIntoStereoRings (std::array<float, kRingCapacity>& ringL,
+                                    std::array<float, kRingCapacity>& ringR,
+                                    std::atomic<size_t>& writePosAtom,
+                                    std::atomic<size_t>& filledAtom,
+                                    const float* left,
+                                    const float* right,
+                                    int numSamples) noexcept
 {
-    const auto channels = m_activeChannels.load();
     size_t writePos = writePosAtom.load (std::memory_order_relaxed);
     size_t filled = filledAtom.load (std::memory_order_relaxed);
 
     for (int n = 0; n < numSamples; ++n)
     {
-        float dataForAnalysis = 0.0f;
-
-        switch (channels)
-        {
-            case Channels::left:  dataForAnalysis = left[n]; break;
-            case Channels::right: dataForAnalysis = right[n]; break;
-            case Channels::both:  dataForAnalysis = (left[n] + right[n]) * 0.5f; break;
-            default: break;
-        }
-
-        ring[writePos] = dataForAnalysis;
+        ringL[writePos] = left[n];
+        ringR[writePos] = right[n];
         writePos = (writePos + 1) & kRingMask;
 
         if (filled < kRingCapacity)
@@ -394,7 +424,7 @@ void Analyser::pushSamplesIntoFifo (const float* left, const float* right, int n
         || left == nullptr || right == nullptr || numSamples <= 0)
         return;
 
-    pushIntoRing (m_ring, m_ringWritePos, m_ringFilled, left, right, numSamples);
+    pushIntoStereoRings (m_ringL, m_ringR, m_ringWritePos, m_ringFilled, left, right, numSamples);
 }
 
 void Analyser::pushPreSamplesIntoFifo (const float* left, const float* right, int numSamples) noexcept
@@ -403,7 +433,7 @@ void Analyser::pushPreSamplesIntoFifo (const float* left, const float* right, in
         || left == nullptr || right == nullptr || numSamples <= 0)
         return;
 
-    pushIntoRing (m_preRing, m_preRingWritePos, m_preRingFilled, left, right, numSamples);
+    pushIntoStereoRings (m_preRingL, m_preRingR, m_preRingWritePos, m_preRingFilled, left, right, numSamples);
 }
 
 bool Analyser::isSpectrumAnalyserParamOn() const
@@ -438,20 +468,57 @@ void Analyser::analyseLatestWindow()
         return;
 
     const size_t fftSize = m_fftSize.load();
-    if (fftSize == 0 || m_fftData.size() < fftSize * 2)
+    if (fftSize == 0
+        || m_fftData.size() < fftSize * 2
+        || m_timeL.size() < fftSize * 2
+        || m_timeR.size() < fftSize * 2)
         return;
+
+    const auto channel = m_activeChannels.load();
+    const bool overlay = SpectrumAnalysis::isOverlay (channel);
+    const auto primaryMix = primaryMixFor (channel);
+    const auto secondaryMix = secondaryMixFor (channel);
 
     bool posted = false;
 
     const size_t writePos = m_ringWritePos.load (std::memory_order_acquire);
     const size_t filled = m_ringFilled.load (std::memory_order_acquire);
 
-    if (copyLatestFromRing (m_ring, writePos, filled, m_fftData.data(), fftSize))
+    const bool haveL = copyLatestFromRing (m_ringL, writePos, filled, m_timeL.data(), fftSize);
+    const bool haveR = copyLatestFromRing (m_ringR, writePos, filled, m_timeR.data(), fftSize);
+
+    if (haveL && haveR)
     {
-        processFFT();
-        calculateCurrentVolumes();
-        calculateDynamicVolumes();
-        calculateMaximumVolumes();
+        mixTimeDomain (m_timeL.data(), m_timeR.data(), m_fftData.data(), fftSize, primaryMix);
+        performFrequencyTransform (m_fftData.data());
+        calculateVolumesFromFft (m_fftData, m_avgData);
+
+        if (overlay && m_fftDataB.size() >= fftSize * 2)
+        {
+            mixTimeDomain (m_timeL.data(), m_timeR.data(), m_fftDataB.data(), fftSize, secondaryMix);
+            performFrequencyTransform (m_fftDataB.data());
+            calculateVolumesFromFft (m_fftDataB, m_avgDataB);
+        }
+
+        if (m_avgFifoSize.load() != m_avgFactor.load())
+            ++m_avgFifoSize;
+
+        {
+            const auto writePtr = m_avgFifoWritePointer.load();
+            m_avgFifoReadPointer = writePtr;
+            m_avgFifoWritePointer.store ((writePtr + 1) % m_avgFifoMaximumSize);
+        }
+
+        calculateAveragedVolumes (m_avgData, m_volumsDynamicData);
+        applyOctaveSmoothing (m_volumsDynamicData);
+        calculateHoldVolumes (m_volumsDynamicData, m_volumsMaximumData, &m_currentMaximumVolumeInDecibels);
+
+        if (overlay)
+        {
+            calculateAveragedVolumes (m_avgDataB, m_volumsDynamicDataB);
+            applyOctaveSmoothing (m_volumsDynamicDataB);
+            calculateHoldVolumes (m_volumsDynamicDataB, m_volumsMaximumDataB, nullptr);
+        }
 
         if (m_volumeRangeIsDynamamic.load())
         {
@@ -464,14 +531,27 @@ void Analyser::analyseLatestWindow()
         posted = true;
     }
 
-    if (m_preFftData.size() >= fftSize * 2)
+    if (m_preFftData.size() >= fftSize * 2
+        && m_timeL.size() >= fftSize * 2
+        && m_timeR.size() >= fftSize * 2)
     {
         const size_t preWrite = m_preRingWritePos.load (std::memory_order_acquire);
         const size_t preFilled = m_preRingFilled.load (std::memory_order_acquire);
 
-        if (copyLatestFromRing (m_preRing, preWrite, preFilled, m_preFftData.data(), fftSize))
+        const bool havePreL = copyLatestFromRing (m_preRingL, preWrite, preFilled, m_timeL.data(), fftSize);
+        const bool havePreR = copyLatestFromRing (m_preRingR, preWrite, preFilled, m_timeR.data(), fftSize);
+
+        if (havePreL && havePreR)
         {
-            processPreFFT();
+            mixTimeDomain (m_timeL.data(), m_timeR.data(), m_preFftData.data(), fftSize, primaryMix);
+            performFrequencyTransform (m_preFftData.data());
+
+            if (overlay && m_preFftDataB.size() >= fftSize * 2)
+            {
+                mixTimeDomain (m_timeL.data(), m_timeR.data(), m_preFftDataB.data(), fftSize, secondaryMix);
+                performFrequencyTransform (m_preFftDataB.data());
+            }
+
             calculatePreScopeFromFft();
             m_preNextFFTBlockReady.store (true);
             posted = true;
@@ -479,6 +559,17 @@ void Analyser::analyseLatestWindow()
     }
 
     juce::ignoreUnused (posted);
+}
+
+void Analyser::publishAdaptedPair (const std::vector<float>& srcDb, std::vector<float>& destNorm,
+                                   float minDb, float maxDb)
+{
+    const size_t n = srcDb.size();
+    if (destNorm.size() != n)
+        destNorm.resize (n);
+
+    for (size_t i = 0; i < n; ++i)
+        destNorm[i] = adaptData (srcDb[i], minDb, maxDb);
 }
 
 void Analyser::publishAdaptedScopes()
@@ -497,15 +588,15 @@ void Analyser::publishAdaptedScopes()
 
     const juce::ScopedLock scopeLock (m_scopeLock);
 
-    if (m_scopeDynamicData.size() != n)
-        m_scopeDynamicData.resize (n);
-    if (m_scopeMaximumData.size() != n)
-        m_scopeMaximumData.resize (n);
+    publishAdaptedPair (m_volumsDynamicData, m_scopeDynamicData, minDb, maxDb);
+    publishAdaptedPair (m_volumsMaximumData, m_scopeMaximumData, minDb, maxDb);
 
-    for (size_t i = 0; i < n; ++i)
+    if (SpectrumAnalysis::isOverlay (m_activeChannels.load())
+        && m_volumsDynamicDataB.size() == n
+        && m_volumsMaximumDataB.size() == n)
     {
-        m_scopeDynamicData[i] = adaptData (m_volumsDynamicData[i], minDb, maxDb);
-        m_scopeMaximumData[i] = adaptData (m_volumsMaximumData[i], minDb, maxDb);
+        publishAdaptedPair (m_volumsDynamicDataB, m_scopeDynamicDataB, minDb, maxDb);
+        publishAdaptedPair (m_volumsMaximumDataB, m_scopeMaximumDataB, minDb, maxDb);
     }
 }
 
@@ -535,33 +626,38 @@ void Analyser::calculateNextFrameOfSpectrum()
 }
 
 // ============================================================================
-void Analyser::processFFT()
+void Analyser::performFrequencyTransform (float* data)
 {
-    switch (m_fftSize.load())
+    if (data == nullptr)
+        return;
+
+    const auto fftSize = m_fftSize.load();
+
+    switch (fftSize)
     {
         case 512:
-            m_window_512.multiplyWithWindowingTable (m_fftData.data(), m_fftSize.load());
-            m_forwardFFT_9.performFrequencyOnlyForwardTransform (m_fftData.data());
+            m_window_512.multiplyWithWindowingTable (data, fftSize);
+            m_forwardFFT_9.performFrequencyOnlyForwardTransform (data);
             break;
         case 1024:
-            m_window_1024.multiplyWithWindowingTable (m_fftData.data(), m_fftSize.load());
-            m_forwardFFT_10.performFrequencyOnlyForwardTransform (m_fftData.data());
+            m_window_1024.multiplyWithWindowingTable (data, fftSize);
+            m_forwardFFT_10.performFrequencyOnlyForwardTransform (data);
             break;
         case 2048:
-            m_window_2048.multiplyWithWindowingTable (m_fftData.data(), m_fftSize.load());
-            m_forwardFFT_11.performFrequencyOnlyForwardTransform (m_fftData.data());
+            m_window_2048.multiplyWithWindowingTable (data, fftSize);
+            m_forwardFFT_11.performFrequencyOnlyForwardTransform (data);
             break;
         case 4096:
-            m_window_4096.multiplyWithWindowingTable (m_fftData.data(), m_fftSize.load());
-            m_forwardFFT_12.performFrequencyOnlyForwardTransform (m_fftData.data());
+            m_window_4096.multiplyWithWindowingTable (data, fftSize);
+            m_forwardFFT_12.performFrequencyOnlyForwardTransform (data);
             break;
         case 8192:
-            m_window_8192.multiplyWithWindowingTable (m_fftData.data(), m_fftSize.load());
-            m_forwardFFT_13.performFrequencyOnlyForwardTransform (m_fftData.data());
+            m_window_8192.multiplyWithWindowingTable (data, fftSize);
+            m_forwardFFT_13.performFrequencyOnlyForwardTransform (data);
             break;
         case 16384:
-            m_window_16384.multiplyWithWindowingTable (m_fftData.data(), m_fftSize.load());
-            m_forwardFFT_14.performFrequencyOnlyForwardTransform (m_fftData.data());
+            m_window_16384.multiplyWithWindowingTable (data, fftSize);
+            m_forwardFFT_14.performFrequencyOnlyForwardTransform (data);
             break;
         default:
             DBG ("FFT Size erorr!");
@@ -569,37 +665,14 @@ void Analyser::processFFT()
     }
 }
 
+void Analyser::processFFT()
+{
+    performFrequencyTransform (m_fftData.data());
+}
+
 void Analyser::processPreFFT()
 {
-    switch (m_fftSize.load())
-    {
-        case 512:
-            m_window_512.multiplyWithWindowingTable (m_preFftData.data(), m_fftSize.load());
-            m_forwardFFT_9.performFrequencyOnlyForwardTransform (m_preFftData.data());
-            break;
-        case 1024:
-            m_window_1024.multiplyWithWindowingTable (m_preFftData.data(), m_fftSize.load());
-            m_forwardFFT_10.performFrequencyOnlyForwardTransform (m_preFftData.data());
-            break;
-        case 2048:
-            m_window_2048.multiplyWithWindowingTable (m_preFftData.data(), m_fftSize.load());
-            m_forwardFFT_11.performFrequencyOnlyForwardTransform (m_preFftData.data());
-            break;
-        case 4096:
-            m_window_4096.multiplyWithWindowingTable (m_preFftData.data(), m_fftSize.load());
-            m_forwardFFT_12.performFrequencyOnlyForwardTransform (m_preFftData.data());
-            break;
-        case 8192:
-            m_window_8192.multiplyWithWindowingTable (m_preFftData.data(), m_fftSize.load());
-            m_forwardFFT_13.performFrequencyOnlyForwardTransform (m_preFftData.data());
-            break;
-        case 16384:
-            m_window_16384.multiplyWithWindowingTable (m_preFftData.data(), m_fftSize.load());
-            m_forwardFFT_14.performFrequencyOnlyForwardTransform (m_preFftData.data());
-            break;
-        default:
-            break;
-    }
+    performFrequencyTransform (m_preFftData.data());
 }
 
 void Analyser::calculatePreScopeFromFft()
@@ -610,8 +683,26 @@ void Analyser::calculatePreScopeFromFft()
     if (scopeSize == 0)
         return;
 
-    if (m_volumsPreData.size() != scopeSize)
-        m_volumsPreData.resize (scopeSize, m_minimumVolumeInDecibels);
+    auto fillPreDb = [scopeSize, offset, this] (const std::vector<float>& fft, std::vector<float>& destDb)
+    {
+        if (destDb.size() != scopeSize)
+            destDb.resize (scopeSize, m_minimumVolumeInDecibels);
+
+        const auto bins = juce::jmin (scopeSize, fft.size());
+        for (size_t i = 0; i < bins; ++i)
+            destDb[i] = juce::Decibels::gainToDecibels (fft[i]) - offset;
+
+        for (size_t i = bins; i < scopeSize; ++i)
+            destDb[i] = m_minimumVolumeInDecibels;
+
+        applyOctaveSmoothing (destDb);
+    };
+
+    fillPreDb (m_preFftData, m_volumsPreData);
+
+    const bool overlay = SpectrumAnalysis::isOverlay (m_activeChannels.load());
+    if (overlay)
+        fillPreDb (m_preFftDataB, m_volumsPreDataB);
 
     float minDb = -120.0f;
     float maxDb = 12.0f;
@@ -621,45 +712,47 @@ void Analyser::calculatePreScopeFromFft()
         maxDb = m_maximumVolumeInDecibels;
     }
 
-    const auto bins = juce::jmin (scopeSize, m_preFftData.size());
-    for (size_t i = 0; i < bins; ++i)
-        m_volumsPreData[i] = juce::Decibels::gainToDecibels (m_preFftData[i]) - offset;
-
-    for (size_t i = bins; i < scopeSize; ++i)
-        m_volumsPreData[i] = m_minimumVolumeInDecibels;
-
     const juce::ScopedLock scopeLock (m_scopeLock);
+    publishAdaptedPair (m_volumsPreData, m_scopePreData, minDb, maxDb);
 
-    if (m_scopePreData.size() != scopeSize)
-        m_scopePreData.resize (scopeSize, 0.0f);
-
-    for (size_t i = 0; i < scopeSize; ++i)
-        m_scopePreData[i] = adaptData (m_volumsPreData[i], minDb, maxDb);
+    if (overlay)
+        publishAdaptedPair (m_volumsPreDataB, m_scopePreDataB, minDb, maxDb);
 }
 
 // ============================================================================
-void Analyser::calculateCurrentVolumes()
+void Analyser::calculateVolumesFromFft (const std::vector<float>& fftData,
+                                        std::array<std::vector<float>, m_avgFifoMaximumSize>& avgData)
 {
     const auto scopeSize = m_scopeSize.load();
     const auto offset = juce::Decibels::gainToDecibels (static_cast<float> (scopeSize));
     const auto writePtr = m_avgFifoWritePointer.load();
-    auto& avgSlot = m_avgData[writePtr];
+    auto& avgSlot = avgData[writePtr];
 
     if (avgSlot.size() != scopeSize)
         avgSlot.resize (scopeSize);
 
-    const auto bins = juce::jmin (scopeSize, m_fftData.size());
+    const auto bins = juce::jmin (scopeSize, fftData.size());
     for (size_t i = 0; i < bins; ++i)
-        avgSlot[i] = juce::Decibels::gainToDecibels (m_fftData[i]) - offset;
+        avgSlot[i] = juce::Decibels::gainToDecibels (fftData[i]) - offset;
+
+    for (size_t i = bins; i < scopeSize; ++i)
+        avgSlot[i] = m_minimumVolumeInDecibels;
+}
+
+void Analyser::calculateCurrentVolumes()
+{
+    calculateVolumesFromFft (m_fftData, m_avgData);
 
     if (m_avgFifoSize.load() != m_avgFactor.load())
         ++m_avgFifoSize;
 
+    const auto writePtr = m_avgFifoWritePointer.load();
     m_avgFifoReadPointer = writePtr;
     m_avgFifoWritePointer.store ((writePtr + 1) % m_avgFifoMaximumSize);
 }
 
-void Analyser::calculateDynamicVolumes()
+void Analyser::calculateAveragedVolumes (const std::array<std::vector<float>, m_avgFifoMaximumSize>& avgData,
+                                         std::vector<float>& destDb)
 {
     const auto scopeSize = m_scopeSize.load();
     auto avgSize = m_avgFifoSize.load();
@@ -667,8 +760,8 @@ void Analyser::calculateDynamicVolumes()
     if (avgSize == 0 || scopeSize == 0)
         return;
 
-    if (m_volumsDynamicData.size() != scopeSize)
-        m_volumsDynamicData.resize (scopeSize, m_minimumVolumeInDecibels);
+    if (destDb.size() != scopeSize)
+        destDb.resize (scopeSize, m_minimumVolumeInDecibels);
 
     for (size_t data = 0; data < scopeSize; ++data)
     {
@@ -678,7 +771,7 @@ void Analyser::calculateDynamicVolumes()
 
         for (size_t counter = avgSize; counter > 0; --counter)
         {
-            const auto& slot = m_avgData[tempReadPointer];
+            const auto& slot = avgData[tempReadPointer];
             if (data < slot.size())
             {
                 sum += slot[data];
@@ -688,12 +781,19 @@ void Analyser::calculateDynamicVolumes()
             tempReadPointer = (tempReadPointer == 0) ? m_avgFifoMaximumSize - 1 : tempReadPointer - 1;
         }
 
-        m_volumsDynamicData[data] = (counted > 0) ? (sum / static_cast<float> (counted))
-                                                  : m_minimumVolumeInDecibels;
+        destDb[data] = (counted > 0) ? (sum / static_cast<float> (counted))
+                                     : m_minimumVolumeInDecibels;
     }
 }
 
-void Analyser::calculateMaximumVolumes()
+void Analyser::calculateDynamicVolumes()
+{
+    calculateAveragedVolumes (m_avgData, m_volumsDynamicData);
+}
+
+void Analyser::calculateHoldVolumes (const std::vector<float>& dynamicDb,
+                                     std::vector<float>& holdDb,
+                                     std::atomic<float>* peakOut)
 {
     const float floorDb = m_minimumVolumeInDecibels;
     const float holdSeconds = juce::jmax (
@@ -711,7 +811,9 @@ void Analyser::calculateMaximumVolumes()
         dtSeconds = juce::jlimit (0.0f, 0.25f, dtSeconds);
     }
 
-    m_lastMaxHoldUpdateMs = nowMs;
+    // Shared dt for both overlay layers — only the first (primary) call advances time.
+    if (peakOut != nullptr)
+        m_lastMaxHoldUpdateMs = nowMs;
 
     const float decayDbPerSecond = (m_maximumVolumeInDecibels - floorDb) / holdSeconds;
     const float decayThisFrame = decayDbPerSecond * dtSeconds;
@@ -719,26 +821,32 @@ void Analyser::calculateMaximumVolumes()
     float framePeak = floorDb;
     const auto scopeSize = m_scopeSize.load();
 
-    if (m_volumsDynamicData.size() != scopeSize)
+    if (dynamicDb.size() != scopeSize)
         return;
 
-    if (m_volumsMaximumData.size() != scopeSize)
-        m_volumsMaximumData.assign (scopeSize, floorDb);
+    if (holdDb.size() != scopeSize)
+        holdDb.assign (scopeSize, floorDb);
 
     for (size_t i = 0; i < scopeSize; ++i)
     {
-        const float dynamicDb = m_volumsDynamicData[i];
-        float& maxDb = m_volumsMaximumData[i];
+        const float dyn = dynamicDb[i];
+        float& maxDb = holdDb[i];
 
-        if (dynamicDb > maxDb)
-            maxDb = dynamicDb;
+        if (dyn > maxDb)
+            maxDb = dyn;
         else
             maxDb = juce::jmax (floorDb, maxDb - decayThisFrame);
 
         framePeak = juce::jmax (framePeak, maxDb);
     }
 
-    m_currentMaximumVolumeInDecibels.store (framePeak);
+    if (peakOut != nullptr)
+        peakOut->store (framePeak);
+}
+
+void Analyser::calculateMaximumVolumes()
+{
+    calculateHoldVolumes (m_volumsDynamicData, m_volumsMaximumData, &m_currentMaximumVolumeInDecibels);
 }
 
 void Analyser::calculateCurrentAverageVolume()
@@ -784,17 +892,39 @@ void Analyser::parameterChanged (const juce::String& parameterID, float newValue
     {
         setRefreshMs ((int) std::lround (newValue));
     }
+    else if (parameterID == SpectrumAnalysis::channelParamId())
+    {
+        if (! m_syncingChannelParams.load())
+        {
+            int index = (int) std::lround (newValue);
+            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                    mr_valueTree.getParameter (SpectrumAnalysis::channelParamId())))
+                index = choice->getIndex();
+            applyChannelFromChoiceIndex (index);
+        }
+    }
+    else if (parameterID == SpectrumAnalysis::octaveSmoothParamId())
+    {
+        int index = (int) std::lround (newValue);
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+                mr_valueTree.getParameter (SpectrumAnalysis::octaveSmoothParamId())))
+            index = choice->getIndex();
+        m_octaveSmoothOctaves.store (SpectrumAnalysis::octaveWidthFromIndex (index));
+    }
     else if (parameterID == "LEFT_ID")
     {
-        setActiveChannel (Channels::left);
+        if (newValue > 0.5f && ! m_syncingChannelParams.load())
+            applyChannelFromChoiceIndex ((int) Channels::left);
     }
     else if (parameterID == "RIGHT_ID")
     {
-        setActiveChannel (Channels::right);
+        if (newValue > 0.5f && ! m_syncingChannelParams.load())
+            applyChannelFromChoiceIndex ((int) Channels::right);
     }
     else if (parameterID == "BOTH_ID")
     {
-        setActiveChannel (Channels::both);
+        if (newValue > 0.5f && ! m_syncingChannelParams.load())
+            applyChannelFromChoiceIndex ((int) Channels::both);
     }
     else if (parameterID == "AVG_ID")
     {
@@ -850,11 +980,18 @@ void Analyser::setFFTBlockSize (const int blockMenuIndex)
     m_ringFilled.store (0);
     m_preRingWritePos.store (0);
     m_preRingFilled.store (0);
-    m_ring.fill (0.0f);
-    m_preRing.fill (0.0f);
+    m_ringL.fill (0.0f);
+    m_ringR.fill (0.0f);
+    m_preRingL.fill (0.0f);
+    m_preRingR.fill (0.0f);
 
-    m_fftData.resize (m_fftSize.load() * 2);
-    m_preFftData.resize (m_fftSize.load() * 2);
+    const auto fftBytes = m_fftSize.load() * 2;
+    m_timeL.assign (fftBytes, 0.0f);
+    m_timeR.assign (fftBytes, 0.0f);
+    m_fftData.assign (fftBytes, 0.0f);
+    m_fftDataB.assign (fftBytes, 0.0f);
+    m_preFftData.assign (fftBytes, 0.0f);
+    m_preFftDataB.assign (fftBytes, 0.0f);
     m_nextFFTBlockReady.store (false);
     m_preNextFFTBlockReady.store (false);
     m_dynamicRangeNeedsHostUpdate.store (false);
@@ -862,17 +999,27 @@ void Analyser::setFFTBlockSize (const int blockMenuIndex)
     {
         const juce::ScopedLock rangeLock (m_volumeRangeChange);
         m_volumsDynamicData.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
+        m_volumsDynamicDataB.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
         m_volumsMaximumData.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
+        m_volumsMaximumDataB.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
         m_volumsPreData.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
+        m_volumsPreDataB.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
+        m_octaveSmoothScratch.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
+        m_octavePrefix.assign (m_scopeSize.load() + 1, 0.0);
         for (auto& vector : m_avgData)
+            vector.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
+        for (auto& vector : m_avgDataB)
             vector.assign (m_scopeSize.load(), m_minimumVolumeInDecibels);
     }
 
     {
         const juce::ScopedLock scopeLock (m_scopeLock);
         m_scopeDynamicData.assign (m_scopeSize.load(), 0.0f);
+        m_scopeDynamicDataB.assign (m_scopeSize.load(), 0.0f);
         m_scopeMaximumData.assign (m_scopeSize.load(), 0.0f);
+        m_scopeMaximumDataB.assign (m_scopeSize.load(), 0.0f);
         m_scopePreData.assign (m_scopeSize.load(), 0.0f);
+        m_scopePreDataB.assign (m_scopeSize.load(), 0.0f);
     }
 
     m_avgFifoSize.store (0);
@@ -888,6 +1035,194 @@ void Analyser::setFFTBlockSize (const int blockMenuIndex)
 void Analyser::setActiveChannel (Channels channels)
 {
     m_activeChannels.store (channels);
+}
+
+Analyser::Channels Analyser::primaryMixFor (Channels channel) const noexcept
+{
+    switch (channel)
+    {
+        case Channels::left:
+        case Channels::leftAndRight: return Channels::left;
+        case Channels::right:        return Channels::right;
+        case Channels::side:         return Channels::side;
+        case Channels::mid:
+        case Channels::midAndSide:
+        case Channels::both:
+        default:                     return Channels::mid;
+    }
+}
+
+Analyser::Channels Analyser::secondaryMixFor (Channels channel) const noexcept
+{
+    if (channel == Channels::leftAndRight)
+        return Channels::right;
+
+    return Channels::side;
+}
+
+void Analyser::mixTimeDomain (const float* left,
+                              const float* right,
+                              float* dest,
+                              size_t numSamples,
+                              Channels mix) const noexcept
+{
+    if (dest == nullptr || numSamples == 0)
+        return;
+
+    switch (mix)
+    {
+        case Channels::left:
+            if (left != nullptr)
+                std::copy_n (left, numSamples, dest);
+            else
+                std::fill_n (dest, numSamples, 0.0f);
+            break;
+
+        case Channels::right:
+            if (right != nullptr)
+                std::copy_n (right, numSamples, dest);
+            else
+                std::fill_n (dest, numSamples, 0.0f);
+            break;
+
+        case Channels::side:
+            if (left != nullptr && right != nullptr)
+            {
+                for (size_t i = 0; i < numSamples; ++i)
+                    dest[i] = (left[i] - right[i]) * 0.5f;
+            }
+            else
+            {
+                std::fill_n (dest, numSamples, 0.0f);
+            }
+            break;
+
+        case Channels::mid:
+        case Channels::both:
+        case Channels::midAndSide:
+        case Channels::leftAndRight:
+        default:
+            if (left != nullptr && right != nullptr)
+            {
+                for (size_t i = 0; i < numSamples; ++i)
+                    dest[i] = (left[i] + right[i]) * 0.5f;
+            }
+            else if (left != nullptr)
+            {
+                std::copy_n (left, numSamples, dest);
+            }
+            else
+            {
+                std::fill_n (dest, numSamples, 0.0f);
+            }
+            break;
+    }
+
+    std::fill_n (dest + numSamples, numSamples, 0.0f);
+}
+
+void Analyser::applyOctaveSmoothing (std::vector<float>& db)
+{
+    const float octaves = m_octaveSmoothOctaves.load();
+    const int n = (int) db.size();
+    if (n < 3 || octaves <= 0.01f)
+        return;
+
+    const float halfOct = octaves * 0.5f;
+    const float ratio = std::pow (2.0f, halfOct);
+
+    if ((int) m_octavePrefix.size() != n + 1)
+        m_octavePrefix.assign ((size_t) n + 1, 0.0);
+    if ((int) m_octaveSmoothScratch.size() != n)
+        m_octaveSmoothScratch.resize ((size_t) n);
+
+    m_octavePrefix[0] = 0.0;
+    for (int i = 0; i < n; ++i)
+        m_octavePrefix[(size_t) i + 1] = m_octavePrefix[(size_t) i] + (double) db[(size_t) i];
+
+    m_octaveSmoothScratch[0] = db[0];
+
+    for (int i = 1; i < n; ++i)
+    {
+        const float iF = (float) i;
+        const int lo = juce::jlimit (1, n - 1, (int) std::floor ((double) (iF / ratio)));
+        const int hi = juce::jlimit (1, n - 1, (int) std::ceil  ((double) (iF * ratio)));
+        const int a = juce::jmin (lo, hi);
+        const int b = juce::jmax (lo, hi);
+        const double sum = m_octavePrefix[(size_t) b + 1] - m_octavePrefix[(size_t) a];
+        const int count = b - a + 1;
+        m_octaveSmoothScratch[(size_t) i] = (count > 0) ? (float) (sum / (double) count) : db[(size_t) i];
+    }
+
+    db.swap (m_octaveSmoothScratch);
+}
+
+void Analyser::applyChannelFromChoiceIndex (int index)
+{
+    const auto channel = SpectrumAnalysis::channelFromIndex (index);
+    m_activeChannels.store (channel);
+
+    if (m_syncingChannelParams.exchange (true))
+        return;
+
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+            mr_valueTree.getParameter (SpectrumAnalysis::channelParamId())))
+    {
+        if (choice->getIndex() != (int) channel)
+            choice->setValueNotifyingHost (choice->convertTo0to1 ((float) (int) channel));
+    }
+
+    auto setBool = [this] (const char* id, bool on)
+    {
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*> (mr_valueTree.getParameter (id)))
+            if (p->get() != on)
+                p->setValueNotifyingHost (on ? 1.0f : 0.0f);
+    };
+
+    setBool ("LEFT_ID",  channel == Channels::left);
+    setBool ("RIGHT_ID", channel == Channels::right);
+    setBool ("BOTH_ID",  channel == Channels::both);
+
+    m_syncingChannelParams.store (false);
+}
+
+void Analyser::readChannelParamsFromTree()
+{
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+            mr_valueTree.getParameter (SpectrumAnalysis::channelParamId())))
+    {
+        m_activeChannels.store (SpectrumAnalysis::channelFromIndex (choice->getIndex()));
+        return;
+    }
+
+    if (auto* left = mr_valueTree.getRawParameterValue ("LEFT_ID");
+        left != nullptr && left->load() > 0.5f)
+    {
+        m_activeChannels.store (Channels::left);
+        return;
+    }
+
+    if (auto* right = mr_valueTree.getRawParameterValue ("RIGHT_ID");
+        right != nullptr && right->load() > 0.5f)
+    {
+        m_activeChannels.store (Channels::right);
+        return;
+    }
+
+    m_activeChannels.store (Channels::both);
+}
+
+void Analyser::readOctaveSmoothFromTree()
+{
+    int index = (int) SpectrumAnalysis::OctaveSmooth::off;
+
+    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+            mr_valueTree.getParameter (SpectrumAnalysis::octaveSmoothParamId())))
+        index = choice->getIndex();
+    else if (auto* raw = mr_valueTree.getRawParameterValue (SpectrumAnalysis::octaveSmoothParamId()))
+        index = (int) std::lround (raw->load());
+
+    m_octaveSmoothOctaves.store (SpectrumAnalysis::octaveWidthFromIndex (index));
 }
 
 void Analyser::setAvg (size_t avg)

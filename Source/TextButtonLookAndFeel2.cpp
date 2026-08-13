@@ -1,4 +1,5 @@
 #include "TextButtonLookAndFeel2.h"
+#include "Menu/SharedResources.h"
 
 
 TextButtonLookAndFeel2::TextButtonLookAndFeel2(float textSize)
@@ -12,7 +13,7 @@ TextButtonLookAndFeel2::TextButtonLookAndFeel2(float textSize)
     buttonTextColor = juce::Colours::whitesmoke.withAlpha(0.8f);
     buttonOutlineColor = juce::Colours::black;
 
-    customLabel.setFont(juce::Font("Lato Black", textSize, juce::Font::plain)); // Initialize the custom label
+    customLabel.setFont (SharedResources::uiFont (textSize));
     customLabel.setColour(juce::Label::textColourId, buttonTextColor);
     customLabel.setJustificationType(juce::Justification::centred);
 }
@@ -64,7 +65,7 @@ void TextButtonLookAndFeel2::drawButtonText(juce::Graphics& g, juce::TextButton&
     juce::Colour currentTextColor = buttonTextColor.withMultipliedBrightness(brightnessMultiplier);
 
     g.setColour(currentTextColor);
-    g.setFont(juce::Font("Lato Black", textSize, juce::Font::plain));
+    g.setFont (SharedResources::uiFont (textSize));
 
     // Calculate the centered position for the text
     juce::Rectangle<float> textBounds(buttonBounds.getX(), buttonBounds.getY() + (sizeDifference / 2),

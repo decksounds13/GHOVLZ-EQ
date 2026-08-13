@@ -54,7 +54,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
         setBandListening (bandMonitorButton->getToggleState());
     };
 
-    juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
+    juce::Font myFont = SharedResources::uiFont (16.0f);
 
     setSize (designWidth, designHeight);
     // Must stay clipped. Unclipped paint + drop shadow left OptionBox "ghosts" when
@@ -109,7 +109,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     addChildComponent (spectralSatDriveKnob);
 
     // Initialize the label for the current band name
-    bandNameLabel.setFont(juce::Font("Lato Black", 15.0f, juce::Font::plain));
+    bandNameLabel.setFont(SharedResources::uiFont (15.0f));
     bandNameLabel.setJustificationType(juce::Justification::centred);
     bandNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     bandNameLabel.setMinimumHorizontalScale (0.5f);
@@ -272,7 +272,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     auto setupSpectralSliderLabel = [this] (juce::Label& label, const juce::String& text)
     {
         label.setText (text, juce::NotificationType::dontSendNotification);
-        label.setFont (juce::Font ("Lato Black", 10.0f, juce::Font::plain));
+        label.setFont (SharedResources::uiFont (10.0f));
         label.setJustificationType (juce::Justification::centred);
         label.setColour (juce::Label::textColourId, colors().optionText);
         // Never ellipsize "Res"/"Amt" to "..." — zero border (default 5px sides
@@ -302,7 +302,7 @@ OptionBoxMenu::OptionBoxMenu (juce::AudioProcessorValueTreeState& state, EqProce
     releaseLabel.setText ("R", juce::NotificationType::dontSendNotification);
     for (auto* label : { &attackLabel, &releaseLabel })
     {
-        label->setFont (juce::Font ("Lato Black", 12.0f, juce::Font::plain));
+        label->setFont (SharedResources::uiFont (12.0f));
         label->setJustificationType (juce::Justification::centred);
         label->setColour (juce::Label::textColourId, colors().optionText);
         label->setInterceptsMouseClicks (false, false);
@@ -411,7 +411,7 @@ void OptionBoxMenu::applyThemeToChildControls()
 {
     const auto& c = colors();
     const auto panelInk = c.legibleTextOn (c.optionText, c.optionBackground);
-    const auto comboInk = c.legibleTextOn (c.optionComboText, c.optionComboBackground);
+    const auto comboInk = c.dropdownTextOn (c.optionComboText, c.optionComboBackground);
     const auto buttonInk = c.legibleTextOn (c.optionText, c.optionComboBackground);
     const auto quietInk = c.enforceLegibleText
                               ? c.legibleTextOn (c.optionText.withAlpha (0.88f), c.optionComboBackground)
@@ -672,7 +672,7 @@ void OptionBoxMenu::resized()
     int onOffButton1Size = 32;
 
 
-    juce::Font myFont("Lato Black", 16.0f, juce::Font::plain);
+    juce::Font myFont = SharedResources::uiFont (16.0f);
 
     // Top-left gold < > cycle bands without moving the box.
     constexpr int navSize = 18;
@@ -818,7 +818,7 @@ void OptionBoxMenu::resized()
     const int dynBtnW = 15;
     const int dynBtnH = 18;
     // Full plain captions "Transient" / "Sustain" — never ship "..." from a ~34 px button.
-    const juce::Font modeFont (juce::FontOptions().withName ("Lato Black").withHeight (9.0f));
+    const juce::Font modeFont (SharedResources::uiFont (9.0f));
     const float modeTextW = juce::jmax (
         juce::GlyphArrangement::getStringWidth (modeFont, "Transient"),
         juce::GlyphArrangement::getStringWidth (modeFont, "Sustain"));
@@ -2154,9 +2154,7 @@ void OptionBoxMenu::setCurrentBandIndex(int index, const std::string bandNames[]
     bandNameLabel.setText (title, juce::NotificationType::dontSendNotification);
     bandNameLabel.setTooltip (title);
     // Two-digit band numbers need a slightly smaller face to avoid "...".
-    bandNameLabel.setFont (juce::Font ("Lato Black",
-                                       globalDisplay >= 9 ? 13.0f : 15.0f,
-                                       juce::Font::plain));
+    bandNameLabel.setFont (SharedResources::uiFont (globalDisplay >= 9 ? 13.0f : 15.0f));
     bandNameLabel.setColour (juce::Label::textColourId, juce::Colours::white);
     bindKnobsToBand (index);
     syncChannelModeButtons();

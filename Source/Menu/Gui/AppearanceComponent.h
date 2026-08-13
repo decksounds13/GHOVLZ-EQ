@@ -19,6 +19,7 @@
 #include "CustomTextButton1.h"
 #include "Eyedropper.h"
 #include "../../CustomPopup.h"
+#include "SettingsSection.h"
 
 class AppearanceComponent : public juce::Component,
     public UIElementsList::Listener,
@@ -32,6 +33,8 @@ public:
     ~AppearanceComponent() override;  // Destructor to remove listener
     void paint(juce::Graphics& g) override;
     void resized() override;
+    /** Height of the full Appearance page so Menu's viewport can scroll. */
+    int getPreferredContentHeight() const;
 
     void sliderValueChanged(juce::Slider* slider);
 
@@ -71,6 +74,7 @@ public:
     void applyColourSideEffects (const juce::String& elementName, juce::Colour newColor);
 
     void notifyThemeLiveChanged();
+    void applyUiFontPreview (const juce::String& fontName, bool persist);
 
     void showRandomizeScopeMenu();
     void refreshAfterRandomize();
@@ -146,7 +150,7 @@ private:
     juce::Label coloursSectionLabel;
     juce::Label themesLabel;
     juce::Label randomizeSectionLabel;
-    juce::Label chromeSectionLabel;
+    SettingsSection chromeSection;
 
     juce::ToggleButton enforceLegibleTextToggle { "Legible text" };
     juce::Label textContrastLabel;
@@ -155,6 +159,46 @@ private:
     juce::Slider optionBoxOpacitySlider;
     /** Live percent for Option box opacity (e.g. "90%"). */
     juce::Label optionBoxOpacityPercentLabel;
+
+    juce::Label buttonCornerRadiusLabel;
+    juce::Slider buttonCornerRadiusSlider;
+    /** Live px readout (e.g. "6 px"). */
+    juce::Label buttonCornerRadiusValueLabel;
+
+    juce::Label menuPopupRadiusLabel;
+    juce::Slider menuPopupRadiusSlider;
+    juce::Label menuPopupRadiusValueLabel;
+    juce::ToggleButton menuPopupOutlineToggle { "Menu outline" };
+
+    juce::Label uiFontLabel;
+
+    /** Combo whose popup previews each typeface on hover (commit only on click). */
+    class UiFontPreviewCombo : public juce::ComboBox
+    {
+    public:
+        std::function<void (const juce::String&)> onHoverPreview;
+        std::function<void()> onMenuDismissedWithoutChoice;
+        void showPopup() override;
+        void hidePopup();
+        void mouseDown (const juce::MouseEvent& e) override;
+        void dismissFontList (bool committed);
+
+    private:
+        void toggleFontList();
+        void launchFontList();
+        juce::Component::SafePointer<juce::Component> fontWindow;
+    };
+
+    UiFontPreviewCombo uiFontCombo;
+    juce::ToggleButton uiFontBoldToggle { "Bold text" };
+    juce::String committedUiFontName;
+
+    juce::Label cursorInfoSizeLabel;
+    juce::Slider cursorInfoSizeSlider;
+    juce::Label cursorInfoSizeValueLabel;
+
+    juce::ToggleButton buttonGlowToggle { "Button glow" };
+    juce::ToggleButton buttonGlowHoverOnlyToggle { "Glow on hover only" };
 
     std::unique_ptr<Eyedropper> eyedropper;
     std::unique_ptr<juce::TextButton> eyedropperButton; // Add this line

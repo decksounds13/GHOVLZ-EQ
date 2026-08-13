@@ -110,6 +110,70 @@ ColourRampBank::ColourRampBank()
         r.enabled = true;
         ramps[(int) Target::meterRms] = std::move (r);
     }
+    {
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::leftToRight;
+        r.stops = {
+            { 0.0f, juce::Colour::fromRGB (70, 200, 255) },
+            { 0.5f, juce::Colour::fromRGB (255, 210, 80) },
+            { 1.0f, juce::Colour::fromRGB (255, 90, 150) }
+        };
+        r.enabled = true; // product default: analyzer curves ramp L→R
+        ramps[(int) Target::spectrumCurve] = std::move (r);
+    }
+    {
+        GradientRamp r;
+        r.mapMode = GradientRamp::MapMode::leftToRight;
+        r.stops = {
+            { 0.0f, juce::Colour::fromRGB (90, 210, 255) },
+            { 0.55f, juce::Colour::fromRGB (255, 215, 95) },
+            { 1.0f, juce::Colour::fromRGB (255, 85, 165) }
+        };
+        r.enabled = true; // product default: EQ curves ramp L→R
+        ramps[(int) Target::eqCurve] = std::move (r);
+    }
+
+    auto makeSpatial = [] (GradientRamp::MapMode mode,
+                           std::initializer_list<GradientRamp::Stop> stops) -> GradientRamp
+    {
+        GradientRamp r;
+        r.mapMode = mode;
+        r.stops = stops;
+        r.enabled = true;
+        return r;
+    };
+
+    ramps[(int) Target::spectrumPreFill] = makeSpatial (
+        GradientRamp::MapMode::bottomToTop,
+        { { 0.0f, juce::Colour::fromRGBA (32, 48, 58, 160) },
+          { 1.0f, juce::Colour::fromRGBA (120, 190, 210, 190) } });
+    ramps[(int) Target::spectrumPreCurve] = makeSpatial (
+        GradientRamp::MapMode::leftToRight,
+        { { 0.0f, juce::Colour::fromRGB (60, 150, 200) },
+          { 0.55f, juce::Colour::fromRGB (180, 210, 90) },
+          { 1.0f, juce::Colour::fromRGB (220, 120, 80) } });
+    ramps[(int) Target::spectrumHoldFill] = makeSpatial (
+        GradientRamp::MapMode::bottomToTop,
+        { { 0.0f, juce::Colour::fromRGBA (58, 32, 42, 160) },
+          { 1.0f, juce::Colour::fromRGBA (219, 150, 132, 190) } });
+    ramps[(int) Target::spectrumHoldCurve] = makeSpatial (
+        GradientRamp::MapMode::leftToRight,
+        { { 0.0f, juce::Colour::fromRGB (220, 170, 80) },
+          { 0.55f, juce::Colour::fromRGB (255, 140, 90) },
+          { 1.0f, juce::Colour::fromRGB (255, 80, 140) } });
+    ramps[(int) Target::eqSumFill] = makeSpatial (
+        GradientRamp::MapMode::topToBottom,
+        { { 0.0f, juce::Colour::fromRGBA (255, 130, 30, 180) },
+          { 1.0f, juce::Colour::fromRGBA (139, 105, 20, 100) } });
+    ramps[(int) Target::eqBandCurve] = makeSpatial (
+        GradientRamp::MapMode::leftToRight,
+        { { 0.0f, juce::Colour::fromRGB (120, 220, 255) },
+          { 0.5f, juce::Colour::fromRGB (255, 200, 80) },
+          { 1.0f, juce::Colour::fromRGB (255, 90, 180) } });
+    ramps[(int) Target::eqBandFill] = makeSpatial (
+        GradientRamp::MapMode::bottomToTop,
+        { { 0.0f, juce::Colour::fromRGBA (40, 50, 70, 140) },
+          { 1.0f, juce::Colour::fromRGBA (200, 180, 90, 170) } });
 
     load();
     sanitizeMapModes();
@@ -124,14 +188,23 @@ juce::String ColourRampBank::targetName (Target t)
         case Target::fftBars:       return "FFT Bars";
         case Target::spectrogram:   return "Spectrogram";
         case Target::spectrogram3D: return "Spectrogram 3D";
-        case Target::spectrumFill:  return "Spectrum Fill";
-        case Target::oscilloscope:  return "Oscilloscope";
-        case Target::goniometer:    return "Goniometer";
-        case Target::stereogram:    return "Stereogram";
-        case Target::histogram:     return "Histogram";
-        case Target::meterPeak:     return "Meter Peak";
-        case Target::meterRms:      return "Meter RMS";
-        default:                    return "Ramp";
+        case Target::spectrumFill:      return "Post Fill";
+        case Target::oscilloscope:      return "Oscilloscope";
+        case Target::goniometer:        return "Goniometer";
+        case Target::stereogram:        return "Stereogram";
+        case Target::histogram:         return "Histogram";
+        case Target::meterPeak:         return "Meter Peak";
+        case Target::meterRms:          return "Meter RMS";
+        case Target::spectrumCurve:     return "Post Curve";
+        case Target::eqCurve:           return "Sum Curve";
+        case Target::spectrumPreFill:   return "Pre Fill";
+        case Target::spectrumPreCurve:  return "Pre Curve";
+        case Target::spectrumHoldFill:  return "Hold Fill";
+        case Target::spectrumHoldCurve: return "Hold Curve";
+        case Target::eqSumFill:         return "Sum Fill";
+        case Target::eqBandCurve:       return "Band Curve";
+        case Target::eqBandFill:        return "Band Fill";
+        default:                        return "Ramp";
     }
 }
 
@@ -276,7 +349,11 @@ void ColourRampBank::randomizeRamps (const SharedColors& colours, const bool* ta
                 continue;
         }
 
-        const bool varyAlpha = (ti == (int) Target::spectrumFill);
+        const bool varyAlpha = (ti == (int) Target::spectrumFill
+                                || ti == (int) Target::spectrumPreFill
+                                || ti == (int) Target::spectrumHoldFill
+                                || ti == (int) Target::eqSumFill
+                                || ti == (int) Target::eqBandFill);
         randomizeRamp (ramps[ti], colours, varyAlpha);
         any = true;
     }
@@ -335,6 +412,15 @@ juce::ValueTree ColourRampBank::toValueTree() const
     tree.appendChild (ramps[(int) Target::histogram].toValueTree ("Histogram"), nullptr);
     tree.appendChild (ramps[(int) Target::meterPeak].toValueTree ("MeterPeak"), nullptr);
     tree.appendChild (ramps[(int) Target::meterRms].toValueTree ("MeterRms"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrumCurve].toValueTree ("SpectrumCurve"), nullptr);
+    tree.appendChild (ramps[(int) Target::eqCurve].toValueTree ("EqCurve"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrumPreFill].toValueTree ("SpectrumPreFill"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrumPreCurve].toValueTree ("SpectrumPreCurve"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrumHoldFill].toValueTree ("SpectrumHoldFill"), nullptr);
+    tree.appendChild (ramps[(int) Target::spectrumHoldCurve].toValueTree ("SpectrumHoldCurve"), nullptr);
+    tree.appendChild (ramps[(int) Target::eqSumFill].toValueTree ("EqSumFill"), nullptr);
+    tree.appendChild (ramps[(int) Target::eqBandCurve].toValueTree ("EqBandCurve"), nullptr);
+    tree.appendChild (ramps[(int) Target::eqBandFill].toValueTree ("EqBandFill"), nullptr);
     return tree;
 }
 
@@ -365,18 +451,36 @@ void ColourRampBank::applyFromValueTree (const juce::ValueTree& tree, bool force
     loadOne (Target::histogram, "Histogram");
     loadOne (Target::meterPeak, "MeterPeak");
     loadOne (Target::meterRms, "MeterRms");
+    loadOne (Target::spectrumCurve, "SpectrumCurve");
+    loadOne (Target::eqCurve, "EqCurve");
+    loadOne (Target::spectrumPreFill, "SpectrumPreFill");
+    loadOne (Target::spectrumPreCurve, "SpectrumPreCurve");
+    loadOne (Target::spectrumHoldFill, "SpectrumHoldFill");
+    loadOne (Target::spectrumHoldCurve, "SpectrumHoldCurve");
+    loadOne (Target::eqSumFill, "EqSumFill");
+    loadOne (Target::eqBandCurve, "EqBandCurve");
+    loadOne (Target::eqBandFill, "EqBandFill");
     sanitizeMapModes();
 
     if (! forceCustomRampsOff)
         return;
 
     // Disk load: keep stops, but never silently override built-in colour schemes
-    // (FFT/Spec/…). Spectrum fill + level meters keep Use as loaded (constructor
-    // default is on when the child was missing from colour_ramps.xml).
+    // (FFT/Spec/…). Spectrum fill / curve + EQ curve + level meters keep Use as
+    // loaded (constructor default is on when the child was missing).
     for (int ti = 0; ti < (int) Target::numTargets; ++ti)
     {
         if (ti == (int) Target::meterPeak || ti == (int) Target::meterRms
-            || ti == (int) Target::spectrumFill)
+            || ti == (int) Target::spectrumFill
+            || ti == (int) Target::spectrumCurve
+            || ti == (int) Target::eqCurve
+            || ti == (int) Target::spectrumPreFill
+            || ti == (int) Target::spectrumPreCurve
+            || ti == (int) Target::spectrumHoldFill
+            || ti == (int) Target::spectrumHoldCurve
+            || ti == (int) Target::eqSumFill
+            || ti == (int) Target::eqBandCurve
+            || ti == (int) Target::eqBandFill)
             continue;
 
         if (ramps[ti].enabled)
@@ -403,7 +507,12 @@ void ColourRampBank::load()
         for (auto id : { juce::Identifier ("FftBars"), juce::Identifier ("Spectrogram"), juce::Identifier ("Spectrogram3D"),
                          juce::Identifier ("SpectrumFill"), juce::Identifier ("Oscilloscope"), juce::Identifier ("Goniometer"),
                          juce::Identifier ("Stereogram"), juce::Identifier ("Histogram"),
-                         juce::Identifier ("MeterPeak"), juce::Identifier ("MeterRms") })
+                         juce::Identifier ("MeterPeak"), juce::Identifier ("MeterRms"),
+                         juce::Identifier ("SpectrumCurve"), juce::Identifier ("EqCurve"),
+                         juce::Identifier ("SpectrumPreFill"), juce::Identifier ("SpectrumPreCurve"),
+                         juce::Identifier ("SpectrumHoldFill"), juce::Identifier ("SpectrumHoldCurve"),
+                         juce::Identifier ("EqSumFill"), juce::Identifier ("EqBandCurve"),
+                         juce::Identifier ("EqBandFill") })
         {
             auto child = tree.getChildWithName (id);
             if (child.isValid() && (bool) child.getProperty ("enabled", false))
@@ -433,9 +542,21 @@ void ColourRampBank::sanitizeMapModes()
     if (! osc.isOscilloscopeMap())
         osc.mapMode = GradientRamp::MapMode::intensityLowToHigh;
 
-    auto& fill = ramps[(int) Target::spectrumFill];
-    if (! fill.isSpatialMap())
-        fill.mapMode = GradientRamp::MapMode::bottomToTop;
+    for (auto t : { Target::spectrumFill, Target::spectrumPreFill, Target::spectrumHoldFill,
+                    Target::eqSumFill, Target::eqBandFill })
+    {
+        auto& r = ramps[(int) t];
+        if (! r.isSpatialMap())
+            r.mapMode = GradientRamp::MapMode::bottomToTop;
+    }
+
+    for (auto t : { Target::spectrumCurve, Target::spectrumPreCurve, Target::spectrumHoldCurve,
+                    Target::eqCurve, Target::eqBandCurve })
+    {
+        auto& r = ramps[(int) t];
+        if (! r.isSpatialMap())
+            r.mapMode = GradientRamp::MapMode::leftToRight;
+    }
 
     auto& gon = ramps[(int) Target::goniometer];
     // Migrate legacy intensity maps → Loudness; otherwise clamp to a goniometer mode.

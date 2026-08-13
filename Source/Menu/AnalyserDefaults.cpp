@@ -24,11 +24,32 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "SPECTRUM_POST_CURVE_ID",
         "SPECTRUM_POST_FILL_ID",
         "SPECTRUM_HOLD_FILL_ID",
+        "SPECTRUM_USE_RAMP_ID",
+        "SPECTRUM_CURVE_RAMP_ID",
+        "EQ_CURVE_RAMP_ID",
+        "SPECTRUM_PRE_FILL_RAMP_ID",
+        "SPECTRUM_PRE_CURVE_RAMP_ID",
+        "SPECTRUM_HOLD_FILL_RAMP_ID",
+        "SPECTRUM_HOLD_CURVE_RAMP_ID",
+        "EQ_SUM_FILL_RAMP_ID",
+        "EQ_BAND_CURVE_RAMP_ID",
+        "EQ_BAND_FILL_RAMP_ID",
+        "EQ_SHOW_CURVES_ID",
+        "SPECTRUM_PRE_CURVE_FADE_ID",
+        "SPECTRUM_PRE_FILL_FADE_ID",
+        "SPECTRUM_POST_CURVE_FADE_ID",
+        "SPECTRUM_POST_FILL_FADE_ID",
+        "SPECTRUM_HOLD_CURVE_FADE_ID",
+        "SPECTRUM_HOLD_FILL_FADE_ID",
+        "EQ_CURVE_FADE_ID",
+        "EQ_FILL_FADE_ID",
         "SPECTRUM_OPACITY_ID",
         "SPECTRUM_FILL_OPACITY_ID",
         "SPECTRUM_PATH_WIDTH_ID",
         "SPECTRUM_RESOLUTION_ID",
         "SPECTRUM_CURVE_RES_ID",
+        "SPECTRUM_CHANNEL_ID",
+        "SPECTRUM_OCTAVE_SMOOTH_ID",
         "SPECTRUM_FFT_BINS_ID",
         "EQ_DISPLAY_RANGE_ID",
         "EQ_BAND_PATH_WIDTH_ID",
@@ -161,9 +182,15 @@ AnalyserDefaults AnalyserDefaults::load()
 
         defaults.fileVersion = xml->getIntAttribute ("version", 1);
 
-        for (const auto& id : getParameterIds())
-            if (xml->hasAttribute (id))
-                defaults.values.set (id, xml->getStringAttribute (id));
+        // Read every saved attribute. A whitelist dropped new IDs (OSC_USE_RAMP,
+        // REFRESH, …) so Save Default looked like it worked but did not reload.
+        for (int i = 0; i < xml->getNumAttributes(); ++i)
+        {
+            const auto name = xml->getAttributeName (i);
+            if (name == "version" || name == "savedAt")
+                continue;
+            defaults.values.set (name, xml->getAttributeValue (i));
+        }
     }
 
     return defaults;

@@ -6,6 +6,7 @@
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class LevelMetersComponent : public juce::Component,
                              private juce::ChangeListener
@@ -128,6 +129,11 @@ private:
         juce::Label rmsGlowOpacityLabel;
         juce::Slider rmsGlowOpacitySlider;
         std::unique_ptr<SliderAttachment> rmsGlowOpacityAttachment;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection displaySection;
+        SettingsSection peakSection;
+        SettingsSection rmsSection;
     };
 
     SharedResources& sharedResources;

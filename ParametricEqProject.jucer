@@ -372,6 +372,7 @@
         </GROUP>
         <FILE id="DbQy2j" name="Analyser.cpp" compile="1" resource="0" file="Source/Visualizer/Analyser.cpp"/>
         <FILE id="lXE3tJ" name="Analyser.h" compile="0" resource="0" file="Source/Visualizer/Analyser.h"/>
+        <FILE id="SpcAnH" name="SpectrumAnalysis.h" compile="0" resource="0" file="Source/Visualizer/SpectrumAnalysis.h"/>
         <FILE id="kHuSCG" name="Visualizer.cpp" compile="1" resource="0" file="Source/Visualizer/Visualizer.cpp"/>
         <FILE id="nOiQHC" name="Visualizer.h" compile="0" resource="0" file="Source/Visualizer/Visualizer.h"/>
       </GROUP>

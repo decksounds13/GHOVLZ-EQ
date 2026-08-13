@@ -1,5 +1,7 @@
 #include "GraphLine.h"
 #include "Menu/SharedResources.h"
+#include <cmath>
+#include <utility>
 
 namespace
 {
@@ -12,6 +14,50 @@ namespace
             return p->load() > 0.5f;
 
         return fallback;
+    }
+
+    float paramSeconds (juce::AudioProcessorValueTreeState* tree, const char* id) noexcept
+    {
+        if (tree == nullptr)
+            return 0.0f;
+        if (auto* p = tree->getRawParameterValue (id))
+            return juce::jlimit (0.0f, 5.0f, p->load());
+        return 0.0f;
+    }
+
+    /** Exponential ease toward target. fadeSec <= 0 snaps. Returns true if still catching up. */
+    bool fadeColumnsToward (std::vector<float>& displayed,
+                            const std::vector<float>& target,
+                            float fadeSec,
+                            float dt)
+    {
+        if (target.empty())
+        {
+            displayed.clear();
+            return false;
+        }
+
+        if (displayed.size() != target.size() || fadeSec <= 1.0e-4f || dt <= 0.0f)
+        {
+            displayed = target;
+            return false;
+        }
+
+        const float a = 1.0f - std::exp (-dt / fadeSec);
+        if (a >= 0.999f)
+        {
+            displayed = target;
+            return false;
+        }
+
+        bool still = false;
+        for (size_t i = 0; i < target.size(); ++i)
+        {
+            displayed[i] += (target[i] - displayed[i]) * a;
+            if (! still && std::abs (target[i] - displayed[i]) > 0.15f)
+                still = true;
+        }
+        return still;
     }
 
     // 240 used createPathWithRoundedCorners(128) on a single curve.
@@ -269,11 +315,14 @@ void GraphLine::drawFrame (juce::Graphics& g)
     if (lastBin < 1)
         return;
 
-    const bool showPreCurve = paramEnabled (mr_valueTree, "SPECTRUM_PRE_CURVE_ID", true);
+    const auto channel = mr_analyser.getActiveChannel();
+    const bool overlay = mr_analyser.isOverlayChannel();
+    // Overlay Mid+Side / L+R: fills only — curve strokes stack into spaghetti.
+    const bool showPreCurve = ! overlay && paramEnabled (mr_valueTree, "SPECTRUM_PRE_CURVE_ID", true);
     const bool showPreFill = paramEnabled (mr_valueTree, "SPECTRUM_PRE_FILL_ID", true);
-    const bool showPostCurve = paramEnabled (mr_valueTree, "SPECTRUM_POST_CURVE_ID", true);
+    const bool showPostCurve = ! overlay && paramEnabled (mr_valueTree, "SPECTRUM_POST_CURVE_ID", true);
     const bool showPostFill = paramEnabled (mr_valueTree, "SPECTRUM_POST_FILL_ID", true);
-    const bool showHoldCurve = paramEnabled (mr_valueTree, "MAX_ID", true);
+    const bool showHoldCurve = ! overlay && paramEnabled (mr_valueTree, "MAX_ID", true);
     const bool showHoldFill = paramEnabled (mr_valueTree, "SPECTRUM_HOLD_FILL_ID", true);
 
     // Bar overlay on/off is SPECTRUM_FFT_BINS_ID only (FFT_RESOLUTION_ID is draw density).
@@ -285,14 +334,85 @@ void GraphLine::drawFrame (juce::Graphics& g)
 
     const float resolution = getSpectrumResolution();
     const bool drawSpectrumPaths = resolution > 0.0f;
+    const bool useSolidThemeColours = (channel == SpectrumAnalysis::Channel::both);
 
-    juce::Path preCurve;
-    juce::Path postCurve;
-    juce::Path holdCurve;
+    struct LayerColours
+    {
+        juce::Colour line;
+        juce::Colour fill;
+        juce::Colour hold;
+    };
+
+    auto coloursFor = [this, useSolidThemeColours] (SpectrumAnalysis::Channel which) -> LayerColours
+    {
+        if (useSolidThemeColours || m_sharedResources == nullptr)
+            return { m_colour, m_fillColour, m_holdColour };
+
+        const auto& c = m_sharedResources->sharedColors;
+
+        switch (which)
+        {
+            case SpectrumAnalysis::Channel::left:
+                return { c.spectrumLineL, c.spectrumFillL, c.spectrumLineL.brighter (0.2f) };
+            case SpectrumAnalysis::Channel::right:
+                return { c.spectrumLineR, c.spectrumFillR, c.spectrumLineR.brighter (0.2f) };
+            case SpectrumAnalysis::Channel::side:
+                return { c.spectrumLineSide, c.spectrumFillSide, c.spectrumLineSide.brighter (0.2f) };
+            case SpectrumAnalysis::Channel::mid:
+            default:
+                return { c.spectrumLineMid, c.spectrumFillMid, c.spectrumLineMid.brighter (0.2f) };
+        }
+    };
+
+    auto primaryWhich = SpectrumAnalysis::Channel::mid;
+    auto secondaryWhich = SpectrumAnalysis::Channel::side;
+
+    switch (channel)
+    {
+        case SpectrumAnalysis::Channel::left:
+        case SpectrumAnalysis::Channel::leftAndRight:
+            primaryWhich = SpectrumAnalysis::Channel::left;
+            secondaryWhich = SpectrumAnalysis::Channel::right;
+            break;
+        case SpectrumAnalysis::Channel::right:
+            primaryWhich = SpectrumAnalysis::Channel::right;
+            break;
+        case SpectrumAnalysis::Channel::side:
+            primaryWhich = SpectrumAnalysis::Channel::side;
+            break;
+        case SpectrumAnalysis::Channel::mid:
+        case SpectrumAnalysis::Channel::midAndSide:
+        case SpectrumAnalysis::Channel::both:
+        default:
+            primaryWhich = SpectrumAnalysis::Channel::mid;
+            secondaryWhich = SpectrumAnalysis::Channel::side;
+            break;
+    }
+
+    const auto primaryColours = coloursFor (primaryWhich);
+    const auto secondaryColours = coloursFor (secondaryWhich);
+
+    juce::Path preCurve, postCurve, holdCurve;
+    juce::Path preFillPath, postFillPath, holdFillPath;
+    juce::Path preCurveB, postCurveB, holdCurveB;
+    juce::Path preFillPathB, postFillPathB, holdFillPathB;
 
     const bool needPre = showPreCurve || showPreFill;
     const bool needPost = showPostCurve || showPostFill;
     const bool needHold = showHoldCurve || showHoldFill;
+
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    float fadeDt = 0.016f;
+    if (m_lastFadeTimeMs > 0.0)
+        fadeDt = juce::jlimit (0.0f, 0.10f, (float) ((nowMs - m_lastFadeTimeMs) * 0.001));
+    m_lastFadeTimeMs = nowMs;
+
+    const float preCurveFade = paramSeconds (mr_valueTree, "SPECTRUM_PRE_CURVE_FADE_ID");
+    const float preFillFade = paramSeconds (mr_valueTree, "SPECTRUM_PRE_FILL_FADE_ID");
+    const float postCurveFade = paramSeconds (mr_valueTree, "SPECTRUM_POST_CURVE_FADE_ID");
+    const float postFillFade = paramSeconds (mr_valueTree, "SPECTRUM_POST_FILL_FADE_ID");
+    const float holdCurveFade = paramSeconds (mr_valueTree, "SPECTRUM_HOLD_CURVE_FADE_ID");
+    const float holdFillFade = paramSeconds (mr_valueTree, "SPECTRUM_HOLD_FILL_FADE_ID");
 
     if (drawSpectrumPaths)
     {
@@ -302,34 +422,79 @@ void GraphLine::drawFrame (juce::Graphics& g)
         const int numColumns = juce::jmax (32, (int) std::lround ((double) width));
         const float smoothRadius = getSpectrumCurveSmoothRadiusPx();
 
-        if (needPre)
+        auto buildLayer = [&] (auto&& readPre, auto&& readPost, auto&& readHold,
+                               std::vector<float>& colPre, std::vector<float>& colPost, std::vector<float>& colHold,
+                               std::vector<float>& fadePreCurve, std::vector<float>& fadePreFill,
+                               std::vector<float>& fadePostCurve, std::vector<float>& fadePostFill,
+                               std::vector<float>& fadeHoldCurve, std::vector<float>& fadeHoldFill,
+                               juce::Path& pathPre, juce::Path& pathPost, juce::Path& pathHold,
+                               juce::Path& fillPre, juce::Path& fillPost, juce::Path& fillHold)
         {
-            reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
-                                  [this] (size_t i) { return mr_analyser.getScopePreData (i); },
-                                  m_columnPre, m_peakScratch, m_hasBinScratch,
-                                  m_pointXScratch, m_pointMagScratch);
-            smoothColumns (m_columnPre, m_smoothScratch, smoothRadius);
-            appendColumnPath (preCurve, m_columnPre, width);
-        }
+            if (needPre)
+            {
+                reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
+                                      std::forward<decltype (readPre)> (readPre),
+                                      colPre, m_peakScratch, m_hasBinScratch,
+                                      m_pointXScratch, m_pointMagScratch);
+                smoothColumns (colPre, m_smoothScratch, smoothRadius);
+                fadeColumnsToward (fadePreCurve, colPre, preCurveFade, fadeDt);
+                fadeColumnsToward (fadePreFill, colPre, preFillFade, fadeDt);
+                if (showPreCurve)
+                    appendColumnPath (pathPre, fadePreCurve, width);
+                if (showPreFill)
+                    appendColumnPath (fillPre, fadePreFill, width);
+            }
 
-        if (needPost)
-        {
-            reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
-                                  [this] (size_t i) { return getScopeDataFromAnalyser (i); },
-                                  m_columnPost, m_peakScratch, m_hasBinScratch,
-                                  m_pointXScratch, m_pointMagScratch);
-            smoothColumns (m_columnPost, m_smoothScratch, smoothRadius);
-            appendColumnPath (postCurve, m_columnPost, width);
-        }
+            if (needPost)
+            {
+                reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
+                                      std::forward<decltype (readPost)> (readPost),
+                                      colPost, m_peakScratch, m_hasBinScratch,
+                                      m_pointXScratch, m_pointMagScratch);
+                smoothColumns (colPost, m_smoothScratch, smoothRadius);
+                fadeColumnsToward (fadePostCurve, colPost, postCurveFade, fadeDt);
+                fadeColumnsToward (fadePostFill, colPost, postFillFade, fadeDt);
+                if (showPostCurve)
+                    appendColumnPath (pathPost, fadePostCurve, width);
+                if (showPostFill)
+                    appendColumnPath (fillPost, fadePostFill, width);
+            }
 
-        if (needHold)
+            if (needHold)
+            {
+                reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
+                                      std::forward<decltype (readHold)> (readHold),
+                                      colHold, m_peakScratch, m_hasBinScratch,
+                                      m_pointXScratch, m_pointMagScratch);
+                smoothColumns (colHold, m_smoothScratch, smoothRadius);
+                fadeColumnsToward (fadeHoldCurve, colHold, holdCurveFade, fadeDt);
+                fadeColumnsToward (fadeHoldFill, colHold, holdFillFade, fadeDt);
+                if (showHoldCurve)
+                    appendColumnPath (pathHold, fadeHoldCurve, width);
+                if (showHoldFill)
+                    appendColumnPath (fillHold, fadeHoldFill, width);
+            }
+        };
+
+        buildLayer ([this] (size_t i) { return mr_analyser.getScopePreData (i); },
+                    [this] (size_t i) { return getScopeDataFromAnalyser (i); },
+                    [this] (size_t i) { return mr_analyser.getScopeMaximumsData (i); },
+                    m_columnPre, m_columnPost, m_columnHold,
+                    m_fadePreCurve, m_fadePreFill, m_fadePostCurve, m_fadePostFill,
+                    m_fadeHoldCurve, m_fadeHoldFill,
+                    preCurve, postCurve, holdCurve,
+                    preFillPath, postFillPath, holdFillPath);
+
+        if (overlay)
         {
-            reduceScopeToColumns (mr_analyser, lastBin, logarithmic, numColumns, height,
-                                  [this] (size_t i) { return mr_analyser.getScopeMaximumsData (i); },
-                                  m_columnHold, m_peakScratch, m_hasBinScratch,
-                                  m_pointXScratch, m_pointMagScratch);
-            smoothColumns (m_columnHold, m_smoothScratch, smoothRadius);
-            appendColumnPath (holdCurve, m_columnHold, width);
+            buildLayer ([this] (size_t i) { return mr_analyser.getScopeSecondaryPreData (i); },
+                        [this] (size_t i) { return mr_analyser.getScopeSecondaryData (i); },
+                        [this] (size_t i) { return mr_analyser.getScopeSecondaryMaximumsData (i); },
+                        m_columnPreB, m_columnPostB, m_columnHoldB,
+                        m_fadePreCurveB, m_fadePreFillB, m_fadePostCurveB, m_fadePostFillB,
+                        m_fadeHoldCurveB, m_fadeHoldFillB,
+                        preCurveB, postCurveB, holdCurveB,
+                        preFillPathB, postFillPathB, holdFillPathB);
         }
     }
 
@@ -346,50 +511,86 @@ void GraphLine::drawFrame (juce::Graphics& g)
         return curve;
     };
 
-    // --- Hold (max) — theme Spectrum Line / Fill ---
-    if (drawSpectrumPaths && showHoldFill && needHold)
-    {
-        g.setColour (m_fillColour.darker (0.15f).withMultipliedAlpha (fillOpacity * 0.85f));
-        g.fillPath (closeFill (holdCurve));
-    }
+    const juce::Rectangle<float> graphBounds { 0.0f, 0.0f, width, height };
 
-    if (drawSpectrumPaths && showHoldCurve && needHold)
+    auto rampOn = [this] (const GradientRamp* ramp, const char* id) -> bool
     {
-        g.setColour (m_holdColour.withMultipliedAlpha (lineOpacity));
-        g.strokePath (holdCurve.createPathWithRoundedCorners (kCornerRound), juce::PathStrokeType (pathWidth));
-    }
+        return paramEnabled (mr_valueTree, id, true) && ramp != nullptr && ramp->isUsable();
+    };
 
-    // --- Pre (darker variant of fill/line, sits behind post) ---
-    if (drawSpectrumPaths && showPreFill && needPre)
+    // Overlay Mid/Side (or L/R): tint by channel colour so both layers read through each other.
+    auto fillWithRampOrSolid = [&] (const juce::Path& path, juce::Colour solid,
+                                    float alpha, float darkerAmt,
+                                    const GradientRamp* ramp, const char* useId)
     {
-        g.setColour (m_fillColour.darker (0.55f).withMultipliedAlpha (fillOpacity * 0.7f));
-        g.fillPath (closeFill (preCurve));
-    }
-
-    if (drawSpectrumPaths && showPreCurve && needPre)
-    {
-        g.setColour (m_colour.darker (0.45f).withMultipliedAlpha (lineOpacity * 0.85f));
-        g.strokePath (preCurve.createPathWithRoundedCorners (kCornerRound),
-                      juce::PathStrokeType (juce::jmax (0.75f, pathWidth * 0.85f)));
-    }
-
-    // --- Post fill ---
-    if (drawSpectrumPaths && showPostFill && needPost)
-    {
-        const auto fillPath = closeFill (postCurve);
-        if (m_spectrumFillRamp != nullptr && m_spectrumFillRamp->isUsable())
+        if (rampOn (ramp, useId))
         {
-            // Spatial map: L→R / R→L / T→B / B→T (selectable in Gradients settings).
-            g.setGradientFill (m_spectrumFillRamp->makeSpatialGradient ({ 0.0f, 0.0f, width, height },
-                                                                       fillOpacity));
-            g.fillPath (fillPath);
+            const auto tint = overlay ? solid : juce::Colour();
+            g.setGradientFill (ramp->makeSpatialGradient (graphBounds, alpha, tint, darkerAmt));
+            g.fillPath (path);
         }
         else
         {
-            g.setColour (m_fillColour.withMultipliedAlpha (fillOpacity));
-            g.fillPath (fillPath);
+            auto c = solid;
+            if (darkerAmt > 0.001f)
+                c = c.darker (darkerAmt);
+            g.setColour (c.withMultipliedAlpha (alpha));
+            g.fillPath (path);
         }
-    }
+    };
+
+    auto strokeWithRampOrSolid = [&] (const juce::Path& curve, juce::Colour solid,
+                                      float strokeW, float alpha,
+                                      const GradientRamp* ramp, const char* useId)
+    {
+        const auto rounded = curve.createPathWithRoundedCorners (kCornerRound);
+        if (rampOn (ramp, useId))
+        {
+            const auto tint = overlay ? solid : juce::Colour();
+            g.setGradientFill (ramp->makeSpatialGradient (graphBounds, alpha, tint));
+            g.strokePath (rounded, juce::PathStrokeType (strokeW));
+        }
+        else
+        {
+            g.setColour (solid.withMultipliedAlpha (alpha));
+            g.strokePath (rounded, juce::PathStrokeType (strokeW));
+        }
+    };
+
+    auto paintStack = [&] (const juce::Path& pre, const juce::Path& post, const juce::Path& hold,
+                           const juce::Path& preFill, const juce::Path& postFill, const juce::Path& holdFill,
+                           const LayerColours& colours)
+    {
+        const float layerFill = overlay ? fillOpacity * 0.62f : fillOpacity;
+
+        if (showHoldFill && needHold)
+            fillWithRampOrSolid (closeFill (holdFill), colours.fill, layerFill * 0.85f, 0.22f,
+                                 m_spectrumHoldFillRamp, "SPECTRUM_HOLD_FILL_RAMP_ID");
+
+        if (showHoldCurve && needHold)
+            strokeWithRampOrSolid (hold, colours.hold, pathWidth, lineOpacity,
+                                   m_spectrumHoldCurveRamp, "SPECTRUM_HOLD_CURVE_RAMP_ID");
+
+        if (showPreFill && needPre)
+            fillWithRampOrSolid (closeFill (preFill), colours.fill, layerFill * 0.70f, 0.50f,
+                                 m_spectrumPreFillRamp, "SPECTRUM_PRE_FILL_RAMP_ID");
+
+        if (showPreCurve && needPre)
+            strokeWithRampOrSolid (pre, colours.line.darker (0.45f),
+                                   juce::jmax (0.75f, pathWidth * 0.85f),
+                                   lineOpacity * 0.85f,
+                                   m_spectrumPreCurveRamp, "SPECTRUM_PRE_CURVE_RAMP_ID");
+
+        if (showPostFill && needPost)
+            fillWithRampOrSolid (closeFill (postFill), colours.fill, layerFill, 0.0f,
+                                 m_spectrumPostFillRamp, "SPECTRUM_USE_RAMP_ID");
+    };
+
+    if (drawSpectrumPaths && overlay)
+        paintStack (preCurveB, postCurveB, holdCurveB, preFillPathB, postFillPathB, holdFillPathB, secondaryColours);
+
+    if (drawSpectrumPaths)
+        paintStack (preCurve, postCurve, holdCurve, preFillPath, postFillPath, holdFillPath, primaryColours);
 
     if (binsWanted)
     {
@@ -401,9 +602,9 @@ void GraphLine::drawFrame (juce::Graphics& g)
     }
 
     // --- Post curve + Melatonin glow (radius / spread / opacity from Spectrum settings) ---
-    if (drawSpectrumPaths && showPostCurve && needPost)
+    auto strokePost = [&] (const juce::Path& curve, const juce::Colour& lineColour)
     {
-        const auto roundedPost = postCurve.createPathWithRoundedCorners (kCornerRound);
+        const auto roundedPost = curve.createPathWithRoundedCorners (kCornerRound);
 
         auto loadGlow = [this] (const char* id, float fallback) -> float
         {
@@ -423,8 +624,8 @@ void GraphLine::drawFrame (juce::Graphics& g)
 
             if (glowAlpha > 0.05f && glowRadius > 0.5f)
             {
-                const auto bloomColour = m_colour.brighter (0.15f).withAlpha (glowAlpha * 0.45f);
-                const auto coreColour = m_colour.brighter (0.45f).withAlpha (glowAlpha * 0.75f);
+                const auto bloomColour = lineColour.brighter (0.15f).withAlpha (glowAlpha * 0.45f);
+                const auto coreColour = lineColour.brighter (0.45f).withAlpha (glowAlpha * 0.75f);
 
                 m_curveGlow.setRadius ((double) juce::jlimit (0.0f, 80.0f, glowRadius), 0);
                 m_curveGlow.setSpread ((double) juce::jlimit (0.0f, 40.0f, glowSpread), 0);
@@ -441,7 +642,24 @@ void GraphLine::drawFrame (juce::Graphics& g)
             }
         }
 
-        g.setColour (m_colour.withMultipliedAlpha (lineOpacity));
-        g.strokePath (roundedPost, juce::PathStrokeType (pathWidth));
+        if (rampOn (m_spectrumPostCurveRamp, "SPECTRUM_CURVE_RAMP_ID"))
+        {
+            const auto tint = overlay ? lineColour : juce::Colour();
+            g.setGradientFill (m_spectrumPostCurveRamp->makeSpatialGradient (graphBounds, lineOpacity, tint));
+            g.strokePath (roundedPost, juce::PathStrokeType (pathWidth));
+        }
+        else
+        {
+            g.setColour (lineColour.withMultipliedAlpha (lineOpacity));
+            g.strokePath (roundedPost, juce::PathStrokeType (pathWidth));
+        }
+    };
+
+    if (drawSpectrumPaths && showPostCurve && needPost)
+    {
+        if (overlay)
+            strokePost (postCurveB, secondaryColours.line);
+
+        strokePost (postCurve, primaryColours.line);
     }
 }

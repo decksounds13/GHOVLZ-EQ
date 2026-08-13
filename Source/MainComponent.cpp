@@ -20,6 +20,33 @@
 #include <cmath>
 #include <initializer_list>
 
+namespace
+{
+    bool isTypingIntoTextField() noexcept
+    {
+        auto* c = juce::Component::getCurrentlyFocusedComponent();
+        if (c == nullptr)
+            return false;
+
+        if (dynamic_cast<juce::TextEditor*> (c) != nullptr)
+            return true;
+
+        if (auto* label = dynamic_cast<juce::Label*> (c))
+            return label->isBeingEdited();
+
+        return false;
+    }
+
+    bool isSettingsHotkey (const juce::KeyPress& key) noexcept
+    {
+        if (key.getModifiers().isAnyModifierKeyDown())
+            return false;
+
+        const int code = key.getKeyCode();
+        return code == 's' || code == 'S';
+    }
+}
+
 // ── True OS fullscreen host for Spec3D (F11) ────────────────────────────────
 
 struct MainComponent::Spec3DOsFullscreenHost final : public juce::Component
@@ -53,6 +80,11 @@ struct MainComponent::Spec3DOsFullscreenHost final : public juce::Component
         if (key == juce::KeyPress::F11Key || key == juce::KeyPress::escapeKey)
         {
             owner.setSpec3DFullscreen (false, true);
+            return true;
+        }
+        if (isSettingsHotkey (key))
+        {
+            owner.toggleSettingsFromHotkey();
             return true;
         }
         return false;
@@ -129,7 +161,7 @@ struct MainComponent::Spec3DFsExitChrome final : public juce::Component
         setOpaque (false);
         setAlwaysOnTop (true);
 
-        settingsButton.setTooltip ("Open Settings / Look (lookdev while fullscreen)");
+        settingsButton.setTooltip ("Open Settings / Look (S)");
         settingsButton.setColour (juce::TextButton::buttonColourId, juce::Colours::black.withAlpha (0.55f));
         settingsButton.setColour (juce::TextButton::buttonOnColourId, juce::Colours::goldenrod.withAlpha (0.75f));
         settingsButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.95f));
@@ -253,6 +285,11 @@ struct MainComponent::ScopeOsFullscreenHost final : public juce::Component
         if (key == juce::KeyPress::F11Key || key == juce::KeyPress::escapeKey)
         {
             owner.exitScopeOsFullscreen (true);
+            return true;
+        }
+        if (isSettingsHotkey (key))
+        {
+            owner.toggleSettingsFromHotkey();
             return true;
         }
         return false;
@@ -765,7 +802,7 @@ namespace
             addAndMakeVisible (glowButton);
 
             rampHeader.setText ("Colour ramps", juce::dontSendNotification);
-            rampHeader.setFont (juce::FontOptions().withName ("Lato Black").withHeight (13.0f * kUiScale));
+            rampHeader.setFont (SharedResources::uiFont (13.0f * kUiScale));
             rampHeader.setColour (juce::Label::textColourId, PluginMenuTheme::highlight());
             rampHeader.setJustificationType (juce::Justification::centredLeft);
             addAndMakeVisible (rampHeader);
@@ -788,6 +825,15 @@ namespace
                 if (specRow != nullptr)    specRow->refreshFromBank();
                 if (spec3DRow != nullptr)  spec3DRow->refreshFromBank();
                 if (fillRow != nullptr)    fillRow->refreshFromBank();
+                if (curveRow != nullptr)   curveRow->refreshFromBank();
+                if (preFillRow != nullptr) preFillRow->refreshFromBank();
+                if (preCurveRow != nullptr) preCurveRow->refreshFromBank();
+                if (holdFillRow != nullptr) holdFillRow->refreshFromBank();
+                if (holdCurveRow != nullptr) holdCurveRow->refreshFromBank();
+                if (eqCurveRow != nullptr) eqCurveRow->refreshFromBank();
+                if (eqSumFillRow != nullptr) eqSumFillRow->refreshFromBank();
+                if (eqBandCurveRow != nullptr) eqBandCurveRow->refreshFromBank();
+                if (eqBandFillRow != nullptr) eqBandFillRow->refreshFromBank();
             };
 
             fftRow = std::make_unique<RampTargetAccordion> (
@@ -799,13 +845,35 @@ namespace
             spec3DRow = std::make_unique<RampTargetAccordion> (
                 resources, colourRamps, ColourRampBank::Target::spectrogram3D,
                 GradientStripEditor::ModeFamily::intensity, kUiScale, layoutCb, activeCb);
-            fillRow = std::make_unique<RampTargetAccordion> (
-                resources, colourRamps, ColourRampBank::Target::spectrumFill,
-                GradientStripEditor::ModeFamily::spatial, kUiScale, layoutCb, activeCb);
+            auto makeSpatialRow = [&] (ColourRampBank::Target t)
+            {
+                return std::make_unique<RampTargetAccordion> (
+                    resources, colourRamps, t, GradientStripEditor::ModeFamily::spatial,
+                    kUiScale, layoutCb, activeCb);
+            };
+            fillRow = makeSpatialRow (ColourRampBank::Target::spectrumFill);
+            curveRow = makeSpatialRow (ColourRampBank::Target::spectrumCurve);
+            preFillRow = makeSpatialRow (ColourRampBank::Target::spectrumPreFill);
+            preCurveRow = makeSpatialRow (ColourRampBank::Target::spectrumPreCurve);
+            holdFillRow = makeSpatialRow (ColourRampBank::Target::spectrumHoldFill);
+            holdCurveRow = makeSpatialRow (ColourRampBank::Target::spectrumHoldCurve);
+            eqCurveRow = makeSpatialRow (ColourRampBank::Target::eqCurve);
+            eqSumFillRow = makeSpatialRow (ColourRampBank::Target::eqSumFill);
+            eqBandCurveRow = makeSpatialRow (ColourRampBank::Target::eqBandCurve);
+            eqBandFillRow = makeSpatialRow (ColourRampBank::Target::eqBandFill);
             addAndMakeVisible (*fftRow);
             addAndMakeVisible (*specRow);
             addAndMakeVisible (*spec3DRow);
+            addAndMakeVisible (*preFillRow);
+            addAndMakeVisible (*preCurveRow);
             addAndMakeVisible (*fillRow);
+            addAndMakeVisible (*curveRow);
+            addAndMakeVisible (*holdFillRow);
+            addAndMakeVisible (*holdCurveRow);
+            addAndMakeVisible (*eqCurveRow);
+            addAndMakeVisible (*eqSumFillRow);
+            addAndMakeVisible (*eqBandCurveRow);
+            addAndMakeVisible (*eqBandFillRow);
 
             listContainer.setWantsKeyboardFocus (false);
             listContainer.setMouseClickGrabsKeyboardFocus (false);
@@ -892,11 +960,23 @@ namespace
                 spec3DRow->setBounds (area.removeFromTop (spec3DRow->getPreferredHeight()));
                 area.removeFromTop (px (4));
             }
-            if (fillRow != nullptr)
+            auto placeRow = [&] (std::unique_ptr<RampTargetAccordion>& row)
             {
-                fillRow->setBounds (area.removeFromTop (fillRow->getPreferredHeight()));
+                if (row == nullptr)
+                    return;
+                row->setBounds (area.removeFromTop (row->getPreferredHeight()));
                 area.removeFromTop (px (4));
-            }
+            };
+            placeRow (preFillRow);
+            placeRow (preCurveRow);
+            placeRow (fillRow);
+            placeRow (curveRow);
+            placeRow (holdFillRow);
+            placeRow (holdCurveRow);
+            placeRow (eqCurveRow);
+            placeRow (eqSumFillRow);
+            placeRow (eqBandCurveRow);
+            placeRow (eqBandFillRow);
 
             if (rows.size() > 0)
             {
@@ -914,11 +994,16 @@ namespace
         void relayout()
         {
             const auto px = [] (float v) { return juce::roundToInt (v * kUiScale); };
-            const int rampH = (fftRow != nullptr ? fftRow->getPreferredHeight() : 0)
-                              + (specRow != nullptr ? specRow->getPreferredHeight() : 0)
-                              + (spec3DRow != nullptr ? spec3DRow->getPreferredHeight() : 0)
-                              + (fillRow != nullptr ? fillRow->getPreferredHeight() : 0)
-                              + px (8) + px (8);
+            auto rh = [] (const std::unique_ptr<RampTargetAccordion>& row) {
+                return row != nullptr ? row->getPreferredHeight() : 0;
+            };
+            const int rampH = rh (fftRow) + rh (specRow) + rh (spec3DRow)
+                              + rh (preFillRow) + rh (preCurveRow)
+                              + rh (fillRow) + rh (curveRow)
+                              + rh (holdFillRow) + rh (holdCurveRow)
+                              + rh (eqCurveRow) + rh (eqSumFillRow)
+                              + rh (eqBandCurveRow) + rh (eqBandFillRow)
+                              + px (8) + px (40);
             const int h = px (8) + px (28) + px (4) + px (28) + px (10) + px (18) + px (4) + px (28) + px (6)
                           + rampH
                           + (rows.size() > 0 ? px (8) + themeListH : 0) + px (8);
@@ -934,7 +1019,10 @@ namespace
         int themeListH = 0;
         juce::TextButton saveButton, glowButton, sampleButton;
         juce::Label rampHeader;
-        std::unique_ptr<RampTargetAccordion> fftRow, specRow, spec3DRow, fillRow;
+        std::unique_ptr<RampTargetAccordion> fftRow, specRow, spec3DRow;
+        std::unique_ptr<RampTargetAccordion> preFillRow, preCurveRow, fillRow, curveRow;
+        std::unique_ptr<RampTargetAccordion> holdFillRow, holdCurveRow;
+        std::unique_ptr<RampTargetAccordion> eqCurveRow, eqSumFillRow, eqBandCurveRow, eqBandFillRow;
         juce::Viewport viewport;
         juce::Component listContainer;
         juce::OwnedArray<UiThemePresetRow> rows;
@@ -1011,6 +1099,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     levelMeterIn (p, treeState, ScopeLevelMeterModule::Tap::input, "Level Meter 1"),
     levelMeterOut (p, treeState, ScopeLevelMeterModule::Tap::output, "Level Meter 2")
 {
+    scopeViewport = ScopeViewport::defaultTree();
+
     // Host may have already called setStateInformation (Ableton often does before the editor).
     restoreSessionUiThemeIfAny();
     colourRamps.addChangeListener (this);
@@ -1036,6 +1126,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     addAndMakeVisible(menuToggleButton);
     menuToggleButton.setButtonText("Settings");
+    menuToggleButton.setTooltip ("Settings (S)");
     menuToggleButton.setAlwaysOnTop(true);
 
     menuToggleButton.setLookAndFeel(&customLookAndFeel);
@@ -1144,9 +1235,19 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     uiRandomizeButton.setThemeResources (&sharedResources);
     uiRandomizeButton.setTooltip (
-        "Randomize checked UI scopes and colour ramps. Right-click: scopes + Ordered/Standard ramp mode.");
+        "Left-click: randomize checked scopes. The dice menu stays open so you can see Menu colours. "
+        "Right-click: choose scopes + Ordered/Standard ramp mode.");
     uiRandomizeButton.setAlwaysOnTop (true);
-    uiRandomizeButton.onClick = [this] { runDiceRandomize(); };
+    uiRandomizeButton.onClick = [this]
+    {
+        runDiceRandomize();
+        // PopupMenu dismisses on the click; reopen so Menu-scope dice is visible.
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+        {
+            if (safe != nullptr)
+                safe->showRandomizeDiceMenu();
+        });
+    };
     uiRandomizeButton.onPopupMenu = [this] { showRandomizeDiceMenu(); };
     addAndMakeVisible (uiRandomizeButton);
 
@@ -1165,8 +1266,8 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     refreshPresetNameDisplay();
 
-    // Undo / Redo â€” top right, just left of Settings.
-    styleChromeButton (undoButton);
+    // Undo / Redo - top right, just left of Settings (curved arrow glyphs).
+    undoButton.setThemeResources (&sharedResources);
     undoButton.setTooltip ("Undo");
     undoButton.setAlwaysOnTop (true);
     undoButton.onClick = [this]
@@ -1177,7 +1278,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     };
     addAndMakeVisible (undoButton);
 
-    styleChromeButton (redoButton);
+    redoButton.setThemeResources (&sharedResources);
     redoButton.setTooltip ("Redo");
     redoButton.setAlwaysOnTop (true);
     redoButton.onClick = [this]
@@ -1362,15 +1463,10 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     addChildComponent (scopeArrangeOverlay);
 
     arrangeButton.setThemeResources (&sharedResources);
-    arrangeButton.setClickingTogglesState (true);
-    arrangeButton.setTooltip ("Arrange - Square = tiled grid; line = strip. Drag pane tops to reorder; drag strip bottom to resize.");
+    arrangeButton.setClickingTogglesState (false);
+    arrangeButton.setTooltip ("Arrange - pick a viewport layout or save a custom one.");
     arrangeButton.setAlwaysOnTop (true);
-    arrangeButton.onClick = [this]
-    {
-        setScopeStripLayout (arrangeButton.getToggleState(), true);
-        arrangeButton.setGlyph (scopeStripLayout ? OscToolButton::Glyph::StripLayout
-                                                  : OscToolButton::Glyph::GridLayout);
-    };
+    arrangeButton.onClick = [this] { showScopeArrangeMenu(); };
     arrangeButton.setVisible (false);
     addChildComponent (arrangeButton);
 
@@ -1459,6 +1555,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
             collapseAnyExpandedScope();
     };
     spectrogram3D.onToggleFullscreen = [this] { toggleSpec3DFullscreen (true); };
+    spectrogram3D.onToggleSettings = [this] { toggleSettingsFromHotkey(); };
     spectrogram3D.isFullscreenQuery = [this] { return isSpec3DFullscreen(); };
     spectrogram3D.onDefaultViewChanged = [this] { editor.requestSaveUiPrefs(); };
     spectrogram3D.onAugmentContextMenu = [this] (juce::PopupMenu& m)
@@ -1741,8 +1838,6 @@ MainComponent::~MainComponent()
     clearChromeLf (presetNextButton);
     clearChromeLf (presetSaveButton);
     clearChromeLf (uiThemeButton);
-    clearChromeLf (undoButton);
-    clearChromeLf (redoButton);
     clearChromeLf (ecoButton);
     clearChromeLf (oscButton);
     clearChromeLf (gonButton);
@@ -1778,6 +1873,12 @@ void MainComponent::applyThemeToChildComponents()
     PluginMenuTheme::applyColours (getLookAndFeel());
     ComboBoxLookAndFeel::sharedForPopupMenus().applyThemeColours();
 
+    // Push Appearance UI font + bold through the whole plugin tree.
+    SharedResources::applyUiFontsRecursively (*this);
+    if (auto* top = getTopLevelComponent())
+        if (top != this)
+            SharedResources::applyUiFontsRecursively (*top);
+
     styleChromeButton (bypassButton);
     styleChromeButton (slotAButton);
     styleChromeButton (slotBButton);
@@ -1788,8 +1889,8 @@ void MainComponent::applyThemeToChildComponents()
     styleChromeButton (presetNextButton);
     styleChromeButton (presetSaveButton);
     styleChromeButton (uiThemeButton);
-    styleChromeButton (undoButton);
-    styleChromeButton (redoButton);
+    undoButton.setThemeResources (&sharedResources);
+    redoButton.setThemeResources (&sharedResources);
     styleChromeButton (ecoButton);
     styleChromeButton (oscButton);
     styleChromeButton (gonButton);
@@ -1799,6 +1900,7 @@ void MainComponent::applyThemeToChildComponents()
     customLookAndFeel.setThemeColors (&sharedResources);
     ComboBoxLookAndFeel::sharedForPopupMenus().setThemeColors (&sharedResources);
     menuToggleButton.repaint();
+    menu.repaint();
 
     stylePresetNameEditor();
 
@@ -2130,7 +2232,8 @@ bool MainComponent::isPointOverSettingsDismissExempt (int catcherX, int catcherY
         &oscZoomInButton, &oscZoomOutButton, &oscChannelModeButton, &oscExpandButton,
         &gonExpandButton,
         &specSpeedUpButton, &specSpeedDownButton, &specExpandButton, &spec3DButton,
-        &arrangeButton
+        &arrangeButton,
+        &uiRandomizeButton
     };
     for (auto* t : tools)
         if (t != nullptr && over (*t))
@@ -2606,6 +2709,23 @@ bool MainComponent::collapseAnyExpandedScope()
     return collapsed;
 }
 
+void MainComponent::toggleSettingsFromHotkey()
+{
+    if (isTypingIntoTextField())
+        return;
+
+    if (spec3DFullscreen)
+    {
+        if (menu.isVisible() && menu.isOnDesktop())
+            closeSettingsMenu();
+        else
+            openSettingsMenuFromFullscreen();
+        return;
+    }
+
+    menuToggleButton.triggerClick();
+}
+
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::F11Key)
@@ -2615,6 +2735,14 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     }
     if (key == juce::KeyPress::escapeKey && collapseAnyExpandedScope())
         return true;
+    if (isSettingsHotkey (key))
+    {
+        if (isTypingIntoTextField())
+            return false;
+
+        toggleSettingsFromHotkey();
+        return true;
+    }
     return false;
 }
 
@@ -5034,6 +5162,15 @@ void MainComponent::applyColourRampsToMeters()
     const auto* specRamp = &colourRamps.get (ColourRampBank::Target::spectrogram);
     const auto* spec3DRamp = &colourRamps.get (ColourRampBank::Target::spectrogram3D);
     const auto* fillRamp = &colourRamps.get (ColourRampBank::Target::spectrumFill);
+    const auto* curveRamp = &colourRamps.get (ColourRampBank::Target::spectrumCurve);
+    const auto* preFillRamp = &colourRamps.get (ColourRampBank::Target::spectrumPreFill);
+    const auto* preCurveRamp = &colourRamps.get (ColourRampBank::Target::spectrumPreCurve);
+    const auto* holdFillRamp = &colourRamps.get (ColourRampBank::Target::spectrumHoldFill);
+    const auto* holdCurveRamp = &colourRamps.get (ColourRampBank::Target::spectrumHoldCurve);
+    const auto* eqCurveRamp = &colourRamps.get (ColourRampBank::Target::eqCurve);
+    const auto* eqSumFillRamp = &colourRamps.get (ColourRampBank::Target::eqSumFill);
+    const auto* eqBandCurveRamp = &colourRamps.get (ColourRampBank::Target::eqBandCurve);
+    const auto* eqBandFillRamp = &colourRamps.get (ColourRampBank::Target::eqBandFill);
     const auto* oscRamp = &colourRamps.get (ColourRampBank::Target::oscilloscope);
     const auto* gonRamp = &colourRamps.get (ColourRampBank::Target::goniometer);
     const auto* stereoRamp = &colourRamps.get (ColourRampBank::Target::stereogram);
@@ -5048,6 +5185,16 @@ void MainComponent::applyColourRampsToMeters()
 
     m_visualizer.setBinOverlayColourRamp (fftRamp->isUsable() ? fftRamp : nullptr);
     m_visualizer.setSpectrumFillRamp (fillRamp->isUsable() ? fillRamp : nullptr);
+    m_visualizer.setSpectrumCurveRamp (curveRamp->isUsable() ? curveRamp : nullptr);
+    m_visualizer.setSpectrumPreFillRamp (preFillRamp->isUsable() ? preFillRamp : nullptr);
+    m_visualizer.setSpectrumPreCurveRamp (preCurveRamp->isUsable() ? preCurveRamp : nullptr);
+    m_visualizer.setSpectrumHoldFillRamp (holdFillRamp->isUsable() ? holdFillRamp : nullptr);
+    m_visualizer.setSpectrumHoldCurveRamp (holdCurveRamp->isUsable() ? holdCurveRamp : nullptr);
+    frequencyResponseComponent.setEqCurveRamp (eqCurveRamp->isUsable() ? eqCurveRamp : nullptr);
+    frequencyResponseComponent.setEqSumFillRamp (eqSumFillRamp->isUsable() ? eqSumFillRamp : nullptr);
+    frequencyResponseComponent.setEqBandCurveRamp (eqBandCurveRamp->isUsable() ? eqBandCurveRamp : nullptr);
+    frequencyResponseComponent.setEqBandFillRamp (eqBandFillRamp->isUsable() ? eqBandFillRamp : nullptr);
+    frequencyResponseComponent.repaint();
     spectrogram.setCustomColourRamp (specRamp->isUsable() ? specRamp : nullptr);
     spectrogram.setCustomColourRamp3D (spec3DRamp->isUsable() ? spec3DRamp : nullptr);
     spectrogram3D.recolourMesh();
@@ -5247,6 +5394,163 @@ void MainComponent::setScopeStripLayout (bool shouldUseStrip, bool notifyPrefs)
         editor.requestSaveUiPrefs();
 }
 
+void MainComponent::applyScopeViewportFactory (const juce::String& factoryId, bool notifyPrefs)
+{
+    if (auto* f = ScopeViewport::findFactory (factoryId))
+    {
+        scopeViewport = f->build();
+        scopeViewportFactoryId = factoryId;
+        const bool wantStrip = (factoryId == "row");
+        setScopeStripLayout (wantStrip, false);
+        if (wantStrip)
+        {
+            std::vector<ScopeModuleId> mods;
+            ScopeViewport::collectModules (scopeViewport.get(), mods);
+            scopeEnabledOrder = mods.empty() ? ScopeModules::defaultEnabledOrder() : mods;
+            ensureScopeStripFractions();
+        }
+        if (scopeModeEnabled)
+        {
+            syncScopeModuleEnabledStates();
+            resized();
+        }
+        if (notifyPrefs)
+            editor.requestSaveUiPrefs();
+    }
+}
+
+void MainComponent::showScopeArrangeMenu()
+{
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Viewport");
+
+    int fid = 1;
+    std::vector<juce::String> factoryIds;
+    for (const auto& f : ScopeViewport::factories())
+    {
+        factoryIds.push_back (f.id);
+        menu.addItem (fid++, f.name, true, scopeViewportFactoryId == f.id);
+    }
+
+    menu.addSeparator();
+    menu.addItem (90, "Save custom layout");
+    auto customs = ScopeLayoutPresets::loadAll();
+    int cid = 200;
+    std::vector<juce::String> customNames;
+    std::vector<bool> customStrip;
+    if (customs.empty())
+        menu.addItem (-1, "(no custom layouts)", false, false);
+    else
+    {
+        for (const auto& p : customs)
+        {
+            customNames.push_back (p.name);
+            customStrip.push_back (p.strip);
+            menu.addItem (cid++, p.name);
+        }
+        menu.addItem (91, "Delete custom...");
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&arrangeButton),
+        [this, factoryIds, customNames, customStrip] (int result)
+        {
+            if (result <= 0)
+                return;
+            if (result >= 1 && result < 90)
+            {
+                const int i = result - 1;
+                if (i >= 0 && i < (int) factoryIds.size())
+                    applyScopeViewportFactory (factoryIds[(size_t) i], true);
+                return;
+            }
+            if (result == 90)
+            {
+                auto* aw = new juce::AlertWindow ("Save layout", "Name this viewport layout:",
+                                                  juce::AlertWindow::NoIcon);
+                aw->addTextEditor ("name", "My Layout", "Name");
+                aw->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                aw->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                juce::Component::SafePointer<juce::AlertWindow> awSafe (aw);
+                aw->enterModalState (true,
+                    juce::ModalCallbackFunction::create (
+                        [this, awSafe] (int r)
+                        {
+                            if (r != 1 || awSafe == nullptr)
+                                return;
+                            const auto name = awSafe->getTextEditorContents ("name").trim();
+                            if (name.isEmpty())
+                                return;
+                            ScopeLayoutPresets::savePreset (captureScopeLayoutPreset (name));
+                        }),
+                    true);
+                return;
+            }
+            if (result >= 200)
+            {
+                const int i = result - 200;
+                if (i >= 0 && i < (int) customNames.size())
+                {
+                    for (const auto& p : ScopeLayoutPresets::loadAll())
+                        if (p.name == customNames[(size_t) i] && p.strip == customStrip[(size_t) i])
+                        {
+                            applyScopeLayoutPreset (p, true);
+                            break;
+                        }
+                }
+            }
+        });
+}
+
+void MainComponent::showScopePaneContextMenu (int leafIndex)
+{
+    if (scopeViewport == nullptr
+        || leafIndex < 0 || leafIndex >= (int) scopeViewportLeaves.size())
+        return;
+
+    auto* leaf = scopeViewportLeaves[(size_t) leafIndex].node;
+    if (leaf == nullptr)
+        return;
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addItem (1, "Split vertical");
+    menu.addItem (2, "Split horizontal");
+    menu.addSeparator();
+    juce::PopupMenu assign;
+    for (int mi = 0; mi < ScopeModules::kNumModules; ++mi)
+    {
+        const auto id = static_cast<ScopeModuleId> (mi);
+        const bool on = leaf->module.has_value() && *leaf->module == id;
+        assign.addItem (20 + mi, ScopeModules::idToLabel (id), true, on);
+    }
+    menu.addSubMenu ("Change to", assign);
+    menu.addSeparator();
+    menu.addItem (3, "Close pane", ScopeViewport::countLeaves (scopeViewport.get()) > 1);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+        [this, leaf] (int result)
+        {
+            if (result <= 0 || leaf == nullptr || scopeViewport == nullptr)
+                return;
+            if (result == 1)
+                ScopeViewport::splitLeaf (*leaf, ScopeViewport::Split::vertical);
+            else if (result == 2)
+                ScopeViewport::splitLeaf (*leaf, ScopeViewport::Split::horizontal);
+            else if (result == 3)
+                ScopeViewport::closeLeaf (scopeViewport, leaf);
+            else if (result >= 20 && result < 20 + ScopeModules::kNumModules)
+            {
+                const auto id = static_cast<ScopeModuleId> (result - 20);
+                ScopeViewport::assignLeaf (*scopeViewport, *leaf, id);
+            }
+            scopeViewportFactoryId = {};
+            syncScopeModuleEnabledStates();
+            resized();
+            editor.requestSaveUiPrefs();
+        });
+}
+
 ScopeLayoutPreset MainComponent::captureScopeLayoutPreset (const juce::String& name) const
 {
     ScopeLayoutPreset p;
@@ -5257,7 +5561,11 @@ ScopeLayoutPreset MainComponent::captureScopeLayoutPreset (const juce::String& n
     p.stripHeightPx = scopeStripHeightPx;
     p.splitX = scopeSplitOverlay.getSplitX();
     p.splitY = scopeSplitOverlay.getSplitY();
-    // Inline colour snapshot only â€” never writes RampPresetStore / UI theme presets.
+    p.factoryId = scopeViewportFactoryId;
+    if (scopeViewport != nullptr)
+        if (auto xml = ScopeViewport::toXml (*scopeViewport))
+            p.viewportXml = xml->toString();
+    // Inline colour snapshot only - never writes RampPresetStore / UI theme presets.
     p.colourRamps = colourRamps.toValueTree();
     return p;
 }
@@ -5269,6 +5577,23 @@ void MainComponent::applyScopeLayoutPreset (const ScopeLayoutPreset& preset, boo
     ensureScopeStripFractions();
     scopeStripHeightPx = juce::jmax (kScopeStripHeightMinPx, preset.stripHeightPx);
     scopeSplitOverlay.setSplitNorm (preset.splitX, preset.splitY);
+    scopeViewportFactoryId = preset.factoryId;
+    if (preset.viewportXml.isNotEmpty())
+    {
+        if (auto xml = juce::parseXML (preset.viewportXml))
+            if (xml->hasTagName ("Pane"))
+                scopeViewport = ScopeViewport::fromXml (*xml);
+    }
+    else if (preset.factoryId.isNotEmpty())
+    {
+        if (auto* f = ScopeViewport::findFactory (preset.factoryId))
+            scopeViewport = f->build();
+    }
+    else
+    {
+        scopeViewport = ScopeViewport::fromLegacy (scopeEnabledOrder, preset.strip,
+                                                   preset.splitX, preset.splitY);
+    }
     setScopeStripLayout (preset.strip, false);
     syncScopeModuleEnabledStates();
 
@@ -6544,6 +6869,15 @@ void MainComponent::randomizeColourRamps()
     mask[(int) ColourRampBank::Target::spectrogram] = c.randomizeRampSpectrogram;
     mask[(int) ColourRampBank::Target::spectrogram3D] = c.randomizeRampSpectrogram3D;
     mask[(int) ColourRampBank::Target::spectrumFill] = c.randomizeRampSpectrumFill;
+    mask[(int) ColourRampBank::Target::spectrumCurve] = c.randomizeRampSpectrumCurve;
+    mask[(int) ColourRampBank::Target::spectrumPreFill] = c.randomizeRampSpectrumPreFill;
+    mask[(int) ColourRampBank::Target::spectrumPreCurve] = c.randomizeRampSpectrumPreCurve;
+    mask[(int) ColourRampBank::Target::spectrumHoldFill] = c.randomizeRampSpectrumHoldFill;
+    mask[(int) ColourRampBank::Target::spectrumHoldCurve] = c.randomizeRampSpectrumHoldCurve;
+    mask[(int) ColourRampBank::Target::eqCurve] = c.randomizeRampEqCurve;
+    mask[(int) ColourRampBank::Target::eqSumFill] = c.randomizeRampEqSumFill;
+    mask[(int) ColourRampBank::Target::eqBandCurve] = c.randomizeRampEqBandCurve;
+    mask[(int) ColourRampBank::Target::eqBandFill] = c.randomizeRampEqBandFill;
     mask[(int) ColourRampBank::Target::meterPeak] = c.randomizeRampLevelMeters;
     mask[(int) ColourRampBank::Target::meterRms] = c.randomizeRampLevelMeters;
     colourRamps.randomizeRamps (c, mask, (int) ColourRampBank::Target::numTargets);
@@ -6601,10 +6935,15 @@ void MainComponent::reapplySessionUiThemeFromProcessor()
 void MainComponent::runDiceRandomize()
 {
     const auto& c = sharedResources.sharedColors;
-    const bool anyUi = c.randomizeFaceplateMod || c.randomizeGraphModule || c.randomizeMenuModule;
+    const bool anyUi = c.randomizeFaceplateMod || c.randomizeGraphModule || c.randomizeMenuModule
+                       || c.randomizeGraphCursorInfo;
     const bool anyRamp = c.randomizeRampFftBars || c.randomizeRampSpectrogram
                          || c.randomizeRampSpectrogram3D || c.randomizeRampSpectrumFill
-                         || c.randomizeRampLevelMeters;
+                         || c.randomizeRampSpectrumCurve || c.randomizeRampSpectrumPreFill
+                         || c.randomizeRampSpectrumPreCurve || c.randomizeRampSpectrumHoldFill
+                         || c.randomizeRampSpectrumHoldCurve || c.randomizeRampEqCurve
+                         || c.randomizeRampEqSumFill || c.randomizeRampEqBandCurve
+                         || c.randomizeRampEqBandFill || c.randomizeRampLevelMeters;
 
     if (anyUi)
         randomizeUiTheme();
@@ -6622,12 +6961,22 @@ void MainComponent::showRandomizeDiceMenu()
     menu.addItem (1, "Faceplate/Mod", true, scopes.randomizeFaceplateMod);
     menu.addItem (2, "Graph", true, scopes.randomizeGraphModule);
     menu.addItem (3, "Menu", true, scopes.randomizeMenuModule);
+    menu.addItem (21, "Cursor Info", true, scopes.randomizeGraphCursorInfo);
     menu.addSeparator();
     menu.addSectionHeader ("Colour ramps");
     menu.addItem (4, "FFT Bars", true, scopes.randomizeRampFftBars);
     menu.addItem (5, "Spectrogram (2D)", true, scopes.randomizeRampSpectrogram);
     menu.addItem (6, "Spectrogram 3D", true, scopes.randomizeRampSpectrogram3D);
-    menu.addItem (7, "Spectrum Fill", true, scopes.randomizeRampSpectrumFill);
+    menu.addItem (14, "Pre Fill", true, scopes.randomizeRampSpectrumPreFill);
+    menu.addItem (15, "Pre Curve", true, scopes.randomizeRampSpectrumPreCurve);
+    menu.addItem (7, "Post Fill", true, scopes.randomizeRampSpectrumFill);
+    menu.addItem (12, "Post Curve", true, scopes.randomizeRampSpectrumCurve);
+    menu.addItem (16, "Hold Fill", true, scopes.randomizeRampSpectrumHoldFill);
+    menu.addItem (17, "Hold Curve", true, scopes.randomizeRampSpectrumHoldCurve);
+    menu.addItem (13, "Sum Curve", true, scopes.randomizeRampEqCurve);
+    menu.addItem (18, "Sum Fill", true, scopes.randomizeRampEqSumFill);
+    menu.addItem (19, "Band Curve", true, scopes.randomizeRampEqBandCurve);
+    menu.addItem (20, "Band Fill", true, scopes.randomizeRampEqBandFill);
     menu.addItem (11, "Level Meters", true, scopes.randomizeRampLevelMeters);
     menu.addSeparator();
     menu.addSectionHeader ("Ramp randomize mode");
@@ -6647,19 +6996,97 @@ void MainComponent::showRandomizeDiceMenu()
                             auto& s = safe->sharedResources.sharedColors;
                             bool keepOpen = false;
 
-                            if (result == 1)      { s.randomizeFaceplateMod = ! s.randomizeFaceplateMod; keepOpen = true; }
-                            else if (result == 2) { s.randomizeGraphModule = ! s.randomizeGraphModule; keepOpen = true; }
-                            else if (result == 3) { s.randomizeMenuModule = ! s.randomizeMenuModule; keepOpen = true; }
-                            else if (result == 4) { s.randomizeRampFftBars = ! s.randomizeRampFftBars; keepOpen = true; }
-                            else if (result == 5) { s.randomizeRampSpectrogram = ! s.randomizeRampSpectrogram; keepOpen = true; }
-                            else if (result == 6) { s.randomizeRampSpectrogram3D = ! s.randomizeRampSpectrogram3D; keepOpen = true; }
-                            else if (result == 7) { s.randomizeRampSpectrumFill = ! s.randomizeRampSpectrumFill; keepOpen = true; }
-                            else if (result == 11) { s.randomizeRampLevelMeters = ! s.randomizeRampLevelMeters; keepOpen = true; }
+                            bool* const scopeFlags[] = {
+                                &s.randomizeFaceplateMod,
+                                &s.randomizeGraphModule,
+                                &s.randomizeMenuModule,
+                                &s.randomizeGraphCursorInfo,
+                                &s.randomizeRampFftBars,
+                                &s.randomizeRampSpectrogram,
+                                &s.randomizeRampSpectrogram3D,
+                                &s.randomizeRampSpectrumFill,
+                                &s.randomizeRampSpectrumCurve,
+                                &s.randomizeRampSpectrumPreFill,
+                                &s.randomizeRampSpectrumPreCurve,
+                                &s.randomizeRampSpectrumHoldFill,
+                                &s.randomizeRampSpectrumHoldCurve,
+                                &s.randomizeRampEqCurve,
+                                &s.randomizeRampEqSumFill,
+                                &s.randomizeRampEqBandCurve,
+                                &s.randomizeRampEqBandFill,
+                                &s.randomizeRampLevelMeters
+                            };
+
+                            auto flagForResult = [&s] (int id) -> bool*
+                            {
+                                switch (id)
+                                {
+                                    case 1:  return &s.randomizeFaceplateMod;
+                                    case 2:  return &s.randomizeGraphModule;
+                                    case 3:  return &s.randomizeMenuModule;
+                                    case 21: return &s.randomizeGraphCursorInfo;
+                                    case 4:  return &s.randomizeRampFftBars;
+                                    case 5:  return &s.randomizeRampSpectrogram;
+                                    case 6:  return &s.randomizeRampSpectrogram3D;
+                                    case 7:  return &s.randomizeRampSpectrumFill;
+                                    case 11: return &s.randomizeRampLevelMeters;
+                                    case 12: return &s.randomizeRampSpectrumCurve;
+                                    case 13: return &s.randomizeRampEqCurve;
+                                    case 14: return &s.randomizeRampSpectrumPreFill;
+                                    case 15: return &s.randomizeRampSpectrumPreCurve;
+                                    case 16: return &s.randomizeRampSpectrumHoldFill;
+                                    case 17: return &s.randomizeRampSpectrumHoldCurve;
+                                    case 18: return &s.randomizeRampEqSumFill;
+                                    case 19: return &s.randomizeRampEqBandCurve;
+                                    case 20: return &s.randomizeRampEqBandFill;
+                                    default: return nullptr;
+                                }
+                            };
+
+                            const bool altSolo = juce::ModifierKeys::getCurrentModifiers().isAltDown()
+                                || juce::ModifierKeys::getCurrentModifiersRealtime().isAltDown();
+
+                            if (auto* flag = flagForResult (result))
+                            {
+                                if (altSolo)
+                                {
+                                    // First Alt-click: solo this item. Second Alt-click on the
+                                    // already-soloed item: invert (this off, everything else on).
+                                    bool alreadySolo = *flag;
+                                    if (alreadySolo)
+                                    {
+                                        for (auto* f : scopeFlags)
+                                        {
+                                            if (f != flag && *f)
+                                            {
+                                                alreadySolo = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (alreadySolo)
+                                    {
+                                        for (auto* f : scopeFlags)
+                                            *f = (f != flag);
+                                    }
+                                    else
+                                    {
+                                        for (auto* f : scopeFlags)
+                                            *f = (f == flag);
+                                    }
+                                }
+                                else
+                                {
+                                    *flag = ! *flag;
+                                }
+                                keepOpen = true;
+                            }
                             else if (result == 8) safe->disableCustomColourRamps();
                             else if (result == 9)  { safe->setOrderedRampGradation (true, true); keepOpen = true; }
                             else if (result == 10) { safe->setOrderedRampGradation (false, true); keepOpen = true; }
 
-                            if ((result >= 1 && result <= 7) || result == 11)
+                            if (flagForResult (result) != nullptr)
                                 safe->editor.requestSaveUiPrefs();
 
                             if (keepOpen)
@@ -6740,8 +7167,27 @@ int MainComponent::ScopeSplitOverlay::splitYPx() const noexcept
     return juce::roundToInt ((float) getHeight() * splitY);
 }
 
+int MainComponent::ScopeSplitOverlay::hitSeamIndex (juce::Point<int> p) const noexcept
+{
+    for (int i = 0; i < (int) seams.size(); ++i)
+    {
+        auto r = seams[(size_t) i].seam.expanded (kHitPad, kHitPad);
+        if (r.contains (p))
+            return i;
+    }
+    return -1;
+}
+
 MainComponent::ScopeSplitOverlay::Drag MainComponent::ScopeSplitOverlay::hitZone (juce::Point<int> p) const noexcept
 {
+    if (! seams.empty())
+    {
+        const int i = hitSeamIndex (p);
+        if (i < 0)
+            return Drag::none;
+        return seams[(size_t) i].vertical ? Drag::vertical : Drag::horizontal;
+    }
+
     const int sx = splitXPx();
     const int sy = splitYPx();
     const bool nearV = std::abs (p.x - sx) <= kHitPad;
@@ -6759,9 +7205,22 @@ bool MainComponent::ScopeSplitOverlay::hitTest (int x, int y)
 
 void MainComponent::ScopeSplitOverlay::paint (juce::Graphics& g)
 {
+    g.setColour (juce::Colour::fromRGBA (180, 150, 55, 160));
+    if (! seams.empty())
+    {
+        for (const auto& s : seams)
+        {
+            const auto r = s.seam.toFloat();
+            if (s.vertical)
+                g.drawLine (r.getCentreX(), r.getY(), r.getCentreX(), r.getBottom(), 1.5f);
+            else
+                g.drawLine (r.getX(), r.getCentreY(), r.getRight(), r.getCentreY(), 1.5f);
+        }
+        return;
+    }
+
     const float sx = (float) splitXPx();
     const float sy = (float) splitYPx();
-    g.setColour (juce::Colour::fromRGBA (180, 150, 55, 160));
     g.drawLine (sx, 0.0f, sx, (float) getHeight(), 1.5f);
     g.drawLine (0.0f, sy, (float) getWidth(), sy, 1.5f);
 
@@ -6772,6 +7231,7 @@ void MainComponent::ScopeSplitOverlay::paint (juce::Graphics& g)
 
 void MainComponent::ScopeSplitOverlay::mouseDown (const juce::MouseEvent& e)
 {
+    dragSeam = hitSeamIndex (e.getPosition());
     drag = hitZone (e.getPosition());
     if (drag != Drag::none)
         setMouseCursor (drag == Drag::vertical ? juce::MouseCursor::LeftRightResizeCursor
@@ -6784,6 +7244,22 @@ void MainComponent::ScopeSplitOverlay::mouseDrag (const juce::MouseEvent& e)
     if (drag == Drag::none || getWidth() <= 0 || getHeight() <= 0)
         return;
 
+    if (dragSeam >= 0 && dragSeam < (int) seams.size())
+    {
+        auto& sh = seams[(size_t) dragSeam];
+        if (sh.node != nullptr && sh.parent.getWidth() > 8 && sh.parent.getHeight() > 8)
+        {
+            if (sh.vertical)
+                sh.node->frac = juce::jlimit (0.12f, 0.88f,
+                    (float) (e.x - sh.parent.getX()) / (float) sh.parent.getWidth());
+            else
+                sh.node->frac = juce::jlimit (0.12f, 0.88f,
+                    (float) (e.y - sh.parent.getY()) / (float) sh.parent.getHeight());
+        }
+        main.resized();
+        return;
+    }
+
     if (drag == Drag::vertical || drag == Drag::both)
         splitX = juce::jlimit (0.18f, 0.82f, (float) e.x / (float) getWidth());
     if (drag == Drag::horizontal || drag == Drag::both)
@@ -6795,6 +7271,7 @@ void MainComponent::ScopeSplitOverlay::mouseDrag (const juce::MouseEvent& e)
 void MainComponent::ScopeSplitOverlay::mouseUp (const juce::MouseEvent&)
 {
     drag = Drag::none;
+    dragSeam = -1;
     setMouseCursor (juce::MouseCursor::NormalCursor);
     main.editor.requestSaveUiPrefs();
 }
@@ -7016,8 +7493,14 @@ void MainComponent::ScopeArrangeOverlay::mouseDown (const juce::MouseEvent& e)
     {
         for (int i = 0; i < (int) slotBounds.size(); ++i)
         {
-            if (slotBounds[(size_t) i].contains (e.getPosition())
-                && i < (int) main.scopeEnabledOrder.size())
+            if (! slotBounds[(size_t) i].contains (e.getPosition()))
+                continue;
+            if (! main.scopeStripLayout)
+            {
+                main.showScopePaneContextMenu (i);
+                return;
+            }
+            if (i < (int) main.scopeEnabledOrder.size())
             {
                 main.showScopeModuleContextMenu (main.scopeEnabledOrder[(size_t) i], &main);
                 return;
@@ -7133,7 +7616,8 @@ void MainComponent::ScopeArrangeOverlay::paint (juce::Graphics& g)
 
     // Stroke + header above modules (card FILL is painted in MainComponent::paint
     // so module content stays visible).
-    for (int i = 0; i < (int) slotBounds.size() && i < (int) main.scopeEnabledOrder.size(); ++i)
+    const int nSlots = (int) slotBounds.size();
+    for (int i = 0; i < nSlots; ++i)
     {
         const auto r = slotBounds[(size_t) i].toFloat();
         if (r.isEmpty())
@@ -7145,7 +7629,21 @@ void MainComponent::ScopeArrangeOverlay::paint (juce::Graphics& g)
 
         auto header = r;
         header = ScopePaneChrome::headerBand (header);
-        ScopePaneChrome::paintHeader (g, header, main.scopeEnabledOrder[(size_t) i], colours, hover);
+
+        std::optional<ScopeModuleId> mid;
+        if (! strip && i < (int) main.scopeViewportLeaves.size())
+            mid = main.scopeViewportLeaves[(size_t) i].module;
+        else if (i < (int) main.scopeEnabledOrder.size())
+            mid = main.scopeEnabledOrder[(size_t) i];
+
+        if (mid.has_value())
+            ScopePaneChrome::paintHeader (g, header, *mid, colours, hover);
+        else
+        {
+            g.setColour (colours.scopeDropOutline.withAlpha (hover ? 0.85f : 0.55f));
+            g.setFont (SharedResources::uiFont (11.0f));
+            g.drawText ("Assign", header.toNearestInt(), juce::Justification::centredLeft, false);
+        }
     }
 
     // Permanent inter-pane hairlines (strip columns)
@@ -7442,7 +7940,7 @@ void MainComponent::layoutScopeModePanes (float scale)
     std::vector<juce::Rectangle<int>> slots ((size_t) juce::jmax (0, n));
     juce::Rectangle<int> stripForOverlay {};
 
-    if (n == 0)
+    if (n == 0 && scopeStripLayout)
     {
         scopeArrangeOverlay.setBounds (getLocalBounds());
         scopeArrangeOverlay.setSlotBounds (slots);
@@ -7486,51 +7984,37 @@ void MainComponent::layoutScopeModePanes (float scale)
             x += cellW + gap;
         }
     }
-    else if (n == 4)
-    {
-        auto graph = getLocalBounds();
-        scopeSplitOverlay.setBounds (graph);
-        scopeSplitOverlay.setVisible (true);
-
-        const int sx = juce::roundToInt ((float) graph.getWidth() * scopeSplitOverlay.getSplitX());
-        const int sy = juce::roundToInt ((float) graph.getHeight() * scopeSplitOverlay.getSplitY());
-        const int halfGap = gap / 2;
-
-        slots[0] = juce::Rectangle<int> (graph.getX(), graph.getY(), sx, sy)
-                       .reduced (gap, gap).withTrimmedRight (halfGap).withTrimmedBottom (halfGap);
-        slots[1] = juce::Rectangle<int> (graph.getX() + sx, graph.getY(), graph.getWidth() - sx, sy)
-                       .reduced (gap, gap).withTrimmedLeft (halfGap).withTrimmedBottom (halfGap);
-        slots[2] = juce::Rectangle<int> (graph.getX(), graph.getY() + sy, sx, graph.getHeight() - sy)
-                       .reduced (gap, gap).withTrimmedRight (halfGap).withTrimmedTop (halfGap);
-        slots[3] = juce::Rectangle<int> (graph.getX() + sx, graph.getY() + sy,
-                                         graph.getWidth() - sx, graph.getHeight() - sy)
-                       .reduced (gap, gap).withTrimmedLeft (halfGap).withTrimmedTop (halfGap);
-
-        frequencyResponseComponent.setVisible (false);
-
-        for (int slot = 0; slot < n; ++slot)
-            placeInset (slot, slots[(size_t) slot]);
-    }
     else
     {
-        scopeSplitOverlay.setVisible (false);
+        if (scopeViewport == nullptr)
+            scopeViewport = ScopeViewport::defaultTree();
+
         frequencyResponseComponent.setVisible (false);
+        frequencyResponseComponent.setBounds ({});
 
+        scopeViewportLeaves.clear();
+        scopeViewportSplits.clear();
         auto graph = getLocalBounds().reduced (gap);
-        const int cols = juce::jmax (1, (int) std::ceil (std::sqrt ((float) n)));
-        const int rows = (n + cols - 1) / cols;
-        const int cellW = juce::jmax (1, (graph.getWidth() - gap * (cols - 1)) / cols);
-        const int cellH = juce::jmax (1, (graph.getHeight() - gap * (rows - 1)) / rows);
+        ScopeViewport::layoutInto (*scopeViewport, graph, gap, scopeViewportLeaves, scopeViewportSplits);
 
-        for (int slot = 0; slot < n; ++slot)
+        slots.assign (scopeViewportLeaves.size(), {});
+        scopeEnabledOrder.clear();
+        for (int i = 0; i < (int) scopeViewportLeaves.size(); ++i)
         {
-            const int row = slot / cols;
-            const int col = slot % cols;
-            auto cell = juce::Rectangle<int> (graph.getX() + col * (cellW + gap),
-                                              graph.getY() + row * (cellH + gap),
-                                              cellW, cellH);
-            placeInset (slot, cell);
+            auto& leaf = scopeViewportLeaves[(size_t) i];
+            slots[(size_t) i] = leaf.cell;
+            leaf.content = ScopePaneChrome::contentBounds (leaf.cell);
+            if (leaf.module.has_value())
+            {
+                scopeEnabledOrder.push_back (*leaf.module);
+                placeScopePane (*leaf.module, leaf.content, toolH, toolSize, toolGap);
+            }
         }
+
+        scopeSplitOverlay.setBounds (getLocalBounds());
+        scopeSplitOverlay.setSeams (scopeViewportSplits);
+        scopeSplitOverlay.setVisible (! scopeViewportSplits.empty());
+        syncScopeModuleEnabledStates();
     }
 
     oscDimmer.setVisible (false);
@@ -7685,18 +8169,24 @@ void MainComponent::resized()
 
     const int editorWidth = getWidth();
     const int editorHeight = getHeight();
-    // Keep meters in the plot area â€” never grow into / over the piano strip.
+    // L/R labels sit inside the meter component, 24 px above its bottom
+    // (40 px body inset - 2 px gap - 14 px label). Park that label 5 px
+    // above the graph chrome row (SideCheck / Match / Learn / P / Mod).
     const int pianoH = frequencyResponseComponent.getPianoStripHeight();
-    const int layoutH = juce::jmax (1, editorHeight - pianoH);
+    const int chromeH = frequencyResponseComponent.getBottomGraphChromeHeight();
+    const int chromeRowY = editorHeight - pianoH - chromeH;
+    constexpr int kChannelLabelBottomInset = 24;
+    constexpr int kPadAboveChromeRow = 5;
+    const int meterY = px (20.0f) + 10;
+    const int meterBottom = chromeRowY + kChannelLabelBottomInset - kPadAboveChromeRow;
     const int meterWidth = static_cast<int>(editorWidth * 0.015);
-    const int meterHeight = static_cast<int>(layoutH * 0.90);
+    const int meterHeight = juce::jmax (1, meterBottom - meterY);
     const int meterSpacing = static_cast<int>(meterWidth * 0.4f);
-    const int centerY = (layoutH - meterHeight) / 2;
     const int totalMeterGroupWidth = 2 * meterWidth + meterSpacing;
     const int padding = static_cast<int>(totalMeterGroupWidth * 0.4);
-    const int xLeft = static_cast<int>(padding * 1.5);
+    // 2 px after the measured dB label glyphs (not the old 48 px draw box).
+    const int xLeft = frequencyResponseComponent.getDbAxisRightX() + 2;
     const int xRight = editorWidth - padding - totalMeterGroupWidth;
-    const int meterY = centerY + px (20.0f);
 
     // Scope mode uses Level Meter modules only â€” hide the default edge meters.
     const bool hideEdgeMeters = scopeModeEnabled;
@@ -7711,20 +8201,11 @@ void MainComponent::resized()
     verticalGradientMeterPostL.setBounds(xRight, meterY, meterWidth, meterHeight);
     verticalGradientMeterPostR.setBounds(xRight + meterWidth + meterSpacing, meterY, meterWidth, meterHeight);
 
-    // Channel-mode toggle sits just left of the post (output) meter pair.
-    // Eco (top chrome) uses these same dimensions so the two chrome toggles match.
-    const int meterModeW = juce::jmax (px (36.0f), meterWidth * 2 + meterSpacing);
-    const int meterModeH = px (22.0f);
-    {
-        const int modeX = juce::jmax (0, xRight - meterModeW - px (6.0f));
-        const int modeY = meterY + px (4.0f);
-        meterChannelModeButton.setBounds (modeX, modeY, meterModeW, meterModeH);
-    }
-
     auto area2 = getLocalBounds().reduced (px (10.0f));
     constexpr float buttonScaleFactor = 1.2f;
-    const int settingsW = px (40.0f * buttonScaleFactor);
-    const int settingsH = px (30.0f * buttonScaleFactor);
+    constexpr float settingsSizeScale = 0.75f;
+    const int settingsW = px (40.0f * buttonScaleFactor * settingsSizeScale);
+    const int settingsH = px (30.0f * buttonScaleFactor * settingsSizeScale);
     // Match EqEditor helpTooltipsButton (?) size: px(20), clamped 16..22 compact / 16..24 expanded.
     constexpr int helpTrimH = 30;
     const int historySize = juce::jlimit (16, editor.isUiCompact() ? 22 : (helpTrimH - 6), px (20.0f));
@@ -7762,6 +8243,22 @@ void MainComponent::resized()
         redoButton.setBounds (hx, historyY, historySize, historySize);
         hx -= historyGap + historySize;
         undoButton.setBounds (hx, historyY, historySize, historySize);
+    }
+
+    // Shared with Eco / Arrange / Osc chrome below (same button height).
+    const int meterModeW = juce::jmax (px (36.0f), meterWidth * 2 + meterSpacing);
+    const int meterModeH = px (22.0f);
+
+    // L/R | M/S sits left of the post meters, 5 px below Undo/Redo (or Settings in strip).
+    {
+        const int modeX = juce::jmax (0, xRight - meterModeW - px (6.0f));
+        constexpr int kPadBelowUndo = 5;
+        int modeY = meterY + px (4.0f);
+        if (undoButton.isVisible())
+            modeY = undoButton.getBottom() + kPadBelowUndo;
+        else if (menuToggleButton.isVisible())
+            modeY = menuToggleButton.getBottom() + kPadBelowUndo;
+        meterChannelModeButton.setBounds (modeX, modeY, meterModeW, meterModeH);
     }
 
     // Top-left chrome: Bypass | A | B | C | D | UI | Dice.

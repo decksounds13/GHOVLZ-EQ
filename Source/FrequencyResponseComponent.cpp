@@ -16,7 +16,10 @@
 #include "EqBand.h"
 #include "LfoMod.h"
 #include "ComboBoxLookAndFeel.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 #include "MusicNote.h"
+#include "Visualizer/SpectrumAnalysis.h"
+#include "ColourRamp/GradientRamp.h"
 #include <JuceHeader.h>
 
 namespace
@@ -85,9 +88,31 @@ namespace
     }
 
     /**
-        Band handle disk + dual rings + centred label.
-        When legible text is on: fill is nudged vs graph bg; ink is chosen per-fill
-        (so cyan/purple/etc. disks each get readable black or white numbers).
+        ~1 Hz pulse between normal size and slightly above the old static enlarge (1.25).
+        Used while the pointer is over a handle so it gently breathes.
+    */
+    float bandHandleHoverPulseScale() noexcept
+    {
+        const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        const float wave = 0.5f
+                           + 0.5f * (float) std::sin (t * juce::MathConstants<double>::twoPi * 1.0);
+        // 1.00 … 1.35 (above former 1.25 static enlarge)
+        return 1.0f + 0.35f * wave;
+    }
+
+    /** Hover pulses; selection / drag / option-box use steady 1.25. */
+    float bandHandleInteractionScale (bool hovering, bool selectedOrDragging) noexcept
+    {
+        if (hovering)
+            return bandHandleHoverPulseScale();
+        if (selectedOrDragging)
+            return 1.25f;
+        return 1.0f;
+    }
+
+    /**
+        Band handle circular face + drop shadow + dual rings + centred label.
+        When legible text is on: fill is nudged vs graph bg; ink is chosen per-fill.
     */
     void paintBandHandleChrome (juce::Graphics& g,
                                 float cx, float cy,
@@ -108,21 +133,34 @@ namespace
         const auto ink = theme.legibleTextOn (labelBase, fill);
         const auto outer = theme.legibleTextOn (outlineBase, graphBg);
 
+        // Handles stay circular. Button radius is chrome-only — a 2–6 px
+        // corner on a 12 px face reads as a square.
+        auto face = juce::Rectangle<float> (cx - handleSize * 0.5f,
+                                            cy - handleSize * 0.5f,
+                                            handleSize, handleSize);
+        auto outR = juce::Rectangle<float> (cx - handleOutlineSize * 0.5f,
+                                            cy - handleOutlineSize * 0.5f,
+                                            handleOutlineSize, handleOutlineSize);
+        auto inR = juce::Rectangle<float> (cx - innerOutlineSize * 0.5f,
+                                           cy - innerOutlineSize * 0.5f,
+                                           innerOutlineSize, innerOutlineSize);
+
+        // Same chrome drop as buttons / meters (master glow/shadow switch).
+        GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, outR, outR.getWidth() * 0.5f);
+
         g.setColour (fill);
-        g.fillEllipse (cx - handleSize * 0.5f, cy - handleSize * 0.5f, handleSize, handleSize);
+        g.fillEllipse (face);
 
         g.setColour (outer);
-        g.drawEllipse (cx - handleOutlineSize * 0.5f, cy - handleOutlineSize * 0.5f,
-                       handleOutlineSize, handleOutlineSize, outlineThickness);
+        g.drawEllipse (outR, outlineThickness);
 
         g.setColour (ink);
-        g.drawEllipse (cx - innerOutlineSize * 0.5f, cy - innerOutlineSize * 0.5f,
-                       innerOutlineSize, innerOutlineSize, outlineThickness2);
+        g.drawEllipse (inR, outlineThickness2);
 
         if (label.isNotEmpty())
         {
             g.setColour (ink);
-            g.setFont (juce::jmax (8.0f, 11.0f * scale));
+            g.setFont (theme.makeUiFont (juce::jmax (8.0f, 11.0f * scale), true));
             if (label.length() <= 1)
             {
                 const float textOffset = 3.5f * scale;
@@ -292,6 +330,14 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     parameters.addParameterListener("EQ_SUM_GLOW_OPACITY_ID", this);
     parameters.addParameterListener("EQ_MULTICOLOR_BAND_FILL_ID", this);
     parameters.addParameterListener("EQ_SHOW_CROSSHAIR_ID", this);
+    parameters.addParameterListener("EQ_CURVE_RAMP_ID", this);
+    parameters.addParameterListener("EQ_SUM_FILL_RAMP_ID", this);
+    parameters.addParameterListener("EQ_BAND_CURVE_RAMP_ID", this);
+    parameters.addParameterListener("EQ_BAND_FILL_RAMP_ID", this);
+    parameters.addParameterListener("EQ_SHOW_CURVES_ID", this);
+    parameters.addParameterListener("EQ_CURVE_FADE_ID", this);
+    parameters.addParameterListener("EQ_FILL_FADE_ID", this);
+    parameters.addParameterListener("SPECTRUM_CHANNEL_ID", this);
     parameters.addParameterListener("PROPORTIONAL_Q_ID", this);
     parameters.addParameterListener("band1Dynamic", this);
     parameters.addParameterListener("band2Dynamic", this);
@@ -386,7 +432,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     optionBoxMenu->setVisible(false);
     optionBoxMenu->resized();
 
-    auto styleRangeButton = [this] (juce::TextButton& button)
+    auto styleRangeButton = [this] (juce::Button& button)
     {
         const auto& c = colors();
         const auto offInk = c.legibleTextOn (c.pluginButtonText, c.pluginButtonBackground);
@@ -396,6 +442,8 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
         button.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
         button.setColour (juce::TextButton::textColourOffId, offInk.withAlpha (0.92f));
         button.setColour (juce::TextButton::textColourOnId, onInk);
+        button.setLookAndFeel (&graphChromeLookAndFeel);
+        button.setPaintingIsUnclipped (true);
     };
 
     styleRangeButton (eqRangeMinusButton);
@@ -510,7 +558,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     {
         label.setText (text, juce::dontSendNotification);
         // Match Range caption size/weight (eqRangeLabel uses 11 pt).
-        label.setFont (juce::Font (11.0f));
+        label.setFont (SharedResources::uiFont (11.0f));
         label.setJustificationType (juce::Justification::centred);
         label.setColour (juce::Label::textColourId, colors().graphAxisText.withAlpha (0.75f));
         label.setInterceptsMouseClicks (false, false);
@@ -544,7 +592,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     addAndMakeVisible (learnButton);
 
     learnStatusLabel.setText ("-", juce::dontSendNotification);
-    learnStatusLabel.setFont (juce::Font (11.0f));
+    learnStatusLabel.setFont (SharedResources::uiFont (11.0f));
     learnStatusLabel.setJustificationType (juce::Justification::centredLeft);
     learnStatusLabel.setColour (juce::Label::textColourId, colors().graphAxisText.withAlpha (0.90f));
     learnStatusLabel.setInterceptsMouseClicks (false, false);
@@ -618,7 +666,9 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
 
     styleRangeButton (autoGainButton);
     autoGainButton.setClickingTogglesState (true);
-    autoGainButton.setTooltip ("Auto Gain - match output loudness to pre-EQ level");
+    autoGainButton.setTooltip (
+        "Auto Gain. Default: match output loudness to the pre-EQ level (Match input). "
+        "Settings - Loudness can switch this to Target LUFS.");
     addChildComponent (autoGainButton); // visible only in compact UI
     autoGainButton.setVisible (false);
     autoGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
@@ -628,7 +678,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     eqRangeLabel.setText ("Range", juce::dontSendNotification);
     eqRangeLabel.setJustificationType (juce::Justification::centredRight);
     eqRangeLabel.setColour (juce::Label::textColourId, colors().graphAxisText.withAlpha (0.75f));
-    eqRangeLabel.setFont (juce::Font (11.0f));
+    eqRangeLabel.setFont (SharedResources::uiFont (11.0f));
     // Intercept so the Range caption can show its tooltip (same tip as - / +).
     eqRangeLabel.setInterceptsMouseClicks (true, false);
     eqRangeLabel.setTooltip ("EQ display range - vertical scale of the curve (+/-6, +/-12, +/-24, or +/-36 dB)");
@@ -746,12 +796,14 @@ void FrequencyResponseComponent::applyThemeToChildControls()
     const auto onInk = c.legibleTextOn (juce::Colours::black, c.pluginButtonAccent);
     const auto axisInk = c.legibleTextOn (c.graphAxisText, graphBg);
 
-    auto styleRangeButton = [&] (juce::TextButton& button)
+    auto styleRangeButton = [&] (juce::Button& button)
     {
         button.setColour (juce::TextButton::buttonColourId, c.pluginButtonBackground);
         button.setColour (juce::TextButton::buttonOnColourId, c.pluginButtonAccent);
         button.setColour (juce::TextButton::textColourOffId, offInk.withAlpha (0.92f));
         button.setColour (juce::TextButton::textColourOnId, onInk);
+        button.setLookAndFeel (&graphChromeLookAndFeel);
+        button.setPaintingIsUnclipped (true);
     };
 
     styleRangeButton (eqRangeMinusButton);
@@ -787,7 +839,7 @@ void FrequencyResponseComponent::applyThemeToChildControls()
 
 void FrequencyResponseComponent::syncUiModeButton (bool isCompact)
 {
-    uiModeButton.setButtonText (isCompact ? "v" : "^");
+    uiModeButton.setExpandGlyph (isCompact);
     uiModeButton.setTooltip (isCompact ? "Expand to full UI" : "Collapse to graph-only view");
     outputGainScrubber.setVisible (isCompact);
     autoGainButton.setVisible (isCompact);
@@ -802,6 +854,21 @@ void FrequencyResponseComponent::syncModButton (bool isOpen)
 
 FrequencyResponseComponent::~FrequencyResponseComponent()
 {
+    auto clearLf = [] (juce::Component& c) { c.setLookAndFeel (nullptr); };
+    clearLf (uiModeButton);
+    clearLf (eqRangeMinusButton);
+    clearLf (eqRangePlusButton);
+    clearLf (modButton);
+    clearLf (proportionalQButton);
+    clearLf (pianoDisplayButton);
+    clearLf (autoGainButton);
+    clearLf (splitSoloTButton);
+    clearLf (splitSoloSButton);
+    clearLf (matchButton);
+    clearLf (matchCurveButton);
+    clearLf (matchFreezeButton);
+    clearLf (learnButton);
+
     stopTimer();
 
     parameters.removeParameterListener("band1Gain", this);
@@ -861,6 +928,14 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener("EQ_SUM_GLOW_OPACITY_ID", this);
     parameters.removeParameterListener("EQ_MULTICOLOR_BAND_FILL_ID", this);
     parameters.removeParameterListener("EQ_SHOW_CROSSHAIR_ID", this);
+    parameters.removeParameterListener("EQ_CURVE_RAMP_ID", this);
+    parameters.removeParameterListener("EQ_SUM_FILL_RAMP_ID", this);
+    parameters.removeParameterListener("EQ_BAND_CURVE_RAMP_ID", this);
+    parameters.removeParameterListener("EQ_BAND_FILL_RAMP_ID", this);
+    parameters.removeParameterListener("EQ_SHOW_CURVES_ID", this);
+    parameters.removeParameterListener("EQ_CURVE_FADE_ID", this);
+    parameters.removeParameterListener("EQ_FILL_FADE_ID", this);
+    parameters.removeParameterListener("SPECTRUM_CHANNEL_ID", this);
     parameters.removeParameterListener("PROPORTIONAL_Q_ID", this);
     for (int bi = 0; bi < 8; ++bi)
     {
@@ -1054,6 +1129,110 @@ bool FrequencyResponseComponent::isShowCrosshair() const
     return true;
 }
 
+bool FrequencyResponseComponent::isShowEqCurves() const
+{
+    if (auto* p = parameters.getRawParameterValue ("EQ_SHOW_CURVES_ID"))
+        return p->load() >= 0.5f;
+
+    return true;
+}
+
+bool FrequencyResponseComponent::isAnalyserOverlayMode() const
+{
+    if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+            parameters.getParameter (SpectrumAnalysis::channelParamId())))
+        return SpectrumAnalysis::isOverlay (SpectrumAnalysis::channelFromIndex (p->getIndex()));
+
+    return false;
+}
+
+void FrequencyResponseComponent::ensureEqFadeTimer() noexcept
+{
+    if (! eqDisplayFading)
+        return;
+
+    setBufferedToImage (false);
+    if (! isTimerRunning())
+        startTimerHz (anyActiveDynamicEq() ? juce::jmax (30, resolveDynamicCurveTimerHz()) : 60);
+}
+
+void FrequencyResponseComponent::applyEqDisplayFades (float dt)
+{
+    auto fadeSec = [this] (const char* id) -> float
+    {
+        if (auto* p = parameters.getRawParameterValue (id))
+            return juce::jlimit (0.0f, 5.0f, p->load());
+        return 0.0f;
+    };
+
+    const float curveSec = fadeSec ("EQ_CURVE_FADE_ID");
+    const float fillSec = fadeSec ("EQ_FILL_FADE_ID");
+
+    auto toward = [] (std::vector<float>& displayed, const std::vector<float>& target,
+                      float seconds, float delta) -> bool
+    {
+        if (target.empty())
+        {
+            displayed.clear();
+            return false;
+        }
+
+        if (displayed.size() != target.size() || seconds <= 1.0e-4f || delta <= 0.0f)
+        {
+            displayed = target;
+            return false;
+        }
+
+        const float a = 1.0f - std::exp (-delta / seconds);
+        if (a >= 0.999f)
+        {
+            displayed = target;
+            return false;
+        }
+
+        bool still = false;
+        for (size_t i = 0; i < target.size(); ++i)
+        {
+            displayed[i] += (target[i] - displayed[i]) * a;
+            if (! still && std::abs (target[i] - displayed[i]) > 0.02f)
+                still = true;
+        }
+        return still;
+    };
+
+    bool still = false;
+    const std::vector<float>* src[8] = {
+        &responseBand1, &responseBand2, &responseBand3, &responseBand4,
+        &responseHighpass, &responseLowpass, &responseHighShelf, &responseLowShelf
+    };
+    for (int i = 0; i < 8; ++i)
+    {
+        still = toward (eqFadeBand[i].curve, *src[i], curveSec, dt) || still;
+        still = toward (eqFadeBand[i].fill, *src[i], fillSec, dt) || still;
+    }
+
+    still = toward (eqFadeCombined.curve, responseCombined, curveSec, dt) || still;
+    still = toward (eqFadeCombined.fill, responseCombined, fillSec, dt) || still;
+    still = toward (eqFadeGhostT.curve, responseTransientGhost, curveSec, dt) || still;
+    still = toward (eqFadeGhostS.curve, responseSustainGhost, curveSec, dt) || still;
+
+    for (int i = 0; i < (int) eqFadeExtended.size(); ++i)
+    {
+        still = toward (eqFadeExtended[(size_t) i].curve, responseExtended[(size_t) i], curveSec, dt) || still;
+        still = toward (eqFadeExtended[(size_t) i].fill, responseExtended[(size_t) i], fillSec, dt) || still;
+    }
+
+    for (int i = 0; i < (int) eqFadeSpectral.size(); ++i)
+    {
+        still = toward (eqFadeSpectral[(size_t) i].curve, responseSpectralAmount[(size_t) i], curveSec, dt) || still;
+        still = toward (eqFadeSpectral[(size_t) i].fill, responseSpectralAmount[(size_t) i], fillSec, dt) || still;
+    }
+
+    eqDisplayFading = still;
+    if (still)
+        ensureEqFadeTimer();
+}
+
 bool FrequencyResponseComponent::bandGainIsBoost (const char* gainParamId, const char* typeParamId) const
 {
     return bandGainIsBoost (juce::String (gainParamId != nullptr ? gainParamId : ""),
@@ -1235,6 +1414,8 @@ void FrequencyResponseComponent::ensureResponseBufferSize (int width)
     resizeIfNeeded (responseHighShelf);
     resizeIfNeeded (responseLowShelf);
     resizeIfNeeded (responseCombined);
+    resizeIfNeeded (responseTransientGhost);
+    resizeIfNeeded (responseSustainGhost);
     resizeIfNeeded (responseDynSumScratch);
     for (auto& ext : responseExtended)
         resizeIfNeeded (ext);
@@ -1709,83 +1890,100 @@ void FrequencyResponseComponent::rebuildMagnitudeResponsesIfNeeded (int width)
     // Skipped entirely when Spec3D "Disable Cumulative Curve" is on.
     auto addBandToCombined = [&] (bool bandOn, bool dynLive, bool lfoLive,
                                   int type, float freq, float qBase, float effectiveGain,
-                                  const juce::String& slopeId, const std::vector<float>& bandBuf)
+                                  const juce::String& slopeId, const std::vector<float>& bandBuf,
+                                  int splitMode = 0)
     {
         if (! bandOn || (int) bandBuf.size() != width)
             return;
 
         const bool sumNeedsEffective = dynLive && ! lfoLive && FilterType::usesGain (type);
+        const float* src = bandBuf.data();
         if (sumNeedsEffective)
         {
             // Published dyn gains are pre-scale; match audio with eqScale.
             fillBandResponse (type, freq, qBase, effectiveGain * eqScale, slopeId, responseDynSumScratch);
-            for (int i = 0; i < width; ++i)
-                responseCombined[(size_t) i] += responseDynSumScratch[(size_t) i];
+            src = responseDynSumScratch.data();
         }
-        else
-        {
+        for (int i = 0; i < width; ++i)
+            responseCombined[(size_t) i] += src[i];
+
+        const bool toT = splitMode != (int) StructuralSplit::Mode::sustain;
+        const bool toS = splitMode != (int) StructuralSplit::Mode::transient;
+        if (toT)
             for (int i = 0; i < width; ++i)
-                responseCombined[(size_t) i] += bandBuf[(size_t) i];
-        }
+                responseTransientGhost[(size_t) i] += src[i];
+        if (toS)
+            for (int i = 0; i < width; ++i)
+                responseSustainGhost[(size_t) i] += src[i];
     };
 
     if (! skipCombined)
     {
         std::fill (responseCombined.begin(), responseCombined.end(), 0.0f);
+        std::fill (responseTransientGhost.begin(), responseTransientGhost.end(), 0.0f);
+        std::fill (responseSustainGhost.begin(), responseSustainGhost.end(), 0.0f);
 
         {
             const int type = (int) raw ("band1Type");
             addBandToCombined (processor.getIsBand1On(), dyn1, anyLfoRouted, type,
                                live1 ? processor.getPublishedBand1Freq() : raw ("band1Frequency"),
                                live1 ? processor.getPublishedBand1Q() : raw ("band1Q"),
-                               eg1, "band1Slope", responseBand1);
+                               eg1, "band1Slope", responseBand1,
+                               BandChannel::readChoiceIndex (parameters, "band1SplitMode"));
         }
         {
             const int type = (int) raw ("band2Type");
             addBandToCombined (processor.getIsBand2On(), dyn2, anyLfoRouted, type,
                                live2 ? processor.getPublishedBand2Freq() : raw ("band2Frequency"),
                                live2 ? processor.getPublishedBand2Q() : raw ("band2Q"),
-                               eg2, "band2Slope", responseBand2);
+                               eg2, "band2Slope", responseBand2,
+                               BandChannel::readChoiceIndex (parameters, "band2SplitMode"));
         }
         {
             const int type = (int) raw ("band3Type");
             addBandToCombined (processor.getIsBand3On(), dyn3, anyLfoRouted, type,
                                live3 ? processor.getPublishedBand3Freq() : raw ("band3Frequency"),
                                live3 ? processor.getPublishedBand3Q() : raw ("band3Q"),
-                               eg3, "band3Slope", responseBand3);
+                               eg3, "band3Slope", responseBand3,
+                               BandChannel::readChoiceIndex (parameters, "band3SplitMode"));
         }
         {
             const int type = (int) raw ("band4Type");
             addBandToCombined (processor.getIsBand4On(), dyn4, anyLfoRouted, type,
                                live4 ? processor.getPublishedBand4Freq() : raw ("band4Frequency"),
                                live4 ? processor.getPublishedBand4Q() : raw ("band4Q"),
-                               eg4, "band4Slope", responseBand4);
+                               eg4, "band4Slope", responseBand4,
+                               BandChannel::readChoiceIndex (parameters, "band4SplitMode"));
         }
         {
             const int type = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
             addBandToCombined (processor.getIsHighpassOn(), dynHP, false, type,
                                raw ("highpassCutoff"), raw ("highpassQ"),
-                               egHP, "highpassSlope", responseHighpass);
+                               egHP, "highpassSlope", responseHighpass,
+                               BandChannel::readChoiceIndex (parameters, "highpassSplitMode"));
         }
         {
             const int type = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
             addBandToCombined (processor.getIsLowpassOn(), dynLP, false, type,
                                raw ("lowpassCutoff"), raw ("lowpassQ"),
-                               egLP, "lowpassSlope", responseLowpass);
+                               egLP, "lowpassSlope", responseLowpass,
+                               BandChannel::readChoiceIndex (parameters, "lowpassSplitMode"));
         }
         {
             const int type = (int) raw ("highShelfType");
             addBandToCombined (processor.getIsHighShelfOn(), dynHS, anyLfoRouted, type,
                                liveHS ? processor.getPublishedHighShelfFreq() : raw ("highShelfFrequency"),
                                liveHS ? processor.getPublishedHighShelfQ() : raw ("highShelfQ"),
-                               egHS, "highShelfSlope", responseHighShelf);
+                               egHS, "highShelfSlope", responseHighShelf,
+                               BandChannel::readChoiceIndex (parameters, "highShelfSplitMode"));
         }
         {
             const int type = (int) raw ("lowShelfType");
             addBandToCombined (processor.getIsLowShelfOn(), dynLS, anyLfoRouted, type,
                                liveLS ? processor.getPublishedLowShelfFreq() : raw ("lowShelfFrequency"),
                                liveLS ? processor.getPublishedLowShelfQ() : raw ("lowShelfQ"),
-                               egLS, "lowShelfSlope", responseLowShelf);
+                               egLS, "lowShelfSlope", responseLowShelf,
+                               BandChannel::readChoiceIndex (parameters, "lowShelfSplitMode"));
         }
 
         for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
@@ -1920,14 +2118,6 @@ void FrequencyResponseComponent::paintGraphChromeShadows (juce::Graphics& g)
     if (! SharedResources::glowShadowEffectsEnabled())
         return;
 
-    auto shadowRounded = [this, &g] (juce::Component& c, float corner = 3.0f)
-    {
-        if (! c.isVisible() || c.getWidth() <= 1 || c.getHeight() <= 1)
-            return;
-        juce::Path p;
-        p.addRoundedRectangle (c.getBounds().toFloat(), corner);
-        chromeDropShadow.render (g, p);
-    };
     auto shadowEllipse = [this, &g] (juce::Component& c)
     {
         if (! c.isVisible() || c.getWidth() <= 1 || c.getHeight() <= 1)
@@ -1937,25 +2127,64 @@ void FrequencyResponseComponent::paintGraphChromeShadows (juce::Graphics& g)
         chromeDropShadow.render (g, p);
     };
 
-    shadowRounded (uiModeButton);
-    shadowRounded (proportionalQButton);
-    shadowRounded (pianoDisplayButton);
-    shadowRounded (modButton);
-    shadowRounded (eqRangeMinusButton);
-    shadowRounded (eqRangePlusButton);
-    shadowRounded (autoGainButton);
-    shadowRounded (outputGainScrubber, 4.0f);
-
-    shadowRounded (matchButton);
-    shadowRounded (matchCurveButton);
-    shadowRounded (matchFreezeButton);
-    shadowRounded (learnButton);
-    // learnStatusLabel is flat text (no chrome shadow)
-    // Match AMT/HP/LP image knobs draw their own Melatonin disc shadow.
-
-    shadowRounded (splitSoloTButton);
-    shadowRounded (splitSoloSButton);
+    // Buttons use GraphOverlayButtonLookAndFeel drop (do not re-list them here).
+    // learnStatusLabel is flat text. Match AMT/HP/LP knobs draw their own disc shadow.
     shadowEllipse (splitSeparationKnob);
+}
+
+void FrequencyResponseComponent::strokeEqCurve (juce::Graphics& g,
+                                                const juce::Path& path,
+                                                juce::Colour solid,
+                                                juce::PathStrokeType stroke,
+                                                bool bandStroke) const
+{
+    // Overlay analysis (Mid+Side / L+R): no EQ path strokes — fills stay.
+    if (isAnalyserOverlayMode())
+        return;
+
+    const auto* ramp = bandStroke ? eqBandCurveRamp : eqCurveRamp;
+    const char* useId = bandStroke ? "EQ_BAND_CURVE_RAMP_ID" : "EQ_CURVE_RAMP_ID";
+    const bool useRamp = ramp != nullptr && ramp->isUsable()
+                         && (parameters.getRawParameterValue (useId) == nullptr
+                             || parameters.getRawParameterValue (useId)->load() > 0.5f);
+
+    if (useRamp)
+    {
+        const juce::Rectangle<float> bounds { 0.0f, 0.0f,
+                                              (float) getWidth(),
+                                              (float) getPlotHeight() };
+        g.setGradientFill (ramp->makeSpatialGradient (bounds, solid.getFloatAlpha(), solid));
+        g.strokePath (path, stroke);
+        return;
+    }
+
+    g.setColour (solid);
+    g.strokePath (path, stroke);
+}
+
+void FrequencyResponseComponent::fillEqArea (juce::Graphics& g,
+                                             const juce::Path& path,
+                                             juce::Colour solid,
+                                             bool bandFill) const
+{
+    const auto* ramp = bandFill ? eqBandFillRamp : eqSumFillRamp;
+    const char* useId = bandFill ? "EQ_BAND_FILL_RAMP_ID" : "EQ_SUM_FILL_RAMP_ID";
+    const bool useRamp = ramp != nullptr && ramp->isUsable()
+                         && (parameters.getRawParameterValue (useId) == nullptr
+                             || parameters.getRawParameterValue (useId)->load() > 0.5f);
+
+    if (useRamp)
+    {
+        const juce::Rectangle<float> bounds { 0.0f, 0.0f,
+                                              (float) getWidth(),
+                                              (float) getPlotHeight() };
+        g.setGradientFill (ramp->makeSpatialGradient (bounds, solid.getFloatAlpha(), solid));
+        g.fillPath (path);
+        return;
+    }
+
+    g.setColour (solid);
+    g.fillPath (path);
 }
 
 void FrequencyResponseComponent::paint(juce::Graphics& g)
@@ -1999,16 +2228,25 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     rebuildMagnitudeResponsesIfNeeded (w);
 
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        float fadeDt = 0.016f;
+        if (lastEqFadeMs > 0.0)
+            fadeDt = juce::jlimit (0.0f, 0.10f, (float) ((nowMs - lastEqFadeMs) * 0.001));
+        lastEqFadeMs = nowMs;
+        applyEqDisplayFades (fadeDt);
+    }
+
     // Local aliases so the rest of paint can keep using the old names
-    auto& compositeResponse = responseCombined;
-    auto& compositeResponse2 = responseBand1;
-    auto& compositeResponse3 = responseBand2;
-    auto& compositeResponse4 = responseBand3;
-    auto& compositeResponse5 = responseBand4;
-    auto& compositeResponse6 = responseHighpass;
-    auto& compositeResponse7 = responseLowpass;
-    auto& compositeResponse8 = responseHighShelf;
-    auto& compositeResponse9 = responseLowShelf;
+    auto& compositeResponse = eqFadeCombined.curve;
+    auto& compositeResponse2 = eqFadeBand[0].curve;
+    auto& compositeResponse3 = eqFadeBand[1].curve;
+    auto& compositeResponse4 = eqFadeBand[2].curve;
+    auto& compositeResponse5 = eqFadeBand[3].curve;
+    auto& compositeResponse6 = eqFadeBand[4].curve;
+    auto& compositeResponse7 = eqFadeBand[5].curve;
+    auto& compositeResponse8 = eqFadeBand[6].curve;
+    auto& compositeResponse9 = eqFadeBand[7].curve;
 
     //=======================================================================================================//
 
@@ -2104,170 +2342,186 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     float highShelfOnOffParam = processor.treeState.getParameter("highShelfOnOff")->getValue();
     float lowShelfOnOffParam = processor.treeState.getParameter("lowShelfOnOff")->getValue();
 
-    if (needsUpdateBand1)
+    const bool showEqCurves = isShowEqCurves();
+
+    if (needsUpdateBand1 || eqDisplayFading)
     {
         band1ResponsePath.clear();
+        band1FillPath.clear();
         if (processor.getIsBand1On() && ! compositeResponse2.empty())
             band1ResponsePath = intelligentDownsample(band1ResponsePath, compositeResponse2, w, h);
-        needsUpdateBand1 = false;
+        if (processor.getIsBand1On() && ! eqFadeBand[0].fill.empty())
+            band1FillPath = intelligentDownsample(band1FillPath, eqFadeBand[0].fill, w, h);
+        if (! eqDisplayFading)
+            needsUpdateBand1 = false;
     }
 
-    if (processor.getIsBand1On())
+    if (showEqCurves && processor.getIsBand1On())
     {
         // Draw the path (this is fast if the path hasn't changed)
         juce::Colour customBandColor1 = resolveBandFillColour (theme.graphBand1,
             bandGainIsBoost ("band1Gain", "band1Type"));
-        g.setColour(customBandColor1);
-        g.fillPath (closeShelfFillPath (band1ResponsePath, (float) h));
-
-        juce::Colour band1CurveColor = bandCurveColour (theme.graphBand1);
-        g.setColour(band1CurveColor);
-        g.strokePath(band1ResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        fillEqArea (g, closeShelfFillPath (band1FillPath.isEmpty() ? band1ResponsePath : band1FillPath, (float) h),
+                    customBandColor1, true);
+        strokeEqCurve (g, band1ResponsePath, bandCurveColour (theme.graphBand1),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
     //=======================================================================================================//
     // Draw the band2 response
 
 
-    if (needsUpdateBand2)
+    if (needsUpdateBand2 || eqDisplayFading)
     {
         band2ResponsePath.clear();
+        band2FillPath.clear();
         if (processor.getIsBand2On() && ! compositeResponse3.empty())
             band2ResponsePath = intelligentDownsample(band2ResponsePath, compositeResponse3, w, h);
-        needsUpdateBand2 = false;
+        if (processor.getIsBand2On() && ! eqFadeBand[1].fill.empty())
+            band2FillPath = intelligentDownsample(band2FillPath, eqFadeBand[1].fill, w, h);
+        if (! eqDisplayFading)
+            needsUpdateBand2 = false;
     }
 
-    if (processor.getIsBand2On())
+    if (showEqCurves && processor.getIsBand2On())
     {
         juce::Colour customBandColor2 = resolveBandFillColour (theme.graphBand2,
             bandGainIsBoost ("band2Gain", "band2Type"));
-        g.setColour(customBandColor2);
-        g.fillPath (closeShelfFillPath (band2ResponsePath, (float) h));
-
-        juce::Colour band2CurveColor = bandCurveColour (theme.graphBand2);
-        g.setColour(band2CurveColor);
-        g.strokePath(band2ResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        fillEqArea (g, closeShelfFillPath (band2FillPath.isEmpty() ? band2ResponsePath : band2FillPath, (float) h),
+                    customBandColor2, true);
+        strokeEqCurve (g, band2ResponsePath, bandCurveColour (theme.graphBand2),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
 
     //=======================================================================================================//
     // Draw the band3 response
 
-    if (needsUpdateBand3)
+    if (needsUpdateBand3 || eqDisplayFading)
     {
         band3ResponsePath.clear();
+        band3FillPath.clear();
         if (processor.getIsBand3On() && ! compositeResponse4.empty())
             band3ResponsePath = intelligentDownsample(band3ResponsePath, compositeResponse4, w, h);
-        needsUpdateBand3 = false;
+        if (processor.getIsBand3On() && ! eqFadeBand[2].fill.empty())
+            band3FillPath = intelligentDownsample(band3FillPath, eqFadeBand[2].fill, w, h);
+        if (! eqDisplayFading)
+            needsUpdateBand3 = false;
     }
 
-    if (processor.getIsBand3On())
+    if (showEqCurves && processor.getIsBand3On())
     {
         juce::Colour customBandColor3 = resolveBandFillColour (theme.graphBand3,
             bandGainIsBoost ("band3Gain", "band3Type"));
-        g.setColour(customBandColor3);
-        g.fillPath (closeShelfFillPath (band3ResponsePath, (float) h));
-
-        juce::Colour band3CurveColor = bandCurveColour (theme.graphBand3);
-        g.setColour(band3CurveColor);
-        g.strokePath(band3ResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        fillEqArea (g, closeShelfFillPath (band3FillPath.isEmpty() ? band3ResponsePath : band3FillPath, (float) h),
+                    customBandColor3, true);
+        strokeEqCurve (g, band3ResponsePath, bandCurveColour (theme.graphBand3),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
     //=======================================================================================================//
     // Draw the band4 response
 
-    if (needsUpdateBand4)
+    if (needsUpdateBand4 || eqDisplayFading)
     {
         band4ResponsePath.clear();
+        band4FillPath.clear();
         if (processor.getIsBand4On() && ! compositeResponse5.empty())
             band4ResponsePath = intelligentDownsample(band4ResponsePath, compositeResponse5, w, h);
-        needsUpdateBand4 = false;
+        if (processor.getIsBand4On() && ! eqFadeBand[3].fill.empty())
+            band4FillPath = intelligentDownsample(band4FillPath, eqFadeBand[3].fill, w, h);
+        if (! eqDisplayFading)
+            needsUpdateBand4 = false;
     }
 
-    if (processor.getIsBand4On())
+    if (showEqCurves && processor.getIsBand4On())
     {
         juce::Colour customBandColor4 = resolveBandFillColour (theme.graphBand4,
             bandGainIsBoost ("band4Gain", "band4Type"));
-        g.setColour(customBandColor4);
-        g.fillPath (closeShelfFillPath (band4ResponsePath, (float) h));
-
-        juce::Colour band4CurveColor = bandCurveColour (theme.graphBand4);
-        g.setColour(band4CurveColor);
-        g.strokePath(band4ResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        fillEqArea (g, closeShelfFillPath (band4FillPath.isEmpty() ? band4ResponsePath : band4FillPath, (float) h),
+                    customBandColor4, true);
+        strokeEqCurve (g, band4ResponsePath, bandCurveColour (theme.graphBand4),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
 
     //=======================================================================================================//
     // Draw the highpass response
 
-    if (needsUpdateHighpass)
+    if (needsUpdateHighpass || eqDisplayFading)
     {
         highpassResponsePath.clear();
+        highpassFillPath.clear();
         if (processor.getIsHighpassOn() && ! compositeResponse6.empty())
         {
             // Corner-tether paths are only for real HP/LP slopes; bells/shelves use the
             // same mid-line close as the other bands (avoids Q->bottom corner glitches).
             const int hpType = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
-            if (hpType == FilterType::highpass)
-                highpassResponsePath = intelligentDownsampleHighpass (highpassResponsePath, compositeResponse6, w, h);
-            else if (hpType == FilterType::lowpass)
-                highpassResponsePath = intelligentDownsampleLowpass (highpassResponsePath, compositeResponse6, w, h);
-            else
-                highpassResponsePath = intelligentDownsample (highpassResponsePath, compositeResponse6, w, h);
+            auto buildHp = [&] (juce::Path& dest, const std::vector<float>& mag)
+            {
+                if (hpType == FilterType::highpass)
+                    dest = intelligentDownsampleHighpass (dest, mag, w, h);
+                else if (hpType == FilterType::lowpass)
+                    dest = intelligentDownsampleLowpass (dest, mag, w, h);
+                else
+                    dest = intelligentDownsample (dest, mag, w, h);
+            };
+            buildHp (highpassResponsePath, compositeResponse6);
+            buildHp (highpassFillPath, eqFadeBand[4].fill);
         }
-        needsUpdateHighpass = false;
+        if (! eqDisplayFading)
+            needsUpdateHighpass = false;
     }
 
-    if (processor.getIsHighpassOn())
+    if (showEqCurves && processor.getIsHighpassOn())
     {
         juce::Colour customHighpassColor = resolveBandFillColour (theme.graphBand5,
             bandGainIsBoost ("highpassGain", "highpassType"));
-        g.setColour(customHighpassColor);
         const int hpType = BandChannel::readChoiceIndex (parameters, "highpassType", FilterType::highpass);
-        if (FilterType::isHpLp (hpType))
-            g.fillPath (highpassResponsePath);
-        else
-            g.fillPath (closeShelfFillPath (highpassResponsePath, (float) h));
-
-        juce::Colour highpassCurveColor = bandCurveColour (theme.graphBand5);
-        g.setColour(highpassCurveColor);
-        g.strokePath(highpassResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        const auto& hpFill = highpassFillPath.isEmpty() ? highpassResponsePath : highpassFillPath;
+        fillEqArea (g, FilterType::isHpLp (hpType) ? hpFill : closeShelfFillPath (hpFill, (float) h),
+                    customHighpassColor, true);
+        strokeEqCurve (g, highpassResponsePath, bandCurveColour (theme.graphBand5),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
 
     //=======================================================================================================//
     // Draw the lowpass response
 
-    if (needsUpdateLowpass)
+    if (needsUpdateLowpass || eqDisplayFading)
     {
         lowpassResponsePath.clear();
+        lowpassFillPath.clear();
         if (processor.getIsLowpassOn() && ! compositeResponse7.empty())
         {
             const int lpType = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
-            if (lpType == FilterType::lowpass)
-                lowpassResponsePath = intelligentDownsampleLowpass (lowpassResponsePath, compositeResponse7, w, h);
-            else if (lpType == FilterType::highpass)
-                lowpassResponsePath = intelligentDownsampleHighpass (lowpassResponsePath, compositeResponse7, w, h);
-            else
-                lowpassResponsePath = intelligentDownsample (lowpassResponsePath, compositeResponse7, w, h);
+            auto buildLp = [&] (juce::Path& dest, const std::vector<float>& mag)
+            {
+                if (lpType == FilterType::lowpass)
+                    dest = intelligentDownsampleLowpass (dest, mag, w, h);
+                else if (lpType == FilterType::highpass)
+                    dest = intelligentDownsampleHighpass (dest, mag, w, h);
+                else
+                    dest = intelligentDownsample (dest, mag, w, h);
+            };
+            buildLp (lowpassResponsePath, compositeResponse7);
+            buildLp (lowpassFillPath, eqFadeBand[5].fill);
         }
-        needsUpdateLowpass = false;
+        if (! eqDisplayFading)
+            needsUpdateLowpass = false;
     }
 
-    if (processor.getIsLowpassOn())
+    if (showEqCurves && processor.getIsLowpassOn())
     {
         juce::Colour customLowpassColor = resolveBandFillColour (theme.graphBand6,
             bandGainIsBoost ("lowpassGain", "lowpassType"));
-        g.setColour(customLowpassColor);
         const int lpType = BandChannel::readChoiceIndex (parameters, "lowpassType", FilterType::lowpass);
-        if (FilterType::isHpLp (lpType))
-            g.fillPath (lowpassResponsePath);
-        else
-            g.fillPath (closeShelfFillPath (lowpassResponsePath, (float) h));
-
-        juce::Colour lowpassCurveColor = bandCurveColour (theme.graphBand6);
-        g.setColour(lowpassCurveColor);
-        g.strokePath(lowpassResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        const auto& lpFill = lowpassFillPath.isEmpty() ? lowpassResponsePath : lowpassFillPath;
+        fillEqArea (g, FilterType::isHpLp (lpType) ? lpFill : closeShelfFillPath (lpFill, (float) h),
+                    customLowpassColor, true);
+        strokeEqCurve (g, lowpassResponsePath, bandCurveColour (theme.graphBand6),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
 
@@ -2275,49 +2529,52 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     // Draw the highShelf response
 
 
-    if (needsUpdateHighShelf)
+    if (needsUpdateHighShelf || eqDisplayFading)
     {
         highShelfResponsePath.clear();
+        highShelfFillPath.clear();
         if (processor.getIsHighShelfOn() && ! compositeResponse8.empty())
             highShelfResponsePath = simpleDownsample(highShelfResponsePath, compositeResponse8, w, h, 8);
-        needsUpdateHighShelf = false;
+        if (processor.getIsHighShelfOn() && ! eqFadeBand[6].fill.empty())
+            highShelfFillPath = simpleDownsample(highShelfFillPath, eqFadeBand[6].fill, w, h, 8);
+        if (! eqDisplayFading)
+            needsUpdateHighShelf = false;
     }
 
-    if (processor.getIsHighShelfOn())
+    if (showEqCurves && processor.getIsHighShelfOn())
     {
         juce::Colour customHighShelfColor = resolveBandFillColour (theme.graphBand7,
             bandGainIsBoost ("highShelfGain", "highShelfType"));
-        g.setColour(customHighShelfColor);
-        // Fill closes to 0 dB; stroke keeps open edge asymptotes (no drop to centre).
-        g.fillPath (closeShelfFillPath (highShelfResponsePath, (float) h));
-
-        juce::Colour highShelfCurveColor = bandCurveColour (theme.graphBand7);
-        g.setColour(highShelfCurveColor);
-        g.strokePath(highShelfResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        fillEqArea (g, closeShelfFillPath (highShelfFillPath.isEmpty() ? highShelfResponsePath : highShelfFillPath, (float) h),
+                    customHighShelfColor, true);
+        strokeEqCurve (g, highShelfResponsePath, bandCurveColour (theme.graphBand7),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
 
     //======================================================================================================//
     // Draw the lowShelf response
   
-    if (needsUpdateLowShelf)
+    if (needsUpdateLowShelf || eqDisplayFading)
     {
         lowShelfResponsePath.clear();
+        lowShelfFillPath.clear();
         if (processor.getIsLowShelfOn() && ! compositeResponse9.empty())
             lowShelfResponsePath = simpleDownsample(lowShelfResponsePath, compositeResponse9, w, h, 8);
-        needsUpdateLowShelf = false;
+        if (processor.getIsLowShelfOn() && ! eqFadeBand[7].fill.empty())
+            lowShelfFillPath = simpleDownsample(lowShelfFillPath, eqFadeBand[7].fill, w, h, 8);
+        if (! eqDisplayFading)
+            needsUpdateLowShelf = false;
     }
 
-    if (processor.getIsLowShelfOn())
+    if (showEqCurves && processor.getIsLowShelfOn())
     {
         juce::Colour customLowShelfColor = resolveBandFillColour (theme.graphBand8,
             bandGainIsBoost ("lowShelfGain", "lowShelfType"));
-        g.setColour(customLowShelfColor);
-        g.fillPath (closeShelfFillPath (lowShelfResponsePath, (float) h));
-
-        juce::Colour lowShelfCurveColor = bandCurveColour (theme.graphBand8);
-        g.setColour(lowShelfCurveColor);
-        g.strokePath(lowShelfResponsePath, juce::PathStrokeType(getBandPathWidth()));
+        fillEqArea (g, closeShelfFillPath (lowShelfFillPath.isEmpty() ? lowShelfResponsePath : lowShelfFillPath, (float) h),
+                    customLowShelfColor, true);
+        strokeEqCurve (g, lowShelfResponsePath, bandCurveColour (theme.graphBand8),
+                       juce::PathStrokeType (getBandPathWidth()), true);
     }
 
     //=======================================================================================================//
@@ -2342,20 +2599,22 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             "highShelfSpectralExpand", "lowShelfSpectralExpand"
         };
 
-        if (needsUpdateSpectralAmount)
+        if (needsUpdateSpectralAmount || eqDisplayFading)
         {
             for (int slot = 0; slot < kNumSpectralSlots; ++slot)
             {
                 auto& path = spectralAmountPaths[(size_t) slot];
                 path.clear();
-                const auto& mag = responseSpectralAmount[(size_t) slot];
+                const auto& mag = eqFadeSpectral[(size_t) slot].curve;
                 if (! bandOn[slot] || ! rawBoolParam (parameters, specIds[slot]) || mag.empty())
                     continue;
                 path = intelligentDownsample (path, mag, w, h);
             }
-            needsUpdateSpectralAmount = false;
+            if (! eqDisplayFading)
+                needsUpdateSpectralAmount = false;
         }
 
+        if (showEqCurves)
         for (int slot = 0; slot < kNumSpectralSlots; ++slot)
         {
             if (! bandOn[slot] || ! rawBoolParam (parameters, specIds[slot]))
@@ -2365,12 +2624,16 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             if (path.isEmpty())
                 continue;
 
+            juce::Path fillPath = path;
+            if (! eqFadeSpectral[(size_t) slot].fill.empty())
+                fillPath = intelligentDownsample (fillPath, eqFadeSpectral[(size_t) slot].fill, w, h);
+
             const bool expand = rawBoolParam (parameters, expandIds[slot]);
             const auto fillCol = resolveBandFillColour (specCols[slot], expand);
-            g.setColour (fillCol.withMultipliedAlpha (0.85f));
-            g.fillPath (closeShelfFillPath (path, (float) h));
-            g.setColour (bandCurveColour (specCols[slot]));
-            g.strokePath (path, juce::PathStrokeType (getBandPathWidth()));
+            fillEqArea (g, closeShelfFillPath (fillPath, (float) h),
+                        fillCol.withMultipliedAlpha (0.85f), true);
+            strokeEqCurve (g, path, bandCurveColour (specCols[slot]),
+                           juce::PathStrokeType (getBandPathWidth()), true);
         }
     }
 
@@ -2382,7 +2645,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             theme.graphBand5, theme.graphBand6, theme.graphBand7, theme.graphBand8
         };
 
-        if (needsUpdateExtended)
+        if (needsUpdateExtended || eqDisplayFading)
         {
             for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
             {
@@ -2393,7 +2656,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                 if (! processor.isGlobalBandOn (global))
                     continue;
 
-                const auto& mag = responseExtended[(size_t) ei];
+                const auto& mag = eqFadeExtended[(size_t) ei].curve;
                 if (mag.empty())
                     continue;
 
@@ -2408,9 +2671,11 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                     path = intelligentDownsample (path, mag, w, h);
             }
 
-            needsUpdateExtended = false;
+            if (! eqDisplayFading)
+                needsUpdateExtended = false;
         }
 
+        if (showEqCurves)
         for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
         {
             if (! processor.isGlobalBandOn (global))
@@ -2428,14 +2693,21 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                 extColours[EqBand::colourSlotFromGlobal (global)],
                 bandGainIsBoost (gainId, typeId));
 
-            g.setColour (fillCol);
-            if (FilterType::isHpLp (type))
-                g.fillPath (path);
-            else
-                g.fillPath (closeShelfFillPath (path, (float) h));
+            juce::Path fillPath = path;
+            if (! eqFadeExtended[(size_t) ei].fill.empty())
+            {
+                if (type == FilterType::highpass)
+                    fillPath = intelligentDownsampleHighpass (fillPath, eqFadeExtended[(size_t) ei].fill, w, h);
+                else if (type == FilterType::lowpass)
+                    fillPath = intelligentDownsampleLowpass (fillPath, eqFadeExtended[(size_t) ei].fill, w, h);
+                else
+                    fillPath = intelligentDownsample (fillPath, eqFadeExtended[(size_t) ei].fill, w, h);
+            }
 
-            g.setColour (bandCurveColour (extColours[EqBand::colourSlotFromGlobal (global)]));
-            g.strokePath (path, juce::PathStrokeType (getBandPathWidth()));
+            fillEqArea (g, FilterType::isHpLp (type) ? fillPath : closeShelfFillPath (fillPath, (float) h),
+                        fillCol, true);
+            strokeEqCurve (g, path, bandCurveColour (extColours[EqBand::colourSlotFromGlobal (global)]),
+                           juce::PathStrokeType (getBandPathWidth()), true);
         }
     }
 
@@ -2445,29 +2717,67 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (! shouldSkipCombinedCurveWork())
     {
       // Update combinedResponsePath only if it's marked as dirty
-    if (needsUpdateCombined) {
+    if (needsUpdateCombined || eqDisplayFading) {
 
         //  DBG("needsUpdateCombined True");
 
           // Clear the existing path
         combinedResponsePath.clear();
+        combinedFillPath.clear();
 
         // Create the new path using intelligent downsampling
         if (! compositeResponse.empty())
             combinedResponsePath = intelligentDownsampleToBottom(combinedResponsePath, compositeResponse, w, h);
-        needsUpdateCombined = false;
+        if (! eqFadeCombined.fill.empty())
+            combinedFillPath = intelligentDownsampleToBottom(combinedFillPath, eqFadeCombined.fill, w, h);
+        if (! eqDisplayFading)
+            needsUpdateCombined = false;
 
     }
 
+    if (showEqCurves)
+    {
     // Draw the path (this is fast if the path hasn't changed)
     // Create a gradient from the top to the bottom
     juce::Colour topColor = theme.graphSumFillTop;
     juce::Colour bottomColor = theme.graphSumFillBottom;
     juce::ColourGradient gradient12(topColor, 0, 0, bottomColor, 0, h, false);
 
-    // Fill and stroke the path with the gradient
-    g.setGradientFill(gradient12);
-    g.fillPath(combinedResponsePath);
+    const auto& sumFillDraw = combinedFillPath.isEmpty() ? combinedResponsePath : combinedFillPath;
+    const bool useSumFillRamp = eqSumFillRamp != nullptr && eqSumFillRamp->isUsable()
+                                && (parameters.getRawParameterValue ("EQ_SUM_FILL_RAMP_ID") == nullptr
+                                    || parameters.getRawParameterValue ("EQ_SUM_FILL_RAMP_ID")->load() > 0.5f);
+    if (useSumFillRamp)
+        fillEqArea (g, sumFillDraw, topColor, false);
+    else
+    {
+        g.setGradientFill (gradient12);
+        g.fillPath (sumFillDraw);
+    }
+
+    // Transient / sustain ghosts (only when any band is split).
+    {
+        bool anySplit = false;
+        for (int bi = 0; bi < 8 && ! anySplit; ++bi)
+        {
+            const auto id = StructuralSplit::splitModeParamIDForBandIndex (bi);
+            if (id.isNotEmpty() && BandChannel::readChoiceIndex (parameters, id) != 0)
+                anySplit = true;
+        }
+        if (anySplit && (int) eqFadeGhostT.curve.size() == w && (int) eqFadeGhostS.curve.size() == w)
+        {
+            transientGhostPath.clear();
+            sustainGhostPath.clear();
+            transientGhostPath = intelligentDownsampleToBottom (transientGhostPath, eqFadeGhostT.curve, w, h);
+            sustainGhostPath = intelligentDownsampleToBottom (sustainGhostPath, eqFadeGhostS.curve, w, h);
+            const auto ghostStroke = juce::PathStrokeType (1.2f, juce::PathStrokeType::curved,
+                                                           juce::PathStrokeType::rounded);
+            strokeEqCurve (g, transientGhostPath,
+                           theme.graphSumCurve.brighter (0.25f).withAlpha (0.45f), ghostStroke);
+            strokeEqCurve (g, sustainGhostPath,
+                           theme.graphSumCurve.darker (0.15f).withAlpha (0.40f), ghostStroke);
+        }
+    }
 
     juce::Colour combinedCurveColor = theme.graphSumCurve;
     // Light corner rounding + curved/rounded stroke matches band AA look on dense polylines.
@@ -2480,7 +2790,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     // Optional Melatonin glow for the cumulative sum curve (off by default - Post Glow is the main one).
     {
         bool glowEnabled = false;
-        if (SharedResources::glowShadowEffectsEnabled())
+        if (SharedResources::glowShadowEffectsEnabled() && ! isAnalyserOverlayMode())
             if (auto* p = parameters.getRawParameterValue ("EQ_SUM_GLOW_ENABLE_ID"))
                 glowEnabled = p->load() > 0.5f;
 
@@ -2521,8 +2831,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         }
     }
 
-    g.setColour(combinedCurveColor);
-    g.strokePath (combinedStrokePath, sumStroke);
+    strokeEqCurve (g, combinedStrokePath, combinedCurveColor, sumStroke);
+    } // showEqCurves
     } // ! shouldSkipCombinedCurveWork
     else
     {
@@ -2554,7 +2864,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand1On())
     {
         // Unified scale factor
-        float scaleFactor = ((isMouseHoveringOverHandle1 || isOptionBoxSelectingBand (0) || isMultiBandSelected (0)) ? 1.25f : 1.0f)
+        float scaleFactor = bandHandleInteractionScale (isMouseHoveringOverHandle1 || faceplateHoverBand == 0,
+                                                        isOptionBoxSelectingBand (0) || isMultiBandSelected (0))
                             * processor.getModHandlePulseScale (0);
 
         // Get the values from the tree state
@@ -2599,7 +2910,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand2On())
     {
         // Unified scale factor for Band 2
-        float scaleFactor2 = ((isMouseHoveringOverHandle2 || isOptionBoxSelectingBand (1) || isMultiBandSelected (1)) ? 1.25f : 1.0f)
+        float scaleFactor2 = bandHandleInteractionScale (isMouseHoveringOverHandle2 || faceplateHoverBand == 1,
+                                                         isOptionBoxSelectingBand (1) || isMultiBandSelected (1))
                              * processor.getModHandlePulseScale (1);
 
         // Get the values from the tree state
@@ -2643,7 +2955,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand3On())
     {
         // Unified scale factor for Band 3
-        float scaleFactor3 = ((isMouseHoveringOverHandle3 || isOptionBoxSelectingBand (2) || isMultiBandSelected (2)) ? 1.25f : 1.0f)
+        float scaleFactor3 = bandHandleInteractionScale (isMouseHoveringOverHandle3 || faceplateHoverBand == 2,
+                                                         isOptionBoxSelectingBand (2) || isMultiBandSelected (2))
                              * processor.getModHandlePulseScale (2);
 
         // Get the values from the tree state
@@ -2686,7 +2999,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsBand4On())
     {
         // Unified scale factor for Band 4
-        float scaleFactor4 = ((isMouseHoveringOverHandle4 || isOptionBoxSelectingBand (3) || isMultiBandSelected (3)) ? 1.25f : 1.0f)
+        float scaleFactor4 = bandHandleInteractionScale (isMouseHoveringOverHandle4 || faceplateHoverBand == 3,
+                                                         isOptionBoxSelectingBand (3) || isMultiBandSelected (3))
                              * processor.getModHandlePulseScale (3);
 
         // Get the values from the tree state
@@ -2730,7 +3044,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsHighpassOn())
     {
         // Unified scale factor for Highpass
-        float scaleFactor5 = ((isMouseHoveringOverHandle5 || isOptionBoxSelectingBand (4) || isMultiBandSelected (4)) ? 1.25f : 1.0f)
+        float scaleFactor5 = bandHandleInteractionScale (isMouseHoveringOverHandle5 || faceplateHoverBand == 4,
+                                                         isOptionBoxSelectingBand (4) || isMultiBandSelected (4))
                              * processor.getModHandlePulseScale (4);
 
         float highpassCutoff = processor.treeState.getRawParameterValue("highpassCutoff")->load();
@@ -2766,7 +3081,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsLowpassOn())
     {
         // Unified scale factor for Lowpass
-        float scaleFactor6 = ((isMouseHoveringOverHandle6 || isOptionBoxSelectingBand (5) || isMultiBandSelected (5)) ? 1.25f : 1.0f)
+        float scaleFactor6 = bandHandleInteractionScale (isMouseHoveringOverHandle6 || faceplateHoverBand == 5,
+                                                         isOptionBoxSelectingBand (5) || isMultiBandSelected (5))
                              * processor.getModHandlePulseScale (5);
 
         float lowpassCutoff = processor.treeState.getRawParameterValue("lowpassCutoff")->load();
@@ -2801,7 +3117,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsHighShelfOn())
     {
         // Unified scale factor
-        float scaleFactor7 = ((isMouseHoveringOverHandle7 || isOptionBoxSelectingBand (6) || isMultiBandSelected (6)) ? 1.25f : 1.0f)
+        float scaleFactor7 = bandHandleInteractionScale (isMouseHoveringOverHandle7 || faceplateHoverBand == 6,
+                                                         isOptionBoxSelectingBand (6) || isMultiBandSelected (6))
                              * processor.getModHandlePulseScale (6);
 
         // Get the values from the tree state
@@ -2845,7 +3162,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     if (processor.getIsLowShelfOn())
     {
         // Unified scale factor for LowShelf
-        float scaleFactor8 = ((isMouseHoveringOverHandle8 || isOptionBoxSelectingBand (7) || isMultiBandSelected (7)) ? 1.25f : 1.0f)
+        float scaleFactor8 = bandHandleInteractionScale (isMouseHoveringOverHandle8 || faceplateHoverBand == 7,
+                                                         isOptionBoxSelectingBand (7) || isMultiBandSelected (7))
                              * processor.getModHandlePulseScale (7);
 
         // Get the values from the tree state
@@ -2934,7 +3252,8 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
             const bool expand = rawBoolParam (parameters, expandIds[slot]);
             const float amountDb = spectralAmountToDisplayDb (amount, expand, rangeDb, eqScaleVis);
 
-            const float scale = (hs.hovering || hs.dragging || activeSpectralAmountSlot == slot) ? 1.25f : 1.0f;
+            const float scale = bandHandleInteractionScale (hs.hovering,
+                                                            hs.dragging || activeSpectralAmountSlot == slot);
             float hx = (getWidth() - 1) * (std::log10 (fHz) - logMin) / (logMax - logMin);
             float hy = dbToY (amountDb, (float) getPlotHeight());
             const float handleSize = 12.0f * scale;
@@ -2977,9 +3296,11 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
                                        * processor.getEqScale()
                                      : 0.0f;
 
-            const float scale = (hs.hovering || hs.dragging || activeExtendedGlobal == global
-                                 || isOptionBoxSelectingBand (global)
-                                 || isMultiBandSelected (global)) ? 1.25f : 1.0f;
+            const float scale = bandHandleInteractionScale (
+                hs.hovering || faceplateHoverBand == global,
+                hs.dragging || activeExtendedGlobal == global
+                    || isOptionBoxSelectingBand (global)
+                    || isMultiBandSelected (global));
             float hx = (getWidth() - 1) * (std::log10 (juce::jmax (20.0f, fHz)) - logMin) / (logMax - logMin);
             float hy = dbToY (gainDb, (float) getPlotHeight());
             const float handleSize = 12.0f * scale;
@@ -3144,13 +3465,19 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     juce::String readoutHz = isAnyHandleMouseOver ? juce::String(displayFreq, 2) + " Hz" : cursorReadoutHz;
     juce::String readoutQ = "Q: " + (isAnyHandleMouseOver ? juce::String(displayQ) : "N/A");
 
-    // Hover / cursor readout - band hover and free-cursor both +40% vs prior 5 / 7.5
+    // Hover / cursor readout - own colour + Appearance size; legible vs both graph washes.
     float labelY = cursorY - 20;
     float labelX = cursorX + 30;
-    const float fontSize = isAnyHandleMouseOver ? 9.8f : 10.5f;
-    juce::Font readoutFont ("Lato Black", fontSize, juce::Font::plain);
+    const float fontSize = juce::jlimit (8.0f, 24.0f, theme.graphCursorInfoFontSize);
+    juce::Font readoutFont = SharedResources::uiFont (fontSize);
     g.setFont (readoutFont);
-    g.setColour (theme.graphAxisText.withAlpha (0.8f));
+    const bool readoutBoxed = ! optionBoxMenu->isVisible()
+                              && (isAnyHandleMouseOver || anyHandleDragging);
+    auto readoutInk = theme.legibleTextOn (theme.graphCursorInfoText, theme.graphBackground);
+    readoutInk = theme.legibleTextOn (readoutInk, theme.graphBackground2);
+    if (readoutBoxed)
+        readoutInk = theme.legibleTextOn (readoutInk, theme.graphOverlayBackground);
+    g.setColour (readoutInk);
 
     const juce::String readoutBandName = (activeBand >= 0 && activeBand < 8)
         ? juce::String (arrayBandName[activeBand])
@@ -3229,7 +3556,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
     }
 
 
-    g.setColour (theme.graphAxisText.withAlpha (0.8f));
+    g.setColour (readoutInk);
 
     // Draw band name + dB / Hz / Q without ellipses (width already measured to fit)
     if (! optionBoxMenu->isVisible() && (isAnyHandleMouseOver || anyHandleDragging) && readoutBandName.isNotEmpty())
@@ -3272,6 +3599,7 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
    
 
     float mouseOverThreshold = 10.0f;  // Half of prior 20 (proportional to 1/2 handle size)
+    constexpr float kDynSpecHoverRadius = 28.0f; // ring + up/down arrows on D/S handles
 
     cursorX = static_cast<float>(event.x);
     cursorY = static_cast<float>(event.y);
@@ -3611,7 +3939,7 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
         hs.hovering = false;
         if (hs.x < 0.0f)
             continue;
-        if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) <= mouseOverThreshold)
+        if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) <= kDynSpecHoverRadius)
         {
             hs.hovering = true;
             isAnyHandleMouseOver = true;
@@ -3633,6 +3961,13 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
             currentBandName = EqBand::displayNameForGlobal (global).toStdString();
         }
     }
+
+    // Drive ~1 Hz handle-size pulse while any handle is hovered.
+    if (isAnyHandleMouseOver && ! isTimerRunning())
+    {
+        setBufferedToImage (false);
+        startTimerHz (60);
+    }
 }
 
 
@@ -3640,6 +3975,25 @@ void FrequencyResponseComponent::mouseMove(const juce::MouseEvent& event)
 
 
     //=======================================================================================================//
+void FrequencyResponseComponent::setFaceplateHoverBand (int globalBand)
+{
+    if (globalBand < 0 || globalBand >= EqBand::kMaxBands)
+        globalBand = -1;
+
+    if (faceplateHoverBand == globalBand)
+        return;
+
+    faceplateHoverBand = globalBand;
+
+    if (faceplateHoverBand >= 0 && ! isTimerRunning())
+    {
+        setBufferedToImage (false);
+        startTimerHz (60);
+    }
+
+    repaint();
+}
+
 void FrequencyResponseComponent::setOptionBoxVisible (bool shouldBeVisible)
 {
     if (optionBoxMenu == nullptr)
@@ -4026,6 +4380,209 @@ void FrequencyResponseComponent::resetAllBandsToDefaults()
     repaint();
 }
 
+namespace GraphCtxMenu
+{
+    class StayOpenItem : public juce::PopupMenu::CustomComponent
+    {
+    public:
+        StayOpenItem (juce::String textIn, bool tickedIn, std::function<bool()> onClickIn,
+                      std::function<bool()> liveTickedIn = {})
+            : juce::PopupMenu::CustomComponent (false),
+              text (std::move (textIn)),
+              ticked (tickedIn),
+              onClick (std::move (onClickIn)),
+              liveTicked (std::move (liveTickedIn))
+        {
+        }
+
+        void getIdealSize (int& w, int& h) override
+        {
+            const auto font = SharedResources::uiFont (13.0f);
+            w = juce::jmax (176, (int) std::ceil (juce::GlyphArrangement::getStringWidth (font, text)) + 34);
+            h = 22;
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds().toFloat();
+            if (isItemHighlighted())
+                ComboBoxLookAndFeel::fillMenuGradient (g, bounds, PluginMenuTheme::highlight(), 3.0f);
+
+            g.setColour (isItemHighlighted() ? PluginMenuTheme::textOnHighlight()
+                                             : PluginMenuTheme::text());
+            g.setFont (SharedResources::uiFont (13.0f));
+
+            const bool showTick = liveTicked != nullptr ? liveTicked() : ticked;
+            if (showTick)
+            {
+                auto tick = bounds.removeFromLeft (16.0f).reduced (3.0f, 5.0f);
+                juce::Path p;
+                p.startNewSubPath (tick.getX(), tick.getCentreY());
+                p.lineTo (tick.getX() + tick.getWidth() * 0.35f, tick.getBottom());
+                p.lineTo (tick.getRight(), tick.getY());
+                g.strokePath (p, juce::PathStrokeType (1.6f));
+            }
+            else
+            {
+                bounds.removeFromLeft (16.0f);
+            }
+
+            g.drawText (text, bounds.toNearestInt(), juce::Justification::centredLeft, false);
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (! e.mouseWasClicked() || onClick == nullptr)
+                return;
+            ticked = onClick();
+            if (auto* p = getParentComponent())
+                p->repaint();
+            else
+                repaint();
+        }
+
+        void setTicked (bool shouldBeTicked) noexcept { ticked = shouldBeTicked; }
+        bool isTicked() const noexcept { return ticked; }
+
+    private:
+        juce::String text;
+        bool ticked = false;
+        std::function<bool()> onClick;
+        std::function<bool()> liveTicked;
+    };
+
+    bool paramOn (juce::AudioProcessorValueTreeState& tree, const char* id, bool fallback = true)
+    {
+        if (auto* p = tree.getRawParameterValue (id))
+            return p->load() > 0.5f;
+        return fallback;
+    }
+
+    bool toggleBool (juce::AudioProcessorValueTreeState& tree, const char* id)
+    {
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*> (tree.getParameter (id)))
+        {
+            const bool next = ! p->get();
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (next ? 1.0f : 0.0f);
+            p->endChangeGesture();
+            return next;
+        }
+        return paramOn (tree, id);
+    }
+
+    int choiceIndex (juce::AudioProcessorValueTreeState& tree, const char* id)
+    {
+        if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (tree.getParameter (id)))
+            return p->getIndex();
+        return 0;
+    }
+
+    void setChoiceIndex (juce::AudioProcessorValueTreeState& tree, const char* id, int index)
+    {
+        if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (tree.getParameter (id)))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) index));
+            p->endChangeGesture();
+        }
+    }
+
+    void addBoolItem (juce::PopupMenu& menu,
+                      juce::AudioProcessorValueTreeState& tree,
+                      const char* id,
+                      const juce::String& name)
+    {
+        const bool on = paramOn (tree, id);
+        menu.addCustomItem (-1,
+                            std::make_unique<StayOpenItem> (name, on,
+                                [&tree, id]() -> bool { return toggleBool (tree, id); }),
+                            nullptr, name);
+    }
+
+    void addGraphDisplayItems (juce::PopupMenu& menu,
+                               juce::AudioProcessorValueTreeState& tree,
+                               FrequencyResponseComponent& host)
+    {
+        auto safe = juce::Component::SafePointer<FrequencyResponseComponent> (&host);
+
+        menu.addSeparator();
+        addBoolItem (menu, tree, "SPECTRUM_ANALYSER_ID", "Show Analyser");
+        addBoolItem (menu, tree, "SPECTRUM_PRE_CURVE_ID", "Pre Curve");
+        addBoolItem (menu, tree, "SPECTRUM_PRE_FILL_ID", "Pre Fill");
+        addBoolItem (menu, tree, "SPECTRUM_POST_CURVE_ID", "Post Curve");
+        addBoolItem (menu, tree, "SPECTRUM_POST_FILL_ID", "Post Fill");
+        addBoolItem (menu, tree, "MAX_ID", "Hold Curve");
+        addBoolItem (menu, tree, "SPECTRUM_HOLD_FILL_ID", "Hold Fill");
+        addBoolItem (menu, tree, "SPECTRUM_FFT_BINS_ID", "FFT Bins");
+        addBoolItem (menu, tree, "SPECTRUM_PRE_FILL_RAMP_ID", "Pre Fill Ramp");
+        addBoolItem (menu, tree, "SPECTRUM_PRE_CURVE_RAMP_ID", "Pre Curve Ramp");
+        addBoolItem (menu, tree, "SPECTRUM_USE_RAMP_ID", "Post Fill Ramp");
+        addBoolItem (menu, tree, "SPECTRUM_CURVE_RAMP_ID", "Post Curve Ramp");
+        addBoolItem (menu, tree, "SPECTRUM_HOLD_FILL_RAMP_ID", "Hold Fill Ramp");
+        addBoolItem (menu, tree, "SPECTRUM_HOLD_CURVE_RAMP_ID", "Hold Curve Ramp");
+        addBoolItem (menu, tree, "EQ_CURVE_RAMP_ID", "Sum Curve Ramp");
+        addBoolItem (menu, tree, "EQ_SUM_FILL_RAMP_ID", "Sum Fill Ramp");
+        addBoolItem (menu, tree, "EQ_BAND_CURVE_RAMP_ID", "Band Curve Ramp");
+        addBoolItem (menu, tree, "EQ_BAND_FILL_RAMP_ID", "Band Fill Ramp");
+        addBoolItem (menu, tree, "SPECTRUM_GLOW_ENABLE_ID", "Post Glow");
+        menu.addSeparator();
+
+        addBoolItem (menu, tree, "EQ_SHOW_CURVES_ID", "EQ Curves");
+        const bool sumOn = ! host.isDisableCumulativeCurve();
+        menu.addCustomItem (-1,
+                            std::make_unique<StayOpenItem> ("Sum Curve", sumOn,
+                                [safe]() -> bool
+                                {
+                                    if (safe == nullptr)
+                                        return false;
+                                    safe->setDisableCumulativeCurve (! safe->isDisableCumulativeCurve());
+                                    return ! safe->isDisableCumulativeCurve();
+                                }),
+                            nullptr, "Sum Curve");
+        addBoolItem (menu, tree, "EQ_SUM_GLOW_ENABLE_ID", "Sum Glow");
+        addBoolItem (menu, tree, "EQ_SHOW_CROSSHAIR_ID", "Crosshair");
+
+        menu.addSeparator();
+
+        juce::PopupMenu analysis;
+        const auto channelNames = SpectrumAnalysis::channelNames();
+        auto channelSel = std::make_shared<int> (choiceIndex (tree, SpectrumAnalysis::channelParamId()));
+        for (int i = 0; i < channelNames.size(); ++i)
+        {
+            analysis.addCustomItem (-1,
+                                    std::make_unique<StayOpenItem> (channelNames[i], i == *channelSel,
+                                        [&tree, channelSel, i]() -> bool
+                                        {
+                                            setChoiceIndex (tree, SpectrumAnalysis::channelParamId(), i);
+                                            *channelSel = i;
+                                            return true;
+                                        },
+                                        [channelSel, i]() { return *channelSel == i; }),
+                                    nullptr, channelNames[i]);
+        }
+        menu.addSubMenu ("Analysis", analysis);
+
+        juce::PopupMenu smoothing;
+        const auto smoothNames = SpectrumAnalysis::octaveSmoothNames();
+        auto smoothSel = std::make_shared<int> (choiceIndex (tree, SpectrumAnalysis::octaveSmoothParamId()));
+        for (int i = 0; i < smoothNames.size(); ++i)
+        {
+            smoothing.addCustomItem (-1,
+                                     std::make_unique<StayOpenItem> (smoothNames[i], i == *smoothSel,
+                                         [&tree, smoothSel, i]() -> bool
+                                         {
+                                             setChoiceIndex (tree, SpectrumAnalysis::octaveSmoothParamId(), i);
+                                             *smoothSel = i;
+                                             return true;
+                                         },
+                                         [smoothSel, i]() { return *smoothSel == i; }),
+                                     nullptr, smoothNames[i]);
+        }
+        menu.addSubMenu ("Smoothing", smoothing);
+    }
+}
+
 void FrequencyResponseComponent::showGraphContextMenu (juce::Point<int> screenPos,
                                                        int hitBandInternalOrGlobal,
                                                        float clickHz)
@@ -4078,6 +4635,9 @@ void FrequencyResponseComponent::showGraphContextMenu (juce::Point<int> screenPo
         menu.addSeparator();
     }
 
+    GraphCtxMenu::addGraphDisplayItems (menu, parameters, *this);
+
+    menu.addSeparator();
     menu.addItem (3, "Reset all bands");
 
     const float createHz = juce::jlimit (20.0f, 20000.0f, clickHz);
@@ -6263,14 +6823,44 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
             }
         };
 
-        wheelOnBand (distanceToHandle  <= clickThreshold, 0, "band1Type",     FilterType::bell,      "band1Q",     0, needsUpdateBand1);
-        wheelOnBand (distanceToHandle2 <= clickThreshold, 1, "band2Type",     FilterType::bell,      "band2Q",     1, needsUpdateBand2);
-        wheelOnBand (distanceToHandle3 <= clickThreshold, 2, "band3Type",     FilterType::bell,      "band3Q",     2, needsUpdateBand3);
-        wheelOnBand (distanceToHandle4 <= clickThreshold, 3, "band4Type",     FilterType::bell,      "band4Q",     3, needsUpdateBand4);
-        wheelOnBand (distanceToHandle5 <= clickThreshold, 4, "highpassType",  FilterType::highpass,  "highpassQ",  4, needsUpdateHighpass);
-        wheelOnBand (distanceToHandle6 <= clickThreshold, 5, "lowpassType",   FilterType::lowpass,   "lowpassQ",   5, needsUpdateLowpass);
-        wheelOnBand (distanceToHandle7 <= clickThreshold, 6, "highShelfType", FilterType::highShelf, "highShelfQ", 6, needsUpdateHighShelf);
-        wheelOnBand (distanceToHandle8 <= clickThreshold, 7, "lowShelfType",  FilterType::lowShelf,  "lowShelfQ",  7, needsUpdateLowShelf);
+        auto dynOn = [this] (int bandIndex) -> bool
+        {
+            const char* ids[] = {
+                "band1Dynamic", "band2Dynamic", "band3Dynamic", "band4Dynamic",
+                "highpassDynamic", "lowpassDynamic", "highShelfDynamic", "lowShelfDynamic"
+            };
+            if (bandIndex < 0 || bandIndex >= 8)
+                return false;
+            if (auto* v = parameters.getRawParameterValue (ids[bandIndex]))
+                return v->load() > 0.5f;
+            return false;
+        };
+
+        auto hitMain = [&] (float dist, int bandIndex) -> bool
+        {
+            const float r = dynOn (bandIndex) ? 28.0f : clickThreshold;
+            return dist <= r;
+        };
+
+        auto hitSpectral = [&] (int slot) -> bool
+        {
+            if (slot < 0 || slot >= kNumSpectralSlots)
+                return false;
+            const auto& hs = spectralAmountHandles[(size_t) slot];
+            if (hs.x < 0.0f)
+                return false;
+            const float r = 28.0f; // amount handle uses the same D/S ring + arrows
+            return std::hypot (event.position.x - hs.x, event.position.y - hs.y) <= r;
+        };
+
+        wheelOnBand (hitMain (distanceToHandle,  0) || hitSpectral (0), 0, "band1Type",     FilterType::bell,      "band1Q",     0, needsUpdateBand1);
+        wheelOnBand (hitMain (distanceToHandle2, 1) || hitSpectral (1), 1, "band2Type",     FilterType::bell,      "band2Q",     1, needsUpdateBand2);
+        wheelOnBand (hitMain (distanceToHandle3, 2) || hitSpectral (2), 2, "band3Type",     FilterType::bell,      "band3Q",     2, needsUpdateBand3);
+        wheelOnBand (hitMain (distanceToHandle4, 3) || hitSpectral (3), 3, "band4Type",     FilterType::bell,      "band4Q",     3, needsUpdateBand4);
+        wheelOnBand (hitMain (distanceToHandle5, 4) || hitSpectral (4), 4, "highpassType",  FilterType::highpass,  "highpassQ",  4, needsUpdateHighpass);
+        wheelOnBand (hitMain (distanceToHandle6, 5) || hitSpectral (5), 5, "lowpassType",   FilterType::lowpass,   "lowpassQ",   5, needsUpdateLowpass);
+        wheelOnBand (hitMain (distanceToHandle7, 6) || hitSpectral (6), 6, "highShelfType", FilterType::highShelf, "highShelfQ", 6, needsUpdateHighShelf);
+        wheelOnBand (hitMain (distanceToHandle8, 7) || hitSpectral (7), 7, "lowShelfType",  FilterType::lowShelf,  "lowShelfQ",  7, needsUpdateLowShelf);
 
         // Extended bands (Band 9-64)
         for (int global = EqBand::kBankSize; global < EqBand::kMaxBands; ++global)
@@ -6278,7 +6868,11 @@ void FrequencyResponseComponent::mouseUp(const juce::MouseEvent& event)
             const auto& hs = extendedHandles[(size_t) (global - EqBand::kBankSize)];
             if (hs.x < 0.0f)
                 continue;
-            if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) > clickThreshold)
+            const auto dynId = DynamicEq::dynamicParamIDForGlobal (global);
+            const bool dyn = parameters.getRawParameterValue (dynId) != nullptr
+                             && parameters.getRawParameterValue (dynId)->load() > 0.5f;
+            const float hitR = dyn ? 28.0f : clickThreshold;
+            if (std::hypot (event.position.x - hs.x, event.position.y - hs.y) > hitR)
                 continue;
 
             const auto typeId = FilterType::paramIDForGlobal (global);
@@ -6641,6 +7235,22 @@ juce::Rectangle<int> FrequencyResponseComponent::layoutMatchChromeAt (juce::Poin
 int FrequencyResponseComponent::getPianoStripHeight() const noexcept
 {
     return pianoDisplayOn ? kPianoStripHeightPx : 0;
+}
+
+int FrequencyResponseComponent::getDbAxisRightX() const
+{
+    constexpr float labelLeft = 5.0f;
+    const int rangeInt = juce::jmax (6, juce::roundToInt (getEqDisplayRangeDbVisual()));
+    juce::Font font (12.0f);
+    float widest = 0.0f;
+    const int candidates[] = { -rangeInt, rangeInt, 0, -36, 36 };
+    for (int db : candidates)
+    {
+        juce::GlyphArrangement ga;
+        ga.addLineOfText (font, juce::String (db) + " dB", 0.0f, 0.0f);
+        widest = juce::jmax (widest, ga.getBoundingBox (0, ga.getNumGlyphs(), true).getWidth());
+    }
+    return juce::roundToInt (labelLeft + widest);
 }
 
 int FrequencyResponseComponent::getBottomGraphChromeHeight() const noexcept
@@ -7667,9 +8277,26 @@ void FrequencyResponseComponent::timerCallback()
     const float dt = (float) getTimerInterval() * 0.001f;
     const bool morphing = tickEqDisplayRangeMorph (dt > 0.0f ? dt : (1.0f / 60.0f));
 
+    // Band-handle hover pulse (~1 Hz) needs continuous repaint while pointer is over a handle.
+    bool anyHandleHover = faceplateHoverBand >= 0
+                          || isMouseHoveringOverHandle1 || isMouseHoveringOverHandle2
+                          || isMouseHoveringOverHandle3 || isMouseHoveringOverHandle4
+                          || isMouseHoveringOverHandle5 || isMouseHoveringOverHandle6
+                          || isMouseHoveringOverHandle7 || isMouseHoveringOverHandle8;
+    if (! anyHandleHover)
+    {
+        for (const auto& hs : spectralAmountHandles)
+            if (hs.hovering) { anyHandleHover = true; break; }
+    }
+    if (! anyHandleHover)
+    {
+        for (const auto& hs : extendedHandles)
+            if (hs.hovering) { anyHandleHover = true; break; }
+    }
+
     if (! anyActiveDynamicEq())
     {
-        if (morphing)
+        if (morphing || anyHandleHover || eqDisplayFading)
         {
             setBufferedToImage (false);
             if (! isTimerRunning() || getTimerInterval() != juce::jmax (1, 1000 / 60))
@@ -7844,7 +8471,15 @@ void FrequencyResponseComponent::parameterChanged(const juce::String& parameterI
         || parameterID == "EQ_SUM_GLOW_RADIUS_ID" || parameterID == "EQ_SUM_GLOW_SPREAD_ID"
         || parameterID == "EQ_SUM_GLOW_OPACITY_ID"
         || parameterID == "EQ_MULTICOLOR_BAND_FILL_ID"
-        || parameterID == "EQ_SHOW_CROSSHAIR_ID")
+        || parameterID == "EQ_SHOW_CROSSHAIR_ID"
+        || parameterID == "EQ_CURVE_RAMP_ID"
+        || parameterID == "EQ_SUM_FILL_RAMP_ID"
+        || parameterID == "EQ_BAND_CURVE_RAMP_ID"
+        || parameterID == "EQ_BAND_FILL_RAMP_ID"
+        || parameterID == "EQ_SHOW_CURVES_ID"
+        || parameterID == "EQ_CURVE_FADE_ID"
+        || parameterID == "EQ_FILL_FADE_ID"
+        || parameterID == "SPECTRUM_CHANNEL_ID")
     {
         repaint();
         return;
@@ -8176,7 +8811,7 @@ void EqScaleScrubber::paint (juce::Graphics& g)
     const bool active = hovered || gestureActive;
     const auto ink = juce::Colours::whitesmoke.withAlpha (active ? 0.95f : 0.78f);
     g.setColour (ink);
-    g.setFont (juce::Font (11.0f));
+    g.setFont (SharedResources::uiFont (11.0f));
     g.drawText (displayText, getLocalBounds(), juce::Justification::centred, false);
 
     if (! active)
@@ -8313,10 +8948,10 @@ void OutputGainScrubber::parameterChanged (const juce::String& parameterID, floa
 void OutputGainScrubber::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat().reduced (1.0f);
-    g.setColour (juce::Colour::fromRGBA (60, 50, 35, hovered || gestureActive ? 220 : 180));
-    g.fillRoundedRectangle (bounds, 3.0f);
+    auto fill = juce::Colour::fromRGBA (60, 50, 35, hovered || gestureActive ? 220 : 180);
+    GraphOverlayButtonLookAndFeel::paintChromeButton (g, bounds, fill, hovered, gestureActive);
     g.setColour (juce::Colours::whitesmoke.withAlpha (hovered || gestureActive ? 0.95f : 0.8f));
-    g.setFont (juce::Font (11.0f));
+    g.setFont (SharedResources::uiFont (11.0f));
     g.drawText (displayText, getLocalBounds(), juce::Justification::centred, false);
 }
 

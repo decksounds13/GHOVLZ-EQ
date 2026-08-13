@@ -3,6 +3,7 @@
 #include "RampPresetPicker.h"
 #include "ColourRampBank.h"
 #include "../ComboBoxLookAndFeel.h"
+#include "../GraphOverlayButtonLookAndFeel.h"
 #include "../MainComponent.h"
 
 namespace
@@ -67,17 +68,8 @@ void GradientStripEditor::DiceButton::mouseDown (const juce::MouseEvent& e)
 void GradientStripEditor::DiceButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     auto r = getLocalBounds().toFloat().reduced (0.5f);
-    const float corner = 3.0f;
-    auto fill = juce::Colours::black.withAlpha (0.35f);
-    if (down)
-        fill = fill.brighter (0.15f);
-    else if (highlighted)
-        fill = fill.brighter (0.08f);
-
-    g.setColour (fill);
-    g.fillRoundedRectangle (r, corner);
-    g.setColour (juce::Colours::goldenrod.withAlpha (0.75f));
-    g.drawRoundedRectangle (r, corner, 1.0f);
+    auto fill = juce::Colours::black.withAlpha (0.45f);
+    GraphOverlayButtonLookAndFeel::paintChromeButton (g, r, fill, highlighted, down);
 
     const float s = juce::jmin (r.getWidth(), r.getHeight());
     const auto c = r.getCentre();
@@ -118,10 +110,9 @@ void GradientStripEditor::PresetFieldButton::setDisplay (const GradientRamp* r, 
 void GradientStripEditor::PresetFieldButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
     auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-    g.setColour (juce::Colours::black.withAlpha (highlighted || down ? 0.5f : 0.35f));
-    g.fillRoundedRectangle (bounds, 3.0f);
-    g.setColour (juce::Colours::whitesmoke.withAlpha (0.22f));
-    g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
+    GraphOverlayButtonLookAndFeel::paintChromeButton (g, bounds,
+                                                      juce::Colours::black.withAlpha (0.45f),
+                                                      highlighted, down);
 
     auto inner = bounds.reduced (4.0f, 3.0f);
     auto arrow = inner.removeFromRight (14.0f);
@@ -174,9 +165,15 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
     mapLabel.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.7f));
     addAndMakeVisible (mapLabel);
 
-    mapCombo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.92f));
-    mapCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colours::black.withAlpha (0.35f));
-    mapCombo.setColour (juce::ComboBox::outlineColourId, juce::Colours::whitesmoke.withAlpha (0.2f));
+    mapCombo.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    {
+        const auto& pal = sharedResources.sharedColors;
+        const auto ink = pal.dropdownTextOn (pal.optionComboText, pal.optionComboBackground);
+        mapCombo.setColour (juce::ComboBox::textColourId, ink);
+        mapCombo.setColour (juce::ComboBox::backgroundColourId, pal.optionComboBackground);
+        mapCombo.setColour (juce::ComboBox::outlineColourId, pal.optionBorder);
+        mapCombo.setColour (juce::ComboBox::arrowColourId, ink);
+    }
     mapCombo.onChange = [this]
     {
         if (ramp == nullptr)
@@ -261,6 +258,7 @@ GradientStripEditor::GradientStripEditor (SharedResources& resources,
 
 GradientStripEditor::~GradientStripEditor()
 {
+    mapCombo.setLookAndFeel (nullptr);
     if (presets != nullptr)
         presets->removeChangeListener (this);
 }

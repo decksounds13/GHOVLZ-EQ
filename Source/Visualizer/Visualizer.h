@@ -44,6 +44,11 @@ public:
     void setThemeColors (SharedResources* r) noexcept;
     void setBinOverlayColourRamp (const GradientRamp* ramp);
     void setSpectrumFillRamp (const GradientRamp* ramp);
+    void setSpectrumCurveRamp (const GradientRamp* ramp);
+    void setSpectrumPreFillRamp (const GradientRamp* ramp);
+    void setSpectrumPreCurveRamp (const GradientRamp* ramp);
+    void setSpectrumHoldFillRamp (const GradientRamp* ramp);
+    void setSpectrumHoldCurveRamp (const GradientRamp* ramp);
 
 private:
     // ========================================================================

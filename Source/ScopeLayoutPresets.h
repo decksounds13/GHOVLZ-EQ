@@ -5,7 +5,8 @@
 #include <vector>
 
 /** Persisted Scope arrange snapshots (strip vs tiled are separate lists).
-    Optionally embeds a ColourRampBank ValueTree snapshot (not RampPresetStore). */
+    Optionally embeds a ColourRampBank ValueTree snapshot (not RampPresetStore).
+    Newer presets store a Viewport BSP tree XML string. */
 struct ScopeLayoutPreset
 {
     juce::String name;
@@ -15,6 +16,10 @@ struct ScopeLayoutPreset
     int stripHeightPx = 200;
     float splitX = 0.5f;
     float splitY = 0.5f;
+    /** Serialized ScopeViewport::Node (XmlElement "Pane"). Empty = legacy 2x2 / row. */
+    juce::String viewportXml;
+    /** Factory id (h50, grid2, image, …) when this is a built-in, else empty. */
+    juce::String factoryId;
     /** Inline colour-ramp snapshot (ColourRamps ValueTree). Empty = geometry only. */
     juce::ValueTree colourRamps;
 };

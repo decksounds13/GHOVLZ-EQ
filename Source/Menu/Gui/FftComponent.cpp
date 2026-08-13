@@ -1,4 +1,4 @@
-﻿#include "FftComponent.h"
+#include "FftComponent.h"
 
 #include "../../MainComponent.h"
 #include "../../ModuleLookPresets.h"
@@ -27,10 +27,13 @@ FftComponent::Content::Content (SharedResources& resources,
     : sharedResources (resources),
       treeState (state),
       colourRamps (ramps),
-      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
+      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
+      displaySection (resources, "fft.display", "Display", false),
+      glowSection (resources, "fft.glow", "Glow", false),
+      rampSection (resources, "fft.ramp", "Ramp", false)
 {
     titleLabel.setText ("FFT", juce::dontSendNotification);
-    titleLabel.setFont (juce::Font ("Lato Black", 20.0f, juce::Font::plain));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -177,6 +180,21 @@ FftComponent::Content::Content (SharedResources& resources,
             menu->notifyContentHeightChanged();
     };
     addAndMakeVisible (gradientEditor);
+
+    wireSection (displaySection);
+    wireSection (glowSection);
+    wireSection (rampSection);
+}
+
+void FftComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
+    };
 }
 
 FftComponent::Content::~Content()
@@ -224,7 +242,7 @@ void FftComponent::Content::styleSlider (juce::Slider& slider)
 
 void FftComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::Font ("Lato Black", 15.0f, juce::Font::plain));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
 }
@@ -241,7 +259,6 @@ void FftComponent::Content::styleSettingsCombo (juce::ComboBox& combo)
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&comboLookAndFeel);
-    combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }
 
 void FftComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
@@ -288,17 +305,12 @@ void FftComponent::Content::syncGradientFromBank()
 
 int FftComponent::Content::getPreferredHeight() const
 {
-    // title + show bars + show bins + full height + block + refresh + 4 sliders + glow toggle + 5 glow sliders + gradient
-    return kContentPadY * 2
-           + 24 + 8
-           + 22 + 6
-           + 22 + 6
-           + 22 + 8
-           + (2 * (kLabelH + kLabelGap + kSliderH + kRowGap))
-           + (4 * (kLabelH + kLabelGap + kSliderH + kRowGap))
-           + 22 + 6
-           + (5 * (kLabelH + kLabelGap + kSliderH + kRowGap))
-           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
+    const int row = kLabelH + kLabelGap + kSliderH + kRowGap;
+    const int tog = 22 + 6;
+    return kContentPadY * 2 + 24 + 8
+           + displaySection.heightFor (tog * 3 + 2 * row + 4 * row)
+           + glowSection.heightFor (tog + 5 * row)
+           + rampSection.heightFor (kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap);
 }
 
 void FftComponent::Content::resized()
@@ -310,36 +322,53 @@ void FftComponent::Content::resized()
     titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
 
-    gradientLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kLabelGap);
-    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
-                                  .removeFromLeft (juce::jmin (520, area.getWidth())));
-    area.removeFromTop (kRowGap);
+    displaySection.applyVisible ({
+        &showBarsToggle, &showBinsToggle, &fullHeightToggle,
+        &blockSizeLabel, &blockSizeCombo, &refreshLabel, &refreshSlider,
+        &opacityLabel, &opacitySlider, &barWidthLabel, &barWidthSlider,
+        &intensityLabel, &intensitySlider, &thresholdLabel, &thresholdSlider });
+    displaySection.placeHeader (area);
+    if (displaySection.isOpen())
+    {
+        showBarsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
+        area.removeFromTop (6);
+        showBinsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
+        area.removeFromTop (6);
+        fullHeightToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
+        area.removeFromTop (8);
+        layoutComboRow (area, blockSizeLabel, blockSizeCombo);
+        layoutSliderRow (area, refreshLabel, refreshSlider);
+        layoutSliderRow (area, opacityLabel, opacitySlider);
+        layoutSliderRow (area, barWidthLabel, barWidthSlider);
+        layoutSliderRow (area, intensityLabel, intensitySlider);
+        layoutSliderRow (area, thresholdLabel, thresholdSlider);
+    }
 
-    showBarsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
-    area.removeFromTop (6);
+    glowSection.applyVisible ({
+        &glowToggle, &glowRadiusLabel, &glowRadiusSlider,
+        &glowSpreadLabel, &glowSpreadSlider, &glowOpacityLabel, &glowOpacitySlider,
+        &glowOffsetXLabel, &glowOffsetXSlider, &glowOffsetYLabel, &glowOffsetYSlider });
+    glowSection.placeHeader (area);
+    if (glowSection.isOpen())
+    {
+        glowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
+        area.removeFromTop (6);
+        layoutSliderRow (area, glowRadiusLabel, glowRadiusSlider);
+        layoutSliderRow (area, glowSpreadLabel, glowSpreadSlider);
+        layoutSliderRow (area, glowOpacityLabel, glowOpacitySlider);
+        layoutSliderRow (area, glowOffsetXLabel, glowOffsetXSlider);
+        layoutSliderRow (area, glowOffsetYLabel, glowOffsetYSlider);
+    }
 
-    showBinsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
-    area.removeFromTop (6);
-
-    fullHeightToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (260, area.getWidth())));
-    area.removeFromTop (8);
-
-    layoutComboRow (area, blockSizeLabel, blockSizeCombo);
-    layoutSliderRow (area, refreshLabel, refreshSlider);
-
-    layoutSliderRow (area, opacityLabel, opacitySlider);
-    layoutSliderRow (area, barWidthLabel, barWidthSlider);
-    layoutSliderRow (area, intensityLabel, intensitySlider);
-    layoutSliderRow (area, thresholdLabel, thresholdSlider);
-
-    glowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (220, area.getWidth())));
-    area.removeFromTop (6);
-    layoutSliderRow (area, glowRadiusLabel, glowRadiusSlider);
-    layoutSliderRow (area, glowSpreadLabel, glowSpreadSlider);
-    layoutSliderRow (area, glowOpacityLabel, glowOpacitySlider);
-    layoutSliderRow (area, glowOffsetXLabel, glowOffsetXSlider);
-    layoutSliderRow (area, glowOffsetYLabel, glowOffsetYSlider);
+    rampSection.applyVisible ({ &gradientLabel, &gradientEditor });
+    rampSection.placeHeader (area);
+    if (rampSection.isOpen())
+    {
+        gradientLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                      .removeFromLeft (juce::jmin (520, area.getWidth())));
+    }
 }
 
 FftComponent::FftComponent (SharedResources& resources,

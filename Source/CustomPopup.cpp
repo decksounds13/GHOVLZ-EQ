@@ -1,6 +1,7 @@
 #include "CustomPopup.h"
 #include "Menu/Gui/ThemeList.h"
 #include "Menu/Gui/AppearanceComponent.h"
+#include "Menu/SharedResources.h"
 
 CustomPopup::CustomPopup()
     : currentMode(Normal),
@@ -67,7 +68,7 @@ void CustomPopup::paint(juce::Graphics& g) {
 
     // Draw the text
     g.setColour(textColor.withAlpha(alpha));
-    g.setFont(juce::Font("Lato Black", 16.0f, juce::Font::bold));
+    g.setFont(SharedResources::uiFont (16.0f, true));
     g.drawText(message, getLocalBounds(), juce::Justification::centred, true);
 }
 

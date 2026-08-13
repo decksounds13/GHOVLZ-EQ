@@ -391,28 +391,19 @@ namespace BandSaturation
             const int needN = juce::jmax (n, maxBlock);
             bool rebuildOs = false;
 
-            // Grow maxBlock if the host ever delivers a larger buffer than prepare.
-            if (n > maxBlock)
-            {
-                maxBlock = n;
-                rebuildOs = true;
-            }
-
-            if (chans > channels)
-            {
-                channels = chans;
-                rebuildOs = true;
-            }
+            // Never allocate / rebuild OS on the audio thread. Oversized host
+            // blocks process with existing buffers (truncate) until prepare.
+            if (n > maxBlock || chans > channels)
+                return;
 
             if (dryBuffer.getNumChannels() < needCh || dryBuffer.getNumSamples() < needN)
-                dryBuffer.setSize (needCh, needN, false, false, true);
+                return;
             if (diffBuffer.getNumChannels() < needCh || diffBuffer.getNumSamples() < needN)
-                diffBuffer.setSize (needCh, needN, false, false, true);
+                return;
             if (workBuffer.getNumChannels() < needCh || workBuffer.getNumSamples() < needN)
-                workBuffer.setSize (needCh, needN, false, false, true);
+                return;
 
-            if (rebuildOs)
-                rebuildOversampling();
+            juce::ignoreUnused (rebuildOs);
         }
 
         void rebuildOversampling()

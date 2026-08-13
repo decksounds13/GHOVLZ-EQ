@@ -1,5 +1,6 @@
 #include "OnOffButton1.h"
 #include "KnobThemeHelpers.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 
 OnOffButton1::OnOffButton1(juce::AudioProcessorValueTreeState& state, const juce::String& parameterID)
     : juce::Button("defaultName"), treeState(state), parameterID(parameterID)  // Initialize parameterID here
@@ -16,15 +17,10 @@ OnOffButton1::~OnOffButton1()
 void OnOffButton1::paintButton(juce::Graphics& g, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown)
 {
 
-    // Match BandNumberButton / faceplate knob arcs (was 2x boost on ON → mismatched glow).
-    juce::Colour ink;
-    if (isButtonDown)
-        ink = KnobTheme::chromeActive (baseColor);
-    else if (shouldDrawButtonAsHighlighted)
-        ink = brighterAndMoreSaturated (KnobTheme::chromeInactive (baseColor), 1.15f, 1.1f);
-    else
-        ink = KnobTheme::chromeInactive (baseColor);
-
+    juce::Colour ink = isButtonDown ? KnobTheme::chromeActive (baseColor)
+                                    : KnobTheme::chromeInactive (baseColor);
+    ink = GraphOverlayButtonLookAndFeel::adjustForInteraction (ink, shouldDrawButtonAsHighlighted,
+                                                               shouldDrawButtonAsDown);
     g.setColour (ink);
 
     // Calculate the dimensions and position

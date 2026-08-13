@@ -1,5 +1,6 @@
 #include "BandMonitorButton.h"
 #include "KnobThemeHelpers.h"
+#include "GraphOverlayButtonLookAndFeel.h"
 
 BandMonitorButton::BandMonitorButton()
     : juce::Button ("bandMonitor")
@@ -32,14 +33,10 @@ void BandMonitorButton::paintButton (juce::Graphics& g, bool shouldDrawButtonAsH
     juce::ignoreUnused (shouldDrawButtonAsDown);
     listening = getToggleState();
 
-    // Match power / knob chrome active-inactive language.
-    juce::Colour ink;
-    if (listening)
-        ink = KnobTheme::chromeActive (baseColor);
-    else if (shouldDrawButtonAsHighlighted)
-        ink = brighterAndMoreSaturated (KnobTheme::chromeInactive (baseColor), 1.15f, 1.1f);
-    else
-        ink = KnobTheme::chromeInactive (baseColor);
+    juce::Colour ink = listening ? KnobTheme::chromeActive (baseColor)
+                                 : KnobTheme::chromeInactive (baseColor);
+    ink = GraphOverlayButtonLookAndFeel::adjustForInteraction (ink, shouldDrawButtonAsHighlighted,
+                                                               shouldDrawButtonAsDown);
 
     const float lineWidth = 2.2f;
     const float diameter = (float) juce::jmin (getWidth(), getHeight()) * 0.72f - 2.0f * lineWidth;

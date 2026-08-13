@@ -21,6 +21,15 @@ public:
         spectrogram3D, // appended — keep prior ordinals stable for prefs / masks
         meterPeak,     // level meter peak bar
         meterRms,      // level meter RMS bar
+        spectrumCurve, // Post Curve (legacy name) — append, keep prior ordinals
+        eqCurve,       // Sum Curve (legacy name)
+        spectrumPreFill,
+        spectrumPreCurve,
+        spectrumHoldFill,
+        spectrumHoldCurve,
+        eqSumFill,
+        eqBandCurve,
+        eqBandFill,
         numTargets
     };
 

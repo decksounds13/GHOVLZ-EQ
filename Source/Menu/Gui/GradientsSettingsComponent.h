@@ -27,11 +27,13 @@ private:
         void resized() override;
         int getPreferredHeight() const;
 
-        juce::Label fftLabel, specLabel, spec3DLabel, fillLabel;
-        GradientStripEditor fftEditor;
-        GradientStripEditor specEditor;
-        GradientStripEditor spec3DEditor;
-        GradientStripEditor fillEditor;
+        juce::Label fftLabel, specLabel, spec3DLabel;
+        juce::Label preFillLabel, preCurveLabel, fillLabel, curveLabel, holdFillLabel, holdCurveLabel;
+        juce::Label eqCurveLabel, eqSumFillLabel, eqBandCurveLabel, eqBandFillLabel;
+        GradientStripEditor fftEditor, specEditor, spec3DEditor;
+        GradientStripEditor preFillEditor, preCurveEditor, fillEditor, curveEditor;
+        GradientStripEditor holdFillEditor, holdCurveEditor;
+        GradientStripEditor eqCurveEditor, eqSumFillEditor, eqBandCurveEditor, eqBandFillEditor;
         ColourRampBank& bank;
     };
 

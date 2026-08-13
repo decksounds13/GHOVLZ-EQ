@@ -179,7 +179,7 @@ void ThemeList::paintListBoxItem(int rowNumber, juce::Graphics& g,
     juce::Colour selectionColour = sharedResources.sharedColors.menuListBoxSelectionColor1; // Selection background colour
 
     // Set the font for the listbox items
-    g.setFont(juce::Font("Lato Black", 12.0f, juce::Font::plain));
+    g.setFont(SharedResources::uiFont (12.0f));
    
 
  
@@ -297,7 +297,7 @@ void ThemeList::listBoxItemClicked(int row, const juce::MouseEvent& e)
             textEditor.setColour(juce::TextEditor::focusedOutlineColourId, focusedOutlineColour);
             textEditor.setColour(juce::TextEditor::shadowColourId, shadowColour);
 
-            textEditor.setFont(juce::Font("Lato Black", 12.0f, juce::Font::bold));
+            textEditor.setFont(SharedResources::uiFont (12.0f, true));
 
             DBG("Adding and making text editor visible");
             addAndMakeVisible(&textEditor); // No need for the isParentComponent check
@@ -444,15 +444,33 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
     const bool keepFace = live.randomizeFaceplateMod;
     const bool keepGraph = live.randomizeGraphModule;
     const bool keepMenu = live.randomizeMenuModule;
+    const bool keepCursorInfo = live.randomizeGraphCursorInfo;
     const bool keepRampFft = live.randomizeRampFftBars;
     const bool keepRampSpec = live.randomizeRampSpectrogram;
     const bool keepRampSpec3D = live.randomizeRampSpectrogram3D;
     const bool keepRampFill = live.randomizeRampSpectrumFill;
+    const bool keepRampCurve = live.randomizeRampSpectrumCurve;
+    const bool keepRampEqCurve = live.randomizeRampEqCurve;
+    const bool keepRampPreFill = live.randomizeRampSpectrumPreFill;
+    const bool keepRampPreCurve = live.randomizeRampSpectrumPreCurve;
+    const bool keepRampHoldFill = live.randomizeRampSpectrumHoldFill;
+    const bool keepRampHoldCurve = live.randomizeRampSpectrumHoldCurve;
+    const bool keepRampEqSumFill = live.randomizeRampEqSumFill;
+    const bool keepRampEqBandCurve = live.randomizeRampEqBandCurve;
+    const bool keepRampEqBandFill = live.randomizeRampEqBandFill;
     const bool keepRampMeters = live.randomizeRampLevelMeters;
     const bool keepOrdered = live.orderedRampGradation;
     const bool keepLegible = live.enforceLegibleText;
     const float keepContrast = live.textContrastAmount;
     const float keepOptionBoxOpacity = live.optionBoxOpacity;
+    const float keepButtonCornerRadius = live.buttonCornerRadius;
+    const float keepMenuPopupRadius = live.menuPopupCornerRadius;
+    const bool keepMenuPopupOutline = live.menuPopupOutline;
+    const bool keepButtonGlow = live.buttonGlowEnabled;
+    const bool keepButtonGlowHover = live.buttonGlowOnlyOnHover;
+    const juce::String keepUiFontName = live.uiFontName;
+    const bool keepUiFontBold = live.uiFontBold;
+    const float keepCursorInfoSize = live.graphCursorInfoFontSize;
     const bool keepGraphBandMinSatEn = live.graphBandRandomMinSatEnabled;
     const float keepGraphBandMinSat = live.graphBandRandomMinSaturation;
     const bool keepH = live.randomizeHue, keepS = live.randomizeSaturation;
@@ -466,15 +484,33 @@ void ThemeList::applyPreset (int index, bool shouldApplyPluginState, bool should
     live.randomizeFaceplateMod = keepFace;
     live.randomizeGraphModule = keepGraph;
     live.randomizeMenuModule = keepMenu;
+    live.randomizeGraphCursorInfo = keepCursorInfo;
     live.randomizeRampFftBars = keepRampFft;
     live.randomizeRampSpectrogram = keepRampSpec;
     live.randomizeRampSpectrogram3D = keepRampSpec3D;
     live.randomizeRampSpectrumFill = keepRampFill;
+    live.randomizeRampSpectrumCurve = keepRampCurve;
+    live.randomizeRampEqCurve = keepRampEqCurve;
+    live.randomizeRampSpectrumPreFill = keepRampPreFill;
+    live.randomizeRampSpectrumPreCurve = keepRampPreCurve;
+    live.randomizeRampSpectrumHoldFill = keepRampHoldFill;
+    live.randomizeRampSpectrumHoldCurve = keepRampHoldCurve;
+    live.randomizeRampEqSumFill = keepRampEqSumFill;
+    live.randomizeRampEqBandCurve = keepRampEqBandCurve;
+    live.randomizeRampEqBandFill = keepRampEqBandFill;
     live.randomizeRampLevelMeters = keepRampMeters;
     live.orderedRampGradation = keepOrdered;
     live.enforceLegibleText = keepLegible;
     live.textContrastAmount = keepContrast;
     live.optionBoxOpacity = keepOptionBoxOpacity;
+    live.buttonCornerRadius = keepButtonCornerRadius;
+    live.menuPopupCornerRadius = keepMenuPopupRadius;
+    live.menuPopupOutline = keepMenuPopupOutline;
+    live.buttonGlowEnabled = keepButtonGlow;
+    live.buttonGlowOnlyOnHover = keepButtonGlowHover;
+    live.uiFontName = keepUiFontName;
+    live.uiFontBold = keepUiFontBold;
+    live.graphCursorInfoFontSize = keepCursorInfoSize;
     live.graphBandRandomMinSatEnabled = keepGraphBandMinSatEn;
     live.graphBandRandomMinSaturation = keepGraphBandMinSat;
     live.randomizeHue = keepH;

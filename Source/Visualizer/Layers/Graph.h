@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../Analyser.h"
+#include "../../Menu/SharedResources.h"
 #include "GraphElements/GraphLine.h"
 #include "GraphElements/GraphBins.h"
 #include "GraphElements/GraphMaximumsLine.h"
@@ -42,6 +43,12 @@ public:
     void setBinOverlayColour (juce::Colour);
     void setBinOverlayColourRamp (const GradientRamp* ramp);
     void setSpectrumFillRamp (const GradientRamp* ramp);
+    void setSpectrumCurveRamp (const GradientRamp* ramp);
+    void setSpectrumPreFillRamp (const GradientRamp* ramp);
+    void setSpectrumPreCurveRamp (const GradientRamp* ramp);
+    void setSpectrumHoldFillRamp (const GradientRamp* ramp);
+    void setSpectrumHoldCurveRamp (const GradientRamp* ramp);
+    void setSharedResources (SharedResources* resources);
 
 private:
     // ========================================================================

@@ -16,6 +16,8 @@ public:
     std::function<void()> onPopupMenu;
 
 private:
+    void rebuildButtonPath();
+
     TextButtonLookAndFeel customLookAndFeel;
     juce::Path buttonPath; // Path for the button shape
     std::unique_ptr<shadows::StackShadow> customShadow;

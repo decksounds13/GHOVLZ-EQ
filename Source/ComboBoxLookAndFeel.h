@@ -34,11 +34,11 @@ namespace PluginMenuTheme
         return colors().optionComboHighlight;
     }
 
-    /** Primary label ink on panel background. */
+    /** Primary label ink on panel background + Settings Menu wash. */
     inline juce::Colour text() noexcept
     {
         const auto& c = colors();
-        return c.legibleTextOn (c.optionComboText, c.optionComboBackground)
+        return c.dropdownTextOn (c.optionComboText, c.optionComboBackground)
             .withAlpha (0.95f);
     }
 
@@ -52,6 +52,17 @@ namespace PluginMenuTheme
     inline juce::Colour outline() noexcept
     {
         return colors().optionBorder;
+    }
+
+    /** Dropdown / popup panel radius — not the chrome button radius. */
+    inline float popupCorner() noexcept
+    {
+        return juce::jlimit (0.0f, 16.0f, colors().menuPopupCornerRadius);
+    }
+
+    inline bool popupDrawOutline() noexcept
+    {
+        return colors().menuPopupOutline;
     }
 
     inline void applyColours (juce::LookAndFeel& lf)
@@ -100,8 +111,8 @@ public:
     void applyThemeColours()
     {
         const auto& c = colors();
-        // Legible text: combo / popup ink vs field fill; highlight row ink vs accent.
-        const auto comboInk = c.legibleTextOn (c.optionComboText, c.optionComboBackground);
+        // Legible text: combo / popup ink vs field fill and Menu Background.
+        const auto comboInk = c.dropdownTextOn (c.optionComboText, c.optionComboBackground);
         const auto hlInk = c.legibleTextOn (juce::Colours::black, c.optionComboHighlight);
         setColour (juce::PopupMenu::backgroundColourId, c.optionComboBackground);
         setColour (juce::PopupMenu::textColourId, comboInk);
@@ -116,12 +127,34 @@ public:
         setColour (juce::ComboBox::focusedOutlineColourId, c.optionComboHighlight);
     }
 
+    /** Soft top→bottom form used by popup panels and highlight rows. */
+    static void fillMenuGradient (juce::Graphics& g,
+                                  juce::Rectangle<float> bounds,
+                                  juce::Colour fill,
+                                  float corner = 0.0f)
+    {
+        GraphOverlayButtonLookAndFeel::fillRoundedGradient (g, bounds, fill, corner);
+    }
+
     void drawPopupMenuBackground (juce::Graphics& g, int width, int height) override
     {
         // Refresh cached colour IDs from the live theme (dice / UI randomize).
         applyThemeColours();
-        g.fillAll (colors().optionComboBackground);
-        juce::ignoreUnused (width, height);
+        const auto& c = colors();
+        auto bounds = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height);
+        const float corner = PluginMenuTheme::popupCorner();
+
+        // Soft vertical gradation (was flat fillAll).
+        fillMenuGradient (g, bounds, c.optionComboBackground, corner);
+
+        if (PluginMenuTheme::popupDrawOutline())
+        {
+            g.setColour (c.optionBorder.withAlpha (0.85f));
+            if (corner > 0.5f)
+                g.drawRoundedRectangle (bounds.reduced (0.5f), corner, 1.0f);
+            else
+                g.drawRect (bounds.reduced (0.5f), 1.0f);
+        }
     }
 
     void drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area,
@@ -132,24 +165,108 @@ public:
     {
         // Re-bind colours every paint so open menus track dice without reopening.
         applyThemeColours();
-        LookAndFeel_V4::drawPopupMenuItem (g, area, isSeparator, isActive, isHighlighted,
-                                           isTicked, hasSubMenu, text, shortcutKeyText,
-                                           icon, textColourToUse);
+        const auto& c = colors();
+
+        if (isSeparator)
+        {
+            auto r = area.reduced (5, 0);
+            r.removeFromTop (juce::roundToInt ((float) r.getHeight() * 0.5f) - 1);
+            g.setColour (c.optionBorder.withAlpha (0.55f));
+            g.fillRect (r.removeFromTop (1));
+            return;
+        }
+
+        auto r = area.toFloat().reduced (1.0f, 1.0f);
+        const float rowCorner = juce::jmin (4.0f, PluginMenuTheme::popupCorner() * 0.75f);
+
+        if (isHighlighted && isActive)
+        {
+            // Highlight row: same soft chrome gradation as buttons.
+            fillMenuGradient (g, r, c.optionComboHighlight, rowCorner);
+            g.setColour (juce::Colours::black.withAlpha (0.28f));
+            g.drawRoundedRectangle (r, rowCorner, 1.0f);
+        }
+
+        const bool useHighlightInk = isHighlighted && isActive;
+        auto textColour = textColourToUse != nullptr
+                              ? c.dropdownTextOn (*textColourToUse, useHighlightInk
+                                                        ? c.optionComboHighlight
+                                                        : c.optionComboBackground)
+                              : (useHighlightInk
+                                     ? c.legibleTextOn (juce::Colours::black, c.optionComboHighlight)
+                                     : c.dropdownTextOn (c.optionComboText, c.optionComboBackground));
+        if (! isActive)
+            textColour = textColour.withMultipliedAlpha (0.45f);
+
+        g.setColour (textColour);
+        g.setFont (c.makeUiFont (13.0f));
+
+        auto textArea = area.reduced (10, 0);
+        if (hasSubMenu)
+            textArea.removeFromRight (16);
+        if (isTicked)
+            textArea.removeFromLeft (12);
+
+        if (icon != nullptr)
+        {
+            auto iconArea = textArea.removeFromLeft (juce::jmin (textArea.getHeight(), 22)).toFloat();
+            icon->drawWithin (g, iconArea, juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize, 1.0f);
+            textArea.removeFromLeft (4);
+        }
+
+        if (isTicked)
+        {
+            const float tickSize = 8.0f;
+            const float cx = (float) area.getX() + 10.0f;
+            const float cy = (float) area.getCentreY();
+            juce::Path tick;
+            tick.startNewSubPath (cx - tickSize * 0.35f, cy);
+            tick.lineTo (cx - tickSize * 0.05f, cy + tickSize * 0.35f);
+            tick.lineTo (cx + tickSize * 0.45f, cy - tickSize * 0.4f);
+            g.strokePath (tick, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded));
+        }
+
+        g.drawFittedText (text, textArea,
+                          juce::Justification::centredLeft, 1, 0.85f);
+
+        if (shortcutKeyText.isNotEmpty())
+        {
+            g.setFont (c.makeUiFont (11.0f));
+            g.setColour (textColour.withMultipliedAlpha (0.7f));
+            g.drawText (shortcutKeyText, area.reduced (10, 0),
+                        juce::Justification::centredRight, false);
+        }
+
+        if (hasSubMenu)
+        {
+            const float arrowX = (float) area.getRight() - 12.0f;
+            const float arrowY = (float) area.getCentreY();
+            juce::Path arrow;
+            arrow.addTriangle (arrowX - 2.0f, arrowY - 4.0f,
+                               arrowX - 2.0f, arrowY + 4.0f,
+                               arrowX + 3.5f, arrowY);
+            g.setColour (textColour.withMultipliedAlpha (0.85f));
+            g.fillPath (arrow);
+        }
     }
 
     void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
                        int buttonX, int buttonY, int buttonW, int buttonH,
                        juce::ComboBox& box) override
     {
-        juce::ignoreUnused (isButtonDown, buttonX, buttonY, buttonW, buttonH);
+        juce::ignoreUnused (buttonX, buttonY, buttonW, buttonH);
 
+        applyThemeColours();
         const auto& c = colors();
         auto cornerSize = box.findParentComponentOfClass<juce::ChoicePropertyComponent>() != nullptr
-                              ? 0.0f : 2.0f;
+                              ? 0.0f : GraphOverlayButtonLookAndFeel::cornerRadius();
         auto bounds = juce::Rectangle<int> (0, 0, width, height).toFloat();
 
-        g.setColour (c.optionComboBackground);
-        g.fillRoundedRectangle (bounds, cornerSize);
+        const bool hot = box.isMouseOver (true) || isButtonDown || box.isPopupActive();
+        auto fill = GraphOverlayButtonLookAndFeel::adjustForInteraction (
+            c.optionComboBackground, box.isMouseOver (true), isButtonDown || box.isPopupActive());
+        GraphOverlayButtonLookAndFeel::paintChromeFace (g, bounds, fill, cornerSize, hot);
         g.setColour (c.optionBorder);
         g.drawRoundedRectangle (bounds.reduced (0.5f), cornerSize, 1.0f);
 
@@ -158,7 +275,7 @@ public:
         path.startNewSubPath ((float) arrowZone.getX() + 2.0f, (float) arrowZone.getCentreY() - 2.0f);
         path.lineTo ((float) arrowZone.getCentreX(), (float) arrowZone.getCentreY() + 2.5f);
         path.lineTo ((float) arrowZone.getRight() - 2.0f, (float) arrowZone.getCentreY() - 2.0f);
-        const auto arrowInk = c.legibleTextOn (c.optionComboText, c.optionComboBackground);
+        const auto arrowInk = c.dropdownTextOn (c.optionComboText, fill);
         g.setColour (arrowInk.withAlpha (box.isEnabled() ? 0.95f : 0.35f));
         g.strokePath (path, juce::PathStrokeType (1.4f));
     }
@@ -166,7 +283,24 @@ public:
     juce::Font getComboBoxFont (juce::ComboBox& box) override
     {
         juce::ignoreUnused (box);
-        return juce::Font ("Lato Black", 11.0f, juce::Font::plain);
+        return colors().makeUiFont (11.0f);
+    }
+
+    juce::Font getPopupMenuFont() override
+    {
+        return colors().makeUiFont (13.0f);
+    }
+
+    juce::Font getLabelFont (juce::Label& label) override
+    {
+        const float h = label.getFont().getHeight() > 1.0f ? label.getFont().getHeight() : 12.0f;
+        return colors().makeUiFont (h);
+    }
+
+    juce::Font getTextButtonFont (juce::TextButton& button, int buttonHeight) override
+    {
+        juce::ignoreUnused (button);
+        return colors().makeUiFont (juce::jmin (15.0f, (float) buttonHeight * 0.55f));
     }
 
     void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
@@ -174,7 +308,11 @@ public:
         label.setBounds (3, 1, juce::jmax (1, box.getWidth() - 16), box.getHeight() - 2);
         label.setFont (getComboBoxFont (box));
         label.setJustificationType (juce::Justification::centredLeft);
-        label.setMinimumHorizontalScale (0.75f); // prefer slight squeeze over "..."
+        label.setMinimumHorizontalScale (1.0f);
+        const auto& c = colors();
+        const auto ink = c.dropdownTextOn (c.optionComboText, c.optionComboBackground)
+                             .withAlpha (box.isEnabled() ? 0.95f : 0.35f);
+        label.setColour (juce::Label::textColourId, ink);
     }
 
 protected:
@@ -233,20 +371,17 @@ public:
         auto& lf = ComboBoxLookAndFeel::sharedForPopupMenus();
         auto bounds = getLocalBounds().toFloat();
         auto fill = lf.findColour (juce::ComboBox::backgroundColourId);
-        if (isMouseButtonDown())
-            fill = fill.brighter (0.18f);
-        else if (isMouseOver())
-            fill = fill.brighter (0.1f);
-
-        GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, bounds.reduced (0.5f), 2.0f);
-        g.setColour (fill);
-        g.fillRoundedRectangle (bounds, 2.0f);
-        g.setColour (lf.findColour (juce::ComboBox::outlineColourId));
-        g.drawRoundedRectangle (bounds.reduced (0.5f), 2.0f, 1.0f);
+        const float corner = GraphOverlayButtonLookAndFeel::cornerRadius();
+        GraphOverlayButtonLookAndFeel::paintChromeButton (g, bounds, fill,
+                                                          isMouseOver(), isMouseButtonDown(),
+                                                          corner);
 
         constexpr int arrowW = 16;
         g.setColour (lf.findColour (juce::ComboBox::textColourId));
-        g.setFont (juce::FontOptions (12.0f));
+        if (auto* active = SharedResources::getActive())
+            g.setFont (active->sharedColors.makeUiFont (12.0f));
+        else
+            g.setFont (juce::FontOptions (12.0f));
         g.drawText (currentText,
                     getLocalBounds().reduced (6, 0).withTrimmedRight (arrowW),
                     juce::Justification::centredLeft,

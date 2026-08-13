@@ -23,7 +23,12 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     : sharedResources (resources),
       treeState (state),
       colourRamps (ramps),
-      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
+      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
+      meshSection (resources, "spec3d.mesh", "Mesh", false),
+      audioSection (resources, "spec3d.audio", "Audio", false),
+      lookSection (resources, "spec3d.look", "Look", false),
+      particlesSection (resources, "spec3d.particles", "Particles", false),
+      rampSection (resources, "spec3d.ramp", "Ramp", false)
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
     // Dual-thumb range: arrow grips (same family as Appearance range bars).
@@ -34,7 +39,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
                                        juce::Colours::goldenrod);
 
     titleLabel.setText ("3D Spectrogram", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -888,7 +893,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
         // Value boxes on the right - same colours / size language as styleSlider text boxes.
         auto styleValueBox = [this] (juce::Label& lab)
         {
-            lab.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
+            lab.setFont (SharedResources::uiFont (13.0f));
             lab.setJustificationType (juce::Justification::centred);
             lab.setMinimumHorizontalScale (0.55f);
             lab.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
@@ -988,7 +993,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     {
         styleLabel (l);
         l.setText (t, juce::dontSendNotification);
-        l.setFont (juce::FontOptions().withName ("Lato Black").withHeight (12.0f));
+        l.setFont (SharedResources::uiFont (12.0f));
         l.setColour (juce::Label::textColourId, juce::Colours::grey);
         addAndMakeVisible (l);
     };
@@ -1197,7 +1202,7 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
 
         auto styleRangeReadout = [this] (juce::Label& lab)
         {
-            lab.setFont (juce::FontOptions().withName ("Lato").withHeight (12.0f));
+            lab.setFont (SharedResources::uiFont (12.0f));
             lab.setJustificationType (juce::Justification::centred);
             lab.setMinimumHorizontalScale (0.55f); // prefer shrink over "..."
             lab.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.88f));
@@ -1371,7 +1376,25 @@ Spectrogram3DSettingsComponent::Content::Content (SharedResources& resources,
     styleLabel (exposureLabel);
     styleLabel (gradeLabel);
 
+    lookLabel.setVisible (false);
+
+    wireSection (meshSection);
+    wireSection (audioSection);
+    wireSection (lookSection);
+    wireSection (particlesSection);
+    wireSection (rampSection);
+
     updateLookDevVisibility();
+}
+
+void Spectrogram3DSettingsComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        updateLookDevVisibility();
+        requestParentRelayout();
+    };
 }
 
 Spectrogram3DSettingsComponent::Content::~Content()
@@ -1400,7 +1423,27 @@ void Spectrogram3DSettingsComponent::Content::setLookChildVisible (juce::Compone
 
 void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
 {
-    const bool audioOn = audioLevelToggle.getToggleState();
+    const bool lookOpen = lookSection.isOpen();
+    const bool audioOpen = audioSection.isOpen();
+    const bool partOpen = particlesSection.isOpen();
+
+    audioLevelToggle.setVisible (audioOpen);
+    lightingToggle.setVisible (lookOpen);
+    domeFillToggle.setVisible (lookOpen);
+    ssgiToggle.setVisible (lookOpen);
+    ssrToggle.setVisible (lookOpen);
+    contactShadowToggle.setVisible (lookOpen);
+    selfShadowToggle.setVisible (lookOpen);
+    castShadowsToggle.setVisible (lookOpen);
+    ssaoToggle.setVisible (lookOpen);
+    bloomToggle.setVisible (lookOpen);
+    motionBlurToggle.setVisible (lookOpen);
+    dofToggle.setVisible (lookOpen);
+    tonemapToggle.setVisible (lookOpen);
+    sssToggle.setVisible (lookOpen);
+    particleToggle.setVisible (partOpen);
+
+    const bool audioOn = audioOpen && audioLevelToggle.getToggleState();
     setLookChildVisible (audioLevelTargetLabel, audioOn);
     setLookChildVisible (audioLevelTargetCombo, audioOn);
     setLookChildVisible (audioLevelMinPctLabel, audioOn);
@@ -1418,7 +1461,7 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (audioAffectPlayheadToggle, audioOn);
     setLookChildVisible (audioAffectAntiPlayheadToggle, audioOn);
 
-    const bool lit = lightingToggle.getToggleState();
+    const bool lit = lookOpen && lightingToggle.getToggleState();
     setLookChildVisible (lightingAmountLabel, lit);
     setLookChildVisible (lightingAmountSlider, lit);
     setLookChildVisible (lightAzimuthLabel, lit);
@@ -1447,7 +1490,7 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (domeSkyEditor, dome && ! domeTex);
     setLookChildVisible (domeGroundEditor, dome && ! domeTex);
 
-    const bool ssgi = ssgiToggle.getToggleState();
+    const bool ssgi = lookOpen && ssgiToggle.getToggleState();
     setLookChildVisible (ssgiStrengthLabel, ssgi);
     setLookChildVisible (ssgiStrengthSlider, ssgi);
     setLookChildVisible (ssgiRadiusLabel, ssgi);
@@ -1455,7 +1498,7 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (ssgiQualityLabel, ssgi);
     setLookChildVisible (ssgiQualityCombo, ssgi);
 
-    const bool ssr = ssrToggle.getToggleState();
+    const bool ssr = lookOpen && ssrToggle.getToggleState();
     setLookChildVisible (ssrStrengthLabel, ssr);
     setLookChildVisible (ssrStrengthSlider, ssr);
     setLookChildVisible (ssrDistanceLabel, ssr);
@@ -1477,12 +1520,12 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (ssrDomeFbLabel, ssr);
     setLookChildVisible (ssrDomeFbSlider, ssr);
 
-    const bool contact = contactShadowToggle.getToggleState();
+    const bool contact = lookOpen && contactShadowToggle.getToggleState();
     setLookChildVisible (contactShadowStrengthLabel, contact);
     setLookChildVisible (contactShadowStrengthSlider, contact);
 
-    const bool selfSh = selfShadowToggle.getToggleState();
-    const bool castSh = castShadowsToggle.getToggleState();
+    const bool selfSh = lookOpen && selfShadowToggle.getToggleState();
+    const bool castSh = lookOpen && castShadowsToggle.getToggleState();
     setLookChildVisible (selfShadowStrengthLabel, selfSh);
     setLookChildVisible (selfShadowStrengthSlider, selfSh);
     // Bias/Softness are shared with the cast-shadow map.
@@ -1502,19 +1545,19 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (cascadeTransLabel, castSh);
     setLookChildVisible (cascadeTransSlider, castSh);
 
-    const bool ao = ssaoToggle.getToggleState();
+    const bool ao = lookOpen && ssaoToggle.getToggleState();
     setLookChildVisible (ssaoStrengthLabel, ao);
     setLookChildVisible (ssaoStrengthSlider, ao);
     setLookChildVisible (ssaoRadiusLabel, ao);
     setLookChildVisible (ssaoRadiusSlider, ao);
 
-    const bool bloom = bloomToggle.getToggleState();
+    const bool bloom = lookOpen && bloomToggle.getToggleState();
     setLookChildVisible (bloomStrengthLabel, bloom);
     setLookChildVisible (bloomStrengthSlider, bloom);
     setLookChildVisible (bloomThresholdLabel, bloom);
     setLookChildVisible (bloomThresholdSlider, bloom);
 
-    const bool motionBlur = motionBlurToggle.getToggleState();
+    const bool motionBlur = lookOpen && motionBlurToggle.getToggleState();
     setLookChildVisible (motionBlurAmountLabel, motionBlur);
     setLookChildVisible (motionBlurAmountSlider, motionBlur);
     setLookChildVisible (motionBlurMaxLabel, motionBlur);
@@ -1522,7 +1565,7 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (motionBlurQualityLabel, motionBlur);
     setLookChildVisible (motionBlurQualityCombo, motionBlur);
 
-    const bool dof = dofToggle.getToggleState();
+    const bool dof = lookOpen && dofToggle.getToggleState();
     setLookChildVisible (dofFocusLabel, dof);
     setLookChildVisible (dofFocusSlider, dof);
     setLookChildVisible (dofFStopLabel, dof);
@@ -1536,13 +1579,13 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     setLookChildVisible (dofEdgeSpillLabel, dof);
     setLookChildVisible (dofEdgeSpillSlider, dof);
 
-    const bool tonemap = tonemapToggle.getToggleState();
+    const bool tonemap = lookOpen && tonemapToggle.getToggleState();
     setLookChildVisible (exposureLabel, tonemap);
     setLookChildVisible (exposureSlider, tonemap);
     setLookChildVisible (gradeLabel, tonemap);
     setLookChildVisible (gradeCombo, tonemap);
 
-    const bool particleOn = particleToggle.getToggleState();
+    const bool particleOn = partOpen && particleToggle.getToggleState();
     setLookChildVisible (particleGpuSimToggle, particleOn);
     setLookChildVisible (particleMaxAliveLabel, particleOn);
     setLookChildVisible (particleMaxAliveSlider, particleOn);
@@ -1689,7 +1732,7 @@ void Spectrogram3DSettingsComponent::Content::updateLookDevVisibility()
     }
 
     const bool closed = closedMeshToggle.getToggleState();
-    const bool sssOn = sssToggle.getToggleState();
+    const bool sssOn = lookOpen && sssToggle.getToggleState();
     setLookChildVisible (sssStrengthLabel, sssOn);
     setLookChildVisible (sssStrengthSlider, sssOn);
     setLookChildVisible (sssWrapLabel, sssOn);
@@ -1808,7 +1851,7 @@ void Spectrogram3DSettingsComponent::Content::setSliderActual (juce::Slider& sli
 
 void Spectrogram3DSettingsComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setMinimumHorizontalScale (0.55f); // shrink before "..." on narrow panels
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
@@ -1826,7 +1869,6 @@ void Spectrogram3DSettingsComponent::Content::styleCombo (juce::ComboBox& combo)
 {
     comboLookAndFeel.setThemeColors (&sharedResources);
     combo.setLookAndFeel (&comboLookAndFeel);
-    combo.setColour (juce::ComboBox::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
 }
 
 void Spectrogram3DSettingsComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
@@ -2625,26 +2667,26 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
             lookRows += 2; // radius, contrast
     }
     int particleModExtra = 0;
+    int particleRows = 0;
     if (particleToggle.getToggleState())
     {
         toggles += 1; // GPU particle integrate
-        lookRows += 1; // max particles
+        particleRows += 1; // max particles
         toggles += 1; // debug overlay
-        lookRows += 2; // clear + node graph buttons
-        lookRows += 2; // binding + emitter type
+        particleRows += 2; // clear + node graph buttons
+        particleRows += 2; // binding + emitter type
         if (particleEmitterTypeCombo.getSelectedId() == 1)
-            lookRows += 1; // emit mode (spectrogram only)
+            particleRows += 1; // emit mode (spectrogram only)
         if (particleEmitterTypeCombo.getSelectedId() != 1)
-            lookRows += 8; // emitter pos XYZ + spray yaw/pitch/spread/speed min/max
-        lookRows += 7; // emission, jitter, init vel XYZ, vel random, lifespan
+            particleRows += 8; // emitter pos XYZ + spray yaw/pitch/spread/speed min/max
+        particleRows += 7; // emission, jitter, init vel XYZ, vel random, lifespan
         if (particleLifespanSlider.getValue() > 1.0e-4)
-            lookRows += 1;
-        lookRows += 2; // size + size random dual-thumb
-        lookRows += 4; // roughness, metalness, specular, emissive (always)
-        // unlit toggle counted above when particleToggle is on
-        lookRows += 1; // mesh shape
+            particleRows += 1;
+        particleRows += 2; // size + size random dual-thumb
+        particleRows += 4; // roughness, metalness, specular, emissive (always)
+        particleRows += 1; // mesh shape
         if (particleMeshCombo.getSelectedId() != 3)
-            lookRows += 4; // init rot x/y/z + random
+            particleRows += 4; // init rot x/y/z + random
         toggles += 2; // forces enable + waterfall lock
         if (particleForcesToggle.getToggleState())
         {
@@ -2664,17 +2706,46 @@ int Spectrogram3DSettingsComponent::Content::getPreferredHeight() const
                 }
     }
 
+    const int meshBody = 5 * toggleH + comboRows * rowH + baseSliderRows * rowH + buttonRows * toggleH;
+    int audioBody = toggleH;
+    if (audioLevelToggle.getToggleState())
+        audioBody += 7 * rowH + 2 * toggleH;
+
+    int lookBody = 13 * toggleH + colourEditorH;
+    if (lightingToggle.getToggleState())
+        lookBody += 7 * rowH + toggleH;
+    if (lightingToggle.getToggleState() && domeFillToggle.getToggleState())
+    {
+        lookBody += rowH + toggleH;
+        if (domeTextureToggle.getToggleState())
+            lookBody += rowH;
+    }
+    if (ssgiToggle.getToggleState()) lookBody += 3 * rowH;
+    if (ssrToggle.getToggleState()) lookBody += 10 * rowH;
+    if (contactShadowToggle.getToggleState()) lookBody += rowH;
+    if (selfShadowToggle.getToggleState()) lookBody += 4 * rowH;
+    else if (castShadowsToggle.getToggleState()) lookBody += 2 * rowH;
+    if (castShadowsToggle.getToggleState()) lookBody += 4 * rowH;
+    if (ssaoToggle.getToggleState()) lookBody += 2 * rowH;
+    if (bloomToggle.getToggleState()) lookBody += 2 * rowH;
+    if (motionBlurToggle.getToggleState()) lookBody += 3 * rowH;
+    if (dofToggle.getToggleState()) lookBody += 6 * rowH;
+    if (tonemapToggle.getToggleState()) lookBody += 2 * rowH;
+    if (sssToggle.getToggleState()) lookBody += 9 * rowH;
+
+    int particleBody = toggleH;
+    if (particleToggle.getToggleState())
+        particleBody += particleRows * rowH + particleModExtra + 4 * toggleH;
+
+    juce::ignoreUnused (lookRows, toggles);
+
     return kPadY * 2
            + 24 + 8
-           + comboRows * rowH
-           + baseSliderRows * rowH
-           + lookRows * rowH
-           + colourEditorH
-           + particleModExtra
-           + toggles * toggleH
-           + buttonRows * toggleH
-           + kLabelH + kSectionGap // look section header
-           + kLabelH + kLabelGap + gradientEditor.getPreferredHeight() + kRowGap;
+           + meshSection.heightFor (meshBody)
+           + audioSection.heightFor (audioBody)
+           + lookSection.heightFor (lookBody)
+           + particlesSection.heightFor (particleBody)
+           + rampSection.heightFor (kLabelH + kLabelGap + gradientEditor.getPreferredHeight());
 }
 
 int Spectrogram3DSettingsComponent::Content::getPreferredWidth() const
@@ -2719,36 +2790,54 @@ void Spectrogram3DSettingsComponent::Content::resized()
     }
     area.removeFromTop (8);
 
-    layoutToggle (area, enable3DToggle);
-    layoutToggle (area, enhancedFreq3DToggle);
-    layoutComboRow (area, fftSizeLabel, fftSizeCombo);
-    layoutComboRow (area, meshQualityLabel, meshQualityCombo);
-    layoutSliderRow (area, meshHeightLabel, meshHeightSlider);
-    layoutSliderRow (area, freqMeshBiasLabel, freqMeshBiasSlider);
-    layoutSliderRow (area, freqMeshBiasPivotLabel, freqMeshBiasPivotSlider);
-    layoutComboRow (area, msaaLabel, msaaCombo);
-    layoutToggle (area, transparentBgToggle);
-    layoutToggle (area, reverseFreqAxisToggle);
-    layoutToggle (area, closedMeshToggle);
-    layoutSliderRow (area, softAngleLabel, softAngleSlider);
-    resetCameraButton.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (160, area.getWidth())));
-    area.removeFromTop (kSectionGap);
+    lookLabel.setVisible (false);
 
-    lookLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kRowGap);
-    layoutToggle (area, audioLevelToggle);
-    if (audioLevelToggle.getToggleState())
+    meshSection.applyVisible ({
+        &enable3DToggle, &enhancedFreq3DToggle,
+        &fftSizeLabel, &fftSizeCombo, &meshQualityLabel, &meshQualityCombo,
+        &meshHeightLabel, &meshHeightSlider, &freqMeshBiasLabel, &freqMeshBiasSlider,
+        &freqMeshBiasPivotLabel, &freqMeshBiasPivotSlider, &msaaLabel, &msaaCombo,
+        &transparentBgToggle, &reverseFreqAxisToggle, &closedMeshToggle,
+        &softAngleLabel, &softAngleSlider, &resetCameraButton });
+    meshSection.placeHeader (area);
+    if (meshSection.isOpen())
     {
-        layoutComboRow (area, audioLevelTargetLabel, audioLevelTargetCombo);
-        layoutSliderRow (area, audioLevelMinPctLabel, audioLevelMinPctSlider);
-        layoutSliderRow (area, audioLevelMaxPctLabel, audioLevelMaxPctSlider);
-        layoutSliderRow (area, audioLevelHpLabel, audioLevelHpSlider);
-        layoutSliderRow (area, audioLevelLpLabel, audioLevelLpSlider);
-        layoutSliderRow (area, audioLevelThresholdLabel, audioLevelThresholdSlider);
-        layoutComboRow (area, audioLevelSpeedLabel, audioLevelSpeedCombo);
-        layoutToggle (area, audioAffectPlayheadToggle);
-        layoutToggle (area, audioAffectAntiPlayheadToggle);
+        layoutToggle (area, enable3DToggle);
+        layoutToggle (area, enhancedFreq3DToggle);
+        layoutComboRow (area, fftSizeLabel, fftSizeCombo);
+        layoutComboRow (area, meshQualityLabel, meshQualityCombo);
+        layoutSliderRow (area, meshHeightLabel, meshHeightSlider);
+        layoutSliderRow (area, freqMeshBiasLabel, freqMeshBiasSlider);
+        layoutSliderRow (area, freqMeshBiasPivotLabel, freqMeshBiasPivotSlider);
+        layoutComboRow (area, msaaLabel, msaaCombo);
+        layoutToggle (area, transparentBgToggle);
+        layoutToggle (area, reverseFreqAxisToggle);
+        layoutToggle (area, closedMeshToggle);
+        layoutSliderRow (area, softAngleLabel, softAngleSlider);
+        resetCameraButton.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (160, area.getWidth())));
     }
+
+    audioSection.placeHeader (area);
+    if (audioSection.isOpen())
+    {
+        layoutToggle (area, audioLevelToggle);
+        if (audioLevelToggle.getToggleState())
+        {
+            layoutComboRow (area, audioLevelTargetLabel, audioLevelTargetCombo);
+            layoutSliderRow (area, audioLevelMinPctLabel, audioLevelMinPctSlider);
+            layoutSliderRow (area, audioLevelMaxPctLabel, audioLevelMaxPctSlider);
+            layoutSliderRow (area, audioLevelHpLabel, audioLevelHpSlider);
+            layoutSliderRow (area, audioLevelLpLabel, audioLevelLpSlider);
+            layoutSliderRow (area, audioLevelThresholdLabel, audioLevelThresholdSlider);
+            layoutComboRow (area, audioLevelSpeedLabel, audioLevelSpeedCombo);
+            layoutToggle (area, audioAffectPlayheadToggle);
+            layoutToggle (area, audioAffectAntiPlayheadToggle);
+        }
+    }
+
+    lookSection.placeHeader (area);
+    if (lookSection.isOpen())
+    {
     layoutToggle (area, lightingToggle);
     if (lightingToggle.getToggleState())
     {
@@ -2878,6 +2967,11 @@ void Spectrogram3DSettingsComponent::Content::resized()
             layoutSliderRow (area, sssContrastLabel, sssContrastSlider);
         }
     }
+    }
+
+    particlesSection.placeHeader (area);
+    if (particlesSection.isOpen())
+    {
     layoutToggle (area, particleToggle);
     if (particleToggle.getToggleState())
     {
@@ -3176,12 +3270,19 @@ void Spectrogram3DSettingsComponent::Content::resized()
             }
         }
     }
-    area.removeFromTop (kSectionGap);
+    }
 
-    gradientLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kLabelGap);
-    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
-                                  .removeFromLeft (juce::jmin (520, area.getWidth())));
+    rampSection.applyVisible ({ &gradientLabel, &gradientEditor });
+    rampSection.placeHeader (area);
+    if (rampSection.isOpen())
+    {
+        gradientLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                      .removeFromLeft (juce::jmin (520, area.getWidth())));
+    }
+
+    updateLookDevVisibility();
 }
 
 Spectrogram3DSettingsComponent::Spectrogram3DSettingsComponent (SharedResources& resources,

@@ -12,6 +12,7 @@
 #include "SpectrogramComponent.h"
 #include <juce_dsp/juce_dsp.h>
 #include "Visualizer/Analyser.h"
+#include "Visualizer/SpectrumAnalysis.h"
 #include "FilterType.h"
 #include "BandChannel.h"
 #include "DynamicEq.h"
@@ -870,17 +871,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         SpectralPerBandLattice::enabledParamId(), "SpectralPerBandLattice", true);
 
     // Built-in analyser defaults match factory "new default";
-    // AnalyserDefaults::load() still overrides when that file is present.
+    // AnalyserDefaults::load() overrides when analyser_defaults.xml is present.
     juce::StringArray choices = AnalyserDefaults::getBlockSizeNames();
-    // Index: 0=2048, 1=4096, 2=8192, 3=16384 — always default to 8192.
-    constexpr int kDefaultBlockIndex = 2; // 8192
+    // Index: 0=2048, 1=4096, 2=8192, 3=16384 — factory default 8192.
+    constexpr int kDefaultBlockIndex = 2;
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
-        "BLOCK_ID", "Block", choices, kDefaultBlockIndex));
+        "BLOCK_ID", "Block", choices,
+        analyserDefaults.getBlockIndex (kDefaultBlockIndex)));
 
     // Boolean parameters
     params.push_back(std::make_unique<juce::AudioParameterBool>("LEFT_ID", "Left", false));
     params.push_back(std::make_unique<juce::AudioParameterBool>("RIGHT_ID", "Right", false));
     params.push_back(std::make_unique<juce::AudioParameterBool>("BOTH_ID", "Both", true));
+    // Spectrum analyser source: Both / L / R / Mid / Side / overlays.
+    // Independent of SPEC_CHANNEL_ID (spectrogram) and of FFT block size.
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        SpectrumAnalysis::channelParamId(), "SpectrumChannel",
+        SpectrumAnalysis::channelNames(),
+        juce::jlimit (0, SpectrumAnalysis::channelNames().size() - 1,
+                      analyserDefaults.getInt (SpectrumAnalysis::channelParamId(),
+                                              (int) SpectrumAnalysis::Channel::both))));
+    // Span-style fractional-octave smoothing. Cosmetic on the analysed curve —
+    // does not change BLOCK_ID / FFT resolution.
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        SpectrumAnalysis::octaveSmoothParamId(), "SpectrumOctaveSmooth",
+        SpectrumAnalysis::octaveSmoothNames(),
+        juce::jlimit (0, SpectrumAnalysis::octaveSmoothNames().size() - 1,
+                      analyserDefaults.getInt (SpectrumAnalysis::octaveSmoothParamId(),
+                                              (int) SpectrumAnalysis::OctaveSmooth::off))));
     params.push_back(std::make_unique<juce::AudioParameterBool>("BINS_ID", "Bins", analyserDefaults.getBool ("BINS_ID", true)));
     params.push_back(std::make_unique<juce::AudioParameterBool>("MAX_ID", "Max", analyserDefaults.getBool ("MAX_ID", true)));
     params.push_back(std::make_unique<juce::AudioParameterBool>("LIN_ID", "Lin", analyserDefaults.getBool ("LIN_ID", false)));
@@ -915,6 +933,66 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         "SPECTRUM_POST_FILL_ID", "SpectrumPostFill", analyserDefaults.getBool ("SPECTRUM_POST_FILL_ID", true)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "SPECTRUM_HOLD_FILL_ID", "SpectrumHoldFill", analyserDefaults.getBool ("SPECTRUM_HOLD_FILL_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPECTRUM_USE_RAMP_ID", "SpectrumUseRamp",
+        analyserDefaults.getBool ("SPECTRUM_USE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPECTRUM_CURVE_RAMP_ID", "SpectrumCurveRamp",
+        analyserDefaults.getBool ("SPECTRUM_CURVE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "EQ_CURVE_RAMP_ID", "EqCurveRamp",
+        analyserDefaults.getBool ("EQ_CURVE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPECTRUM_PRE_FILL_RAMP_ID", "SpectrumPreFillRamp",
+        analyserDefaults.getBool ("SPECTRUM_PRE_FILL_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPECTRUM_PRE_CURVE_RAMP_ID", "SpectrumPreCurveRamp",
+        analyserDefaults.getBool ("SPECTRUM_PRE_CURVE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPECTRUM_HOLD_FILL_RAMP_ID", "SpectrumHoldFillRamp",
+        analyserDefaults.getBool ("SPECTRUM_HOLD_FILL_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "SPECTRUM_HOLD_CURVE_RAMP_ID", "SpectrumHoldCurveRamp",
+        analyserDefaults.getBool ("SPECTRUM_HOLD_CURVE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "EQ_SUM_FILL_RAMP_ID", "EqSumFillRamp",
+        analyserDefaults.getBool ("EQ_SUM_FILL_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "EQ_BAND_CURVE_RAMP_ID", "EqBandCurveRamp",
+        analyserDefaults.getBool ("EQ_BAND_CURVE_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "EQ_BAND_FILL_RAMP_ID", "EqBandFillRamp",
+        analyserDefaults.getBool ("EQ_BAND_FILL_RAMP_ID", true)));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "EQ_SHOW_CURVES_ID", "EqShowCurves",
+        analyserDefaults.getBool ("EQ_SHOW_CURVES_ID", true)));
+    {
+        const auto fadeRange = juce::NormalisableRange<float> (0.0f, 5.0f, 0.01f, 0.4f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "SPECTRUM_PRE_CURVE_FADE_ID", "SpectrumPreCurveFade", fadeRange,
+            analyserDefaults.getFloat ("SPECTRUM_PRE_CURVE_FADE_ID", 0.0f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "SPECTRUM_PRE_FILL_FADE_ID", "SpectrumPreFillFade", fadeRange,
+            analyserDefaults.getFloat ("SPECTRUM_PRE_FILL_FADE_ID", 0.0f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "SPECTRUM_POST_CURVE_FADE_ID", "SpectrumPostCurveFade", fadeRange,
+            analyserDefaults.getFloat ("SPECTRUM_POST_CURVE_FADE_ID", 0.0f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "SPECTRUM_POST_FILL_FADE_ID", "SpectrumPostFillFade", fadeRange,
+            analyserDefaults.getFloat ("SPECTRUM_POST_FILL_FADE_ID", 0.0f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "SPECTRUM_HOLD_CURVE_FADE_ID", "SpectrumHoldCurveFade", fadeRange,
+            analyserDefaults.getFloat ("SPECTRUM_HOLD_CURVE_FADE_ID", 0.0f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "SPECTRUM_HOLD_FILL_FADE_ID", "SpectrumHoldFillFade", fadeRange,
+            analyserDefaults.getFloat ("SPECTRUM_HOLD_FILL_FADE_ID", 0.0f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "EQ_CURVE_FADE_ID", "EqCurveFade", fadeRange,
+            analyserDefaults.getFloat ("EQ_CURVE_FADE_ID", 0.0f)));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (
+            "EQ_FILL_FADE_ID", "EqFillFade", fadeRange,
+            analyserDefaults.getFloat ("EQ_FILL_FADE_ID", 0.0f)));
+    }
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "SPECTRUM_OPACITY_ID", "SpectrumOpacity",
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f),
@@ -1410,6 +1488,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     // Autogain: compensates EQ loudness change via an internal offset (not the Out knob).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "autoGain", "Auto Gain", true));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "targetLufs", "Target LUFS",
+        juce::NormalisableRange<float> (-36.0f, -6.0f, 0.1f),
+        -18.0f));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "targetLufsEnable", "Target LUFS On", false));
 
     // Spectral Match — global shape match toward a target curve (noise / capture).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -3210,6 +3294,68 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         };
 
         storeInput (0, inputPeakDbLeft, inputRmsDbLeft);
+
+        // Coarse 3-band main vs sidechain energy for the collision overlay.
+        {
+            collisionHasSc.store (scL != nullptr, std::memory_order_relaxed);
+            auto bandRms = [] (const float* a, const float* b, int n, float loHz, float hiHz, double sr) -> float
+            {
+                if (a == nullptr || n <= 0 || sr <= 0.0)
+                    return -100.0f;
+                const float dt = 1.0f / (float) sr;
+                float lp = 0.0f, hp = 0.0f;
+                const float aLo = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * loHz * dt);
+                const float aHi = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * hiHz * dt);
+                double acc = 0.0;
+                const int step = juce::jmax (1, n / 256);
+                int count = 0;
+                for (int i = 0; i < n; i += step)
+                {
+                    float x = a[i];
+                    if (b != nullptr)
+                        x = 0.5f * (x + b[i]);
+                    lp += aHi * (x - lp);
+                    hp += aLo * (x - hp);
+                    const float y = lp - hp;
+                    acc += (double) y * (double) y;
+                    ++count;
+                }
+                if (count <= 0)
+                    return -100.0f;
+                return juce::Decibels::gainToDecibels ((float) std::sqrt (acc / (double) count), -100.0f);
+            };
+            const double sr = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
+            const auto* ml = mainBuffer.getNumChannels() > 0 ? mainBuffer.getReadPointer (0) : nullptr;
+            const auto* mr = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : ml;
+            const float m0 = bandRms (ml, mr, numSamples, 20.0f, 250.0f, sr);
+            const float m1 = bandRms (ml, mr, numSamples, 250.0f, 2500.0f, sr);
+            const float m2 = bandRms (ml, mr, numSamples, 2500.0f, 16000.0f, sr);
+            collisionMainDb[0].store (m0, std::memory_order_relaxed);
+            collisionMainDb[1].store (m1, std::memory_order_relaxed);
+            collisionMainDb[2].store (m2, std::memory_order_relaxed);
+            if (scL != nullptr)
+            {
+                const float s0 = bandRms (scL, scR, numSamples, 20.0f, 250.0f, sr);
+                const float s1 = bandRms (scL, scR, numSamples, 250.0f, 2500.0f, sr);
+                const float s2 = bandRms (scL, scR, numSamples, 2500.0f, 16000.0f, sr);
+                collisionScDb[0].store (s0, std::memory_order_relaxed);
+                collisionScDb[1].store (s1, std::memory_order_relaxed);
+                collisionScDb[2].store (s2, std::memory_order_relaxed);
+                int peak = 0;
+                float best = s0 - m0;
+                if (s1 - m1 > best) { best = s1 - m1; peak = 1; }
+                if (s2 - m2 > best) { best = s2 - m2; peak = 2; }
+                const float hz = (peak == 0 ? 80.0f : (peak == 1 ? 800.0f : 5000.0f));
+                collisionPeakHz.store (best > 1.5f ? hz : 0.0f, std::memory_order_relaxed);
+            }
+            else
+            {
+                collisionScDb[0].store (-100.0f, std::memory_order_relaxed);
+                collisionScDb[1].store (-100.0f, std::memory_order_relaxed);
+                collisionScDb[2].store (-100.0f, std::memory_order_relaxed);
+                collisionPeakHz.store (0.0f, std::memory_order_relaxed);
+            }
+        }
         if (mainBuffer.getNumChannels() > 1)
         {
             storeInput (1, inputPeakDbRight, inputRmsDbRight);
@@ -4423,11 +4569,34 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             {
                 smoothAutoGainOffset.setTargetValue (0.0f);
             }
-            else if (autoGainPreDbSmooth > silenceFloorDb && autoGainPostDbSmooth > silenceFloorDb)
+            else if (autoGainPostDbSmooth > silenceFloorDb)
             {
-                // Hold last target during silence so the offset doesn't pump out/in.
-                smoothAutoGainOffset.setTargetValue (
-                    juce::jlimit (-24.0f, 24.0f, autoGainPreDbSmooth - autoGainPostDbSmooth));
+                const bool aimLufs = treeState.getRawParameterValue ("targetLufsEnable") != nullptr
+                                     && treeState.getRawParameterValue ("targetLufsEnable")->load() > 0.5f;
+                if (aimLufs)
+                {
+                    // Shared with the Loudness meter target so Settings has one number.
+                    float target = -14.0f;
+                    if (auto* v = treeState.getRawParameterValue ("LOUDNESS_TARGET_ID"))
+                        target = juce::jlimit (-36.0f, -6.0f, v->load());
+                    else if (auto* v = treeState.getRawParameterValue ("targetLufs"))
+                        target = juce::jlimit (-36.0f, -6.0f, v->load());
+                    float measured = autoGainPostDbSmooth;
+                    if (auto* loud = loudnessTarget.load (std::memory_order_acquire))
+                    {
+                        const float integ = loud->getIntegratedLufs();
+                        if (integ > -70.0f)
+                            measured = integ;
+                    }
+                    smoothAutoGainOffset.setTargetValue (
+                        juce::jlimit (-24.0f, 24.0f, target - measured));
+                }
+                else if (autoGainPreDbSmooth > silenceFloorDb)
+                {
+                    // Hold last target during silence so the offset doesn't pump out/in.
+                    smoothAutoGainOffset.setTargetValue (
+                        juce::jlimit (-24.0f, 24.0f, autoGainPreDbSmooth - autoGainPostDbSmooth));
+                }
             }
         }
 

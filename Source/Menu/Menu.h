@@ -25,8 +25,8 @@ public:
     static constexpr int kContentHeight = 460;
     static constexpr int kDragBarHeight = 26;
     static constexpr int kScrollBarThickness = 11;
-    /** Fewer per page so multi-word labels stay fully visible with the pager. */
-    static constexpr int kTabsPerPage = 5;
+    /** Fallback tab-strip width when the frame has not been sized yet. */
+    static constexpr int kTabStripFallbackW = 560;
 
     Menu (SharedResources& resources,
           juce::AudioProcessorValueTreeState& state,
@@ -66,6 +66,9 @@ public:
     /** Call when an active tab's preferred height/width changes (look toggles, gradients, …). */
     void notifyContentHeightChanged();
 
+    /** Push the current Appearance UI font onto title, tabs, and all Settings pages. */
+    void refreshUiFonts();
+
     /**
         Keep border-resize inside the parent so left-edge drags cannot shove the
         right edge off-screen (and vice versa). Call after the panel is parented / laid out.
@@ -104,20 +107,13 @@ private:
                 fill = fill.withMultipliedAlpha (0.45f);
                 ink = ink.withMultipliedAlpha (0.4f);
             }
-            else if (down)
+            else
             {
-                fill = fill.brighter (0.15f);
-                ink = ink.brighter (0.1f);
-            }
-            else if (highlighted)
-            {
-                fill = fill.brighter (0.1f);
-                ink = ink.brighter (0.08f);
+                fill = GraphOverlayButtonLookAndFeel::adjustForInteraction (fill, highlighted, down);
+                ink = GraphOverlayButtonLookAndFeel::adjustForInteraction (ink, highlighted, down);
             }
 
-            GraphOverlayButtonLookAndFeel::fillRoundedGradient (g, bounds, fill, 3.0f);
-            g.setColour (ink.withAlpha (0.35f));
-            g.drawRoundedRectangle (bounds, 3.0f, 1.0f);
+            GraphOverlayButtonLookAndFeel::paintChromeButton (g, bounds, fill);
 
             const float cx = bounds.getCentreX();
             const float cy = bounds.getCentreY();
@@ -158,6 +154,11 @@ private:
     void rebuildTabsForCurrentPage();
     void setTabPage (int page);
     int getNumTabPages() const noexcept;
+    void recomputeTabPageStarts (int availableWidth);
+    int pageIndexContainingTab (int tabIndex) const noexcept;
+    int currentPageStart() const noexcept;
+    int currentPageEnd() const noexcept;
+    void syncTabPagesToWidth (int availableWidth);
     /** @param preserveScrollPosition keep viewport offset (toggles / resize). Tab changes pass false. */
     void refreshContentPanelSize (bool preserveScrollPosition = false);
     int getActiveTabPreferredContentHeight() const;
@@ -177,7 +178,11 @@ private:
 
         void currentTabChanged (int newCurrentTabIndex, const juce::String& newTabName) override
         {
-            juce::ignoreUnused (newCurrentTabIndex, newTabName);
+            juce::ignoreUnused (newCurrentTabIndex);
+            if (owner.rebuildingTabs)
+                return;
+            if (newTabName.isNotEmpty())
+                owner.selectedTabName = newTabName;
             // New tab: jump to top (don't preserve prior tab's scroll).
             owner.refreshContentPanelSize (false);
             // Tabs that sync Look toggles from prefs during layout can grow after the
@@ -208,7 +213,10 @@ private:
 
     std::vector<std::unique_ptr<juce::Component>> ownedTabContents;
     std::vector<TabEntry> allTabs;
+    std::vector<int> tabPageStarts { 0 };
     int tabPageIndex = 0;
+    juce::String selectedTabName;
+    bool rebuildingTabs = false;
     TabPageArrowButton tabPrevButton { false };
     TabPageArrowButton tabNextButton { true };
 

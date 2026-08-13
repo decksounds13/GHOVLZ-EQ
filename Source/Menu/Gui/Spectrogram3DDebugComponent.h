@@ -6,6 +6,7 @@
 #include "../../ColourRamp/ColourSwatchEditor.h"
 #include "../../Spectrogram3DComponent.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 /** Spec3D lookdev: debug sphere / gizmo (cast-shadow settings live on 3D Spectrogram Look). */
 class Spectrogram3DDebugComponent : public juce::Component
@@ -72,6 +73,9 @@ private:
         juce::Slider roughSlider;
         juce::Label metalLabel;
         juce::Slider metalSlider;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection sphereSection;
     };
 
     SharedResources& sharedResources;

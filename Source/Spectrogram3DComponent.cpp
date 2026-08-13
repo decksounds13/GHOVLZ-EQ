@@ -8171,6 +8171,17 @@ bool Spectrogram3DComponent::keyPressed (const juce::KeyPress& key)
         }
     }
 
+    if ((key == juce::KeyPress ('s') || key == juce::KeyPress ('S'))
+        && ! key.getModifiers().isAnyModifierKeyDown()
+        && ! freecamRmbHeld)
+    {
+        if (onToggleSettings != nullptr)
+        {
+            onToggleSettings();
+            return true;
+        }
+    }
+
     // Consume freecam keys so host doesn't steal them while RMB-flying.
     if (freecamRmbHeld)
     {
@@ -9130,10 +9141,10 @@ namespace
     {
         label.setJustificationType (juce::Justification::centredLeft);
         label.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.9f));
-        label.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
+        label.setFont (SharedResources::uiFont (13.0f));
         valueLabel.setJustificationType (juce::Justification::centredRight);
         valueLabel.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
-        valueLabel.setFont (juce::FontOptions().withName ("Lato").withHeight (13.0f));
+        valueLabel.setFont (SharedResources::uiFont (13.0f));
     }
 
     /** Period slider under Turntable - does not dismiss the menu when dragged. */

@@ -1,4 +1,5 @@
 #include "LoudnessComponent.h"
+#include "Menu/SharedResources.h"
 
 namespace
 {
@@ -203,7 +204,7 @@ void LoudnessComponent::paint (juce::Graphics& g)
 
     const float numH = juce::jlimit (12.0f, 28.0f, (float) area.getHeight() * 0.22f);
     const float labelH = juce::jlimit (9.0f, 14.0f, numH * 0.62f);
-    auto numFont = juce::Font (juce::FontOptions (numH).withName ("Lato Black"));
+    auto numFont = SharedResources::uiFont (numH);
     auto labelFont = juce::Font (juce::FontOptions (labelH));
 
     const juce::String labels[3] = { "Mom.", "Short", "Int." };

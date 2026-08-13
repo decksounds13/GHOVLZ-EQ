@@ -57,7 +57,7 @@ void CustomHeader::paint(juce::Graphics& g) {
     customShadow->drawInnerShadowForPath(g, headerPath);
 
     // Set the font for the listbox items
-    g.setFont(juce::Font("Lato Black", 14.0f, juce::Font::bold));
+    g.setFont(SharedResources::uiFont (14.0f, true));
 
     // Draw the labels for each column
     g.setColour(headerLabelTextColor);

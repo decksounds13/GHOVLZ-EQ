@@ -20,10 +20,13 @@ StereogramSettingsComponent::Content::Content (SharedResources& resources,
     : sharedResources (resources),
       treeState (state),
       colourRamps (ramps),
-      gradientEditor (resources, GradientStripEditor::ModeFamily::frequency, &ramps.getPresets())
+      gradientEditor (resources, GradientStripEditor::ModeFamily::frequency, &ramps.getPresets()),
+      displaySection (resources, "stereogram.display", "Display", false),
+      glowSection (resources, "stereogram.glow", "Glow", false),
+      rampSection (resources, "stereogram.ramp", "Ramp", false)
 {
     titleLabel.setText ("Stereogram", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -93,20 +96,35 @@ StereogramSettingsComponent::Content::Content (SharedResources& resources,
 
     styleLabel (titleLabel);
     syncRampControlsEnabled();
+
+    wireSection (displaySection);
+    wireSection (glowSection);
+    wireSection (rampSection);
+}
+
+void StereogramSettingsComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
+    };
 }
 
 StereogramSettingsComponent::Content::~Content() = default;
 
 void StereogramSettingsComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
 }
 
 void StereogramSettingsComponent::Content::styleSectionLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (16.0f));
+    label.setFont (SharedResources::uiFont (16.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
 }
@@ -149,13 +167,11 @@ void StereogramSettingsComponent::Content::syncRampControlsEnabled()
 int StereogramSettingsComponent::Content::getPreferredHeight() const
 {
     const int sliderBlock = kLabelH + kLabelGap + kSliderH + kRowGap;
+    const int tog = 22 + kRowGap;
     return kPadY * 2 + 24 + 8
-         + 22 + kRowGap                    // use ramp
-         + kLabelH + kLabelGap + gradientEditor.getPreferredHeight()
-         + kSectionGap
-         + sliderBlock * 3                 // size, density, fade
-         + kSectionGap + 20 + 8 + 22 + kRowGap // glow section + toggle
-         + sliderBlock * 3;                // glow radius/spread/opacity
+         + displaySection.heightFor (sliderBlock * 3)
+         + glowSection.heightFor (tog + sliderBlock * 3)
+         + rampSection.heightFor (tog + kLabelH + kLabelGap + gradientEditor.getPreferredHeight());
 }
 
 void StereogramSettingsComponent::Content::resized()
@@ -174,27 +190,43 @@ void StereogramSettingsComponent::Content::resized()
         area.removeFromTop (kRowGap);
     };
 
-    // Ramp first so it is visible without scrolling.
-    useRampToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    gradientLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kLabelGap);
-    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
-                                  .removeFromLeft (controlW));
+    glowSectionLabel.setVisible (false);
 
-    area.removeFromTop (kSectionGap);
-    placeSlider (dotSizeLabel, dotSizeSlider);
-    placeSlider (densityLabel, densitySlider);
-    placeSlider (fadeLabel, fadeSlider);
+    displaySection.applyVisible ({
+        &dotSizeLabel, &dotSizeSlider, &densityLabel, &densitySlider,
+        &fadeLabel, &fadeSlider });
+    displaySection.placeHeader (area);
+    if (displaySection.isOpen())
+    {
+        placeSlider (dotSizeLabel, dotSizeSlider);
+        placeSlider (densityLabel, densitySlider);
+        placeSlider (fadeLabel, fadeSlider);
+    }
 
-    area.removeFromTop (kSectionGap);
-    glowSectionLabel.setBounds (area.removeFromTop (20).removeFromLeft (controlW));
-    area.removeFromTop (8);
-    glowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    placeSlider (glowRadiusLabel, glowRadiusSlider);
-    placeSlider (glowSpreadLabel, glowSpreadSlider);
-    placeSlider (glowOpacityLabel, glowOpacitySlider);
+    glowSection.applyVisible ({
+        &glowToggle, &glowRadiusLabel, &glowRadiusSlider,
+        &glowSpreadLabel, &glowSpreadSlider, &glowOpacityLabel, &glowOpacitySlider });
+    glowSection.placeHeader (area);
+    if (glowSection.isOpen())
+    {
+        glowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        placeSlider (glowRadiusLabel, glowRadiusSlider);
+        placeSlider (glowSpreadLabel, glowSpreadSlider);
+        placeSlider (glowOpacityLabel, glowOpacitySlider);
+    }
+
+    rampSection.applyVisible ({ &useRampToggle, &gradientLabel, &gradientEditor });
+    rampSection.placeHeader (area);
+    if (rampSection.isOpen())
+    {
+        useRampToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        gradientLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                      .removeFromLeft (controlW));
+    }
 }
 
 StereogramSettingsComponent::StereogramSettingsComponent (SharedResources& resources,

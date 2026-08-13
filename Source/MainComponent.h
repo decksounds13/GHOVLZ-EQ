@@ -20,6 +20,7 @@
 #include "FramedFloatingScopeWindow.h"
 #include "ScopeModules.h"
 #include "ScopeLayoutPresets.h"
+#include "ScopeViewport.h"
 #include "ModuleLookPresets.h"
 #include "ScopeLevelMeterModule.h"
 #include "LoudnessComponent.h"
@@ -140,6 +141,9 @@ public:
 
     ScopeLayoutPreset captureScopeLayoutPreset (const juce::String& name) const;
     void applyScopeLayoutPreset (const ScopeLayoutPreset& preset, bool notifyPrefs = true);
+    void applyScopeViewportFactory (const juce::String& factoryId, bool notifyPrefs = true);
+    void showScopeArrangeMenu();
+    void showScopePaneContextMenu (int leafIndex);
     float getScopeSplitX() const noexcept { return scopeSplitOverlay.getSplitX(); }
     float getScopeSplitY() const noexcept { return scopeSplitOverlay.getSplitY(); }
     void setScopeSplitNorm (float xNorm, float yNorm) noexcept;
@@ -574,6 +578,8 @@ public:
     void closeSettingsMenu();
     /** Open Settings while Spec3D is OS-fullscreen (desktop chrome button for lookdev). */
     void openSettingsMenuFromFullscreen();
+    /** Toggle Settings (S). No-op while a text field is focused. */
+    void toggleSettingsFromHotkey();
     /** True when a Settings dismiss-catcher point lies over an expanded analyser window / its tools. */
     bool isPointOverSettingsDismissExempt (int catcherX, int catcherY,
                                            const juce::Component& catcher) const noexcept;
@@ -699,7 +705,7 @@ private:
     {
     public:
         enum class Glyph { Plus, Minus, SummedStereo, SplitStereo, Expand, Collapse, Dice,
-                           StripLayout, GridLayout, Cube };
+                           StripLayout, GridLayout, Cube, Undo, Redo };
 
         explicit OscToolButton (Glyph g)
             : juce::Button ({}), glyph (g)
@@ -742,20 +748,8 @@ private:
             const auto& pal = themeResources != nullptr ? themeResources->sharedColors : defaultColors;
 
             auto r = getLocalBounds().toFloat().reduced (0.5f);
-            const float corner = 3.0f;
-            auto fill = pal.pluginButtonBackground;
-            if (getToggleState())
-                fill = pal.pluginButtonAccent;
-            else if (down)
-                fill = fill.brighter (0.15f);
-            else if (highlighted)
-                fill = fill.brighter (0.08f);
-
-            GraphOverlayButtonLookAndFeel::renderRoundedDrop (g, r, corner);
-            GraphOverlayButtonLookAndFeel::fillRoundedGradient (g, r, fill, corner);
-            // Match GraphOverlayButtonLookAndFeel / styleChromeButton (UI, Bypass, A-D, etc.).
-            g.setColour (juce::Colours::black.withAlpha (0.35f));
-            g.drawRoundedRectangle (r, corner, 1.0f);
+            auto fill = getToggleState() ? pal.pluginButtonAccent : pal.pluginButtonBackground;
+            GraphOverlayButtonLookAndFeel::paintChromeButton (g, r, fill, highlighted, down);
 
             // Same ink path as styleChromeButton so dice / zoom / expand match text chrome.
             const auto ink = getToggleState()
@@ -783,7 +777,7 @@ private:
                 {
                     const bool split = (glyph == Glyph::SplitStereo);
                     const float fontH = s * (split ? 0.38f : 0.42f);
-                    g.setFont (juce::FontOptions().withHeight (fontH).withStyle ("Bold"));
+                    g.setFont (SharedResources::uiFont (fontH, true));
                     g.drawText (split ? "L/R" : "ST",
                                 getLocalBounds(),
                                 juce::Justification::centred,
@@ -836,6 +830,12 @@ private:
                                 juce::jmax (1.5f, thick * 0.85f));
                     break;
                 }
+                case Glyph::Undo:
+                    GraphOverlayButtonLookAndFeel::paintUndoRedoArrow (g, r, ink, false);
+                    break;
+                case Glyph::Redo:
+                    GraphOverlayButtonLookAndFeel::paintUndoRedoArrow (g, r, ink, true);
+                    break;
                 case Glyph::Cube:
                 {
                     // Isometric cube for Spec 3D mode.
@@ -949,8 +949,8 @@ private:
     PathSampleOverlay rampSampleOverlay;
 
     /** Top-right: Undo / Redo just left of Settings. */
-    juce::TextButton undoButton { "<<" };
-    juce::TextButton redoButton { ">>" };
+    OscToolButton undoButton { OscToolButton::Glyph::Undo };
+    OscToolButton redoButton { OscToolButton::Glyph::Redo };
 
     /** Top chrome row, just right of Save's X: Eco disables analyser/FFT visuals. */
     juce::TextButton ecoButton { "Eco" };
@@ -1056,10 +1056,12 @@ private:
         void setSplitNorm (float xNorm, float yNorm) noexcept;
         float getSplitX() const noexcept { return splitX; }
         float getSplitY() const noexcept { return splitY; }
+        void setSeams (const std::vector<ScopeViewport::SplitHit>& seamsIn) { seams = seamsIn; }
 
     private:
         enum class Drag { none, vertical, horizontal, both };
         Drag hitZone (juce::Point<int> p) const noexcept;
+        int hitSeamIndex (juce::Point<int> p) const noexcept;
         int splitXPx() const noexcept;
         int splitYPx() const noexcept;
 
@@ -1067,6 +1069,8 @@ private:
         float splitX = 0.5f;
         float splitY = 0.5f;
         Drag drag = Drag::none;
+        std::vector<ScopeViewport::SplitHit> seams;
+        int dragSeam = -1;
         static constexpr int kHitPad = 6;
     };
 
@@ -1149,6 +1153,10 @@ private:
     /** false = 2x2 quad (when N==4) or grid; true = horizontal strip (EQ graph hidden). */
     bool scopeStripLayout = false;
     std::vector<ScopeModuleId> scopeEnabledOrder = ScopeModules::defaultEnabledOrder();
+    std::unique_ptr<ScopeViewport::Node> scopeViewport;
+    juce::String scopeViewportFactoryId { "grid2" };
+    std::vector<ScopeViewport::LeafHit> scopeViewportLeaves;
+    std::vector<ScopeViewport::SplitHit> scopeViewportSplits;
     /** Strip column width fractions (sum ~ 1). Sized to match scopeEnabledOrder. */
     std::vector<float> scopeStripFractions;
     void ensureScopeStripFractions();

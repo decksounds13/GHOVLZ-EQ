@@ -6,6 +6,7 @@
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class FftComponent : public juce::Component,
                      private juce::ChangeListener
@@ -119,6 +120,11 @@ private:
 
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;
+
+        void wireSection (SettingsSection& section);
+        SettingsSection displaySection;
+        SettingsSection glowSection;
+        SettingsSection rampSection;
     };
 
     SharedResources& sharedResources;

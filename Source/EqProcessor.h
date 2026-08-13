@@ -455,6 +455,25 @@ public:
     /** Last-block Side Check GR (dB, negative when pulling Side down). */
     float getSideCheckGrDb() const noexcept { return sideCheck.getPublishedGrDb(); }
 
+    bool hasExternalSidechainSignal() const noexcept { return collisionHasSc.load (std::memory_order_relaxed); }
+    /** Hz of strongest SC-vs-main excess (0 if none). */
+    float getCollisionPeakHz() const noexcept { return collisionPeakHz.load (std::memory_order_relaxed); }
+    void copyCollisionOctaves (float* mainDb3, float* scDb3) const noexcept
+    {
+        if (mainDb3 != nullptr)
+        {
+            mainDb3[0] = collisionMainDb[0].load (std::memory_order_relaxed);
+            mainDb3[1] = collisionMainDb[1].load (std::memory_order_relaxed);
+            mainDb3[2] = collisionMainDb[2].load (std::memory_order_relaxed);
+        }
+        if (scDb3 != nullptr)
+        {
+            scDb3[0] = collisionScDb[0].load (std::memory_order_relaxed);
+            scDb3[1] = collisionScDb[1].load (std::memory_order_relaxed);
+            scDb3[2] = collisionScDb[2].load (std::memory_order_relaxed);
+        }
+    }
+
     /** Global EQ depth scale 0..2 (default 1 = 100%). Scales band gains + Match amount. */
     float getEqScale() const noexcept
     {
@@ -855,6 +874,11 @@ private:
     {
         cache = { a, b, c, i };
     }
+
+    std::atomic<bool> collisionHasSc { false };
+    std::array<std::atomic<float>, 3> collisionMainDb {};
+    std::array<std::atomic<float>, 3> collisionScDb {};
+    std::atomic<float> collisionPeakHz { 0.0f };
 
     FrequencyResponseComponent* frequencyResponseComponent = nullptr;
 

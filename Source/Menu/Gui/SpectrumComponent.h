@@ -5,7 +5,9 @@
 #include "../../ColourRamp/ColourRampBank.h"
 #include "../../ColourRamp/GradientStripEditor.h"
 #include "../../ComboBoxLookAndFeel.h"
+#include "../../Visualizer/SpectrumAnalysis.h"
 #include "../SharedResources.h"
+#include "SettingsSection.h"
 
 class SpectrumComponent : public juce::Component,
                           private juce::ChangeListener
@@ -40,6 +42,7 @@ private:
         void resized() override;
         int getPreferredHeight() const;
         void syncGradientFromBank();
+        void syncRampControlsEnabled();
 
     private:
         void parameterChanged (const juce::String& parameterID, float newValue) override;
@@ -86,10 +89,59 @@ private:
         juce::Slider avgSlider;
         std::unique_ptr<SliderAttachment> avgAttachment;
 
+        juce::Label analysisLabel;
+        juce::ComboBox analysisCombo;
+        std::unique_ptr<ComboBoxAttachment> analysisAttachment;
+
+        juce::Label octaveSmoothLabel;
+        juce::ComboBox octaveSmoothCombo;
+        std::unique_ptr<ComboBoxAttachment> octaveSmoothAttachment;
+
         juce::Label curveSmoothLabel;
         juce::ComboBox curveSmoothCombo;
         std::unique_ptr<ComboBoxAttachment> curveSmoothAttachment;
         ComboBoxLookAndFeel comboLookAndFeel;
+
+        juce::Label channelColoursLabel;
+
+        class ColourSwatch : public juce::Component
+        {
+        public:
+            ColourSwatch (SharedResources& resources,
+                          juce::Colour SharedColors::* member,
+                          juce::String caption);
+            void paint (juce::Graphics& g) override;
+            void mouseUp (const juce::MouseEvent& e) override;
+            void refresh() { repaint(); }
+
+        private:
+            void launchSelector();
+
+            SharedResources& sharedResources;
+            juce::Colour SharedColors::* colourMember;
+            juce::String caption;
+        };
+
+        class ChannelColourRow : public juce::Component
+        {
+        public:
+            ChannelColourRow (SharedResources& resources,
+                              const juce::String& name,
+                              juce::Colour SharedColors::* lineMember,
+                              juce::Colour SharedColors::* fillMember);
+            void resized() override;
+            void refresh();
+
+        private:
+            juce::Label nameLabel;
+            ColourSwatch lineSwatch;
+            ColourSwatch fillSwatch;
+        };
+
+        ChannelColourRow leftColourRow;
+        ChannelColourRow rightColourRow;
+        ChannelColourRow midColourRow;
+        ChannelColourRow sideColourRow;
 
         juce::ToggleButton multicolorBandFillToggle { "Multicolor Band Fill" };
         std::unique_ptr<ButtonAttachment> multicolorBandFillAttachment;
@@ -106,6 +158,9 @@ private:
 
         juce::ToggleButton showCrosshairToggle { "Show Crosshair" };
         std::unique_ptr<ButtonAttachment> showCrosshairAttachment;
+
+        juce::ToggleButton showEqCurvesToggle { "Show EQ Curves" };
+        std::unique_ptr<ButtonAttachment> showEqCurvesAttachment;
 
         void syncBandMinSatControlsFromShared();
         void applyBandMinSatFromControls();
@@ -188,10 +243,90 @@ private:
         juce::Slider holdTimeSlider;
         std::unique_ptr<SliderAttachment> holdTimeAttachment;
 
+        juce::Label fadeSectionLabel;
+        juce::Label preCurveFadeLabel;
+        juce::Slider preCurveFadeSlider;
+        std::unique_ptr<SliderAttachment> preCurveFadeAttachment;
+        juce::Label preFillFadeLabel;
+        juce::Slider preFillFadeSlider;
+        std::unique_ptr<SliderAttachment> preFillFadeAttachment;
+        juce::Label postCurveFadeLabel;
+        juce::Slider postCurveFadeSlider;
+        std::unique_ptr<SliderAttachment> postCurveFadeAttachment;
+        juce::Label postFillFadeLabel;
+        juce::Slider postFillFadeSlider;
+        std::unique_ptr<SliderAttachment> postFillFadeAttachment;
+        juce::Label holdCurveFadeLabel;
+        juce::Slider holdCurveFadeSlider;
+        std::unique_ptr<SliderAttachment> holdCurveFadeAttachment;
+        juce::Label holdFillFadeLabel;
+        juce::Slider holdFillFadeSlider;
+        std::unique_ptr<SliderAttachment> holdFillFadeAttachment;
+        juce::Label eqCurveFadeLabel;
+        juce::Slider eqCurveFadeSlider;
+        std::unique_ptr<SliderAttachment> eqCurveFadeAttachment;
+        juce::Label eqFillFadeLabel;
+        juce::Slider eqFillFadeSlider;
+        std::unique_ptr<SliderAttachment> eqFillFadeAttachment;
+
+        juce::ToggleButton useRampToggle { "Use post fill ramp" };
+        std::unique_ptr<ButtonAttachment> useRampAttachment;
         juce::Label gradientLabel;
         GradientStripEditor gradientEditor;
 
+        juce::ToggleButton useCurveRampToggle { "Use post curve ramp" };
+        std::unique_ptr<ButtonAttachment> useCurveRampAttachment;
+        juce::Label curveGradientLabel;
+        GradientStripEditor curveGradientEditor;
+
+        juce::ToggleButton usePreFillRampToggle { "Use pre fill ramp" };
+        std::unique_ptr<ButtonAttachment> usePreFillRampAttachment;
+        juce::Label preFillGradientLabel;
+        GradientStripEditor preFillGradientEditor;
+
+        juce::ToggleButton usePreCurveRampToggle { "Use pre curve ramp" };
+        std::unique_ptr<ButtonAttachment> usePreCurveRampAttachment;
+        juce::Label preCurveGradientLabel;
+        GradientStripEditor preCurveGradientEditor;
+
+        juce::ToggleButton useHoldFillRampToggle { "Use hold fill ramp" };
+        std::unique_ptr<ButtonAttachment> useHoldFillRampAttachment;
+        juce::Label holdFillGradientLabel;
+        GradientStripEditor holdFillGradientEditor;
+
+        juce::ToggleButton useHoldCurveRampToggle { "Use hold curve ramp" };
+        std::unique_ptr<ButtonAttachment> useHoldCurveRampAttachment;
+        juce::Label holdCurveGradientLabel;
+        GradientStripEditor holdCurveGradientEditor;
+
+        juce::ToggleButton useEqCurveRampToggle { "Use sum curve ramp" };
+        std::unique_ptr<ButtonAttachment> useEqCurveRampAttachment;
+        juce::Label eqCurveGradientLabel;
+        GradientStripEditor eqCurveGradientEditor;
+
+        juce::ToggleButton useEqSumFillRampToggle { "Use sum fill ramp" };
+        std::unique_ptr<ButtonAttachment> useEqSumFillRampAttachment;
+        juce::Label eqSumFillGradientLabel;
+        GradientStripEditor eqSumFillGradientEditor;
+
+        juce::ToggleButton useEqBandCurveRampToggle { "Use band curve ramp" };
+        std::unique_ptr<ButtonAttachment> useEqBandCurveRampAttachment;
+        juce::Label eqBandCurveGradientLabel;
+        GradientStripEditor eqBandCurveGradientEditor;
+
+        juce::ToggleButton useEqBandFillRampToggle { "Use band fill ramp" };
+        std::unique_ptr<ButtonAttachment> useEqBandFillRampAttachment;
+        juce::Label eqBandFillGradientLabel;
+        GradientStripEditor eqBandFillGradientEditor;
+
         enum { scaleRadioGroup = 0x5c41e };
+
+        void wireSection (SettingsSection& section);
+        SettingsSection analysisSection;
+        SettingsSection displaySection;
+        SettingsSection strokeSection;
+        SettingsSection glowSection;
+        SettingsSection rampsSection;
     };
 
     SharedResources& sharedResources;

@@ -20,10 +20,14 @@ HistogramSettingsComponent::Content::Content (SharedResources& resources,
     : sharedResources (resources),
       treeState (state),
       colourRamps (ramps),
-      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets())
+      gradientEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
+      displaySection (resources, "histogram.display", "Display", false),
+      tracesSection (resources, "histogram.traces", "Traces", false),
+      glowSection (resources, "histogram.glow", "Glow", false),
+      rampSection (resources, "histogram.ramp", "Ramp", false)
 {
     titleLabel.setText ("Histogram", juce::dontSendNotification);
-    titleLabel.setFont (juce::FontOptions().withName ("Lato Black").withHeight (20.0f));
+    titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
@@ -121,20 +125,36 @@ HistogramSettingsComponent::Content::Content (SharedResources& resources,
 
     styleLabel (titleLabel);
     syncRampControlsEnabled();
+
+    wireSection (displaySection);
+    wireSection (tracesSection);
+    wireSection (glowSection);
+    wireSection (rampSection);
+}
+
+void HistogramSettingsComponent::Content::wireSection (SettingsSection& section)
+{
+    addAndMakeVisible (section);
+    section.onChanged = [this]
+    {
+        resized();
+        if (auto* menu = findParentComponentOfClass<Menu>())
+            menu->notifyContentHeightChanged();
+    };
 }
 
 HistogramSettingsComponent::Content::~Content() = default;
 
 void HistogramSettingsComponent::Content::styleLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (15.0f));
+    label.setFont (SharedResources::uiFont (15.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, sharedResources.sharedColors.menuLabelTextColor1);
 }
 
 void HistogramSettingsComponent::Content::styleSectionLabel (juce::Label& label)
 {
-    label.setFont (juce::FontOptions().withName ("Lato Black").withHeight (16.0f));
+    label.setFont (SharedResources::uiFont (16.0f));
     label.setJustificationType (juce::Justification::centredLeft);
     label.setColour (juce::Label::textColourId, juce::Colours::goldenrod.withAlpha (0.95f));
 }
@@ -177,15 +197,12 @@ void HistogramSettingsComponent::Content::syncRampControlsEnabled()
 int HistogramSettingsComponent::Content::getPreferredHeight() const
 {
     const int sliderBlock = kLabelH + kLabelGap + kSliderH + kRowGap;
+    const int tog = 22 + kRowGap;
     return kPadY * 2 + 24 + 8
-         + 22 + kRowGap
-         + kLabelH + kLabelGap + gradientEditor.getPreferredHeight()
-         + kSectionGap + 20 + 8
-         + sliderBlock * 5
-         + kSectionGap + 20 + 8
-         + 22 * 4 + kRowGap * 4
-         + kSectionGap + 20 + 8 + 22 + kRowGap
-         + sliderBlock * 3;
+         + displaySection.heightFor (sliderBlock * 5)
+         + tracesSection.heightFor (tog * 4)
+         + glowSection.heightFor (tog + sliderBlock * 3)
+         + rampSection.heightFor (tog + kLabelH + kLabelGap + gradientEditor.getPreferredHeight());
 }
 
 void HistogramSettingsComponent::Content::resized()
@@ -204,41 +221,62 @@ void HistogramSettingsComponent::Content::resized()
         area.removeFromTop (kRowGap);
     };
 
-    useRampToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    gradientLabel.setBounds (area.removeFromTop (kLabelH));
-    area.removeFromTop (kLabelGap);
-    gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
-                                  .removeFromLeft (controlW));
+    behaviourSectionLabel.setVisible (false);
+    tracesSectionLabel.setVisible (false);
+    glowSectionLabel.setVisible (false);
 
-    area.removeFromTop (kSectionGap);
-    behaviourSectionLabel.setBounds (area.removeFromTop (20).removeFromLeft (controlW));
-    area.removeFromTop (8);
-    placeSlider (speedLabel, speedSlider);
-    placeSlider (lineWidthLabel, lineWidthSlider);
-    placeSlider (fillOpacityLabel, fillOpacitySlider);
-    placeSlider (minDbLabel, minDbSlider);
-    placeSlider (maxDbLabel, maxDbSlider);
+    displaySection.applyVisible ({
+        &speedLabel, &speedSlider, &lineWidthLabel, &lineWidthSlider,
+        &fillOpacityLabel, &fillOpacitySlider, &minDbLabel, &minDbSlider,
+        &maxDbLabel, &maxDbSlider });
+    displaySection.placeHeader (area);
+    if (displaySection.isOpen())
+    {
+        placeSlider (speedLabel, speedSlider);
+        placeSlider (lineWidthLabel, lineWidthSlider);
+        placeSlider (fillOpacityLabel, fillOpacitySlider);
+        placeSlider (minDbLabel, minDbSlider);
+        placeSlider (maxDbLabel, maxDbSlider);
+    }
 
-    area.removeFromTop (kSectionGap);
-    tracesSectionLabel.setBounds (area.removeFromTop (20).removeFromLeft (controlW));
-    area.removeFromTop (8);
-    showLufsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    showRmsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    showTruePeakToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    freezeToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+    tracesSection.applyVisible ({
+        &showLufsToggle, &showRmsToggle, &showTruePeakToggle, &freezeToggle });
+    tracesSection.placeHeader (area);
+    if (tracesSection.isOpen())
+    {
+        showLufsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        showRmsToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        showTruePeakToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        freezeToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+    }
 
-    area.removeFromTop (kSectionGap);
-    glowSectionLabel.setBounds (area.removeFromTop (20).removeFromLeft (controlW));
-    area.removeFromTop (8);
-    glowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
-    area.removeFromTop (kRowGap);
-    placeSlider (glowRadiusLabel, glowRadiusSlider);
-    placeSlider (glowSpreadLabel, glowSpreadSlider);
-    placeSlider (glowOpacityLabel, glowOpacitySlider);
+    glowSection.applyVisible ({
+        &glowToggle, &glowRadiusLabel, &glowRadiusSlider,
+        &glowSpreadLabel, &glowSpreadSlider, &glowOpacityLabel, &glowOpacitySlider });
+    glowSection.placeHeader (area);
+    if (glowSection.isOpen())
+    {
+        glowToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        placeSlider (glowRadiusLabel, glowRadiusSlider);
+        placeSlider (glowSpreadLabel, glowSpreadSlider);
+        placeSlider (glowOpacityLabel, glowOpacitySlider);
+    }
+
+    rampSection.applyVisible ({ &useRampToggle, &gradientLabel, &gradientEditor });
+    rampSection.placeHeader (area);
+    if (rampSection.isOpen())
+    {
+        useRampToggle.setBounds (area.removeFromTop (22).removeFromLeft (juce::jmin (240, area.getWidth())));
+        area.removeFromTop (kRowGap);
+        gradientLabel.setBounds (area.removeFromTop (kLabelH));
+        area.removeFromTop (kLabelGap);
+        gradientEditor.setBounds (area.removeFromTop (gradientEditor.getPreferredHeight())
+                                      .removeFromLeft (controlW));
+    }
 }
 
 HistogramSettingsComponent::HistogramSettingsComponent (SharedResources& resources,
