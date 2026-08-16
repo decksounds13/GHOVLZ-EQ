@@ -18,6 +18,7 @@
 #include "FilterSlope.h"
 #include "EqBand.h"
 #include "BandChannel.h"
+#include "Dyn/DynParams.h"
 #include "Menu/Theme.h"
 #include "ColourRamp/Spec3DRampSequence.h"
 
@@ -45,7 +46,8 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     onOffButton6(std::make_unique<BandNumberButton>(treeState, "band2OnOff")),
     onOffButton7(std::make_unique<BandNumberButton>(treeState, "band3OnOff")),
     onOffButton8(std::make_unique<BandNumberButton>(treeState, "band4OnOff")),
-    phaseModeCombo (treeState, PhaseMode::paramId())
+    phaseModeCombo (treeState, PhaseMode::paramId()),
+    detectModeCombo (treeState, DynParams::detectId())
 
 {
     DBG("EqEditor constructor called");
@@ -347,8 +349,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
 
     autoGainButton.setClickingTogglesState (true);
     autoGainButton.setTooltip (
-        "Auto Gain. Left click toggles. Right click: RMS (match input) or LUFS (target). "
-        "Same option as Settings - Loudness.");
+        "Auto Gain. Keeps the output about as loud as the input. Left click on or off. Right click chooses per-band or the whole plugin.");
     autoGainButton.onPopupMenu = [this] { showAutoGainModeMenu(); };
     autoGainButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
     autoGainButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
@@ -360,14 +361,16 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     autoGainAttachment = std::make_unique<ButtonAttachment> (audioProcessor.treeState, "autoGain", autoGainButton);
 
     sideCheckButton.setClickingTogglesState (true);
-    sideCheckButton.setTooltip (
-        "Side Check - when Side is louder than Mid in a band, attenuate that side energy (HQ = BP lattice; HQ off = 3-band shelf/bell)");
     sideCheckButton.setColour (juce::TextButton::buttonColourId, juce::Colour::fromRGBA (60, 50, 35, 255));
     sideCheckButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour::fromRGBA (180, 150, 55, 255));
     sideCheckButton.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.85f));
     sideCheckButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     sideCheckButton.setLookAndFeel (&graphOverlayButtonLookAndFeel);
     sideCheckButton.setPaintingIsUnclipped (true);
+    sideCheckButton.onPopupMenu = [this] { showSideCheckMethodMenu(); };
+    sideCheckButton.setTooltip (
+        "Side Check - when Side is louder than Mid in a band, attenuate that side energy. "
+        "Right-click: Bandpass array or FFT.");
     addAndMakeVisible (sideCheckButton);
     sideCheckAttachment = std::make_unique<ButtonAttachment> (
         audioProcessor.treeState, SideCheck::enabledParamId(), sideCheckButton);
@@ -514,10 +517,37 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     addAndMakeVisible (helpTooltipsButton);
 
     // Bottom chrome: Phase / Processing Mode (preset-style popup, not ComboBox).
-    phaseModeCombo.setTooltip ("Phase - Minimum Phase is zero-latency IIR EQ. Linear Phase matches the EQ magnitude with constant group delay (higher latency).");
+    phaseModeCombo.setTooltip ("Phase. Minimum Phase has no extra delay. Linear Phase keeps all bands in time with each other and adds latency.");
     addAndMakeVisible (phaseModeCombo);
 
+    detectModeCombo.setTooltip ("Detector. Peak reacts to hits. RMS is smoother, more like Ableton OTT.");
+    addAndMakeVisible (detectModeCombo);
+
+    dynOsButton.setTooltip ("Oversample. Left click sets live oversampling. Right click sets bounce/offline oversampling, up to 16x.");
+    dynOsButton.setPaintingIsUnclipped (true);
+    dynOsButton.setRepaintsOnMouseActivity (true);
+    dynOsButton.onLeftClick = [this] { showDynOsRealtimeMenu(); };
+    dynOsButton.onRightClick = [this] { showDynOsOfflineMenu(); };
+    addAndMakeVisible (dynOsButton);
+
+    dynLearnButton.setButtonText ("Learn");
+    dynLearnButton.setTooltip ("Listen for about 5 seconds and set band splits plus Down, Up, and Clip thresholds so they just tickle the signal. Right click chooses which.");
+    dynLearnButton.setClickingTogglesState (true);
+    dynLearnButton.onPopupMenu = [this]
+    {
+        if (dynFaceplate != nullptr)
+            dynFaceplate->showGlobalLearnMenu (dynLearnButton);
+    };
+    dynLearnButton.onClick = [this]
+    {
+        if (dynFaceplate != nullptr)
+            dynFaceplate->toggleGlobalLearn();
+        layoutDynLearnButton();
+    };
+    addAndMakeVisible (dynLearnButton);
+
     loadUiPrefs();
+    uiPrefsReady = true;
     // Host setState often runs before the editor; if it already stored UiSession, loadUiPrefs
     // restored it. If setState runs later, EqProcessor will call loadUiPrefs again.
     applyTooltipsEnabled();
@@ -670,7 +700,7 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     border20.setText("Gain");
     border21.setText("Gain");
     border22.setText("Gain");
-    borderOutputGain.setText("Out");
+    borderOutputGain.setText("Output");
     border17.setTextLabelPosition(juce::Justification::centred);
     // Side label next to the compact trim-strip knob (not above)
     borderOutputGain.setTextLabelPosition(juce::Justification::centredRight);
@@ -758,8 +788,46 @@ EqEditor::EqEditor(EqProcessor& p, juce::AudioProcessorValueTreeState& treeState
     // mode (beneath Settings/menu), on the editor faceplate trim when expanded.
     addChildComponent (brandWordmark);
 
-    // Default: graph-only compact UI (faceplate hidden). Toggle still expands via ^/v.
+    // DYN: expanded faceplate by default so compressor knobs are visible.
+    uiCompact = false;
     applyCompactUi();
+
+    dynFaceplate = std::make_unique<DynFaceplate> (treeState, audioProcessor.getDynEngine(),
+                                                   audioProcessor.getAnalyser());
+    addAndMakeVisible (*dynFaceplate);
+    dynTransfer = std::make_unique<TransferCurveComponent> (treeState, [this]
+    {
+        return dynFaceplate != nullptr ? dynFaceplate->getSelectedBand() : 0;
+    });
+    dynTransfer->setEngine (&audioProcessor.getDynEngine());
+    addAndMakeVisible (*dynTransfer);
+    dynFaceplate->onModeChanged = [this] { resized(); };
+    dynFaceplate->onLearnChanged = [this] { layoutDynLearnButton(); };
+    dynScope.setEnabled (false);
+    dynScope.setVisible (false);
+    audioProcessor.setOscilloscopeTarget (nullptr);
+
+    dynLookaheadKnob.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    dynLookaheadKnob.setTooltip ("Lookahead. Delays the audio a little so the compressor can see a loud hit coming. Adds latency.");
+    outputGainKnob.setTooltip ("Output. Final volume of the plugin after everything.");
+    addAndMakeVisible (dynLookaheadKnob);
+    dynLookaheadLabel.setText ("Lookahead", juce::dontSendNotification);
+    dynLookaheadLabel.setMinimumHorizontalScale (1.0f);
+    dynLookaheadLabel.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (dynLookaheadLabel);
+    dynOutputLabel.setText ("Output", juce::dontSendNotification);
+    dynOutputLabel.setMinimumHorizontalScale (1.0f);
+    dynOutputLabel.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (dynOutputLabel);
+    dynLookaheadAt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        treeState, DynParams::lookaheadId(), dynLookaheadKnob);
+
+    mainComponent->getFrequencyResponseComponent().setDynProductMode (true);
+    mainComponent->setDynShellMode (true);
+    dynFaceplate->setThemeColors (&mainComponent->getSharedResources());
+    dynTransfer->setThemeColors (&mainComponent->getSharedResources());
+    dynScope.setThemeColors (&mainComponent->getSharedResources());
+    resized();
 }
  
 EqEditor::~EqEditor()
@@ -845,30 +913,16 @@ void EqEditor::paint(juce::Graphics& g)
         return;
     }
 
-    // Match resized() stack: top band -> graph -> optional mod -> faceplate -> trim.
+    // Match resized() stack: top trim -> graph -> optional mod -> transfer/knobs -> bottom trim.
     const int titleBarHeight = getTopBandHeight();
     const int trimH = getBottomTrimHeight();
-    const int faceplateStripH = isFaceplateSuppressed() ? 0 : getFaceplateHeightForWidth (getWidth());
     const int modStripH = modPanelOpen ? getModPanelHeightForGraphHeight (0) : 0;
     const int availableBelowTop = juce::jmax (1, getHeight() - titleBarHeight - trimH);
-    int graphH = availableBelowTop - faceplateStripH - modStripH;
-    int modHForLayout = modStripH;
-    if (graphH < 180)
-    {
-        graphH = 180;
-        const int remaining = juce::jmax (1, availableBelowTop - graphH);
-        if (modPanelOpen)
-        {
-            // Preserve mod = 3/4 faceplate ratio when packing.
-            const int faceH = juce::jmax (1, (remaining * 4) / 7);
-            modHForLayout = juce::jmax (1, remaining - faceH);
-        }
-        else
-        {
-            modHForLayout = 0;
-        }
-    }
-    const int titleBarY = titleBarHeight + graphH + modHForLayout;
+    int modHForLayout = (modPanelOpen && availableBelowTop > 200) ? modStripH : 0;
+    const int split = juce::jmax (1, availableBelowTop - modHForLayout);
+    const int graphH = isFaceplateSuppressed() ? split : split / 2;
+    const int midTrimH = isFaceplateSuppressed() ? 0 : getMidTrimHeight();
+    const int midTrimY = titleBarHeight + graphH + modHForLayout;
 
     juce::ColourGradient bodyGrad (pal.pluginBackground2,
         juce::Point<float> ((float) getWidth() * 0.5f, 0.0f),
@@ -885,12 +939,17 @@ void EqEditor::paint(juce::Graphics& g)
         true);
     g.setGradientFill (chromeGrad);
     g.fillRect (0, 0, getWidth(), titleBarHeight);
-    g.fillRect (0, titleBarY, getWidth(), titleBarHeight);
     g.fillRect (0, getHeight() - trimH, getWidth(), trimH);
+    if (midTrimH > 0)
+        g.fillRect (0, midTrimY, getWidth(), midTrimH);
 
     g.setColour (pal.pluginBackground);
     g.drawLine (0.0f, (float) titleBarHeight, (float) getWidth(), (float) titleBarHeight, 4.0f);
-    g.drawLine (0.0f, (float) (titleBarY + titleBarHeight), (float) getWidth(), (float) (titleBarY + titleBarHeight), 2.0f);
+    if (midTrimH > 0)
+    {
+        g.drawLine (0.0f, (float) midTrimY, (float) getWidth(), (float) midTrimY, 1.0f);
+        g.drawLine (0.0f, (float) (midTrimY + midTrimH), (float) getWidth(), (float) (midTrimY + midTrimH), 1.0f);
+    }
 }
 
 
@@ -924,7 +983,10 @@ void EqEditor::resized()
         }
 
         if (mainComponent != nullptr)
+        {
+            mainComponent->setDynTopTrimHeight (getTopBandHeight());
             mainComponent->setBounds (0, 0, getWidth(), mainH);
+        }
 
         if (modSection != nullptr)
         {
@@ -956,53 +1018,49 @@ void EqEditor::resized()
         for (auto* k : faceplateKnobs)
             k->setBounds ({});
 
+        if (dynFaceplate != nullptr) { dynFaceplate->setVisible (false); dynFaceplate->setBounds ({}); }
+        if (dynTransfer != nullptr) { dynTransfer->setVisible (false); dynTransfer->setBounds ({}); }
+        dynScope.setVisible (false);
+        dynScope.setBounds ({});
+        dynLookaheadKnob.setVisible (false);
+        dynLookaheadLabel.setVisible (false);
+        dynOutputLabel.setVisible (false);
+
         layoutBrandWordmark (-1);
         layoutHelpTooltipsButton();
         layoutPhaseModeCombo();
+        layoutDetectModeCombo();
+        layoutDynOversampleCombo();
+        layoutDynLearnButton();
         layoutSideCheckButton();
         layoutScopeModeButton();
         // Chrome just toFront'd — re-assert OptionBox (and Settings) above it.
         raiseOptionBoxStack();
+        if (uiPrefsReady && ! restoringEditorSize)
+            requestSaveUiPrefs();
         return;
     }
 
     // Padding between groups and rows
     const int padding = px (10.0f);
 
-    // Stack: graph (fills leftover) -> mod (optional, 3/4 faceplate) -> faceplate -> bottom trim.
-    // Scope mode suppresses the faceplate strip (knobs parked); bottom chrome stays.
+    // Stack: top trim -> graph -> optional mod -> transfer/knobs (same height as graph) -> bottom trim.
     const int graphTop = getTopBandHeight();
     const int trimH = getBottomTrimHeight();
-    const int faceplateTopTrimH = getTopBandHeight(); // painted trim strip above knobs
+    const int faceplateTopTrimH = getTopBandHeight();
+    if (mainComponent != nullptr)
+        mainComponent->setDynTopTrimHeight (graphTop);
     const bool suppressFaceplate = isFaceplateSuppressed();
-    const int faceplateStripH = suppressFaceplate ? 0 : getFaceplateHeightForWidth (getWidth());
     const int modStripH = modPanelOpen ? getModPanelHeightForGraphHeight (0) : 0;
+    const int midTrimH = suppressFaceplate ? 0 : getMidTrimHeight();
     const int availableBelowTop = juce::jmax (1, getHeight() - graphTop - trimH);
-    int graphH = availableBelowTop - faceplateStripH - modStripH;
-    int faceplateH = faceplateStripH;
-    int modHForLayout = modStripH;
-    if (graphH < 180)
-    {
-        graphH = 180;
-        const int remaining = juce::jmax (1, availableBelowTop - graphH);
-        if (modPanelOpen)
-        {
-            faceplateH = suppressFaceplate ? 0 : juce::jmax (1, (remaining * 4) / 7);
-            modHForLayout = juce::jmax (1, remaining - faceplateH);
-        }
-        else
-        {
-            faceplateH = suppressFaceplate ? 0 : remaining;
-            modHForLayout = 0;
-        }
-    }
-    const int faceplateMinTop = graphTop + graphH + modHForLayout;
-    const int bottomLimit = getHeight() - trimH - 2;
-    if (suppressFaceplate)
-        faceplateH = 0;
-    else
-        faceplateH = juce::jmax (1, juce::jmin (faceplateH, bottomLimit - faceplateMinTop));
+    int modHForLayout = (modPanelOpen && availableBelowTop > 200) ? modStripH : 0;
+    const int split = juce::jmax (1, availableBelowTop - modHForLayout - midTrimH);
+    int graphH = suppressFaceplate ? split : split / 2;
+    int faceplateH = suppressFaceplate ? 0 : (split - graphH);
+    const int faceplateMinTop = graphTop + graphH + modHForLayout + midTrimH;
     const int faceplateBottom = faceplateMinTop + faceplateH;
+    const int bottomLimit = getHeight() - trimH - 2;
 
     const int totalWidth = getWidth();
     // Integer groupWidth leaves a remainder that used to sit entirely on the right
@@ -1188,25 +1246,60 @@ void EqEditor::resized()
 
         // Layout: [A] [Out] [knob] - button a few px under trim height
         const int btnSize = juce::jlimit (16, outTrimH - 6, outSize);
-        const int labelW = px (28.0f);
+        const auto outFont = SharedResources::uiFont (13.0f);
+        juce::GlyphArrangement ga;
+        ga.addLineOfText (outFont, "Output", 0.0f, 0.0f);
+        const int labelW = juce::jmax (px (52.0f), (int) std::ceil (ga.getBoundingBox (0, ga.getNumGlyphs(), true).getWidth()) + 10);
         const int labelH = juce::jmin (px (18.0f), outTrimH - 2);
-        const int gap = px (2.0f);
+        const int gap = px (4.0f);
 
         const int labelX = outX - labelW - gap;
         const int labelY = trimTop + (outTrimH - labelH) / 2;
-        borderOutputGain.setBounds (labelX, labelY, labelW, labelH);
+        borderOutputGain.setVisible (false);
+        borderOutputGain.setBounds ({});
+        dynOutputLabel.setFont (outFont);
+        dynOutputLabel.setMinimumHorizontalScale (1.0f);
+        dynOutputLabel.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.88f));
+        dynOutputLabel.setBounds (labelX, labelY, labelW, labelH);
+        dynOutputLabel.setVisible (true);
+        dynOutputLabel.toFront (false);
 
         const int btnX = labelX - btnSize - gap;
         const int btnY = trimTop + (outTrimH - btnSize) / 2;
         autoGainButton.setBounds (btnX, btnY, btnSize, btnSize);
 
-        outClusterLeftX = btnX;
+        const auto lookFont = SharedResources::uiFont (13.0f);
+        juce::GlyphArrangement lga;
+        lga.addLineOfText (lookFont, "Lookahead", 0.0f, 0.0f);
+        const int lookLabW = juce::jmax (px (68.0f),
+            (int) std::ceil (lga.getBoundingBox (0, lga.getNumGlyphs(), true).getWidth()) + 10);
+        const int lookKnob = juce::jlimit (16, outTrimH - 6, outSize);
+        const int lookX = btnX - gap - lookKnob;
+        dynLookaheadKnob.setBounds (lookX, trimTop + (outTrimH - lookKnob) / 2, lookKnob, lookKnob);
+        dynLookaheadLabel.setFont (lookFont);
+        dynLookaheadLabel.setMinimumHorizontalScale (1.0f);
+        dynLookaheadLabel.setColour (juce::Label::textColourId, juce::Colours::whitesmoke.withAlpha (0.88f));
+        dynLookaheadLabel.setBounds (lookX - lookLabW - gap, labelY, lookLabW, labelH);
+        dynLookaheadKnob.setVisible (true);
+        dynLookaheadLabel.setVisible (true);
+        dynLookaheadLabel.toFront (false);
+
+        outClusterLeftX = lookX - lookLabW - gap;
     }
 
     layoutBrandWordmark (outClusterLeftX);
     layoutHelpTooltipsButton();
     layoutPhaseModeCombo();
-    layoutSideCheckButton();
+    layoutDetectModeCombo();
+    layoutDynOversampleCombo();
+    layoutDynLearnButton();
+    sideCheckButton.setVisible (false);
+    sideCheckButton.setBounds ({});
+    sideCheckAmountKnob.setVisible (false);
+    sideCheckHpKnob.setVisible (false);
+    sideCheckLpKnob.setVisible (false);
+    sideCheckSpeedButton.setVisible (false);
+    sideCheckHqButton.setVisible (false);
     layoutScopeModeButton();
 
     int parentWidth = getWidth();
@@ -1216,7 +1309,73 @@ void EqEditor::resized()
     const int modH = modHForLayout;
     const int xPos = (parentWidth - componentWidth) / 2;
 
-    mainComponent->setBounds (xPos, graphTop, componentWidth, componentHeight);
+    if (mainComponent->isDynShellMode())
+        mainComponent->setBounds (xPos, 0, componentWidth, graphTop + componentHeight);
+    else
+        mainComponent->setBounds (xPos, graphTop, componentWidth, componentHeight);
+
+    dynScope.setVisible (false);
+    dynScope.setBounds ({});
+    dynScope.setEnabled (false);
+
+    const bool focusMode = dynFaceplate != nullptr && ! dynFaceplate->isShowingAll();
+    if (dynTransfer != nullptr && ! suppressFaceplate && focusMode && faceplateH > 40)
+    {
+        const int pad = 10;
+        const int xferSide = juce::jmax (96, juce::jmin (faceplateH - pad * 2,
+                                                         (getWidth() * 38) / 100));
+        const int knobsW = dynFaceplate != nullptr
+            ? dynFaceplate->getFocusClusterWidth (faceplateH)
+            : juce::jmax (280, getWidth() / 2);
+        const int gap = 18;
+        const int total = xferSide + gap + knobsW;
+        const int x0 = juce::jmax (pad, (getWidth() - total) / 2);
+        const int xferY = faceplateMinTop + juce::jmax (0, (faceplateH - xferSide) / 2);
+        dynTransfer->setVisible (true);
+        dynTransfer->setBounds (x0, xferY, xferSide, xferSide);
+        dynTransfer->toFront (false);
+    }
+    else if (dynTransfer != nullptr)
+    {
+        dynTransfer->setVisible (false);
+        dynTransfer->setBounds ({});
+    }
+
+    if (dynFaceplate != nullptr && ! suppressFaceplate)
+    {
+        dynFaceplate->setVisible (true);
+        int fx = 0;
+        int fw = getWidth();
+        if (focusMode && dynTransfer != nullptr && dynTransfer->isVisible())
+        {
+            fx = dynTransfer->getRight() + 18;
+            fw = juce::jmax (160, getWidth() - fx - 8);
+        }
+        dynFaceplate->setBounds (fx, faceplateMinTop, fw, faceplateH);
+        dynFaceplate->setThemeColors (mainComponent != nullptr ? &mainComponent->getSharedResources() : nullptr);
+        dynFaceplate->refresh();
+        dynFaceplate->toFront (false);
+    }
+    else if (dynFaceplate != nullptr)
+    {
+        dynFaceplate->setVisible (false);
+        dynFaceplate->setBounds ({});
+    }
+
+    // EQ Freq/Gain/Q knobs are not used on the DYN faceplate.
+    {
+        juce::Slider* oldKnobs[] = {
+            &knob1, &knobHpGain, &knob2, &knob3, &knobLpGain, &knob4,
+            &knob5, &knob6, &knob7, &knob8, &knob9, &knob10,
+            &knob11, &knob12, &knob13, &knob14, &knob15, &knob16,
+            &knob17, &knob18, &knob19, &knob20, &knob21, &knob22
+        };
+        for (auto* k : oldKnobs)
+        {
+            k->setVisible (false);
+            k->setBounds ({});
+        }
+    }
 
     if (modSection != nullptr)
     {
@@ -1385,6 +1544,9 @@ void EqEditor::resized()
 
     // Chrome just toFront'd — re-assert OptionBox (and Settings) above Phase/SideCheck/Scope.
     raiseOptionBoxStack();
+
+    if (uiPrefsReady && ! restoringEditorSize)
+        requestSaveUiPrefs();
 }
 
 void EqEditor::updateBandFaceplateGainVisibility()
@@ -1457,14 +1619,13 @@ void EqEditor::layoutBrandWordmark (int outClusterLeftX)
     // Expanded: bottom faceplate trim lives on the editor, outside MainComponent.
     addAndMakeVisible (brandWordmark);
 
-    constexpr int trimH = 30;
+    const int trimH = getBottomTrimHeight();
     const int trimTop = getHeight() - trimH;
     const int clearance = px (8.0f);
     const int openRight = juce::jmax (px (120.0f), outClusterLeftX - clearance);
 
     // Prefer true window center; clamp so the wordmark stays left of the A/Out cluster
-    // and right of the help (?) button on the trim.
-    // Extra width for 2x "with SideCheck(TM)" + beta beside "GHOVLZ! EQ".
+    // and right of ? + Minimum/Linear Phase on the bottom trim.
     const int maxLogoW = juce::jmin (px (660.0f), juce::jmax (80, openRight - px (16.0f)));
     const int logoH = juce::jmax (20, trimH - 4);
     const int logoW = maxLogoW;
@@ -1473,7 +1634,15 @@ void EqEditor::layoutBrandWordmark (int outClusterLeftX)
     const int halfW = logoW / 2;
     if (centerX + halfW > openRight)
         centerX = openRight - halfW;
-    const int helpLeftClearance = px (8.0f) + juce::jlimit (16, trimH - 6, px (20.0f)) + px (8.0f);
+    const int helpBtn = juce::jlimit (16, trimH - 6, px (20.0f));
+    const auto phaseFont = SharedResources::uiFont (14.0f);
+    const int phaseW = juce::jmax (
+        (int) std::ceil (juce::GlyphArrangement::getStringWidth (phaseFont, "Minimum Phase")) + 28,
+        px (132.0f));
+    const int detW = juce::jmax (
+        (int) std::ceil (juce::GlyphArrangement::getStringWidth (phaseFont, "Peak")) + 28,
+        px (64.0f));
+    const int helpLeftClearance = px (8.0f) + helpBtn + px (6.0f) + phaseW + px (6.0f) + detW + px (8.0f);
     if (centerX - halfW < helpLeftClearance)
         centerX = halfW + helpLeftClearance;
 
@@ -1503,12 +1672,14 @@ void EqEditor::layoutHelpTooltipsButton()
     const float scale = (float) getWidth() / (float) designWidth;
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
 
-    constexpr int trimH = 30;
+    const int trimH = getBottomTrimHeight();
     const int btnSize = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
     const int margin = px (8.0f);
 
     const int pianoH = (mainComponent != nullptr)
         ? mainComponent->getFrequencyResponseComponent().getPianoStripHeight() : 0;
+
+    const bool dynShell = mainComponent != nullptr && mainComponent->isDynShellMode();
 
     if (uiCompact)
     {
@@ -1523,23 +1694,21 @@ void EqEditor::layoutHelpTooltipsButton()
         const int y = graphBottom - btnSize - bottomMargin - pianoH;
         helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
     }
+    else if (dynShell || ! modPanelOpen)
+    {
+        // DYN (and expanded EQ with Mod closed): keep ? on the bottom faceplate trim.
+        const int trimTop = getHeight() - trimH;
+        const int x = margin;
+        const int y = trimTop + (trimH - btnSize) / 2;
+        helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
+    }
     else
     {
-        // Prefer bottom of spectrum graph when Mod is open; otherwise faceplate trim.
-        if (modPanelOpen && mainComponent != nullptr)
-        {
-            constexpr int bottomMargin = 18;
-            const int x = margin;
-            const int y = mainComponent->getBottom() - btnSize - bottomMargin - pianoH;
-            helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
-        }
-        else
-        {
-            const int trimTop = getHeight() - trimH;
-            const int x = margin;
-            const int y = trimTop + (trimH - btnSize) / 2;
-            helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
-        }
+        // EQ only: park ? on the graph when Mod is open.
+        constexpr int bottomMargin = 18;
+        const int x = margin;
+        const int y = mainComponent->getBottom() - btnSize - bottomMargin - pianoH;
+        helpTooltipsButton.setBounds (x, y, btnSize, btnSize);
     }
 
     helpTooltipsButton.toFront (false);
@@ -1561,16 +1730,177 @@ void EqEditor::layoutPhaseModeCombo()
     const float scale = (float) getWidth() / (float) designWidth;
     auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
 
-    constexpr int trimH = 30;
-    const int comboH = juce::jlimit (16, uiCompact ? 22 : (trimH - 6), px (20.0f));
-    const int comboW = px (132.0f);
+    const auto phaseFont = SharedResources::uiFont (14.0f);
+    const int phaseTextW = (int) std::ceil (
+        juce::GlyphArrangement::getStringWidth (phaseFont, "Minimum Phase"));
+    const int comboW = juce::jmax (phaseTextW + 28, px (132.0f));
     const int gap = px (6.0f);
+    const int margin = px (8.0f);
 
-    // Sit just right of the ? help button in both layouts.
+    const bool pinToBottomTrim = ! uiCompact;
+    if (pinToBottomTrim)
+    {
+        // Always the bottom faceplate trim — not the mid-trim, not the top OS row.
+        const int trimH = getBottomTrimHeight();
+        const int comboH = juce::jlimit (16, juce::jmax (16, trimH - 6), px (20.0f));
+        const int trimTop = getHeight() - trimH;
+        const int x = helpTooltipsButton.isVisible()
+            ? helpTooltipsButton.getRight() + gap
+            : margin;
+        const int y = trimTop + (trimH - comboH) / 2;
+        phaseModeCombo.setBounds (x, y, comboW, comboH);
+        phaseModeCombo.toFront (false);
+        return;
+    }
+
+    const int comboH = juce::jlimit (16, 22, px (20.0f));
     const int x = helpTooltipsButton.getRight() + gap;
     const int y = helpTooltipsButton.getY() + (helpTooltipsButton.getHeight() - comboH) / 2;
     phaseModeCombo.setBounds (x, y, comboW, comboH);
     phaseModeCombo.toFront (false);
+}
+
+void EqEditor::layoutDetectModeCombo()
+{
+    if (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome())
+    {
+        detectModeCombo.setVisible (false);
+        detectModeCombo.setBounds ({});
+        return;
+    }
+
+    detectModeCombo.setVisible (true);
+    addAndMakeVisible (detectModeCombo);
+
+    const float scale = (float) getWidth() / (float) designWidth;
+    auto px = [scale] (float value) { return juce::roundToInt (value * scale); };
+
+    const auto detFont = SharedResources::uiFont (14.0f);
+    const int detTextW = (int) std::ceil (
+        juce::GlyphArrangement::getStringWidth (detFont, "Peak"));
+    const int comboW = juce::jmax (detTextW + 28, px (64.0f));
+    const int gap = px (6.0f);
+
+    const bool pinToBottomTrim = ! uiCompact;
+    const int comboH = pinToBottomTrim
+        ? juce::jlimit (16, juce::jmax (16, getBottomTrimHeight() - 6), px (20.0f))
+        : juce::jlimit (16, 22, px (20.0f));
+    const int y = pinToBottomTrim
+        ? (getHeight() - getBottomTrimHeight()) + (getBottomTrimHeight() - comboH) / 2
+        : phaseModeCombo.getY() + (phaseModeCombo.getHeight() - comboH) / 2;
+    const int x = phaseModeCombo.isVisible()
+        ? phaseModeCombo.getRight() + gap
+        : (helpTooltipsButton.isVisible() ? helpTooltipsButton.getRight() + gap : px (8.0f));
+    detectModeCombo.setBounds (x, y, comboW, comboH);
+    detectModeCombo.toFront (false);
+}
+
+void EqEditor::layoutDynOversampleCombo()
+{
+    if (uiCompact || (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome()))
+    {
+        dynOsButton.setVisible (false);
+        dynOsButton.setBounds ({});
+        return;
+    }
+
+    int idx = 0;
+    if (auto* p = audioProcessor.treeState.getRawParameterValue (DynParams::osRealtimeId()))
+        idx = juce::jlimit (0, 3, (int) std::lround (p->load()));
+    const auto names = DynParams::osRealtimeNames();
+    dynOsButton.text = (idx >= 0 && idx < names.size()) ? names[idx] : "OS Off";
+
+    const int trimH = getTopBandHeight();
+    const int comboH = juce::jlimit (16, trimH - 4, 20);
+    const auto osFont = SharedResources::uiFont (13.0f);
+    const int comboW = juce::jmax (72, (int) std::ceil (
+        juce::GlyphArrangement::getStringWidth (osFont, "OS Off")) + 28);
+    const int x = juce::jmax (8, getWidth() - comboW - 108);
+    const int y = juce::jmax (1, (trimH - comboH) / 2);
+    dynOsButton.setVisible (true);
+    addAndMakeVisible (dynOsButton);
+    dynOsButton.setBounds (x, y, comboW, comboH);
+    dynOsButton.toFront (false);
+}
+
+void EqEditor::layoutDynLearnButton()
+{
+    if (uiCompact || (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome()))
+    {
+        dynLearnButton.setVisible (false);
+        dynLearnButton.setBounds ({});
+        return;
+    }
+
+    dynLearnButton.setVisible (true);
+    addAndMakeVisible (dynLearnButton);
+    const int trimH = getTopBandHeight();
+    const int btnH = juce::jlimit (16, trimH - 4, 20);
+    const int btnW = juce::jmax (60, (int) std::ceil (dynLearnButton.getBestWidthForHeight (btnH)));
+    const int gap = 6;
+    const int x = dynOsButton.isVisible()
+        ? juce::jmax (8, dynOsButton.getX() - gap - btnW)
+        : juce::jmax (8, getWidth() - btnW - 108);
+    const int y = dynOsButton.isVisible()
+        ? dynOsButton.getY() + (dynOsButton.getHeight() - btnH) / 2
+        : juce::jmax (1, (trimH - btnH) / 2);
+    dynLearnButton.setBounds (x, y, btnW, btnH);
+    const bool lit = dynFaceplate != nullptr && dynFaceplate->isLearnLit();
+    dynLearnButton.setToggleState (lit, juce::dontSendNotification);
+    dynLearnButton.toFront (false);
+}
+
+void EqEditor::showDynOsRealtimeMenu()
+{
+    int cur = 0;
+    if (auto* p = audioProcessor.treeState.getRawParameterValue (DynParams::osRealtimeId()))
+        cur = (int) std::lround (p->load());
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Realtime");
+    const auto names = DynParams::osRealtimeNames();
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (1 + i, names[i], true, i == cur);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&dynOsButton),
+        [safe = juce::Component::SafePointer<EqEditor> (this)] (int result)
+        {
+            if (safe == nullptr || result <= 0)
+                return;
+            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                    safe->audioProcessor.treeState.getParameter (DynParams::osRealtimeId())))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) (result - 1)));
+                p->endChangeGesture();
+            }
+            safe->layoutDynOversampleCombo();
+        });
+}
+
+void EqEditor::showDynOsOfflineMenu()
+{
+    int cur = 4;
+    if (auto* p = audioProcessor.treeState.getRawParameterValue (DynParams::osOfflineId()))
+        cur = (int) std::lround (p->load());
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Offline");
+    const auto names = DynParams::osOfflineNames();
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (1 + i, names[i], true, i == cur);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&dynOsButton),
+        [safe = juce::Component::SafePointer<EqEditor> (this)] (int result)
+        {
+            if (safe == nullptr || result <= 0)
+                return;
+            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                    safe->audioProcessor.treeState.getParameter (DynParams::osOfflineId())))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) (result - 1)));
+                p->endChangeGesture();
+            }
+        });
 }
 
 
@@ -1602,6 +1932,13 @@ void EqEditor::applyPianoStripWindowHeight (bool pianoOn)
 
 void EqEditor::layoutScopeModeButton()
 {
+    if (mainComponent != nullptr && mainComponent->isDynShellMode())
+    {
+        scopeModeButton.setVisible (false);
+        scopeModeButton.setBounds ({});
+        return;
+    }
+
     scopeModeButton.setVisible (true);
     addAndMakeVisible (scopeModeButton);
 
@@ -1695,6 +2032,22 @@ void EqEditor::layoutScopeModeButton()
 
 void EqEditor::layoutSideCheckButton()
 {
+    // DYN: no SideCheck chrome.
+    {
+        sideCheckButton.setVisible (false);
+        sideCheckAmountKnob.setVisible (false);
+        sideCheckAmountLabel.setVisible (false);
+        sideCheckSpeedButton.setVisible (false);
+        sideCheckHqButton.setVisible (false);
+        sideCheckHpKnob.setVisible (false);
+        sideCheckLpKnob.setVisible (false);
+        sideCheckHpLabel.setVisible (false);
+        sideCheckLpLabel.setVisible (false);
+        sideCheckButton.setBounds ({});
+        layoutScopeModeButton();
+        return;
+    }
+
     // Scope Pre / strip: hide Side Check and its DSP controls.
     if (mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome())
     {
@@ -1885,16 +2238,46 @@ void EqEditor::showSideCheckHpLpSlopeMenu (bool forHp)
         });
 }
 
+void EqEditor::showSideCheckMethodMenu()
+{
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+        audioProcessor.treeState.getParameter (SideCheck::methodParamId()));
+    if (choice == nullptr)
+        return;
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Side Check method");
+    const auto names = SideCheck::getMethodChoiceNames();
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (1 + i, names[i], true, choice->getIndex() == i);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&sideCheckButton),
+        [safe = juce::Component::SafePointer<EqEditor> (this)] (int result)
+        {
+            if (safe == nullptr || result <= 0)
+                return;
+            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                    safe->audioProcessor.treeState.getParameter (SideCheck::methodParamId())))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) (result - 1)));
+                p->endChangeGesture();
+            }
+        });
+}
+
 void EqEditor::showAutoGainModeMenu()
 {
-    const bool aimLufs = audioProcessor.treeState.getRawParameterValue ("targetLufsEnable") != nullptr
-                         && audioProcessor.treeState.getRawParameterValue ("targetLufsEnable")->load() > 0.5f;
+    int mode = 0;
+    if (auto* p = audioProcessor.treeState.getRawParameterValue (DynParams::autoGainModeId()))
+        mode = (int) std::lround (p->load());
 
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addSectionHeader ("Auto Gain");
-    menu.addItem (1, "RMS (match input)", true, ! aimLufs);
-    menu.addItem (2, "LUFS (target)", true, aimLufs);
+    menu.addItem (1, "Multiband", true, mode == 0);
+    menu.addItem (2, "Global", true, mode != 0);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&autoGainButton),
         [safe = juce::Component::SafePointer<EqEditor> (this)] (int result)
@@ -1902,12 +2285,13 @@ void EqEditor::showAutoGainModeMenu()
             if (safe == nullptr || result <= 0)
                 return;
 
-            const bool aimLufs = (result == 2);
-            if (auto* p = dynamic_cast<juce::AudioParameterBool*> (
-                    safe->audioProcessor.treeState.getParameter ("targetLufsEnable")))
+            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                    safe->audioProcessor.treeState.getParameter (DynParams::autoGainModeId())))
             {
-                if (p->get() != aimLufs)
-                    p->setValueNotifyingHost (aimLufs ? 1.0f : 0.0f);
+                const int idx = result - 1;
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) idx));
+                p->endChangeGesture();
             }
         });
 }
@@ -1948,7 +2332,7 @@ juce::File EqEditor::getUiPrefsFile()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
         .getChildFile ("Decksounds")
-        .getChildFile ("ParametricEq")
+        .getChildFile ("GhovlzDyn")
         .getChildFile ("ui_prefs.xml");
 }
 
@@ -1956,7 +2340,7 @@ juce::File EqEditor::getLastUiThemeFile()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
         .getChildFile ("Decksounds")
-        .getChildFile ("ParametricEq")
+        .getChildFile ("GhovlzDyn")
         .getChildFile ("last_ui_theme.xml");
 }
 
@@ -2283,6 +2667,9 @@ void EqEditor::syncScopeModeLayout()
     layoutBrandWordmark (-1);
     layoutHelpTooltipsButton();
     layoutPhaseModeCombo();
+    layoutDetectModeCombo();
+    layoutDynOversampleCombo();
+    layoutDynLearnButton();
     layoutSideCheckButton();
     layoutScopeModeButton();
 }
@@ -2590,11 +2977,13 @@ void EqEditor::loadUiPrefs()
     std::vector<ParticleForceModule> spec3DParticleForceStack;
     std::array<ParticleModSlot, kParticleModSlotCount> spec3DParticleMods {};
     std::array<ParticleRandomSource, kParticleRandomSourceCount> spec3DParticleRands {};
+    int persistedEditorW = 0;
+    int persistedEditorH = 0;
     bool oscExpandedOnLoad = false;
     bool gonExpandedOnLoad = false;
     bool specExpandedOnLoad = false;
     bool scopeModeOnLoad = false;
-    bool uiCompactOnLoad = true; // factory default matches ctor (compact)
+    bool uiCompactOnLoad = false; // DYN defaults to expanded compressor faceplate
     bool modPanelOnLoad = false;
     bool spec3DCamCustom = false;
     auto spec3DCam = Spectrogram3DComponent::getFactoryCameraState();
@@ -2612,7 +3001,7 @@ void EqEditor::loadUiPrefs()
         haveSessionTheme = sessionUi.getChildWithName ("Theme").isValid()
                            || sessionUi.getChildWithName ("GlobalUi").isValid();
         scopeModeOnLoad = (bool) sessionUi.getProperty ("scopeMode", false);
-        uiCompactOnLoad = (bool) sessionUi.getProperty ("uiCompact", true);
+        uiCompactOnLoad = (bool) sessionUi.getProperty ("uiCompact", false);
         modPanelOnLoad = (bool) sessionUi.getProperty ("modPanelOpen", false);
     }
 
@@ -2643,6 +3032,10 @@ void EqEditor::loadUiPrefs()
                 lastStripScopeHeight = xml->getIntAttribute ("lastStripScopeHeight", 0);
                 lastTiledScopeWidth = xml->getIntAttribute ("lastTiledScopeWidth", 0);
                 lastTiledScopeHeight = xml->getIntAttribute ("lastTiledScopeHeight", 0);
+                persistedEditorW = xml->getIntAttribute ("editorWidth", 0);
+                persistedEditorH = xml->getIntAttribute ("editorHeight", 0);
+                savedEditorWidth = xml->getIntAttribute ("savedEditorWidth", savedEditorWidth);
+                savedEditorHeight = xml->getIntAttribute ("savedEditorHeight", savedEditorHeight);
                 // Migrate older single-size prefs into the per-arrange slots.
                 if (lastStripScopeWidth <= 0 && lastStripScopeHeight <= 0
                     && lastScopeWasStrip && lastScopeWidth > 0 && lastScopeHeight > 0)
@@ -3110,8 +3503,9 @@ void EqEditor::loadUiPrefs()
             mainComponent->applyScopeLayoutPreset (vp, false);
         }
         // Restore Scope mode as last left (geometry above already applied).
-        mainComponent->setScopeMode (scopeModeOnLoad, false);
-        mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (pianoDisplayOnLoad, false);
+        // DYN never restores Scope / piano — product chrome is the r3 shell.
+        mainComponent->setScopeMode (false, false);
+        mainComponent->getFrequencyResponseComponent().setPianoDisplayOn (false, false);
         mainComponent->setSpec3DMeshQuality (
             spec3DMeshQuality <= 0 ? Spectrogram3DComponent::MeshQuality::low
                                   : (spec3DMeshQuality == 1 ? Spectrogram3DComponent::MeshQuality::medium
@@ -3337,9 +3731,11 @@ void EqEditor::loadUiPrefs()
         if (spec3DFrameCustom && spec3DFrameW > 0 && spec3DFrameH > 0)
             mainComponent->setSpec3DFrameBounds (spec3DFrameX, spec3DFrameY,
                                                  spec3DFrameW, spec3DFrameH);
-        mainComponent->setOscExpanded (oscExpandedOnLoad, false);
-        mainComponent->setGonExpanded (gonExpandedOnLoad, false);
-        mainComponent->setSpecExpanded (specExpandedOnLoad, false);
+        mainComponent->setOscExpanded (false, false);
+        mainComponent->setGonExpanded (false, false);
+        mainComponent->setSpecExpanded (false, false);
+        mainComponent->setSpec3DMode (false, false);
+        mainComponent->setDynShellMode (true);
 
         // Theme colours: host session first, else last_ui_theme.xml (disk - same path as dice flags).
         if (haveSessionTheme || audioProcessor.hasSessionUiTheme())
@@ -3388,9 +3784,15 @@ void EqEditor::loadUiPrefs()
         // Re-apply text vs background contrast (Scope + global) after theme restore.
         if (c.enforceLegibleText)
             c.enforceLegibleTextContrast();
+        c.knobTint = juce::Colour::fromRGBA (255, 110, 0, 0);
+        c.knobMultiply = juce::Colours::white;
         mainComponent->getSharedResources().makeActive();
+        mainComponent->setDynShellMode (true);
         mainComponent->repaint();
     }
+
+    if (mainComponent != nullptr)
+        mainComponent->setDynShellMode (true);
 
     // Compact / mod strip as last left (after MainComponent prefs so window height matches).
     if (modPanelOpen != modPanelOnLoad)
@@ -3399,6 +3801,7 @@ void EqEditor::loadUiPrefs()
         if (mainComponent != nullptr)
             mainComponent->getFrequencyResponseComponent().syncModButton (modPanelOpen);
     }
+    uiCompactOnLoad = false; // DYN always opens expanded
     if (uiCompact != uiCompactOnLoad)
     {
         uiCompact = uiCompactOnLoad;
@@ -3412,6 +3815,18 @@ void EqEditor::loadUiPrefs()
     syncScopeModeButton();
     syncScopeModeLayout();
     setFaceplateBank (faceplateBank, false);
+
+    if (persistedEditorW > 0 && persistedEditorH > 0)
+    {
+        const int minW = (getConstrainer() != nullptr) ? getConstrainer()->getMinimumWidth() : 600;
+        const int minH = (getConstrainer() != nullptr) ? getConstrainer()->getMinimumHeight() : 100;
+        const int maxW = (getConstrainer() != nullptr) ? getConstrainer()->getMaximumWidth() : 2400;
+        const int maxH = (getConstrainer() != nullptr) ? getConstrainer()->getMaximumHeight() : 2000;
+        restoringEditorSize = true;
+        setSize (juce::jlimit (minW, maxW, persistedEditorW),
+                 juce::jlimit (minH, maxH, persistedEditorH));
+        restoringEditorSize = false;
+    }
 }
 
 void EqEditor::requestSaveUiPrefs() noexcept
@@ -3492,6 +3907,10 @@ void EqEditor::saveUiPrefs() const
     xml->setAttribute ("lastStripScopeHeight", lastStripScopeHeight);
     xml->setAttribute ("lastTiledScopeWidth", lastTiledScopeWidth);
     xml->setAttribute ("lastTiledScopeHeight", lastTiledScopeHeight);
+    xml->setAttribute ("editorWidth", getWidth());
+    xml->setAttribute ("editorHeight", getHeight());
+    xml->setAttribute ("savedEditorWidth", savedEditorWidth);
+    xml->setAttribute ("savedEditorHeight", savedEditorHeight);
     xml->setAttribute ("savedAt", juce::Time::getCurrentTime().toISO8601 (true));
     xml->setAttribute ("faceplateBank", faceplateBank);
     xml->setAttribute ("pianoDisplay",
@@ -4469,12 +4888,20 @@ void EqEditor::applyFaceplateTheme()
         b.setPaintingIsUnclipped (true);
     };
     styleChrome (helpTooltipsButton);
+    styleChrome (dynLearnButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (dynLearnButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionBold (dynLearnButton, true);
     styleChrome (autoGainButton);
     styleChrome (sideCheckButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (sideCheckButton, 2);
     styleChrome (scopeModeButton);
     styleChrome (sideCheckSpeedButton);
     styleChrome (sideCheckHqButton);
+    phaseModeCombo.setChromeColours (c.pluginButtonBackground, buttonInk.withAlpha (0.92f));
+    detectModeCombo.setChromeColours (c.pluginButtonBackground, buttonInk.withAlpha (0.92f));
+    dynOsButton.setChromeColours (c.pluginButtonBackground, buttonInk.withAlpha (0.92f));
     attachGraphShadow (helpTooltipsButton);
+    attachGraphShadow (dynLearnButton);
     attachGraphShadow (autoGainButton);
     attachGraphShadow (sideCheckButton);
     attachGraphShadow (scopeModeButton);
@@ -4651,6 +5078,11 @@ void EqEditor::setThemeColors (SharedResources* r) noexcept
 
     if (modSection != nullptr)
         modSection->setThemeColors (r);
+    if (dynFaceplate != nullptr)
+        dynFaceplate->setThemeColors (r);
+    if (dynTransfer != nullptr)
+        dynTransfer->setThemeColors (r);
+    dynScope.setThemeColors (r);
 
     applyFaceplateTheme();
     repaint();
@@ -4694,7 +5126,9 @@ int EqEditor::getModPanelHeightForGraphHeight (int graphHeight) const
 int EqEditor::getFaceplateHeightForWidth (int width) const
 {
     const int gh = getGraphHeightForWidth (width);
-    return juce::jmax (190, juce::roundToInt ((float) gh * 0.62f));
+    juce::ignoreUnused (gh);
+    // Tall enough for All-mode: transfer on top + 2x3 knobs + GR rail.
+    return 320;
 }
 
 int EqEditor::getBottomTrimHeight() const
@@ -4703,51 +5137,57 @@ int EqEditor::getBottomTrimHeight() const
     return juce::jmax (22, juce::roundToInt (30.0f * scale));
 }
 
+int EqEditor::getMidTrimHeight() const
+{
+    return juce::jmax (10, getBottomTrimHeight() / 2);
+}
+
 int EqEditor::getExpandedEditorHeight (int width, bool includeModPanel) const
 {
     const float scale = (float) width / (float) designWidth;
     const int graphTop = juce::jmax (22, juce::roundToInt (30.0f * scale));
     const int graphH = getGraphHeightForWidth (width);
-    const int stripH = isFaceplateSuppressed() ? 0 : getFaceplateHeightForWidth (width);
+    const int stripH = isFaceplateSuppressed() ? 0 : graphH;
+    const int midTrimH = isFaceplateSuppressed() ? 0 : juce::jmax (10, juce::roundToInt (15.0f * scale));
     const int modH = includeModPanel ? getModPanelHeightForGraphHeight (graphH) : 0;
     const int trimH = juce::jmax (22, juce::roundToInt (30.0f * scale));
-    // Piano grows the graph host (MainComponent), not the faceplate - plot height stays via getPlotHeight().
-    return graphTop + graphH + getPianoWindowExtra() + modH + stripH + trimH;
+    return graphTop + graphH + getPianoWindowExtra() + modH + midTrimH + stripH + trimH;
 }
 
 void EqEditor::setFaceplateVisible (bool shouldShow)
 {
     auto setVis = [shouldShow] (juce::Component& c) { c.setVisible (shouldShow); };
+    auto hide = [] (juce::Component& c) { c.setVisible (false); };
 
-    setVis (knob1);  setVis (knob2);  setVis (knob3);  setVis (knob4);
-    setVis (knobHpGain); setVis (knobLpGain); // were missing - leaked onto graph in compact UI
-    setVis (knob5);  setVis (knob6);  setVis (knob7);  setVis (knob8);
-    setVis (knob9);  setVis (knob10); setVis (knob11); setVis (knob12);
-    setVis (knob13); setVis (knob14); setVis (knob15); setVis (knob16);
-    setVis (knob17); setVis (knob18); setVis (knob19); setVis (knob20);
-    setVis (knob21); setVis (knob22);
+    hide (knob1);  hide (knob2);  hide (knob3);  hide (knob4);
+    hide (knobHpGain); hide (knobLpGain);
+    hide (knob5);  hide (knob6);  hide (knob7);  hide (knob8);
+    hide (knob9);  hide (knob10); hide (knob11); hide (knob12);
+    hide (knob13); hide (knob14); hide (knob15); hide (knob16);
+    hide (knob17); hide (knob18); hide (knob19); hide (knob20);
+    hide (knob21); hide (knob22);
     setVis (outputGainKnob);
     setVis (autoGainButton);
 
-    setVis (border1);  setVis (border2);  setVis (border3);  setVis (border4);
-    setVis (border5);  setVis (border6);  setVis (border7);  setVis (border8);
-    setVis (border9);  setVis (border10); setVis (border11); setVis (border12);
-    setVis (border13); setVis (border14); setVis (border15); setVis (border16);
-    setVis (border17); setVis (border18); setVis (border19); setVis (border20);
-    setVis (border21); setVis (border22);
+    hide (border1);  hide (border2);  hide (border3);  hide (border4);
+    hide (border5);  hide (border6);  hide (border7);  hide (border8);
+    hide (border9);  hide (border10); hide (border11); hide (border12);
+    hide (border13); hide (border14); hide (border15); hide (border16);
+    hide (border17); hide (border18); hide (border19); hide (border20);
+    hide (border21); hide (border22);
     setVis (borderOutputGain);
 
-    setVis (faceplateBankPrevButton);
-    setVis (faceplateBankNextButton);
+    hide (faceplateBankPrevButton);
+    hide (faceplateBankNextButton);
 
-    if (onOffButton1) setVis (*onOffButton1);
-    if (onOffButton2) setVis (*onOffButton2);
-    if (onOffButton3) setVis (*onOffButton3);
-    if (onOffButton4) setVis (*onOffButton4);
-    if (onOffButton5) setVis (*onOffButton5);
-    if (onOffButton6) setVis (*onOffButton6);
-    if (onOffButton7) setVis (*onOffButton7);
-    if (onOffButton8) setVis (*onOffButton8);
+    if (onOffButton1) hide (*onOffButton1);
+    if (onOffButton2) hide (*onOffButton2);
+    if (onOffButton3) hide (*onOffButton3);
+    if (onOffButton4) hide (*onOffButton4);
+    if (onOffButton5) hide (*onOffButton5);
+    if (onOffButton6) hide (*onOffButton6);
+    if (onOffButton7) hide (*onOffButton7);
+    if (onOffButton8) hide (*onOffButton8);
 
     // Brand wordmark stays visible in both compact and expanded modes.
     // Parent / z-order are applied in layoutBrandWordmark() from resized()/applyCompactUi().
@@ -4758,6 +5198,7 @@ void EqEditor::setFaceplateVisible (bool shouldShow)
     helpTooltipsButton.setVisible (true);
     const bool hideDsp = mainComponent != nullptr && mainComponent->shouldHideScopeDspChrome();
     phaseModeCombo.setVisible (! hideDsp);
+    detectModeCombo.setVisible (! hideDsp);
     sideCheckButton.setVisible (! hideDsp);
     updateSideCheckAmountVisibility();
 

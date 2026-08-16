@@ -24,12 +24,11 @@ void RotaryImageKnobLookAndFeel2::drawRotarySlider(juce::Graphics& g, int x, int
 {
     if (knobImage.isValid())
     {
-        // Get the parameter's current value
-        const float parameterValue = slider.getValue();
-
-        // Map the parameter's value to the frame range
-        int frameId = static_cast<int>((parameterValue - minValue) / (maxValue - minValue) * frames);
-        frameId = juce::jlimit(0, frames - 1, frameId); // Ensure frameId stays within valid range
+        juce::ignoreUnused (sliderPos, rotaryStartAngle, rotaryEndAngle);
+        const float normalizedSliderPos = juce::jlimit (
+            0.0f, 1.0f, (float) slider.valueToProportionOfLength (slider.getValue()));
+        int frameId = juce::jlimit (0, frames - 1,
+                                    (int) std::lround (normalizedSliderPos * (float) (frames - 1)));
 
         const int frameWidth = knobImage.getWidth();
         const int frameHeight = knobImage.getHeight() / frames;
@@ -61,25 +60,14 @@ void RotaryImageKnobLookAndFeel2::drawRotarySlider(juce::Graphics& g, int x, int
 
         g.setImageResamplingQuality(juce::Graphics::ResamplingQuality::highResamplingQuality);
 
-        // Create a Path object for the filled arc
         juce::Path filledArc;
-
-        // Normalize the slider position to a 0-1 range
-        float normalizedSliderPos = (sliderPos - minValue) / (maxValue - minValue);
-
-        // Define start and end angles in degrees
-        float rotaryStartAngleInDegrees = -145.0f;
-        float rotaryEndAngleInDegrees = 145.0f;
-
-        // Convert to radians
-        float rotaryStartAngle = juce::degreesToRadians(rotaryStartAngleInDegrees);
-        float rotaryEndAngle = juce::degreesToRadians(rotaryEndAngleInDegrees);
-
-        // Calculate the end angle based on the normalized slider position
-        float endAngle = rotaryStartAngle + (rotaryEndAngle - rotaryStartAngle) * normalizedSliderPos;
+        const float startRad = juce::degreesToRadians (-145.0f);
+        const float endRad   = juce::degreesToRadians (145.0f);
+        const float endAngle = startRad + (endRad - startRad) * normalizedSliderPos;
 
         // Add pie segment to represent the filled part of the slider
-        filledArc.addPieSegment(juce::Rectangle<float>(x, y, width, height), rotaryStartAngle, endAngle, 0.8f);
+        filledArc.addPieSegment (juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height),
+                                 startRad, endAngle, 0.8f);
 
         // Create colour gradient
         const bool bandHighlight = KnobBandHighlight::isActive (slider);

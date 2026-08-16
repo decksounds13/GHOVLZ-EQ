@@ -21,6 +21,20 @@ namespace MatchEq
     inline constexpr const char* lpHzParamId() noexcept { return "matchLpHz"; }
     inline constexpr const char* hpSlopeParamId() noexcept { return "matchHpSlope"; }
     inline constexpr const char* lpSlopeParamId() noexcept { return "matchLpSlope"; }
+    inline constexpr const char* methodParamId() noexcept { return "matchMethod"; }
+
+    /** 0 = IIR bandpass array (zero latency), 1 = FFT. */
+    enum Method : int
+    {
+        lattice = 0,
+        fft,
+        numMethods
+    };
+
+    inline juce::StringArray getMethodChoiceNames()
+    {
+        return { "Bandpass array", "FFT" };
+    }
 
     constexpr float kMinAmount = 0.0f;
     constexpr float kMaxAmount = 1.0f;

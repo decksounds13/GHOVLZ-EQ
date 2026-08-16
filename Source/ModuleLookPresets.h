@@ -6,7 +6,7 @@
 /**
     Per-module look / UI settings (not EQ DSP).
 
-    Documents/Decksounds/ParametricEq/ModuleLook/<Kind>/
+    Documents/Decksounds/GhovlzDyn/ModuleLook/<Kind>/
       default.xml  — "Save as default"
       presets.xml  — named presets
 
@@ -40,6 +40,7 @@ bool saveDefault (Kind k, const juce::ValueTree& state);
 juce::ValueTree loadDefault (Kind k);
 
 bool saveNamed (Kind k, juce::String name, const juce::ValueTree& state);
+bool containsName (Kind k, const juce::String& name);
 juce::ValueTree loadNamed (Kind k, const juce::String& name);
 bool deleteNamed (Kind k, const juce::String& name);
 std::vector<juce::String> listNames (Kind k);

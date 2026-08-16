@@ -23,6 +23,7 @@
 #include "BandSidechain.h"
 #include "ShapeMod.h"
 #include "EqBand.h"
+#include "Dyn/DynCompressor.h"
 #include "Menu/SharedResources.h"
 #include "Export/Spec3DExportSandbox.h"
 #if SPEC3D_EXPORT_ENABLED
@@ -65,6 +66,9 @@ public:
     //juce::AudioProcessorValueTreeState treeState;
 
     Analyser& getAnalyser() { return m_analyser; }
+
+    DynCompressor& getDynEngine() noexcept { return dynEngine; }
+    const DynCompressor& getDynEngine() const noexcept { return dynEngine; }
 
     /** Optional oscilloscope strip (UI). Audio thread pushes when non-null and enabled. */
     void setOscilloscopeTarget (class OscilloscopeComponent* target) noexcept;
@@ -769,6 +773,8 @@ private:
 
     /** Global Side Check (S<=M): post-Spectral BP-lattice Mid/Side balance. */
     SideCheck::Processor sideCheck;
+
+    DynCompressor dynEngine;
 
     /** Spectral Match — isolated shape-match lattice (Pre or Post EQ). */
     MatchEq::Processor matchEngine;

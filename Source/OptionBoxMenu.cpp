@@ -1955,7 +1955,7 @@ void OptionBoxMenu::showHierarchicalFilterMenu()
     const auto typeNames = FilterType::getChoiceNames();
 
     juce::PopupMenu menu;
-    menu.setLookAndFeel (&getLookAndFeel());
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
 
     // Top-level shapes (HP/LP/brickwall are submenus only).
     for (int t = 0; t < FilterType::numChoices; ++t)

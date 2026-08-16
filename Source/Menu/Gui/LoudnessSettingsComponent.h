@@ -30,6 +30,8 @@ private:
     private:
         void styleLabel (juce::Label& label);
         void styleCombo (juce::ComboBox& combo);
+        void styleSaveDefaultButton (juce::TextButton& button);
+        void saveAnalyserDefaults();
         void syncTargetComboFromParam();
         void applyTargetFromCombo();
         void syncAutoGainModeFromParam();
@@ -40,6 +42,7 @@ private:
         ComboBoxLookAndFeel comboLookAndFeel;
 
         juce::Label titleLabel;
+        juce::TextButton saveDefaultButton { "Save Default" };
         juce::Label autoGainModeLabel;
         juce::ComboBox autoGainModeCombo;
         juce::Label targetLabel;

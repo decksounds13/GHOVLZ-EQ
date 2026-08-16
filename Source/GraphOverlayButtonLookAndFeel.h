@@ -199,11 +199,36 @@ public:
                          shouldDrawButtonAsHighlighted || shouldDrawButtonAsDown);
     }
 
+    static constexpr const char* kCaptionFontDeltaProp = "overlayFontDelta";
+    static constexpr const char* kCaptionBoldProp = "overlayFontBold";
+
+    static void setCaptionFontDelta (juce::Component& c, int extraPx) noexcept
+    {
+        c.getProperties().set (kCaptionFontDeltaProp, extraPx);
+        c.repaint();
+    }
+
+    static int captionFontDelta (const juce::Component& c) noexcept
+    {
+        return (int) c.getProperties().getWithDefault (kCaptionFontDeltaProp, 0);
+    }
+
+    static void setCaptionBold (juce::Component& c, bool bold) noexcept
+    {
+        c.getProperties().set (kCaptionBoldProp, bold);
+        c.repaint();
+    }
+
+    static bool captionBold (const juce::Component& c) noexcept
+    {
+        return (bool) c.getProperties().getWithDefault (kCaptionBoldProp, false);
+    }
+
     juce::Font getTextButtonFont (juce::TextButton& button, int buttonHeight) override
     {
-        juce::ignoreUnused (button);
-        const float h = juce::jmin (15.0f, (float) buttonHeight * 0.55f);
-        return SharedResources::uiFont (h);
+        const float h = juce::jmin (15.0f, (float) buttonHeight * 0.55f)
+                        + (float) captionFontDelta (button);
+        return SharedResources::uiFont (juce::jmax (9.0f, h), captionBold (button));
     }
 
     juce::Font getLabelFont (juce::Label& label) override
@@ -231,8 +256,9 @@ public:
         g.setColour (ink.withAlpha (button.isEnabled() ? 0.95f : 0.40f));
 
         const int h = button.getHeight();
-        const float fontH = juce::jlimit (9.0f, 14.0f, (float) h * 0.48f);
-        g.setFont (SharedResources::uiFont (fontH));
+        const float fontH = juce::jlimit (9.0f, 22.0f,
+                                          (float) h * 0.48f + (float) captionFontDelta (button));
+        g.setFont (SharedResources::uiFont (fontH, captionBold (button)));
         // Never ellipsize chrome captions.
         g.drawText (button.getButtonText(),
                     button.getLocalBounds().reduced (2, 0),

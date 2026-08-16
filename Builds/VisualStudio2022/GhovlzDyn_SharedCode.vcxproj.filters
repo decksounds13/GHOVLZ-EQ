@@ -2,124 +2,124 @@
 
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="ParametricEqProject\Source\Menu\Gui">
+    <Filter Include="GhovlzDyn\Source\Menu\Gui">
       <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu">
+    <Filter Include="GhovlzDyn\Source\Menu">
       <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Assets">
+    <Filter Include="GhovlzDyn\Source\Assets">
       <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\ColourRamp">
+    <Filter Include="GhovlzDyn\Source\ColourRamp">
       <UniqueIdentifier>{EC9A775C-1238-8D75-54B2-8DB895BEBFE1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Assets">
+    <Filter Include="GhovlzDyn\Source\Assets">
       <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations">
       <UniqueIdentifier>{A44CA844-07B8-B554-5FA6-7C9504B03FBF}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\internal">
       <UniqueIdentifier>{14CAF6BB-C50B-F636-20B0-779A37377B7F}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur\melatonin">
       <UniqueIdentifier>{9CD8191C-3100-B8A7-5BFA-BB628828565C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur">
       <UniqueIdentifier>{AD506983-E63D-D43C-B288-A8F57385F0D3}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects">
+    <Filter Include="GhovlzDyn\Source\Effects">
       <UniqueIdentifier>{9F86C40A-42E8-D254-8DAD-0B70DFB2311F}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\Gui">
+    <Filter Include="GhovlzDyn\Source\Menu\Gui">
       <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu">
+    <Filter Include="GhovlzDyn\Source\Menu">
       <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Spectral">
+    <Filter Include="GhovlzDyn\Source\Spectral">
       <UniqueIdentifier>{069880E3-DEEB-3CBE-9DAD-2D22E0B80C82}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Match">
+    <Filter Include="GhovlzDyn\Source\Match">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Learn">
+    <Filter Include="GhovlzDyn\Source\Learn">
       <UniqueIdentifier>{b2c3d4e5-f6a7-8901-bcde-f12345678901}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\StructuralSplit">
+    <Filter Include="GhovlzDyn\Source\StructuralSplit">
       <UniqueIdentifier>{A8C3E1F2-4B5D-6E7F-8091-A2B3C4D5E6F7}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Controls\Categories">
+    <Filter Include="GhovlzDyn\Source\Controls\Categories">
       <UniqueIdentifier>{7EFDE8D3-7793-B6C7-C284-26939B297B82}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Controls">
+    <Filter Include="GhovlzDyn\Source\Controls">
       <UniqueIdentifier>{B54D5FC3-1C9D-0539-83FA-87732DDA1F21}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations">
       <UniqueIdentifier>{A44CA844-07B8-B554-5FA6-7C9504B03FBF}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\support">
       <UniqueIdentifier>{E8FD5C32-0521-186F-7552-50A8FBFD6F8D}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur\melatonin">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur\melatonin">
       <UniqueIdentifier>{9CD8191C-3100-B8A7-5BFA-BB628828565C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\MelatoninBlur">
+    <Filter Include="GhovlzDyn\Source\Effects\MelatoninBlur">
       <UniqueIdentifier>{AD506983-E63D-D43C-B288-A8F57385F0D3}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\shadows-main\source">
+    <Filter Include="GhovlzDyn\Source\Effects\shadows-main\source">
       <UniqueIdentifier>{0D40B112-26F9-7BA9-7AE5-17F01734F268}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects\shadows-main">
+    <Filter Include="GhovlzDyn\Source\Effects\shadows-main">
       <UniqueIdentifier>{1C0A32BA-E609-5212-4BBB-AAA2AA0E416A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Effects">
+    <Filter Include="GhovlzDyn\Source\Effects">
       <UniqueIdentifier>{9F86C40A-42E8-D254-8DAD-0B70DFB2311F}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Resources">
+    <Filter Include="GhovlzDyn\Source\Resources">
       <UniqueIdentifier>{089183F4-FEB2-9841-F6FB-05FFBC774919}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer\Layers\GraphElements">
+    <Filter Include="GhovlzDyn\Source\Visualizer\Layers\GraphElements">
       <UniqueIdentifier>{039080F4-970D-47C6-2D04-05981EFFC5AC}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer\Layers\GridElements">
+    <Filter Include="GhovlzDyn\Source\Visualizer\Layers\GridElements">
       <UniqueIdentifier>{45003241-222E-C93C-DE7B-F14E64DCB489}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer\Layers">
+    <Filter Include="GhovlzDyn\Source\Visualizer\Layers">
       <UniqueIdentifier>{3D2E8D91-7E98-089C-A3BA-96FFA9592BE4}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Visualizer">
+    <Filter Include="GhovlzDyn\Source\Visualizer">
       <UniqueIdentifier>{27C311B4-6387-5AD5-2900-893F63833CF9}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Spectral">
+    <Filter Include="GhovlzDyn\Source\Spectral">
       <UniqueIdentifier>{069880E3-DEEB-3CBE-9DAD-2D22E0B80C82}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\internal">
+    <Filter Include="GhovlzDyn\Source\Menu\ScreenCaptureLite\internal">
       <UniqueIdentifier>{594E7132-A6F4-4BE6-C85E-32BB24F0A4A7}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\ios">
+    <Filter Include="GhovlzDyn\Source\Menu\ScreenCaptureLite\ios">
       <UniqueIdentifier>{0345DFD6-5A54-9C42-4A1D-7506D7AD635A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\linux">
+    <Filter Include="GhovlzDyn\Source\Menu\ScreenCaptureLite\linux">
       <UniqueIdentifier>{03A5AE53-24A9-410B-0B40-8151FBC37F14}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite\windows">
+    <Filter Include="GhovlzDyn\Source\Menu\ScreenCaptureLite\windows">
       <UniqueIdentifier>{5D9C3B57-6767-1A58-BD51-C874C4EC1E49}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\ScreenCaptureLite">
+    <Filter Include="GhovlzDyn\Source\Menu\ScreenCaptureLite">
       <UniqueIdentifier>{085D42B5-079C-01FB-54C1-9D24DEF0C8DA}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu\Gui">
+    <Filter Include="GhovlzDyn\Source\Menu\Gui">
       <UniqueIdentifier>{6A642BC4-A60E-E84D-99BD-E95A298593B1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source\Menu">
+    <Filter Include="GhovlzDyn\Source\Menu">
       <UniqueIdentifier>{405C5EC2-BA8F-4522-28EB-0321CE4CD808}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject\Source">
+    <Filter Include="GhovlzDyn\Source">
       <UniqueIdentifier>{128F303A-D396-FB2D-8B57-BC340F1ECB71}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ParametricEqProject">
+    <Filter Include="GhovlzDyn">
       <UniqueIdentifier>{0D1D33AE-9140-10FE-DABA-1AA9195A5DFB}</UniqueIdentifier>
     </Filter>
     <Filter Include="JUCE Modules\gin\3rdparty\bsdiff">
@@ -1013,361 +1013,361 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\GoniometerComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\SpectrogramComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\SpectrogramReassignment.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectrogram3DComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spec3DParticleSystem.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Assets\VeniceSunsetHdri.cpp">
-      <Filter>ParametricEqProject\Source\Assets</Filter>
+      <Filter>GhovlzDyn\Source\Assets</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\FramedFloatingScopeWindow.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\ColourRampBank.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\ColourSwatchEditor.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\PathSampleOverlay.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\RampColorPickerPanel.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\GradientStripEditor.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColourRamp\RampPresetStore.cpp">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\rendered_single_channel_shadow.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin\cached_blur.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ApplyButton.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ColorValuesInput.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\HueSelector.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\OscilloscopeComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\QuadPicker.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\UIElementsList.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\TextButtonLookAndFeel2.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\SettingsButtonLookAndFeel .cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\AvgControl.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\BlockControl.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\ChannelControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\GraphControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\RefreshControl.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\ScaleXControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Categories\ScaleYControls.cpp">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Controls.cpp">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>GhovlzDyn\Source\Controls</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Controls\Separator.cpp">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>GhovlzDyn\Source\Controls</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\MelatoninBlur\melatonin_blur.cpp">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\shadows-main\source\StackShadow.cpp">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main\source</Filter>
+      <Filter>GhovlzDyn\Source\Effects\shadows-main\source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Effects\shadows-main\shadows.cpp">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main</Filter>
+      <Filter>GhovlzDyn\Source\Effects\shadows-main</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphBins.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\SpectrumBinOverlay.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphInfoLabel.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphLine.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GraphElements\GraphMaximumsLine.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GridElements\LinearScale.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GridElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GridElements\LogarithmicScale.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GridElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\GridElements\NoteScale.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GridElements</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\Graph.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Layers\Grid.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Analyser.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Visualizer\Visualizer.cpp">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ComboBoxLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\EqEditor.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\EqPresetStore.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\ModSectionComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\LinearPhaseEqEngine.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\EqProcessor.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\FrequencyResponseComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\MainComponent.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\OnOffButton1.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\BandMonitorButton.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\BandNumberButton.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\OptionBoxMenu.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectral\SpectralDynamicsProcessor.cpp">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectral\SpectralFftEngine.cpp">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\StructuralSplit\StructuralSplitEngine.cpp">
-      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+      <Filter>GhovlzDyn\Source\StructuralSplit</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Match\MatchProcessor.cpp">
-      <Filter>ParametricEqProject\Source\Match</Filter>
+      <Filter>GhovlzDyn\Source\Match</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Learn\BiquadMagnitude.cpp">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Learn\ParametricMatcher.cpp">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Learn\EqBandFitter.cpp">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Learn\EqSourceClassifier.cpp">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Learn\EqLearnController.cpp">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob1.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob2.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob3.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob4.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob5.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnob6.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobForOptionBox.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel1.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel2.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel3.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel4.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel5.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\RotaryImageKnobLookAndFeel6.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Spectrogram.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\TextButtonLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\VerticalGradientMeter.cpp">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\ScreenCaptureLite\SourceCode.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Theme.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\AnalyserDefaults.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Menu.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\SharedResources.cpp">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\AppearanceComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\SpectrumComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\FftComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ApplyButton.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ColorPicker.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ColorValuesInput.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomHeader.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomHeader2.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomScrollBar.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomSliderLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomTabBarLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomTextButton1.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\CustomTwoValueSliderLookAndFeel.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\HueSelector.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\HueSelectorOverlayComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\QuadPicker.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\QuadPickerOverlayComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\ThemeList.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\UIElementsList.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\Eyedropper.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Menu\Gui\LevelMetersComponent.cpp">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\CustomPopup.cpp">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>GhovlzDyn</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\..\..\modules\gin\3rdparty\bsdiff\bsdiff.c">
       <Filter>JUCE Modules\gin\3rdparty\bsdiff</Filter>
@@ -4798,571 +4798,571 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Source\Menu\Gui\GoniometerSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrogramSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\Spectrogram3DSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\GoniometerComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SpectrogramComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SpectrogramReassignment.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectrogram3DComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spec3DParticleSystem.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ParticleForceModule.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ParticleForceStackComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FramedFloatingScopeWindow.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\GradientRamp.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\ColourRampBank.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\PathSampleOverlay.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\RampColorPickerPanel.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\ColourSwatchEditor.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Assets\VeniceSunsetHdri.h">
-      <Filter>ParametricEqProject\Source\Assets</Filter>
+      <Filter>GhovlzDyn\Source\Assets</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\GradientStripEditor.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColourRamp\RampPresetStore.h">
-      <Filter>ParametricEqProject\Source\ColourRamp</Filter>
+      <Filter>GhovlzDyn\Source\ColourRamp</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\GradientsSettingsComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\direct2d.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\cached_shadows.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\implementations.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\internal\rendered_single_channel_shadow.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\blur_demo_component.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\blur_options.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\OscilloscopeSettingsComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralPerBandLattice.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ApplyButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandChannel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandSaturation.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ColorValuesInput.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqBand.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FactoryDefaultsState.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FilterSlope.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FilterType.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\HueSelector.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\KnobBandHighlight.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OscilloscopeComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\PhaseMode.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\QuadPicker.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RetrigButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ShapeCurveEditor.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ShapeEditorPopup.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SideCheck.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\UIElementsList.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\TextButtonLookAndFeel2.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SettingsButtonLookAndFeel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\AvgControl.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\BlockControl.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\ChannelControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\GraphControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\RefreshControl.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\ScaleXControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Categories\ScaleYControls.h">
-      <Filter>ParametricEqProject\Source\Controls\Categories</Filter>
+      <Filter>GhovlzDyn\Source\Controls\Categories</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Controls.h">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>GhovlzDyn\Source\Controls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Controls\Separator.h">
-      <Filter>ParametricEqProject\Source\Controls</Filter>
+      <Filter>GhovlzDyn\Source\Controls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\dequeue.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\float_vector_stack_blur.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\gin.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\ipp.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\ipp_vector.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\naive.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\naive_class.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\naive_with_martin_optimization.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\templated_function.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\templated_function_float.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector_class.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector_convolution.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vector_optimized.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vImage.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\implementations\vImage_macOS14.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\implementations</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\support\cached_shadow.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\support</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\support\helpers.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\support</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\support\implementations.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin\support</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin\support</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\cached_blur.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin\shadows.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur\melatonin</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur\melatonin</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\MelatoninBlur\melatonin_blur.h">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\shadows-main\source\StackShadow.h">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main\source</Filter>
+      <Filter>GhovlzDyn\Source\Effects\shadows-main\source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\shadows-main\shadows.h">
-      <Filter>ParametricEqProject\Source\Effects\shadows-main</Filter>
+      <Filter>GhovlzDyn\Source\Effects\shadows-main</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\BlurEffect.h">
-      <Filter>ParametricEqProject\Source\Effects</Filter>
+      <Filter>GhovlzDyn\Source\Effects</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Effects\RenderDropShadow.h">
-      <Filter>ParametricEqProject\Source\Effects</Filter>
+      <Filter>GhovlzDyn\Source\Effects</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphBins.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\SpectrumBinOverlay.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphInfoLabel.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphLine.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GraphElements\GraphMaximumsLine.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GraphElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GraphElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GridElements\LinearScale.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GridElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GridElements\LogarithmicScale.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GridElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\GridElements\NoteScale.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers\GridElements</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers\GridElements</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\Graph.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Layers\Grid.h">
-      <Filter>ParametricEqProject\Source\Visualizer\Layers</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer\Layers</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Analyser.h">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Visualizer\Visualizer.h">
-      <Filter>ParametricEqProject\Source\Visualizer</Filter>
+      <Filter>GhovlzDyn\Source\Visualizer</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ComboBoxLookAndFeel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqEditor.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqPresetStore.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ModSectionComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\LinearPhaseEqEngine.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\LfoMod.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ShapeMod.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandSidechain.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\EqProcessor.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\FrequencyResponseComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\MainComponent.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandMonitorButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OnOffButton1.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BandNumberButton.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\OptionBoxMenu.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\DynamicEq.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralBinning.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralBandSettings.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralDynamicsProcessor.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralFftEngine.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectral\SpectralMethod.h">
-      <Filter>ParametricEqProject\Source\Spectral</Filter>
+      <Filter>GhovlzDyn\Source\Spectral</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitSettings.h">
-      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+      <Filter>GhovlzDyn\Source\StructuralSplit</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\StructuralSplit\StructuralSplitEngine.h">
-      <Filter>ParametricEqProject\Source\StructuralSplit</Filter>
+      <Filter>GhovlzDyn\Source\StructuralSplit</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Match\MatchSettings.h">
-      <Filter>ParametricEqProject\Source\Match</Filter>
+      <Filter>GhovlzDyn\Source\Match</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Match\MatchProcessor.h">
-      <Filter>ParametricEqProject\Source\Match</Filter>
+      <Filter>GhovlzDyn\Source\Match</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Learn\EqLearnSettings.h">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Learn\BiquadMagnitude.h">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Learn\ParametricMatcher.h">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Learn\EqBandFitter.h">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Learn\EqSourceTemplates.h">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Learn\EqSourceClassifier.h">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Learn\EqLearnController.h">
-      <Filter>ParametricEqProject\Source\Learn</Filter>
+      <Filter>GhovlzDyn\Source\Learn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob1.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob2.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob3.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob4.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob5.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnob6.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobForOptionBox.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel1.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel2.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel3.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel4.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel5.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\RotaryImageKnobLookAndFeel6.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Spectrogram.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\TextButtonLookAndFeel.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\VerticalGradientMeter.h">
-      <Filter>ParametricEqProject\Source</Filter>
+      <Filter>GhovlzDyn\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\internal\SCCommon.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\internal</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\internal\ThreadManager.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\internal</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\CGFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSFrameProcessorm.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSMouseCapture.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ios\NSMouseProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\ios</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\ios</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\linux\X11FrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\linux</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\linux</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\linux\X11MouseProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\linux</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\linux</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\DXFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\GDIFrameProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\GDIHelpers.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\windows\GDIMouseProcessor.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite\windows</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite\windows</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ScreenCapture.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\ScreenCapture_C_API.h">
-      <Filter>ParametricEqProject\Source\Menu\ScreenCaptureLite</Filter>
+      <Filter>GhovlzDyn\Source\Menu\ScreenCaptureLite</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ScreenCaptureLite\SourceCode.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Theme.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\AnalyserDefaults.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Menu.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\SharedResources.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\ThemeColorRegistry.h">
-      <Filter>ParametricEqProject\Source\Menu</Filter>
+      <Filter>GhovlzDyn\Source\Menu</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\AppearanceComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\SpectrumComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\FftComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ApplyButton.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ColorPicker.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ColorValuesInput.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomHeader.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomHeader2.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomScrollBar.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomSliderLookAndFeel.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomTabBarLookAndFeel.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomTextButton1.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\CustomTwoValueSliderLookAndFeel.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\HueSelector.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\HueSelectorOverlayComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\QuadPicker.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\QuadPickerOverlayComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\ThemeList.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\Eyedropper.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\LevelMetersComponent.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Menu\Gui\UIElementsList.h">
-      <Filter>ParametricEqProject\Source\Menu\Gui</Filter>
+      <Filter>GhovlzDyn\Source\Menu\Gui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\ArrowSliderLookAndFeel.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>GhovlzDyn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\BrandWordmark.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>GhovlzDyn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\CustomPopup.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>GhovlzDyn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\TwoThumbSliderLookAndFeel.h">
-      <Filter>ParametricEqProject</Filter>
+      <Filter>GhovlzDyn</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\..\..\..\modules\gin\3rdparty\bsdiff\bsdiff.h">
       <Filter>JUCE Modules\gin\3rdparty\bsdiff</Filter>
@@ -10641,13 +10641,13 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\Source\Effects\MelatoninBlur\README.md">
-      <Filter>ParametricEqProject\Source\Effects\MelatoninBlur</Filter>
+      <Filter>GhovlzDyn\Source\Effects\MelatoninBlur</Filter>
     </None>
     <None Include="..\..\Resources\DarkKnob4_Stitched.png">
-      <Filter>ParametricEqProject\Source\Resources</Filter>
+      <Filter>GhovlzDyn\Source\Resources</Filter>
     </None>
     <None Include="..\..\Resources\pirulen.ttf">
-      <Filter>ParametricEqProject\Source\Resources</Filter>
+      <Filter>GhovlzDyn\Source\Resources</Filter>
     </None>
     <None Include="..\..\..\..\..\..\..\modules\gin\README.md">
       <Filter>JUCE Modules\gin</Filter>

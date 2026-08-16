@@ -1,6 +1,7 @@
 #include "ScopeLevelMeterModule.h"
 #include "EqProcessor.h"
 #include "Menu/SharedResources.h"
+#include "ComboBoxLookAndFeel.h"
 
 namespace
 {
@@ -359,6 +360,7 @@ void ScopeLevelMeterModule::showTapMenu()
     }
 
     juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addSectionHeader ("Level Meter Tap");
     menu.addItem (1, "Input", true, tap == Tap::input);
     menu.addItem (2, "Output", true, tap == Tap::output);

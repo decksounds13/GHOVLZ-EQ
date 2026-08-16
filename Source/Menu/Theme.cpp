@@ -158,7 +158,7 @@ void Theme::savePresetsToXML (juce::Array<Theme>& themes,
 {
     juce::File presetDirectory = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                                      .getChildFile ("Decksounds")
-                                     .getChildFile ("ParametricEq")
+                                     .getChildFile ("GhovlzDyn")
                                      .getChildFile ("Themes");
 
     if (! presetDirectory.exists())

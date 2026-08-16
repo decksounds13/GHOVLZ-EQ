@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cstdint>
 #include "../../TextButtonLookAndFeel.h"
+#include "../../PresetOverwriteConfirm.h"
 #include "../../ComboBoxLookAndFeel.h"
+#include "CustomScrollBar.h"
 #include "QuadPickerOverlayComponent.h"
 #include "../Menu.h"
 
@@ -43,8 +45,17 @@ namespace
             addAndMakeVisible (list);
             if (auto* vp = list.getViewport())
             {
-                vp->setScrollBarsShown (true, false);
-                vp->setScrollBarThickness (11);
+                vp->setScrollBarsShown (false, false);
+                vp->setScrollBarThickness (0);
+            }
+            customScrollBar = std::make_unique<CustomScrollBar> (list);
+            addAndMakeVisible (*customScrollBar);
+            if (auto* active = SharedResources::getActive())
+            {
+                const auto& pal = active->sharedColors;
+                customScrollBar->setTrackBackgroundColour (pal.menuScrollBarTrackColor1);
+                customScrollBar->setThumbBackgroundColour (pal.menuScrollBarThumbColor1);
+                customScrollBar->setThumbOutlineColour (pal.menuScrollBarOutlineColor1);
             }
             list.updateContent();
             const int sel = juce::jlimit (0, juce::jmax (0, fonts.size() - 1), selectedId - 1);
@@ -132,8 +143,23 @@ namespace
 
         void resized() override
         {
-            list.setBounds (getLocalBounds().reduced (4));
+            auto r = getLocalBounds().reduced (4);
+            constexpr int kBar = 11;
+            auto listArea = r;
+            if (customScrollBar != nullptr)
+                listArea.removeFromRight (kBar);
+            list.setBounds (listArea);
             list.updateContent();
+            if (customScrollBar != nullptr)
+            {
+                customScrollBar->updateThumbPosition();
+                const bool show = customScrollBar->isScrollable();
+                customScrollBar->setVisible (show);
+                if (show)
+                    customScrollBar->setBounds (r.removeFromRight (kBar));
+                else
+                    list.setBounds (r);
+            }
         }
 
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
@@ -169,6 +195,7 @@ namespace
         int selectedId = 1;
         juce::Component* combo = nullptr;
         juce::ListBox list;
+        std::unique_ptr<CustomScrollBar> customScrollBar;
         std::function<void (const juce::String&)> onHover;
         std::function<void (int)> onPick;
         std::function<void()> onClickAway;
@@ -335,16 +362,25 @@ AppearanceComponent::AppearanceComponent(SharedResources& resources, juce::Audio
 	overwritePresetButton.repaint();
 	overwritePresetButton.onClick = [this] {
 		int selectedPresetIndex = themeList.getSelectedRow();
-		if (selectedPresetIndex != -1) {
-			juce::String selectedPresetName = themeList.getPresetName(selectedPresetIndex);
-			themeList.overwritePreset(selectedPresetIndex, selectedPresetName);
-			popup.updateBackgroundBlur();
-			popup.setVisible(true);
-			showPopup("Preset Overwritten");
+		if (selectedPresetIndex <= 0) {
+			DBG("No user preset selected to overwrite");
+			return;
 		}
-		else {
-			DBG("No preset selected to overwrite");
-		}
+		const juce::String selectedPresetName = themeList.getPresetName(selectedPresetIndex);
+		PresetOverwriteConfirm::run (
+			"UI theme",
+			selectedPresetName,
+			true,
+			[this, selectedPresetIndex, selectedPresetName]
+			{
+				if (themeList.getSelectedRow() != selectedPresetIndex)
+					return;
+				themeList.overwritePreset(selectedPresetIndex, selectedPresetName);
+				popup.updateBackgroundBlur();
+				popup.setVisible(true);
+				showPopup("Preset Overwritten");
+			},
+			this);
 		};
 
 	addAndMakeVisible(deletePresetButton);

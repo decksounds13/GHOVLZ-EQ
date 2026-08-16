@@ -41,7 +41,7 @@ juce::File RampPresetStore::getStoreFile()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
         .getChildFile ("Decksounds")
-        .getChildFile ("ParametricEq")
+        .getChildFile ("GhovlzDyn")
         .getChildFile ("ramp_presets.xml");
 }
 
@@ -143,18 +143,37 @@ void RampPresetStore::seedFactoryPresets()
     }
 }
 
-bool RampPresetStore::savePreset (juce::String name, const GradientRamp& ramp)
+juce::String RampPresetStore::resolvedUserName (juce::String name) const
 {
     name = name.trim();
-    if (name.isEmpty() || ramp.stops.size() < 2)
-        return false;
+    if (name.isEmpty())
+        return {};
 
     for (const auto& p : presets)
         if (p.isFactory && p.name.equalsIgnoreCase (name))
-        {
-            name << " User";
-            break;
-        }
+            return name + " User";
+
+    return name;
+}
+
+bool RampPresetStore::containsUserName (juce::String name) const
+{
+    name = resolvedUserName (std::move (name));
+    if (name.isEmpty())
+        return false;
+
+    for (const auto& p : presets)
+        if (! p.isFactory && p.name.equalsIgnoreCase (name))
+            return true;
+
+    return false;
+}
+
+bool RampPresetStore::savePreset (juce::String name, const GradientRamp& ramp)
+{
+    name = resolvedUserName (std::move (name));
+    if (name.isEmpty() || ramp.stops.size() < 2)
+        return false;
 
     for (auto& p : presets)
     {

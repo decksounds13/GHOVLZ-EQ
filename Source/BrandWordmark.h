@@ -11,13 +11,13 @@ public:
     /** Hero product name painted at full brand weight. */
     static juce::String getBrandText()
     {
-        return "GHOVLZ! EQ";
+        return "GHOVLZ! DYN";
     }
 
     /** Secondary product framing beside the hero brand (plain ASCII). */
     static juce::String getSideCheckTagText()
     {
-        return "with SideCheck(TM)";
+        return "Multiband Dynamics";
     }
 
     /** Same as getSideCheckTagText() - kept for call sites that used the ASCII path. */

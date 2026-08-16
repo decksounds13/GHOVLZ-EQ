@@ -23,7 +23,7 @@ namespace
             + "\",\"data\":" + dataJson + ",\"timestamp\":"
             + juce::String ((juce::int64) juce::Time::currentTimeMillis()) + "}\n";
         // Absolute path - DAW CWD is unreliable for relative logs.
-        juce::File ("C:/Users/jerem/Desktop/DecksoundsParametricEq/ParametricEqProject/debug-70daa9.log")
+        juce::File ("C:/Users/jerem/Desktop/Decksounds Plugin Projects/ParametricEqProject/debug-70daa9.log")
             .appendText (line, false, false);
         juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
             .getChildFile ("debug-70daa9.log")

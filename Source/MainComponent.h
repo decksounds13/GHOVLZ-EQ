@@ -93,6 +93,12 @@ public:
     void setScopeMode (bool shouldEnable, bool notifyPrefs = true);
     bool isScopeMode() const noexcept { return scopeModeEnabled; }
 
+    /** DYN product: hide Osc / Gon / Spec chrome and compact overlays. Logic stays. */
+    void setDynShellMode (bool shouldEnable);
+    bool isDynShellMode() const noexcept { return dynShellMode; }
+    /** When dyn shell is on, MainComponent owns the top trim; FRC starts below this. */
+    void setDynTopTrimHeight (int h) noexcept { dynTopTrimH = juce::jmax (0, h); }
+
     /** Scope arrange: false = 2x2 quad, true = side-by-side strip (EQ graph hidden). */
     void setScopeStripLayout (bool shouldUseStrip, bool notifyPrefs = true);
     bool isScopeStripLayout() const noexcept { return scopeStripLayout; }
@@ -1150,6 +1156,9 @@ private:
 
     bool ecoEnabled = false;
     bool scopeModeEnabled = false;
+    bool dynShellMode = false;
+    int dynTopTrimH = 0;
+    juce::Rectangle<int> dynInMeterWell, dynOutMeterWell;
     /** false = 2x2 quad (when N==4) or grid; true = horizontal strip (EQ graph hidden). */
     bool scopeStripLayout = false;
     std::vector<ScopeModuleId> scopeEnabledOrder = ScopeModules::defaultEnabledOrder();

@@ -46,12 +46,15 @@ private:
         void styleToggle (juce::ToggleButton& toggle);
         void styleSlider (juce::Slider& slider);
         void styleSectionLabel (juce::Label& label);
+        void styleSaveDefaultButton (juce::TextButton& button);
+        void saveAnalyserDefaults();
 
         SharedResources& sharedResources;
         juce::AudioProcessorValueTreeState& treeState;
         ColourRampBank& colourRamps;
 
         juce::Label titleLabel;
+        juce::TextButton saveDefaultButton { "Save Default" };
 
         juce::Label dotSizeLabel;
         juce::Slider dotSizeSlider;

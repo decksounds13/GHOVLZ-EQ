@@ -21,6 +21,9 @@
 #include "ComboBoxLookAndFeel.h"
 #include "Menu/SharedResources.h"
 #include "GraphOverlayButtonLookAndFeel.h"
+#include "Dyn/DynFaceplate.h"
+#include "Dyn/TransferCurveComponent.h"
+#include "OscilloscopeComponent.h"
 
 // Forward declaration
 class MainComponent;
@@ -139,9 +142,15 @@ private:
     void layoutBrandWordmark (int outClusterLeftX);
     void layoutHelpTooltipsButton();
     void layoutPhaseModeCombo();
+    void layoutDetectModeCombo();
+    void layoutDynOversampleCombo();
+    void layoutDynLearnButton();
+    void showDynOsRealtimeMenu();
+    void showDynOsOfflineMenu();
     void layoutSideCheckButton();
     void layoutScopeModeButton();
     void showSideCheckHpLpSlopeMenu (bool forHp);
+    void showSideCheckMethodMenu();
     void showAutoGainModeMenu();
     void updateSideCheckAmountVisibility();
     void updateSideCheckSpeedButtonText();
@@ -158,6 +167,8 @@ private:
     /** Faceplate knob section height — same as mod strip when expanded. */
     int getFaceplateHeightForWidth (int width) const;
     int getBottomTrimHeight() const;
+    /** Chrome strip between the analyser and the knob / All-mode modules. */
+    int getMidTrimHeight() const;
     /** Extra editor height for the piano strip (0 when hidden). Kept out of the plot via getPlotHeight(). */
     int getPianoWindowExtra() const noexcept;
     /** Total editor height for expanded (non-compact) layout, including piano when open. */
@@ -209,7 +220,7 @@ private:
 
     // Output gain (faceplate, expanded mode)
     RotaryImageKnob3 outputGainKnob;
-    /** Faceplate Auto Gain with right-click RMS / LUFS (same as Settings - Loudness). */
+    /** Faceplate Auto Gain. Left click toggles. Right click: Multiband or Global. */
     class AutoGainButton : public juce::TextButton
     {
     public:
@@ -230,7 +241,23 @@ private:
         }
     };
     AutoGainButton autoGainButton;
-    juce::TextButton sideCheckButton { "SideCheck" };
+    class SideCheckChromeButton : public juce::TextButton
+    {
+    public:
+        SideCheckChromeButton() : juce::TextButton ("SideCheck") {}
+        std::function<void()> onPopupMenu;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+            {
+                if (onPopupMenu != nullptr)
+                    onPopupMenu();
+                return;
+            }
+            juce::TextButton::mouseDown (e);
+        }
+    };
+    SideCheckChromeButton sideCheckButton;
 
     /** TextButton with right-click Pre/Post menu for Scope mode. */
     class ScopeModeButton : public juce::TextButton
@@ -472,6 +499,74 @@ private:
 
     /** Bottom chrome: Minimum Phase / Linear Phase processing mode. */
     ParamChoiceButton phaseModeCombo;
+    /** Bottom chrome: Peak / RMS detector. */
+    ParamChoiceButton detectModeCombo;
+
+    /** Top-trim realtime OS. Right-click sets offline bounce OS. */
+    class DynOsButton : public juce::Component, public juce::SettableTooltipClient
+    {
+    public:
+        std::function<void()> onLeftClick;
+        std::function<void()> onRightClick;
+        juce::String text { "OS Off" };
+        juce::Colour chromeFill, chromeInk;
+        bool useChrome = false;
+
+        void setChromeColours (juce::Colour fill, juce::Colour ink)
+        {
+            chromeFill = fill;
+            chromeInk = ink;
+            useChrome = true;
+            repaint();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds().toFloat();
+            auto fill = useChrome ? chromeFill : juce::Colour::fromRGB (40, 34, 26);
+            auto ink = useChrome ? chromeInk : juce::Colours::whitesmoke;
+            GraphOverlayButtonLookAndFeel::paintChromeButton (g, bounds, fill,
+                                                              isMouseOver(), isMouseButtonDown(),
+                                                              GraphOverlayButtonLookAndFeel::cornerRadius());
+            g.setColour (ink.withAlpha (0.95f));
+            g.setFont (SharedResources::uiFont (13.0f));
+            g.drawText (text, getLocalBounds().reduced (6, 0).withTrimmedRight (14),
+                        juce::Justification::centredLeft, false);
+            juce::Path arrow;
+            const float cx = (float) getWidth() - 8.0f;
+            const float cy = (float) getHeight() * 0.5f;
+            arrow.addTriangle (cx - 3.5f, cy - 2.0f, cx + 3.5f, cy - 2.0f, cx, cy + 3.0f);
+            g.fillPath (arrow);
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+            {
+                if (onRightClick) onRightClick();
+                return;
+            }
+            if (onLeftClick) onLeftClick();
+        }
+    };
+
+    DynOsButton dynOsButton;
+
+    class DynLearnButton : public juce::TextButton
+    {
+    public:
+        std::function<void()> onPopupMenu;
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+            {
+                if (onPopupMenu) onPopupMenu();
+                return;
+            }
+            juce::TextButton::mouseDown (e);
+        }
+    };
+    DynLearnButton dynLearnButton;
 
     bool isButtonUpdate = false;
 
@@ -498,7 +593,17 @@ private:
 
     juce::ComponentBoundsConstrainer resizeConstrainer;
 
-    bool uiCompact = true;
+    bool uiCompact = false;
+
+    std::unique_ptr<DynFaceplate> dynFaceplate;
+    std::unique_ptr<TransferCurveComponent> dynTransfer;
+    OscilloscopeComponent dynScope;
+    RotaryImageKnob1 dynLookaheadKnob;
+    juce::Label dynLookaheadLabel;
+    juce::Label dynOutputLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> dynLookaheadAt;
+    bool uiPrefsReady = false;
+    bool restoringEditorSize = false;
     int savedEditorWidth = designWidth;
     int savedEditorHeight = designHeight;
     /** Captures editor size when entering Scope so strip/quad can restore it on exit. */

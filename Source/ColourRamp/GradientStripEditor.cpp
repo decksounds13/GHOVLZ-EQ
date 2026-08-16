@@ -3,6 +3,7 @@
 #include "RampPresetPicker.h"
 #include "ColourRampBank.h"
 #include "../ComboBoxLookAndFeel.h"
+#include "../PresetOverwriteConfirm.h"
 #include "../GraphOverlayButtonLookAndFeel.h"
 #include "../MainComponent.h"
 
@@ -485,8 +486,19 @@ void GradientStripEditor::savePresetClicked()
                 auto name = aw->getTextEditorContents ("name").trim();
                 if (name.isEmpty())
                     name = "Ramp";
-                safe->presets->savePreset (name, *safe->ramp);
-                safe->syncPresetField();
+                const auto resolved = safe->presets->resolvedUserName (name);
+                PresetOverwriteConfirm::run (
+                    "ramp preset",
+                    resolved,
+                    safe->presets->containsUserName (resolved),
+                    [safe, resolved]
+                    {
+                        if (safe == nullptr || safe->presets == nullptr || safe->ramp == nullptr)
+                            return;
+                        safe->presets->savePreset (resolved, *safe->ramp);
+                        safe->syncPresetField();
+                    },
+                    safe.getComponent());
             }
             delete aw;
         }));

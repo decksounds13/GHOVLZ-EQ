@@ -58,6 +58,7 @@ namespace ThemeColorRegistry
         { "Graph Handle Text",            "GraphHandleText",                    &SharedColors::graphHandleText },
         { "Graph Overlay Background",     "GraphOverlayBackground",             &SharedColors::graphOverlayBackground },
         { "Graph Overlay Border",         "GraphOverlayBorder",                 &SharedColors::graphOverlayBorder },
+        { "Graph Makeup Bar",             "GraphMakeupBar",                     &SharedColors::graphMakeupBar },
         { "Graph Sum Curve",              "GraphSumCurve",                      &SharedColors::graphSumCurve },
         { "Graph Sum Fill Bottom",        "GraphSumFillBottom",                 &SharedColors::graphSumFillBottom },
         { "Graph Sum Fill Top",           "GraphSumFillTop",                    &SharedColors::graphSumFillTop },
@@ -507,14 +508,11 @@ void SharedColors::enforceLegibleTextContrast() noexcept
     // Option box + combo / graph-top UI menus (PluginMenuTheme + PopupMenu LAF).
     fix (optionText, optionBackground);
     fix (optionText, optionBackground.darker (0.35f));
-    // Dropdown field must sit off the Settings wash, then ink vs that field
-    // and vs Menu Background / Background 2 (the page the list sits on).
+    // Field chip can sit off the Settings wash. Do not bake Menu Background 1/2
+    // into Option Combo Text — that forced dropdown items to white after dice.
     optionComboBackground = nudgeFillAwayFromBackground (
         optionComboBackground.withAlpha (1.0f), menuBg, minRatio);
-    optionComboText = ensureTextOnBackgrounds (
-        optionComboText,
-        { optionComboBackground, menuBackgroundGradientColor1, menuBackgroundGradientColor2, menuBg },
-        minRatio);
+    fix (optionComboText, optionComboBackground);
 
     // Mod panel: full strip gradient + brighter button faces + column cards.
     fix (modText, modBackground);

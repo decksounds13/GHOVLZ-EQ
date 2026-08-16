@@ -197,21 +197,60 @@ namespace KnobTheme
     }
 
     /**
+        Hover / drag value chip drawn in the knob's paint (not a Slider text box).
+        Sized to the full string so it never ellipsizes; hidden when the mouse leaves.
+    */
+    inline void drawHoverValuePopup (juce::Graphics& g, juce::Slider& slider, SharedResources* themeColors) noexcept
+    {
+        if (! slider.isMouseOverOrDragging())
+            return;
+
+        const auto& c = colors (themeColors);
+        const auto text = slider.getTextFromValue (slider.getValue());
+        if (text.isEmpty())
+            return;
+
+        const auto font = SharedResources::uiFont (12.5f);
+        juce::GlyphArrangement ga;
+        ga.addLineOfText (font, text, 0.0f, 0.0f);
+        const float tw = ga.getBoundingBox (0, ga.getNumGlyphs(), true).getWidth();
+        const float boxW = tw + 14.0f;
+        const float boxH = 18.0f;
+        const float x = ((float) slider.getWidth() - boxW) * 0.5f;
+        const float y = (float) slider.getHeight() - boxH - 1.0f;
+        const auto r = juce::Rectangle<float> (x, y, boxW, boxH);
+
+        g.setColour (c.knobPopupBackground.withAlpha (juce::jmax (0.82f, c.knobPopupBackground.getFloatAlpha())));
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (c.knobPopupText.withAlpha (0.28f));
+        g.drawRoundedRectangle (r, 3.0f, 1.0f);
+        g.setFont (font);
+        g.setColour (c.knobPopupText);
+        g.drawText (text, r.toNearestInt(), juce::Justification::centred, false);
+    }
+
+    /**
         Size the slider value text box to the full plain numeric string (never "...").
-        Call whenever the value popup is shown or the value changes while shown.
+        Prefer drawHoverValuePopup for rotary knobs so the chip is not clipped to the knob.
     */
     inline void showValueTextBox (juce::Slider& slider, bool show, SharedResources* themeColors) noexcept
     {
+        if (! show)
+        {
+            slider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+            return;
+        }
+
         const auto& c = colors (themeColors);
         const auto text = slider.getTextFromValue (slider.getValue());
-        // Match typical Slider text-box face; measure full string + padding.
-        const juce::Font font (juce::FontOptions (12.5f));
-        const float tw = juce::GlyphArrangement::getStringWidth (font, text);
-        // Wide enough for e.g. "20000 Hz", "-24.0 dB", "1000.0 ms" — never clamp to tiny knob width.
-        const int boxW = juce::jlimit (44, 100, (int) std::ceil (tw) + 14);
+        const auto font = SharedResources::uiFont (12.5f);
+        juce::GlyphArrangement ga;
+        ga.addLineOfText (font, text, 0.0f, 0.0f);
+        const float tw = ga.getBoundingBox (0, ga.getNumGlyphs(), true).getWidth();
+        const int boxW = juce::jmax (44, (int) std::ceil (tw) + 14);
         const int boxH = 18;
         slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, boxW, boxH);
-        applyValuePopupColours (slider, show, c);
+        applyValuePopupColours (slider, true, c);
 
         for (int i = 0; i < slider.getNumChildComponents(); ++i)
         {

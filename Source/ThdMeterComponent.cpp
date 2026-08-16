@@ -1,4 +1,5 @@
 #include "ThdMeterComponent.h"
+#include "ComboBoxLookAndFeel.h"
 #include <cmath>
 
 namespace
@@ -374,6 +375,7 @@ void ThdMeterComponent::mouseDoubleClick (const juce::MouseEvent&)
 void ThdMeterComponent::showContextMenu()
 {
     juce::PopupMenu m;
+    m.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     const auto mode = currentMode();
     m.addItem (1, "Broadband", true, mode == DisplayMode::broadband);
     m.addItem (2, "Multiband", true, mode == DisplayMode::multiband);

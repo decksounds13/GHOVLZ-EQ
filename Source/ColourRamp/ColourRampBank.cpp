@@ -393,7 +393,7 @@ juce::File ColourRampBank::getStoreFile()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
         .getChildFile ("Decksounds")
-        .getChildFile ("ParametricEq")
+        .getChildFile ("GhovlzDyn")
         .getChildFile ("colour_ramps.xml");
 }
 

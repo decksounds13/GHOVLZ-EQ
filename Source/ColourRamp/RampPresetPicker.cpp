@@ -1,4 +1,5 @@
 #include "RampPresetPicker.h"
+#include "../ComboBoxLookAndFeel.h"
 
 void paintRampSwatch (juce::Graphics& g, juce::Rectangle<float> bounds,
                       const GradientRamp& ramp, float corner)
@@ -46,7 +47,7 @@ public:
         paintRampSwatch (g, swatch, ramp, 2.5f);
 
         bounds.removeFromLeft (8.0f);
-        g.setColour (juce::Colours::whitesmoke.withAlpha (0.9f));
+        g.setColour (PluginMenuTheme::text().withAlpha (0.95f));
         g.setFont (juce::FontOptions (12.5f));
         g.drawText (name, bounds.toNearestIntEdges(), juce::Justification::centredLeft, true);
     }

@@ -869,6 +869,19 @@ int ThemeList::findPresetIndexByName (const juce::String& name) const
     return presetNames.indexOf (name);
 }
 
+int ThemeList::findPresetIndexByNameIgnoreCase (const juce::String& name) const
+{
+    const auto trimmed = name.trim();
+    if (trimmed.isEmpty())
+        return -1;
+
+    for (int i = 0; i < presetNames.size(); ++i)
+        if (presetNames[i].equalsIgnoreCase (trimmed))
+            return i;
+
+    return -1;
+}
+
 void ThemeList::resized()
 {
     needsRepainting = true;

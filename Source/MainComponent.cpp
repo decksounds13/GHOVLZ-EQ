@@ -11,6 +11,7 @@
 #include "ComboBoxLookAndFeel.h"
 #include "EqPresetStore.h"
 #include "ModuleLookPresets.h"
+#include "PresetOverwriteConfirm.h"
 #include "ScopePaneChrome.h"
 #include "Menu/AnalyserDefaults.h"
 #include "Menu/Gui/ThemeList.h"
@@ -44,6 +45,110 @@ namespace
 
         const int code = key.getKeyCode();
         return code == 's' || code == 'S';
+    }
+
+    /** Dice-menu stay-open row so Alt is read on the click, not after PopupMenu dismiss. */
+    class DiceStayOpenItem : public juce::PopupMenu::CustomComponent
+    {
+    public:
+        DiceStayOpenItem (juce::String textIn, bool tickedIn,
+                          std::function<bool (bool alt)> onClickIn,
+                          std::function<bool()> liveTickedIn)
+            : juce::PopupMenu::CustomComponent (false),
+              text (std::move (textIn)),
+              ticked (tickedIn),
+              onClick (std::move (onClickIn)),
+              liveTicked (std::move (liveTickedIn))
+        {
+        }
+
+        void getIdealSize (int& w, int& h) override
+        {
+            const auto font = SharedResources::uiFont (13.0f);
+            w = juce::jmax (176, (int) std::ceil (juce::GlyphArrangement::getStringWidth (font, text)) + 34);
+            h = 22;
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds().toFloat();
+            if (isItemHighlighted())
+                ComboBoxLookAndFeel::fillMenuGradient (g, bounds, PluginMenuTheme::highlight(), 3.0f);
+
+            g.setColour (isItemHighlighted() ? PluginMenuTheme::textOnHighlight()
+                                             : PluginMenuTheme::text());
+            g.setFont (SharedResources::uiFont (13.0f));
+
+            const bool showTick = liveTicked != nullptr ? liveTicked() : ticked;
+            if (showTick)
+            {
+                auto tick = bounds.removeFromLeft (16.0f).reduced (3.0f, 5.0f);
+                juce::Path p;
+                p.startNewSubPath (tick.getX(), tick.getCentreY());
+                p.lineTo (tick.getX() + tick.getWidth() * 0.35f, tick.getBottom());
+                p.lineTo (tick.getRight(), tick.getY());
+                g.strokePath (p, juce::PathStrokeType (1.6f));
+            }
+            else
+            {
+                bounds.removeFromLeft (16.0f);
+            }
+
+            g.drawText (text, bounds.toNearestInt(), juce::Justification::centredLeft, false);
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (! e.mouseWasClicked() || onClick == nullptr)
+                return;
+            ticked = onClick (e.mods.isAltDown());
+            if (auto* p = getParentComponent())
+                p->repaint();
+            else
+                repaint();
+        }
+
+    private:
+        juce::String text;
+        bool ticked = false;
+        std::function<bool (bool)> onClick;
+        std::function<bool()> liveTicked;
+    };
+
+    void applyDiceAltSoloOrToggle (bool* clicked, const std::vector<bool*>& group, bool alt)
+    {
+        if (clicked == nullptr)
+            return;
+
+        if (! alt)
+        {
+            *clicked = ! *clicked;
+            return;
+        }
+
+        bool alreadySolo = *clicked;
+        if (alreadySolo)
+        {
+            for (auto* f : group)
+            {
+                if (f != clicked && *f)
+                {
+                    alreadySolo = false;
+                    break;
+                }
+            }
+        }
+
+        if (alreadySolo)
+        {
+            for (auto* f : group)
+                *f = (f != clicked);
+        }
+        else
+        {
+            for (auto* f : group)
+                *f = (f == clicked);
+        }
     }
 }
 
@@ -1193,6 +1298,14 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
     setupAbButton (slotBButton, EqProcessor::AbSlot::B);
     setupAbButton (slotCButton, EqProcessor::AbSlot::C);
     setupAbButton (slotDButton, EqProcessor::AbSlot::D);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (bypassButton, 2);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotAButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotBButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotCButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotDButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (presetSaveButton, 2);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (uiThemeButton, 2);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (ecoButton, 2);
     syncAbButtons();
 
     // Preset chrome: â-€ | editable name | â-¼ | â-¶ | Save â€” EQ/functionality only (UI themes are separate).
@@ -1293,6 +1406,7 @@ MainComponent::MainComponent(EqProcessor& p, Analyser& analyser, juce::AudioProc
 
     // Eco â€” same Y as Bypass, X just right of Save. Disables analyser/FFT + all scopes.
     styleChromeButton (ecoButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (ecoButton, 2);
     ecoButton.setClickingTogglesState (true);
     ecoButton.setTooltip ("Eco - disables analyser, spectrum, and all scopes to save CPU. Dynamic (D) and Spectral (S) still work.");
     ecoButton.setAlwaysOnTop (true);
@@ -1889,9 +2003,17 @@ void MainComponent::applyThemeToChildComponents()
     styleChromeButton (presetNextButton);
     styleChromeButton (presetSaveButton);
     styleChromeButton (uiThemeButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (bypassButton, 2);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotAButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotBButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotCButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (slotDButton, 4);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (presetSaveButton, 2);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (uiThemeButton, 2);
     undoButton.setThemeResources (&sharedResources);
     redoButton.setThemeResources (&sharedResources);
     styleChromeButton (ecoButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (ecoButton, 2);
     styleChromeButton (oscButton);
     styleChromeButton (gonButton);
     styleChromeButton (specButton);
@@ -5300,6 +5422,49 @@ void MainComponent::setEcoMode (bool shouldEnable, bool notifyPrefs)
         editor.requestSaveUiPrefs();
 }
 
+void MainComponent::setDynShellMode (bool shouldEnable)
+{
+    dynShellMode = shouldEnable;
+    if (! dynShellMode)
+    {
+        resized();
+        return;
+    }
+
+    if (scopeModeEnabled)
+        setScopeMode (false, false);
+
+    oscButton.setToggleState (false, juce::dontSendNotification);
+    gonButton.setToggleState (false, juce::dontSendNotification);
+    specButton.setToggleState (false, juce::dontSendNotification);
+    setOscExpanded (false, false);
+    setGonExpanded (false, false);
+    setSpecExpanded (false, false);
+    setSpec3DMode (false, false);
+    oscilloscope.setEnabled (false);
+    oscilloscope.setVisible (false);
+    goniometer.setVisible (false);
+    spectrogram.setVisible (false);
+    spectrogram3D.setVisible (false);
+    oscButton.setVisible (false);
+    gonButton.setVisible (false);
+    specButton.setVisible (false);
+    oscButton.setBounds ({});
+    gonButton.setBounds ({});
+    specButton.setBounds ({});
+    hideAllScopePanes();
+
+    // Raw filmstrip — no theme multiply / tint on DYN knobs.
+    sharedResources.sharedColors.knobTint = juce::Colour::fromRGBA (255, 110, 0, 0);
+    sharedResources.sharedColors.knobMultiply = juce::Colours::white;
+
+    frequencyResponseComponent.setDynProductMode (true);
+    frequencyResponseComponent.setPianoDisplayOn (false, false);
+
+    addAndMakeVisible (frequencyResponseComponent.getUiModeButton());
+    resized();
+}
+
 void MainComponent::applyScopeMode (bool shouldEnable)
 {
     scopeModeEnabled = shouldEnable;
@@ -5481,7 +5646,15 @@ void MainComponent::showScopeArrangeMenu()
                             const auto name = awSafe->getTextEditorContents ("name").trim();
                             if (name.isEmpty())
                                 return;
-                            ScopeLayoutPresets::savePreset (captureScopeLayoutPreset (name));
+                            PresetOverwriteConfirm::run (
+                                "scope layout",
+                                name,
+                                ScopeLayoutPresets::containsName (name, isScopeStripLayout()),
+                                [this, name]
+                                {
+                                    ScopeLayoutPresets::savePreset (captureScopeLayoutPreset (name));
+                                },
+                                this);
                         }),
                     true);
                 return;
@@ -6052,8 +6225,18 @@ void MainComponent::promptSaveModuleLookPreset (ModuleLookPresets::Kind kind)
                 if (safe == nullptr || r != 1 || awSafe == nullptr)
                     return;
                 const auto name = awSafe->getTextEditorContents ("name").trim();
-                if (name.isNotEmpty())
-                    safe->saveModuleLookNamed (kind, name);
+                if (name.isEmpty())
+                    return;
+                PresetOverwriteConfirm::run (
+                    juce::String (ModuleLookPresets::kindDisplayName (kind)) + " look preset",
+                    name,
+                    ModuleLookPresets::containsName (kind, name),
+                    [safe, kind, name]
+                    {
+                        if (safe != nullptr)
+                            safe->saveModuleLookNamed (kind, name);
+                    },
+                    safe.getComponent());
             }),
         true);
 }
@@ -6513,6 +6696,9 @@ void MainComponent::applyScopePaneReorder (int fromSlot, int toSlot, bool insert
 
 void MainComponent::setScopeMode (bool shouldEnable, bool notifyPrefs)
 {
+    if (dynShellMode && shouldEnable)
+        shouldEnable = false;
+
     if (shouldEnable == scopeModeEnabled)
     {
         editor.syncScopeModeButton();
@@ -6778,7 +6964,20 @@ void MainComponent::showUiThemePopupMenu()
                         auto name = aw->getTextEditorContents ("name").trim();
                         if (name.isEmpty())
                             name = "UI Theme";
-                        themes->saveOrUpdateWithName (name);
+                        const int existing = themes->findPresetIndexByNameIgnoreCase (name);
+                        const int selected = themes->getSelectedRow();
+                        PresetOverwriteConfirm::run (
+                            "UI theme",
+                            name,
+                            existing > 0 && existing != selected,
+                            [safeThis, name]
+                            {
+                                if (safeThis == nullptr)
+                                    return;
+                                if (auto* list = safeThis->menu.getThemeList())
+                                    list->saveOrUpdateWithName (name);
+                            },
+                            safeThis.getComponent());
                     }
                 }
                 delete aw;
@@ -6953,150 +7152,81 @@ void MainComponent::runDiceRandomize()
 
 void MainComponent::showRandomizeDiceMenu()
 {
-    auto& scopes = sharedResources.sharedColors;
+    auto& s = sharedResources.sharedColors;
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
 
+    const std::vector<bool*> uiGroup {
+        &s.randomizeFaceplateMod, &s.randomizeGraphModule,
+        &s.randomizeMenuModule, &s.randomizeGraphCursorInfo
+    };
+    const std::vector<bool*> rampGroup {
+        &s.randomizeRampFftBars, &s.randomizeRampSpectrogram, &s.randomizeRampSpectrogram3D,
+        &s.randomizeRampSpectrumPreFill, &s.randomizeRampSpectrumPreCurve,
+        &s.randomizeRampSpectrumFill, &s.randomizeRampSpectrumCurve,
+        &s.randomizeRampSpectrumHoldFill, &s.randomizeRampSpectrumHoldCurve,
+        &s.randomizeRampEqCurve, &s.randomizeRampEqSumFill,
+        &s.randomizeRampEqBandCurve, &s.randomizeRampEqBandFill,
+        &s.randomizeRampLevelMeters
+    };
+
+    auto addStay = [this, &menu] (const juce::String& name, bool* flag, const std::vector<bool*>& group)
+    {
+        menu.addCustomItem (-1,
+                            std::make_unique<DiceStayOpenItem> (
+                                name, flag != nullptr && *flag,
+                                [safe = juce::Component::SafePointer<MainComponent> (this), flag, group] (bool alt) -> bool
+                                {
+                                    if (safe == nullptr || flag == nullptr)
+                                        return false;
+                                    applyDiceAltSoloOrToggle (flag, group, alt);
+                                    safe->editor.requestSaveUiPrefs();
+                                    return *flag;
+                                },
+                                [flag] { return flag != nullptr && *flag; }),
+                            nullptr, name);
+    };
+
     menu.addSectionHeader ("UI colours");
-    menu.addItem (1, "Faceplate/Mod", true, scopes.randomizeFaceplateMod);
-    menu.addItem (2, "Graph", true, scopes.randomizeGraphModule);
-    menu.addItem (3, "Menu", true, scopes.randomizeMenuModule);
-    menu.addItem (21, "Cursor Info", true, scopes.randomizeGraphCursorInfo);
+    addStay ("Faceplate/Mod", &s.randomizeFaceplateMod, uiGroup);
+    addStay ("Graph", &s.randomizeGraphModule, uiGroup);
+    addStay ("Menu", &s.randomizeMenuModule, uiGroup);
+    addStay ("Cursor Info", &s.randomizeGraphCursorInfo, uiGroup);
     menu.addSeparator();
     menu.addSectionHeader ("Colour ramps");
-    menu.addItem (4, "FFT Bars", true, scopes.randomizeRampFftBars);
-    menu.addItem (5, "Spectrogram (2D)", true, scopes.randomizeRampSpectrogram);
-    menu.addItem (6, "Spectrogram 3D", true, scopes.randomizeRampSpectrogram3D);
-    menu.addItem (14, "Pre Fill", true, scopes.randomizeRampSpectrumPreFill);
-    menu.addItem (15, "Pre Curve", true, scopes.randomizeRampSpectrumPreCurve);
-    menu.addItem (7, "Post Fill", true, scopes.randomizeRampSpectrumFill);
-    menu.addItem (12, "Post Curve", true, scopes.randomizeRampSpectrumCurve);
-    menu.addItem (16, "Hold Fill", true, scopes.randomizeRampSpectrumHoldFill);
-    menu.addItem (17, "Hold Curve", true, scopes.randomizeRampSpectrumHoldCurve);
-    menu.addItem (13, "Sum Curve", true, scopes.randomizeRampEqCurve);
-    menu.addItem (18, "Sum Fill", true, scopes.randomizeRampEqSumFill);
-    menu.addItem (19, "Band Curve", true, scopes.randomizeRampEqBandCurve);
-    menu.addItem (20, "Band Fill", true, scopes.randomizeRampEqBandFill);
-    menu.addItem (11, "Level Meters", true, scopes.randomizeRampLevelMeters);
+    addStay ("FFT Bars", &s.randomizeRampFftBars, rampGroup);
+    addStay ("Spectrogram (2D)", &s.randomizeRampSpectrogram, rampGroup);
+    addStay ("Spectrogram 3D", &s.randomizeRampSpectrogram3D, rampGroup);
+    addStay ("Pre Fill", &s.randomizeRampSpectrumPreFill, rampGroup);
+    addStay ("Pre Curve", &s.randomizeRampSpectrumPreCurve, rampGroup);
+    addStay ("Post Fill", &s.randomizeRampSpectrumFill, rampGroup);
+    addStay ("Post Curve", &s.randomizeRampSpectrumCurve, rampGroup);
+    addStay ("Hold Fill", &s.randomizeRampSpectrumHoldFill, rampGroup);
+    addStay ("Hold Curve", &s.randomizeRampSpectrumHoldCurve, rampGroup);
+    addStay ("Sum Curve", &s.randomizeRampEqCurve, rampGroup);
+    addStay ("Sum Fill", &s.randomizeRampEqSumFill, rampGroup);
+    addStay ("Band Curve", &s.randomizeRampEqBandCurve, rampGroup);
+    addStay ("Band Fill", &s.randomizeRampEqBandFill, rampGroup);
+    addStay ("Level Meters", &s.randomizeRampLevelMeters, rampGroup);
     menu.addSeparator();
     menu.addSectionHeader ("Ramp randomize mode");
-    menu.addItem (9, "Ordered gradation", true, scopes.orderedRampGradation);
-    menu.addItem (10, "Standard (independent stops)", true, ! scopes.orderedRampGradation);
+    menu.addItem (9, "Ordered gradation", true, s.orderedRampGradation);
+    menu.addItem (10, "Standard (independent stops)", true, ! s.orderedRampGradation);
     menu.addSeparator();
     menu.addItem (8, "Disable custom ramps (use schemes)");
 
-    // JUCE PopupMenu always dismisses on click - re-open after toggles so multi-select
-    // scopes stay convenient (checkmarks update, dismiss with click-away / Esc).
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&uiRandomizeButton),
                         [safe = juce::Component::SafePointer<MainComponent> (this)] (int result)
                         {
                             if (safe == nullptr || result <= 0)
                                 return;
 
-                            auto& s = safe->sharedResources.sharedColors;
-                            bool keepOpen = false;
-
-                            bool* const scopeFlags[] = {
-                                &s.randomizeFaceplateMod,
-                                &s.randomizeGraphModule,
-                                &s.randomizeMenuModule,
-                                &s.randomizeGraphCursorInfo,
-                                &s.randomizeRampFftBars,
-                                &s.randomizeRampSpectrogram,
-                                &s.randomizeRampSpectrogram3D,
-                                &s.randomizeRampSpectrumFill,
-                                &s.randomizeRampSpectrumCurve,
-                                &s.randomizeRampSpectrumPreFill,
-                                &s.randomizeRampSpectrumPreCurve,
-                                &s.randomizeRampSpectrumHoldFill,
-                                &s.randomizeRampSpectrumHoldCurve,
-                                &s.randomizeRampEqCurve,
-                                &s.randomizeRampEqSumFill,
-                                &s.randomizeRampEqBandCurve,
-                                &s.randomizeRampEqBandFill,
-                                &s.randomizeRampLevelMeters
-                            };
-
-                            auto flagForResult = [&s] (int id) -> bool*
-                            {
-                                switch (id)
-                                {
-                                    case 1:  return &s.randomizeFaceplateMod;
-                                    case 2:  return &s.randomizeGraphModule;
-                                    case 3:  return &s.randomizeMenuModule;
-                                    case 21: return &s.randomizeGraphCursorInfo;
-                                    case 4:  return &s.randomizeRampFftBars;
-                                    case 5:  return &s.randomizeRampSpectrogram;
-                                    case 6:  return &s.randomizeRampSpectrogram3D;
-                                    case 7:  return &s.randomizeRampSpectrumFill;
-                                    case 11: return &s.randomizeRampLevelMeters;
-                                    case 12: return &s.randomizeRampSpectrumCurve;
-                                    case 13: return &s.randomizeRampEqCurve;
-                                    case 14: return &s.randomizeRampSpectrumPreFill;
-                                    case 15: return &s.randomizeRampSpectrumPreCurve;
-                                    case 16: return &s.randomizeRampSpectrumHoldFill;
-                                    case 17: return &s.randomizeRampSpectrumHoldCurve;
-                                    case 18: return &s.randomizeRampEqSumFill;
-                                    case 19: return &s.randomizeRampEqBandCurve;
-                                    case 20: return &s.randomizeRampEqBandFill;
-                                    default: return nullptr;
-                                }
-                            };
-
-                            const bool altSolo = juce::ModifierKeys::getCurrentModifiers().isAltDown()
-                                || juce::ModifierKeys::getCurrentModifiersRealtime().isAltDown();
-
-                            if (auto* flag = flagForResult (result))
-                            {
-                                if (altSolo)
-                                {
-                                    // First Alt-click: solo this item. Second Alt-click on the
-                                    // already-soloed item: invert (this off, everything else on).
-                                    bool alreadySolo = *flag;
-                                    if (alreadySolo)
-                                    {
-                                        for (auto* f : scopeFlags)
-                                        {
-                                            if (f != flag && *f)
-                                            {
-                                                alreadySolo = false;
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    if (alreadySolo)
-                                    {
-                                        for (auto* f : scopeFlags)
-                                            *f = (f != flag);
-                                    }
-                                    else
-                                    {
-                                        for (auto* f : scopeFlags)
-                                            *f = (f == flag);
-                                    }
-                                }
-                                else
-                                {
-                                    *flag = ! *flag;
-                                }
-                                keepOpen = true;
-                            }
-                            else if (result == 8) safe->disableCustomColourRamps();
-                            else if (result == 9)  { safe->setOrderedRampGradation (true, true); keepOpen = true; }
-                            else if (result == 10) { safe->setOrderedRampGradation (false, true); keepOpen = true; }
-
-                            if (flagForResult (result) != nullptr)
-                                safe->editor.requestSaveUiPrefs();
-
-                            if (keepOpen)
-                            {
-                                juce::MessageManager::callAsync ([safe]
-                                {
-                                    if (safe != nullptr)
-                                        safe->showRandomizeDiceMenu();
-                                });
-                            }
+                            if (result == 8)
+                                safe->disableCustomColourRamps();
+                            else if (result == 9)
+                                safe->setOrderedRampGradation (true, true);
+                            else if (result == 10)
+                                safe->setOrderedRampGradation (false, true);
                         });
 }
 
@@ -7136,8 +7266,24 @@ void MainComponent::saveCurrentEqPreset()
     if (eqPresets == nullptr)
         return;
 
-    eqPresets->saveOrUpdateWithName (presetNameEditor.getText());
-    refreshPresetNameDisplay();
+    auto name = presetNameEditor.getText().trim();
+    if (name.isEmpty())
+        name = "Preset";
+
+    const int existing = eqPresets->indexOfName (name);
+    const bool colliding = existing >= 0 && existing != eqPresets->getSelectedIndex();
+    PresetOverwriteConfirm::run (
+        "DSP preset",
+        name,
+        colliding,
+        [this, name]
+        {
+            if (eqPresets == nullptr)
+                return;
+            eqPresets->saveOrUpdateWithName (name);
+            refreshPresetNameDisplay();
+        },
+        this);
 }
 
 void MainComponent::onPresetApplied (const Theme&)
@@ -8090,16 +8236,17 @@ void MainComponent::layoutPresetChrome (float scale)
     presetSaveButton.setVisible (true);
 
     const int chromeH = px (28.0f);
-    const int chromeY = px (6.0f);
+    const int chromeY = dynShellMode ? juce::jmax (1, (dynTopTrimH - chromeH) / 2) : px (6.0f);
     const int gap = px (4.0f);
     const int navW = px (22.0f);
     const int menuW = px (22.0f);
     const int nameW = px (138.0f);
     const int saveW = px (52.0f);
-    const int barH = px (24.0f);
+    const int barH = dynShellMode ? juce::jmin (chromeH, px (22.0f)) : px (24.0f);
     const int totalW = navW + gap + nameW + menuW + gap + navW + gap + saveW;
 
-    int barY = chromeY + chromeH + px (2.0f);
+    int barY = dynShellMode ? (chromeY + (chromeH - barH) / 2)
+                            : (chromeY + chromeH + px (2.0f));
 
     // Compact: logo is hosted on this component at the top â€” sit directly under it.
     if (hostedWordmark != nullptr
@@ -8124,7 +8271,42 @@ void MainComponent::layoutPresetChrome (float scale)
 
 void MainComponent::paint(juce::Graphics& g)
 {
-    g.fillAll (sharedResources.sharedColors.pluginBackground);
+    const auto& pal = sharedResources.sharedColors;
+    g.fillAll (pal.pluginBackground);
+
+    if (dynShellMode && dynTopTrimH > 0)
+    {
+        juce::ColourGradient chromeGrad (pal.pluginButtonBackground,
+            juce::Point<float> ((float) getWidth() * 0.5f, 0.0f),
+            pal.pluginBackground,
+            juce::Point<float> ((float) getWidth(), (float) getHeight()),
+            true);
+        g.setGradientFill (chromeGrad);
+        g.fillRect (0, 0, getWidth(), dynTopTrimH);
+        g.setColour (pal.pluginBackground);
+        g.drawLine (0.0f, (float) dynTopTrimH, (float) getWidth(), (float) dynTopTrimH, 4.0f);
+    }
+
+    auto paintMeterWell = [&g, &pal] (juce::Rectangle<int> well)
+    {
+        if (well.isEmpty())
+            return;
+        auto wf = well.toFloat();
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRoundedRectangle (wf, 4.0f);
+        g.setColour (pal.pluginButtonAccent.withAlpha (0.28f));
+        g.drawRoundedRectangle (wf, 4.0f, 1.0f);
+        auto trim = wf.removeFromBottom (7.0f).reduced (1.0f, 0.5f);
+        juce::ColourGradient bar (pal.pluginButtonBackground.brighter (0.08f),
+                                  trim.getX(), trim.getY(),
+                                  pal.pluginBackground, trim.getX(), trim.getBottom(), false);
+        g.setGradientFill (bar);
+        g.fillRoundedRectangle (trim, 2.0f);
+        g.setColour (pal.pluginButtonAccent.withAlpha (0.40f));
+        g.drawRoundedRectangle (trim, 2.0f, 1.0f);
+    };
+    paintMeterWell (dynInMeterWell);
+    paintMeterWell (dynOutMeterWell);
 
     // Scope card bodies behind modules (overlay only draws stroke + header on top).
     if (scopeModeEnabled)
@@ -8154,12 +8336,22 @@ void MainComponent::resized()
     const int componentHeight = parentHeight;
     const int xPos = (parentWidth - componentWidth) / 2;
 
-    frequencyResponseComponent.setBounds(xPos, FrequencyResponseyOffset, componentWidth, componentHeight);
+    const int dynTrim = dynShellMode ? dynTopTrimH : 0;
+    const int meterWidthEarly = juce::jmax (8, static_cast<int> (componentWidth * 0.015));
+    const int meterSpacingEarly = juce::jmax (3, static_cast<int> (meterWidthEarly * 0.4f));
+    const int meterGroupW = 2 * meterWidthEarly + meterSpacingEarly;
+    const int dynGutter = dynShellMode ? juce::jmax (px (34.0f), meterGroupW + px (14.0f)) : 0;
+    const int graphX = xPos + dynGutter;
+    const int graphW = juce::jmax (1, componentWidth - 2 * dynGutter);
+    const int graphY = FrequencyResponseyOffset + dynTrim;
+    const int graphH = juce::jmax (1, componentHeight - dynTrim);
+
+    frequencyResponseComponent.setBounds (graphX, graphY, graphW, graphH);
 
     auto area = getLocalBounds().reduced (px ((float) m_marginInPixels));
 
     if (! scopeModeEnabled)
-        m_visualizer.setBounds(xPos, FrequencyResponseyOffset, componentWidth, componentHeight);
+        m_visualizer.setBounds (graphX, graphY, graphW, graphH);
 
     const int controlsWidth = px (200.0f);
     const int controlsHeight = px (180.0f);
@@ -8177,16 +8369,32 @@ void MainComponent::resized()
     const int chromeRowY = editorHeight - pianoH - chromeH;
     constexpr int kChannelLabelBottomInset = 24;
     constexpr int kPadAboveChromeRow = 5;
-    const int meterY = px (20.0f) + 10;
-    const int meterBottom = chromeRowY + kChannelLabelBottomInset - kPadAboveChromeRow;
-    const int meterWidth = static_cast<int>(editorWidth * 0.015);
+    const int meterWellTrim = dynShellMode ? juce::jmax (6, px (8.0f)) : 0;
+    const int meterY = dynShellMode ? (dynTrim + 8) : (px (20.0f) + 10);
+    const int meterBottom = dynShellMode ? (editorHeight - 8 - meterWellTrim)
+                                         : (chromeRowY + kChannelLabelBottomInset - kPadAboveChromeRow);
+    const int meterWidth = juce::jmax (8, static_cast<int>(editorWidth * 0.015));
     const int meterHeight = juce::jmax (1, meterBottom - meterY);
-    const int meterSpacing = static_cast<int>(meterWidth * 0.4f);
+    const int meterSpacing = juce::jmax (3, static_cast<int>(meterWidth * 0.4f));
     const int totalMeterGroupWidth = 2 * meterWidth + meterSpacing;
     const int padding = static_cast<int>(totalMeterGroupWidth * 0.4);
-    // 2 px after the measured dB label glyphs (not the old 48 px draw box).
-    const int xLeft = frequencyResponseComponent.getDbAxisRightX() + 2;
-    const int xRight = editorWidth - padding - totalMeterGroupWidth;
+    // DYN: mirrored gutters. EQ: IN after the dB labels.
+    const int xLeft = dynShellMode
+        ? juce::jmax (6, (dynGutter - totalMeterGroupWidth) / 2)
+        : (frequencyResponseComponent.getDbAxisRightX() + 2);
+    const int xRight = dynShellMode
+        ? (editorWidth - xLeft - totalMeterGroupWidth)
+        : (editorWidth - padding - totalMeterGroupWidth);
+
+    dynInMeterWell = {};
+    dynOutMeterWell = {};
+    if (dynShellMode)
+    {
+        const int wellY = dynTrim + 4;
+        const int wellH = juce::jmax (1, editorHeight - wellY - 4);
+        dynInMeterWell  = { 3, wellY, dynGutter - 6, wellH };
+        dynOutMeterWell = { editorWidth - dynGutter + 3, wellY, dynGutter - 6, wellH };
+    }
 
     // Scope mode uses Level Meter modules only â€” hide the default edge meters.
     const bool hideEdgeMeters = scopeModeEnabled;
@@ -8194,12 +8402,23 @@ void MainComponent::resized()
     verticalGradientMeterR.setVisible (! hideEdgeMeters);
     verticalGradientMeterPostL.setVisible (! hideEdgeMeters);
     verticalGradientMeterPostR.setVisible (! hideEdgeMeters);
-    meterChannelModeButton.setVisible (! hideEdgeMeters);
+    meterChannelModeButton.setVisible (! hideEdgeMeters && ! dynShellMode);
 
     verticalGradientMeterL.setBounds(xLeft, meterY, meterWidth, meterHeight);
     verticalGradientMeterR.setBounds(xLeft + meterWidth + meterSpacing, meterY, meterWidth, meterHeight);
     verticalGradientMeterPostL.setBounds(xRight, meterY, meterWidth, meterHeight);
     verticalGradientMeterPostR.setBounds(xRight + meterWidth + meterSpacing, meterY, meterWidth, meterHeight);
+    if (dynShellMode)
+    {
+        verticalGradientMeterL.setTextChromeVisible (false);
+        verticalGradientMeterR.setTextChromeVisible (false);
+        verticalGradientMeterPostL.setTextChromeVisible (false);
+        verticalGradientMeterPostR.setTextChromeVisible (false);
+        verticalGradientMeterL.toFront (false);
+        verticalGradientMeterR.toFront (false);
+        verticalGradientMeterPostL.toFront (false);
+        verticalGradientMeterPostR.toFront (false);
+    }
 
     auto area2 = getLocalBounds().reduced (px (10.0f));
     constexpr float buttonScaleFactor = 1.2f;
@@ -8234,11 +8453,15 @@ void MainComponent::resized()
         menuToggleButton.setIdleAlpha (1.0f);
         undoButton.setVisible (true);
         redoButton.setVisible (true);
-        menuToggleButton.setBounds (area2.getRight() - settingsW, area2.getY(),
-                                    settingsW, settingsH);
+        const int settingsHUse = dynShellMode ? juce::jmin (settingsH, juce::jmax (16, dynTopTrimH - 4))
+                                              : settingsH;
+        const int settingsY = dynShellMode ? juce::jmax (1, (dynTopTrimH - settingsHUse) / 2)
+                                           : area2.getY();
+        menuToggleButton.setBounds (area2.getRight() - settingsW, settingsY,
+                                    settingsW, settingsHUse);
 
         // Undo / Redo just left of Settings (hamburger), same size as ?.
-        const int historyY = area2.getY() + (settingsH - historySize) / 2;
+        const int historyY = settingsY + (settingsHUse - historySize) / 2;
         int hx = menuToggleButton.getX() - historyGap - historySize;
         redoButton.setBounds (hx, historyY, historySize, historySize);
         hx -= historyGap + historySize;
@@ -8267,7 +8490,8 @@ void MainComponent::resized()
         constexpr int minimizeSize = 22;
         constexpr int minimizeMargin = 6;
         const int chromeH = px (28.0f);
-        const int chromeY = px ((float) minimizeMargin);
+        const int chromeY = dynShellMode ? juce::jmax (1, (dynTopTrimH - chromeH) / 2)
+                                         : px ((float) minimizeMargin);
         const int gap = px (4.0f);
         const int bypassW = px (62.0f);
         // Referencing slots â€” 40% smaller than the previous A/B chrome size.
@@ -8321,6 +8545,17 @@ void MainComponent::resized()
         else
         {
         int x = minimizeMargin + minimizeSize + gap + px (2.0f);
+        if (dynShellMode)
+        {
+            auto& expand = frequencyResponseComponent.getUiModeButton();
+            if (expand.getParentComponent() != this)
+                addAndMakeVisible (expand);
+            expand.setBounds (minimizeMargin, chromeY + (chromeH - minimizeSize) / 2,
+                              minimizeSize, minimizeSize);
+            expand.setVisible (true);
+            expand.toFront (false);
+            x = expand.getRight() + gap;
+        }
         if (analyzerOnly)
         {
             bypassButton.setVisible (false);
@@ -8369,7 +8604,7 @@ void MainComponent::resized()
     // Strip: Eco hidden; Arrange stays (line icon â†’ click for grid). Tiled: Arrange beside Eco.
     {
         const int chromeH = px (28.0f);
-        const int chromeY = px (6.0f);
+        const int chromeY = dynShellMode ? juce::jmax (1, (dynTopTrimH - chromeH) / 2) : px (6.0f);
         const int gap = px (6.0f);
         const int ecoY = chromeY + (chromeH - meterModeH) / 2;
         const bool analyzerOnly = isScopeAnalyzerOnly();
@@ -8505,6 +8740,27 @@ void MainComponent::resized()
                     spectrogram3D.toFront (false);
                 }
             }
+        }
+        else if (dynShellMode)
+        {
+            scopeArrangeOverlay.setVisible (false);
+            scopeSplitOverlay.setVisible (false);
+            oscButton.setVisible (false);
+            gonButton.setVisible (false);
+            specButton.setVisible (false);
+            oscButton.setBounds ({});
+            gonButton.setBounds ({});
+            specButton.setBounds ({});
+            oscilloscope.setVisible (false);
+            oscilloscope.setEnabled (false);
+            goniometer.setVisible (false);
+            spectrogram.setVisible (false);
+            spectrogram3D.setVisible (false);
+            oscDimmer.setVisible (false);
+            hideAllScopePanes();
+            if (! frequencyResponseComponent.isVisible())
+                frequencyResponseComponent.setVisible (true);
+            m_visualizer.setVisible (true);
         }
         else
         {

@@ -5,6 +5,7 @@
 #include "../../ModuleLookPresets.h"
 #include "../AnalyserDefaults.h"
 #include "../Menu.h"
+#include "../../Dyn/DynParams.h"
 
 namespace
 {
@@ -26,6 +27,7 @@ LevelMetersComponent::Content::Content (SharedResources& resources,
       peakRampEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
       rmsRampEditor (resources, GradientStripEditor::ModeFamily::intensity, &ramps.getPresets()),
       displaySection (resources, "meters.display", "Display", false),
+      grSection (resources, "meters.gr", "Gain Reduction", true),
       peakSection (resources, "meters.peak", "Peak", false),
       rmsSection (resources, "meters.rms", "RMS", false)
 {
@@ -89,6 +91,22 @@ LevelMetersComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (clipThresholdSlider);
     clipThresholdAttachment = std::make_unique<SliderAttachment> (
         treeState, "METER_CLIP_THRESHOLD_ID", clipThresholdSlider);
+
+    grAvgLabel.setText ("GR Averaging", juce::dontSendNotification);
+    styleLabel (grAvgLabel);
+    styleSlider (grAvgSlider);
+    grAvgSlider.setTextValueSuffix (" ms");
+    addAndMakeVisible (grAvgSlider);
+    grAvgAttachment = std::make_unique<SliderAttachment> (
+        treeState, DynParams::grAvgMsId(), grAvgSlider);
+
+    grFallLabel.setText ("GR Fall Time", juce::dontSendNotification);
+    styleLabel (grFallLabel);
+    styleSlider (grFallSlider);
+    grFallSlider.setTextValueSuffix (" ms");
+    addAndMakeVisible (grFallSlider);
+    grFallAttachment = std::make_unique<SliderAttachment> (
+        treeState, DynParams::grFallMsId(), grFallSlider);
 
     // ---- Peak ramp + glow ----
     peakRampSectionLabel.setText ("Peak Colour", juce::dontSendNotification);
@@ -220,10 +238,13 @@ LevelMetersComponent::Content::Content (SharedResources& resources,
     addAndMakeVisible (peakHoldLabel);
     addAndMakeVisible (clipHoldLabel);
     addAndMakeVisible (clipThresholdLabel);
+    addAndMakeVisible (grAvgLabel);
+    addAndMakeVisible (grFallLabel);
 
     updateGlowVisibility();
 
     wireSection (displaySection);
+    wireSection (grSection);
     wireSection (peakSection);
     wireSection (rmsSection);
 }
@@ -387,6 +408,7 @@ int LevelMetersComponent::Content::getPreferredHeight() const
     return kMeterPadY * 2
            + 24 + 8
            + displaySection.heightFor (7 * sliderRow)
+           + grSection.heightFor (2 * sliderRow)
            + peakSection.heightFor (rampBlock + peakRampEditor.getPreferredHeight()
                                     + kMeterRowGap + toggleRow + peakGlowRows * sliderRow)
            + rmsSection.heightFor (rampBlock + rmsRampEditor.getPreferredHeight()
@@ -420,6 +442,14 @@ void LevelMetersComponent::Content::resized()
         layoutSliderRow (area, peakHoldLabel, peakHoldSlider);
         layoutSliderRow (area, clipHoldLabel, clipHoldSlider);
         layoutSliderRow (area, clipThresholdLabel, clipThresholdSlider);
+    }
+
+    grSection.applyVisible ({ &grAvgLabel, &grAvgSlider, &grFallLabel, &grFallSlider });
+    grSection.placeHeader (area);
+    if (grSection.isOpen())
+    {
+        layoutSliderRow (area, grAvgLabel, grAvgSlider);
+        layoutSliderRow (area, grFallLabel, grFallSlider);
     }
 
     peakSection.applyVisible ({

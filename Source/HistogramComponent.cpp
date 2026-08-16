@@ -1,5 +1,6 @@
 #include "HistogramComponent.h"
 #include "Menu/SharedResources.h"
+#include "ComboBoxLookAndFeel.h"
 #include <algorithm>
 #include <cmath>
 
@@ -593,6 +594,7 @@ void HistogramComponent::showContextMenu()
     }
 
     juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addItem (1, "Freeze", true, loadBoolParam ("HISTOGRAM_FREEZE_ID", false));
     menu.addItem (2, "Reset Integrated");
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),

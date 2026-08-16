@@ -1,6 +1,7 @@
 #include "HistogramSettingsComponent.h"
 
 #include "../../MainComponent.h"
+#include "../../ModuleLookPresets.h"
 #include "../Menu.h"
 
 namespace
@@ -30,6 +31,10 @@ HistogramSettingsComponent::Content::Content (SharedResources& resources,
     titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
+
+    styleSaveDefaultButton (saveDefaultButton);
+    saveDefaultButton.onClick = [this] { saveAnalyserDefaults(); };
+    addAndMakeVisible (saveDefaultButton);
 
     auto setupSlider = [this] (juce::Label& label, juce::Slider& slider,
                                std::unique_ptr<SliderAttachment>& attachment,
@@ -167,6 +172,26 @@ void HistogramSettingsComponent::Content::styleToggle (juce::ToggleButton& toggl
     toggle.setColour (juce::ToggleButton::tickDisabledColourId, juce::Colours::darkgrey);
 }
 
+void HistogramSettingsComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
+{
+    button.setClickingTogglesState (false);
+    button.setColour (juce::TextButton::buttonColourId, juce::Colours::black.withAlpha (0.35f));
+    button.setColour (juce::TextButton::buttonOnColourId, juce::Colours::darkgoldenrod.withAlpha (0.75f));
+    button.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
+    button.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+}
+
+void HistogramSettingsComponent::Content::saveAnalyserDefaults()
+{
+    const bool ok = ModuleLookPresets::saveDefaultFromApvts (ModuleLookPresets::Kind::histogram, treeState);
+    saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
+    juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
+    {
+        if (safe != nullptr)
+            safe->setButtonText ("Save Default");
+    });
+}
+
 void HistogramSettingsComponent::Content::styleSlider (juce::Slider& slider)
 {
     slider.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -208,7 +233,9 @@ int HistogramSettingsComponent::Content::getPreferredHeight() const
 void HistogramSettingsComponent::Content::resized()
 {
     auto area = getLocalBounds().reduced (kPadX, kPadY);
-    titleLabel.setBounds (area.removeFromTop (24));
+    auto titleRow = area.removeFromTop (24);
+    saveDefaultButton.setBounds (titleRow.removeFromRight (108).withHeight (22).withY (titleRow.getY() + 1));
+    titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
 
     const int controlW = juce::jmin (520, area.getWidth());

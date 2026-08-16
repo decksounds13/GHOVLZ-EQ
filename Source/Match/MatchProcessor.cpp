@@ -1,4 +1,5 @@
 #include "MatchProcessor.h"
+#include <complex>
 
 namespace MatchEq
 {
@@ -30,9 +31,13 @@ void Processor::prepare (double newSampleRate, int samplesPerBlock) noexcept
     desiredSliceCount = kNumSlices;
     rebuildLattice();
     fillFactoryTarget (pink);
+    stft.prepare (sampleRate);
+    fftEnvDb.fill (kSilenceFloorDb);
+    fftGrDb.fill (0.0f);
     clearPublished();
     wasEnabled = false;
     settling = false;
+    fftMethod = false;
     prepared = true;
 }
 
@@ -50,6 +55,9 @@ void Processor::reset() noexcept
         s.sumSq = 0.0f;
     }
     clearPublished();
+    stft.reset();
+    fftEnvDb.fill (kSilenceFloorDb);
+    fftGrDb.fill (0.0f);
     wasEnabled = false;
     settling = false;
 }
@@ -443,13 +451,34 @@ void Processor::process (juce::AudioBuffer<float>& buffer,
                          float lpHz,
                          int resolutionMode,
                          int hpSlope,
-                         int lpSlope) noexcept
+                         int lpSlope,
+                         int method) noexcept
 {
     const int numCh = buffer.getNumChannels();
     const int n = buffer.getNumSamples();
     if (numCh < 1 || n <= 0 || detectL == nullptr)
     {
         clearPublished();
+        return;
+    }
+
+    const bool wantFft = (method == Method::fft);
+    if (wantFft != fftMethod)
+    {
+        fftMethod = wantFft;
+        if (fftMethod)
+        {
+            stft.prepare (sampleRate);
+            stft.reset();
+            fftEnvDb.fill (kSilenceFloorDb);
+            fftGrDb.fill (0.0f);
+        }
+    }
+
+    if (fftMethod)
+    {
+        processFft (buffer, detectL, detectR, enabled, amount, speedMode, smooth01,
+                    hpHz, lpHz, hpSlope, lpSlope);
         return;
     }
 
@@ -704,13 +733,42 @@ juce::String Processor::getUserPresetName (int index) const
     return userPresets[(size_t) index].name;
 }
 
+bool Processor::containsUserPreset (const juce::String& name) const
+{
+    const auto trimmed = name.trim();
+    if (trimmed.isEmpty())
+        return false;
+
+    for (int i = 0; i < numUserPresets; ++i)
+        if (userPresets[(size_t) i].name.equalsIgnoreCase (trimmed))
+            return true;
+
+    return false;
+}
+
 bool Processor::saveUserPreset (const juce::String& name)
 {
+    auto trimmed = name.trim();
+    if (trimmed.isEmpty())
+        trimmed = "Match curve " + juce::String (numUserPresets + 1);
+
+    for (int i = 0; i < numUserPresets; ++i)
+    {
+        if (userPresets[(size_t) i].name.equalsIgnoreCase (trimmed))
+        {
+            auto& slot = userPresets[(size_t) i];
+            slot.name = trimmed;
+            const juce::SpinLock::ScopedLockType lock (targetLock);
+            slot.targetDb = publishedTargetDb;
+            return true;
+        }
+    }
+
     if (numUserPresets >= kMaxUserPresets)
         return false;
 
     auto& slot = userPresets[(size_t) numUserPresets];
-    slot.name = name.isNotEmpty() ? name : ("Match curve " + juce::String (numUserPresets + 1));
+    slot.name = trimmed;
     {
         const juce::SpinLock::ScopedLockType lock (targetLock);
         slot.targetDb = publishedTargetDb;
@@ -735,6 +793,170 @@ bool Processor::removeUserPreset (int index)
         userPresets[(size_t) i] = userPresets[(size_t) (i + 1)];
     --numUserPresets;
     return true;
+}
+
+void Processor::processFft (juce::AudioBuffer<float>& buffer,
+                            const float* detectL, const float* detectR,
+                            bool enabled, float amount, int speedMode, float smooth01,
+                            float hpHz, float lpHz, int hpSlope, int lpSlope) noexcept
+{
+    if (! prepared)
+        prepare (sampleRate > 0.0 ? sampleRate : 48000.0, juce::jmax (blockSize, buffer.getNumSamples()));
+
+    if (! enabled && ! wasEnabled && ! settling)
+    {
+        clearPublished();
+        return;
+    }
+
+    if (enabled && ! wasEnabled)
+    {
+        stft.reset();
+        fftEnvDb.fill (kSilenceFloorDb);
+        fftGrDb.fill (0.0f);
+    }
+
+    wasEnabled = enabled;
+    settling = ! enabled;
+
+    float attackMs = 12.0f, releaseMs = 100.0f, grSmoothMs = 12.0f;
+    getBallisticsMs (speedMode, attackMs, releaseMs, grSmoothMs);
+    const float atk = DynamicEq::coeffForTimeMs (attackMs, sampleRate, OverlapAddStft::kHop);
+    const float rel = DynamicEq::coeffForTimeMs (releaseMs, sampleRate, OverlapAddStft::kHop);
+    const float grSmooth = DynamicEq::coeffForTimeMs (grSmoothMs, sampleRate, OverlapAddStft::kHop);
+    const float amountClamped = juce::jlimit (kMinAmount, kMaxAmount, amount);
+    const float spatialSmooth = juce::jlimit (kMinSmooth, kMaxSmooth, smooth01);
+
+    const bool useHp = hpHz > 1.0f;
+    const bool useLp = lpHz > 1.0f && lpHz < (float) sampleRate * 0.49f;
+    const auto hpStages = useHp
+        ? FilterSlope::makeHighpassCoeffs (sampleRate, hpHz, 0.70710678f, hpSlope)
+        : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+    const auto lpStages = useLp
+        ? FilterSlope::makeLowpassCoeffs (sampleRate, lpHz, 0.70710678f, lpSlope)
+        : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+
+    std::array<float, kNumSlices> tgt {};
+    {
+        const juce::SpinLock::ScopedLockType lock (targetLock);
+        tgt = publishedTargetDb;
+    }
+
+    std::array<float, kNumSlices> centers {};
+    const int nSl = juce::jmax (1, activeSlices);
+    for (int i = 0; i < nSl; ++i)
+        centers[(size_t) i] = slices[(size_t) i].centerHz;
+
+    stft.process (buffer, detectL, detectR,
+        [&] (float* workL, float* workR, const float* detMag, int numBins)
+        {
+            auto* cL = reinterpret_cast<std::complex<float>*> (workL);
+            auto* cR = reinterpret_cast<std::complex<float>*> (workR);
+
+            std::array<float, OverlapAddStft::kBins> measDb {};
+            std::array<float, OverlapAddStft::kBins> edgeW {};
+            float measSum = 0.0f, tgtSum = 0.0f;
+            int measN = 0;
+
+            for (int k = 1; k < numBins - 1; ++k)
+            {
+                const float f = stft.binHz (k);
+                float w = 1.0f;
+                if (useHp)
+                    w *= FilterSlope::cascadeMagnitudeAt (hpStages, (double) f, sampleRate);
+                if (useLp)
+                    w *= FilterSlope::cascadeMagnitudeAt (lpStages, (double) f, sampleRate);
+                edgeW[(size_t) k] = juce::jlimit (0.0f, 1.0f, w);
+
+                const float mag = detMag[k] * (2.0f / (float) OverlapAddStft::kSize);
+                const float level = juce::Decibels::gainToDecibels (mag, kSilenceFloorDb);
+                float& env = fftEnvDb[(size_t) k];
+                const float c = level > env ? atk : rel;
+                env = c * env + (1.0f - c) * level;
+                measDb[(size_t) k] = env;
+
+                if (edgeW[(size_t) k] > 0.02f && env > kSilenceFloorDb + 1.0f)
+                {
+                    measSum += env;
+                    tgtSum += interpTargetDb (centers.data(), tgt.data(), nSl, f);
+                    ++measN;
+                }
+            }
+
+            const float measMean = measN > 0 ? measSum / (float) measN : 0.0f;
+            const float tgtMean = measN > 0 ? tgtSum / (float) measN : 0.0f;
+
+            std::array<float, OverlapAddStft::kBins> rawGr {};
+            rawGr.fill (1.0f);
+            for (int k = 1; k < numBins - 1; ++k)
+            {
+                float targetGrDb = 0.0f;
+                if (enabled && amountClamped > 1.0e-4f
+                    && edgeW[(size_t) k] > 0.02f
+                    && measDb[(size_t) k] > kSilenceFloorDb + 1.0f)
+                {
+                    const float f = stft.binHz (k);
+                    const float tDb = interpTargetDb (centers.data(), tgt.data(), nSl, f);
+                    const float err = (measDb[(size_t) k] - measMean) - (tDb - tgtMean);
+                    targetGrDb = juce::jlimit (-kMaxGrDb, kMaxGrDb, -err * amountClamped * edgeW[(size_t) k]);
+                }
+                rawGr[(size_t) k] = juce::Decibels::decibelsToGain (targetGrDb);
+            }
+
+            if (spatialSmooth > 1.0e-4f)
+            {
+                auto blended = rawGr;
+                for (int k = 2; k < numBins - 2; ++k)
+                {
+                    const float neigh = 0.25f * (rawGr[(size_t) (k - 1)] + 2.0f * rawGr[(size_t) k]
+                                                 + rawGr[(size_t) (k + 1)]);
+                    blended[(size_t) k] = (1.0f - spatialSmooth) * rawGr[(size_t) k] + spatialSmooth * neigh;
+                }
+                rawGr = blended;
+            }
+
+            float peak = 0.0f;
+            for (int k = 0; k < numBins; ++k)
+            {
+                float& g = fftGrDb[(size_t) k];
+                const float tDb = juce::Decibels::gainToDecibels (juce::jmax (1.0e-6f, rawGr[(size_t) k]), -100.0f);
+                g = grSmooth * g + (1.0f - grSmooth) * tDb;
+                const float gLin = juce::Decibels::decibelsToGain (g);
+                if (k > 0 && k < numBins - 1)
+                {
+                    cL[k] *= gLin;
+                    cR[k] *= gLin;
+                }
+                if (std::abs (g) > std::abs (peak))
+                    peak = g;
+            }
+
+            publishedPeakGrDb.store (peak, std::memory_order_relaxed);
+
+            const int writeIdx = 1 - publishedIndex.load (std::memory_order_relaxed);
+            auto& dest = publishedCurves[(size_t) writeIdx];
+            dest.count = 0;
+            for (int i = 0; i < nSl && dest.count < kNumSlices; ++i)
+            {
+                const float f = juce::jmax (20.0f, slices[(size_t) i].centerHz);
+                const int bin = juce::jlimit (1, numBins - 2,
+                                              (int) std::lround (f * (float) OverlapAddStft::kSize
+                                                                  / (float) sampleRate));
+                dest.centerHz[(size_t) dest.count] = f;
+                dest.grDb[(size_t) dest.count] = fftGrDb[(size_t) bin];
+                ++dest.count;
+            }
+            publishedIndex.store (writeIdx, std::memory_order_release);
+        });
+
+    if (! enabled)
+    {
+        bool any = false;
+        for (float g : fftGrDb)
+            if (std::abs (g) > 0.05f) { any = true; break; }
+        if (! any)
+            settling = false;
+    }
 }
 
 } // namespace MatchEq

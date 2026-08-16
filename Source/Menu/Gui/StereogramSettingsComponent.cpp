@@ -1,6 +1,7 @@
 #include "StereogramSettingsComponent.h"
 
 #include "../../MainComponent.h"
+#include "../../ModuleLookPresets.h"
 #include "../Menu.h"
 
 namespace
@@ -29,6 +30,10 @@ StereogramSettingsComponent::Content::Content (SharedResources& resources,
     titleLabel.setFont (SharedResources::uiFont (20.0f));
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
+
+    styleSaveDefaultButton (saveDefaultButton);
+    saveDefaultButton.onClick = [this] { saveAnalyserDefaults(); };
+    addAndMakeVisible (saveDefaultButton);
 
     auto setupSlider = [this] (juce::Label& label, juce::Slider& slider,
                                std::unique_ptr<SliderAttachment>& attachment,
@@ -137,6 +142,26 @@ void StereogramSettingsComponent::Content::styleToggle (juce::ToggleButton& togg
     toggle.setColour (juce::ToggleButton::tickDisabledColourId, juce::Colours::darkgrey);
 }
 
+void StereogramSettingsComponent::Content::styleSaveDefaultButton (juce::TextButton& button)
+{
+    button.setClickingTogglesState (false);
+    button.setColour (juce::TextButton::buttonColourId, juce::Colours::black.withAlpha (0.35f));
+    button.setColour (juce::TextButton::buttonOnColourId, juce::Colours::darkgoldenrod.withAlpha (0.75f));
+    button.setColour (juce::TextButton::textColourOffId, juce::Colours::whitesmoke.withAlpha (0.9f));
+    button.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+}
+
+void StereogramSettingsComponent::Content::saveAnalyserDefaults()
+{
+    const bool ok = ModuleLookPresets::saveDefaultFromApvts (ModuleLookPresets::Kind::stereogram, treeState);
+    saveDefaultButton.setButtonText (ok ? "Saved!" : "Failed");
+    juce::Timer::callAfterDelay (1400, [safe = juce::Component::SafePointer<juce::TextButton> (&saveDefaultButton)]
+    {
+        if (safe != nullptr)
+            safe->setButtonText ("Save Default");
+    });
+}
+
 void StereogramSettingsComponent::Content::styleSlider (juce::Slider& slider)
 {
     slider.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -177,7 +202,9 @@ int StereogramSettingsComponent::Content::getPreferredHeight() const
 void StereogramSettingsComponent::Content::resized()
 {
     auto area = getLocalBounds().reduced (kPadX, kPadY);
-    titleLabel.setBounds (area.removeFromTop (24));
+    auto titleRow = area.removeFromTop (24);
+    saveDefaultButton.setBounds (titleRow.removeFromRight (108).withHeight (22).withY (titleRow.getY() + 1));
+    titleLabel.setBounds (titleRow);
     area.removeFromTop (8);
 
     const int controlW = juce::jmin (520, area.getWidth());

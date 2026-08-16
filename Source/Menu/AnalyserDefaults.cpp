@@ -4,7 +4,7 @@ juce::File AnalyserDefaults::getDefaultsFile()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
         .getChildFile ("Decksounds")
-        .getChildFile ("ParametricEq")
+        .getChildFile ("GhovlzDyn")
         .getChildFile ("analyser_defaults.xml");
 }
 
@@ -18,6 +18,8 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "LOG_ID",
         "ST_ID",
         "MAX_HOLD_ID",
+        "REFRESH_ID",
+        "AVG_ID",
         "SPECTRUM_ANALYSER_ID",
         "SPECTRUM_PRE_CURVE_ID",
         "SPECTRUM_PRE_FILL_ID",
@@ -62,6 +64,7 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "SPECTRUM_GLOW_RADIUS_ID",
         "SPECTRUM_GLOW_SPREAD_ID",
         "SPECTRUM_GLOW_OPACITY_ID",
+        "OSC_USE_RAMP_ID",
         "OSC_LINE_OPACITY_ID",
         "OSC_LINE_WIDTH_ID",
         "OSC_GLOW_ENABLE_ID",
@@ -158,7 +161,11 @@ juce::StringArray AnalyserDefaults::getParameterIds()
         "METER_RMS_GLOW_THRESHOLD_ID",
         "METER_RMS_GLOW_RADIUS_ID",
         "METER_RMS_GLOW_SPREAD_ID",
-        "METER_RMS_GLOW_OPACITY_ID"
+        "METER_RMS_GLOW_OPACITY_ID",
+        "DYN_GR_AVG_MS_ID",
+        "DYN_GR_FALL_MS_ID",
+        "LOUDNESS_TARGET_ID",
+        "targetLufsEnable"
     };
 }
 

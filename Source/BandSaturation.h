@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <juce_dsp/juce_dsp.h>
 #include <cmath>
+#include <vector>
 #include "EqBand.h"
 
 /**
@@ -21,6 +22,11 @@ namespace BandSaturation
         tube,
         diode,
         dualTriode,
+        softClip,
+        evenHarm,
+        transformer,
+        fold,
+        rectify,
         numModels
     };
 
@@ -35,7 +41,8 @@ namespace BandSaturation
 
     inline juce::StringArray getModelChoiceNames()
     {
-        return { "Tape", "Tube", "Diode", "Dual-Triode" };
+        return { "Tape", "Tube", "Diode", "Dual-Triode",
+                 "Soft Clip", "Even", "Transformer", "Fold", "Rectify" };
     }
 
     inline juce::StringArray getOversampleChoiceNames()
@@ -172,7 +179,7 @@ namespace BandSaturation
         return EqBand::extendedParamID (globalDisplay, "SatDriveDb");
     }
 
-    inline float shapeSample (float x, int model) noexcept
+    inline float shapeSample (float x, int model, float* hystState = nullptr) noexcept
     {
         x = sanitizeDriveSample (x);
 
@@ -194,6 +201,38 @@ namespace BandSaturation
                 const float a = std::tanh (x * 1.1f);
                 return std::tanh (a * 1.6f + 0.08f * a * a);
             }
+            case softClip:
+            {
+                const float y = x - (x * x * x) * (1.0f / 3.0f);
+                return juce::jlimit (-1.0f, 1.0f, y);
+            }
+            case evenHarm:
+            {
+                constexpr float b = 0.22f;
+                return (std::tanh (x + b) - std::tanh (b)) / (1.0f - std::tanh (b));
+            }
+            case transformer:
+            {
+                float odd = x - 0.28f * x * x * x;
+                if (hystState != nullptr)
+                {
+                    const float d = x - *hystState;
+                    *hystState += 0.18f * d * std::abs (d);
+                    *hystState = juce::jlimit (-1.5f, 1.5f, *hystState);
+                    odd = 0.62f * odd + 0.38f * *hystState;
+                }
+                return std::tanh (odd * 1.45f);
+            }
+            case fold:
+            {
+                const float y = std::sin (x * 3.14159265f * 1.15f);
+                return juce::jlimit (-1.0f, 1.0f, y);
+            }
+            case rectify:
+            {
+                const float y = std::abs (x) * 1.35f;
+                return y / (1.0f + y);
+            }
             case tube:
             default:
             {
@@ -214,6 +253,7 @@ namespace BandSaturation
             dryBuffer.setSize (channels, maxBlock, false, false, true);
             diffBuffer.setSize (channels, maxBlock, false, false, true);
             workBuffer.setSize (channels, maxBlock, false, false, true);
+            hyst.assign ((size_t) juce::jmax (1, channels), 0.0f);
             rebuildOversampling();
             reset();
         }
@@ -222,6 +262,7 @@ namespace BandSaturation
         {
             if (oversampling != nullptr)
                 oversampling->reset();
+            std::fill (hyst.begin(), hyst.end(), 0.0f);
         }
 
         void releaseResources()
@@ -474,11 +515,16 @@ namespace BandSaturation
         void shapeBlock (juce::dsp::AudioBlock<float>& block) noexcept
         {
             const int n = (int) block.getNumSamples();
-            for (size_t ch = 0; ch < block.getNumChannels(); ++ch)
+            const int chans = (int) block.getNumChannels();
+            if ((int) hyst.size() < chans)
+                hyst.assign ((size_t) juce::jmax (chans, 2), 0.0f);
+
+            for (int ch = 0; ch < chans; ++ch)
             {
-                auto* d = block.getChannelPointer (ch);
+                auto* d = block.getChannelPointer ((size_t) ch);
+                float* h = (model == transformer) ? &hyst[(size_t) ch] : nullptr;
                 for (int i = 0; i < n; ++i)
-                    d[i] = shapeSample (d[i], model);
+                    d[i] = shapeSample (d[i], model, h);
             }
         }
 
@@ -492,6 +538,7 @@ namespace BandSaturation
         juce::AudioBuffer<float> dryBuffer;
         juce::AudioBuffer<float> diffBuffer;
         juce::AudioBuffer<float> workBuffer;
+        std::vector<float> hyst;
         std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
     };
 }

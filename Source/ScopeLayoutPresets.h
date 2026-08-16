@@ -32,6 +32,7 @@ std::vector<ScopeLayoutPreset> loadAll();
 std::vector<ScopeLayoutPreset> loadForMode (bool stripMode);
 
 bool savePreset (const ScopeLayoutPreset& preset); // replaces same name+mode
+bool containsName (const juce::String& name, bool stripMode);
 bool deletePreset (const juce::String& name, bool stripMode);
 
 juce::String encodeFractions (const std::vector<float>& fracs);

@@ -1,5 +1,6 @@
 #include "LoudnessComponent.h"
 #include "Menu/SharedResources.h"
+#include "ComboBoxLookAndFeel.h"
 
 namespace
 {
@@ -359,6 +360,7 @@ void LoudnessComponent::showContextMenu()
     }
 
     juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     menu.addItem (1, "Reset Integrated");
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
                         [safe = juce::Component::SafePointer<LoudnessComponent> (this)] (int r)

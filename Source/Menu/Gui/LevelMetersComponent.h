@@ -92,6 +92,13 @@ private:
         juce::Slider clipThresholdSlider;
         std::unique_ptr<SliderAttachment> clipThresholdAttachment;
 
+        juce::Label grAvgLabel;
+        juce::Slider grAvgSlider;
+        std::unique_ptr<SliderAttachment> grAvgAttachment;
+        juce::Label grFallLabel;
+        juce::Slider grFallSlider;
+        std::unique_ptr<SliderAttachment> grFallAttachment;
+
         juce::Label peakRampSectionLabel;
         juce::Label peakRampLabel;
         GradientStripEditor peakRampEditor;
@@ -132,6 +139,7 @@ private:
 
         void wireSection (SettingsSection& section);
         SettingsSection displaySection;
+        SettingsSection grSection;
         SettingsSection peakSection;
         SettingsSection rmsSection;
     };

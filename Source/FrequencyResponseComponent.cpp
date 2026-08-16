@@ -16,6 +16,7 @@
 #include "EqBand.h"
 #include "LfoMod.h"
 #include "ComboBoxLookAndFeel.h"
+#include "PresetOverwriteConfirm.h"
 #include "GraphOverlayButtonLookAndFeel.h"
 #include "MusicNote.h"
 #include "Visualizer/SpectrumAnalysis.h"
@@ -159,20 +160,18 @@ namespace
 
         if (label.isNotEmpty())
         {
+            // Outline at a fixed 11 pt, then scale the path. Changing font height
+            // every pulse frame re-hints the glyph and looks like flicker.
+            const float tw = label.length() <= 1 ? 16.0f : 20.0f;
+            const float th = 16.0f;
+            juce::GlyphArrangement ga;
+            ga.addFittedText (theme.makeUiFont (11.0f, true), label,
+                              cx - tw * 0.5f, cy - th * 0.5f, tw, th,
+                              juce::Justification::centred, 1);
+            juce::Path glyph;
+            ga.createPath (glyph);
             g.setColour (ink);
-            g.setFont (theme.makeUiFont (juce::jmax (8.0f, 11.0f * scale), true));
-            if (label.length() <= 1)
-            {
-                const float textOffset = 3.5f * scale;
-                g.drawText (label, cx - textOffset, cy - textOffset,
-                            7.0f * scale, 7.0f * scale, juce::Justification::centred, false);
-            }
-            else
-            {
-                const float tw = juce::jmax (10.0f, (float) label.length() * 6.0f * scale);
-                g.drawText (label, cx - tw * 0.5f, cy - 4.0f * scale, tw, 9.0f * scale,
-                            juce::Justification::centred, false);
-            }
+            g.fillPath (glyph, juce::AffineTransform::scale (scale, scale, cx, cy));
         }
     }
 
@@ -448,6 +447,8 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
 
     styleRangeButton (eqRangeMinusButton);
     styleRangeButton (eqRangePlusButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (eqRangeMinusButton, 2);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (eqRangePlusButton, 2);
     eqRangeMinusButton.onClick = [this] { adjustEqDisplayRange (-1); };
     eqRangePlusButton.onClick = [this] { adjustEqDisplayRange (1); };
     // Plain ASCII tip: vertical EQ curve scale (not frequency octaves).
@@ -478,6 +479,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     addAndMakeVisible (uiModeButton);
 
     styleRangeButton (proportionalQButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (proportionalQButton, 2);
     proportionalQButton.setClickingTogglesState (true);
     proportionalQButton.setTooltip ("Proportional Q - tighten peaking Q as |gain| increases");
     addAndMakeVisible (proportionalQButton);
@@ -494,10 +496,13 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     addAndMakeVisible (pianoDisplayButton);
 
     styleRangeButton (matchButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (matchButton, 2);
     matchButton.setClickingTogglesState (true);
+    matchButton.addMouseListener (this, false);
     matchButton.setTooltip (
         "Match - pull the signal toward the selected target curve. "
-        "Turning on asks whether to disable active EQ bands first.");
+        "Turning on asks whether to disable active EQ bands first. "
+        "Right-click: Bandpass array or FFT.");
     matchButton.onClick = [this]
     {
         if (matchButton.getToggleState())
@@ -581,6 +586,7 @@ FrequencyResponseComponent::FrequencyResponseComponent(EqProcessor& processor)
     syncMatchChrome();
 
     styleRangeButton (learnButton);
+    GraphOverlayButtonLookAndFeel::setCaptionFontDelta (learnButton, 2);
     learnButton.setClickingTogglesState (false);
     learnButton.setTooltip (
         "Learn - capture spectrum, match a source/reference curve (Match-style), bake into editable bands (max 10). "
@@ -835,14 +841,55 @@ void FrequencyResponseComponent::applyThemeToChildControls()
 
     if (optionBoxMenu != nullptr)
         optionBoxMenu->setThemeColors (themeColors);
+
+    if (dynOverlay != nullptr)
+        dynOverlay->setThemeColors (themeColors);
 }
 
 void FrequencyResponseComponent::syncUiModeButton (bool isCompact)
 {
     uiModeButton.setExpandGlyph (isCompact);
     uiModeButton.setTooltip (isCompact ? "Expand to full UI" : "Collapse to graph-only view");
-    outputGainScrubber.setVisible (isCompact);
-    autoGainButton.setVisible (isCompact);
+    outputGainScrubber.setVisible (isCompact && ! dynProductMode);
+    autoGainButton.setVisible (isCompact && ! dynProductMode);
+    resized();
+}
+
+void FrequencyResponseComponent::setDynProductMode (bool shouldEnable)
+{
+    dynProductMode = shouldEnable;
+    if (dynProductMode && dynOverlay == nullptr)
+    {
+        dynOverlay = std::make_unique<DynSpectrumOverlay> (parameters, processor.getDynEngine());
+        dynOverlay->setThemeColors (themeColors);
+        addAndMakeVisible (*dynOverlay);
+    }
+    if (dynOverlay != nullptr)
+    {
+        dynOverlay->setThemeColors (themeColors);
+        dynOverlay->setVisible (dynProductMode);
+    }
+
+    matchButton.setVisible (! dynProductMode);
+    learnButton.setVisible (! dynProductMode);
+    learnStatusLabel.setVisible (! dynProductMode);
+    matchCurveButton.setVisible (false);
+    matchAmountLabel.setVisible (false);
+    matchAmountKnob.setVisible (false);
+    matchHpLabel.setVisible (false);
+    matchHpKnob.setVisible (false);
+    matchLpLabel.setVisible (false);
+    matchLpKnob.setVisible (false);
+    matchFreezeButton.setVisible (false);
+    modButton.setVisible (! dynProductMode);
+    proportionalQButton.setVisible (! dynProductMode);
+    eqRangeMinusButton.setVisible (! dynProductMode);
+    eqRangePlusButton.setVisible (! dynProductMode);
+    eqRangeLabel.setVisible (! dynProductMode);
+    eqScaleScrubber.setVisible (! dynProductMode);
+    pianoDisplayButton.setVisible (! dynProductMode);
+    if (dynProductMode)
+        setPianoDisplayOn (false, false);
     resized();
 }
 
@@ -948,6 +995,7 @@ FrequencyResponseComponent::~FrequencyResponseComponent()
     parameters.removeParameterListener (MatchEq::curveParamId(), this);
     parameters.removeParameterListener (MatchEq::frozenParamId(), this);
     matchFreezeButton.removeMouseListener (this);
+    matchButton.removeMouseListener (this);
     learnButton.removeMouseListener (this);
     if (learnController != nullptr)
     {
@@ -2287,42 +2335,48 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         //g.drawText(label, labelX, labelY, 50, 10, juce::Justification::left);
     }
 
-    // Draw horizontal grid lines and dB labels for the current EQ display range.
-    // Labels sit at the left edge of the window (~5px padding).
-    // Use visual range so axis ticks morph with the zoom animation.
+    // Draw horizontal grid lines and dB labels.
+    // DYN: 0 dB at the top, -60 at the bottom (same map as the overlay).
+    // EQ: +/- display range, 0 dB in the middle.
     {
-        const int rangeInt = juce::jmax (6, juce::roundToInt (getEqDisplayRangeDbVisual()));
-        const int step = (rangeInt <= 6) ? 1 : (rangeInt <= 12) ? 2 : (rangeInt <= 24) ? 3 : 6;
         const float plotH = (float) getPlotHeight();
-
-        std::vector<int> specialDbLevels;
-        for (int major : { 6, 12, 18, 24, 30, 36 })
-            if (major <= rangeInt)
-                specialDbLevels.push_back (major);
-
         constexpr float labelLeft = 5.0f;
         const float labelW = 48.0f;
-
         g.setFont (labelFont);
 
-        for (int db = -rangeInt; db <= rangeInt; db += step)
+        if (dynProductMode)
         {
-            const float y = dbToY (static_cast<float> (db), plotH);
-            const bool isSpecial = (db == 0)
-                || std::find (specialDbLevels.begin(), specialDbLevels.end(), std::abs (db)) != specialDbLevels.end();
+            for (int db = 0; db >= -60; db -= 6)
+            {
+                const float y = juce::jmap ((float) db, 0.0f, -60.0f, 0.0f, plotH);
+                const bool isSpecial = (db == 0 || db == -12 || db == -24 || db == -36 || db == -48 || db == -60);
+                const float labelY = juce::jlimit (0.0f, plotH - 14.0f, y - 7.0f);
+                g.setColour (theme.graphAxisText.withAlpha (isSpecial ? 0.82f : 0.58f));
+                g.drawText (juce::String (db) + " dB",
+                            labelLeft, labelY, labelW, 14.0f,
+                            juce::Justification::centredLeft, false);
+            }
+        }
+        else
+        {
+            const int rangeInt = juce::jmax (6, juce::roundToInt (getEqDisplayRangeDbVisual()));
+            const int step = (rangeInt <= 6) ? 1 : (rangeInt <= 12) ? 2 : (rangeInt <= 24) ? 3 : 6;
+            std::vector<int> specialDbLevels;
+            for (int major : { 6, 12, 18, 24, 30, 36 })
+                if (major <= rangeInt)
+                    specialDbLevels.push_back (major);
 
-            g.setColour (isSpecial ? specialGridLineColor : standardGridLineColor);
-            //g.drawLine(0, y, getWidth(), y, 1.0f);
-
-            const float labelY = juce::jlimit (0.0f, plotH - 14.0f, y - 7.0f);
-            g.setColour (theme.graphAxisText.withAlpha (isSpecial ? 0.82f : 0.58f));
-            g.drawText (juce::String (db) + " dB",
-                        labelLeft,
-                        labelY,
-                        labelW,
-                        14.0f,
-                        juce::Justification::centredLeft,
-                        false);
+            for (int db = -rangeInt; db <= rangeInt; db += step)
+            {
+                const float y = dbToY (static_cast<float> (db), plotH);
+                const bool isSpecial = (db == 0)
+                    || std::find (specialDbLevels.begin(), specialDbLevels.end(), std::abs (db)) != specialDbLevels.end();
+                const float labelY = juce::jlimit (0.0f, plotH - 14.0f, y - 7.0f);
+                g.setColour (theme.graphAxisText.withAlpha (isSpecial ? 0.82f : 0.58f));
+                g.drawText (juce::String (db) + " dB",
+                            labelLeft, labelY, labelW, 14.0f,
+                            juce::Justification::centredLeft, false);
+            }
         }
     }
 
@@ -2858,6 +2912,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         paintBandHandleChrome (g, cx, cy, scale, bandFill, graphBgForHandles,
                                theme.graphHandleOutline, theme.graphHandleText, theme, label);
     };
+
+    if (dynProductMode)
+        goto skipEqHandles;
 
     // Band 1 //
 
@@ -3405,6 +3462,7 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
         }
     }
 
+skipEqHandles:
     //=======================================================================================================//
     // Crosshairs //
 
@@ -3420,7 +3478,9 @@ void FrequencyResponseComponent::paint(juce::Graphics& g)
 
     // Calculate frequency and dB from mouse position
     float cursorFreq = static_cast<float>(std::pow(10.0, static_cast<double>(juce::jmap(static_cast<float>(cursorX), 0.0f, static_cast<float>(getWidth()), static_cast<float>(logMin), static_cast<float>(logMax)))));
-    float cursorDB = yToDb(cursorY, (float) getPlotHeight());
+    float cursorDB = dynProductMode
+        ? juce::jmap (cursorY, 0.0f, (float) getPlotHeight(), 0.0f, -60.0f)
+        : yToDb (cursorY, (float) getPlotHeight());
 
     // Create the numerical readout strings for cursor position
     juce::String cursorReadoutDb = juce::String(cursorDB, 2) + " dB";
@@ -4451,17 +4511,19 @@ namespace GraphCtxMenu
         std::function<bool()> liveTicked;
     };
 
-    bool paramOn (juce::AudioProcessorValueTreeState& tree, const char* id, bool fallback = true)
+    bool paramOn (juce::AudioProcessorValueTreeState& tree, const juce::String& id, bool fallback = true)
     {
         if (auto* p = tree.getRawParameterValue (id))
             return p->load() > 0.5f;
         return fallback;
     }
 
-    bool toggleBool (juce::AudioProcessorValueTreeState& tree, const char* id)
+    bool toggleBool (juce::AudioProcessorValueTreeState& tree, const juce::String& id)
     {
         if (auto* p = dynamic_cast<juce::AudioParameterBool*> (tree.getParameter (id)))
         {
+            if (tree.undoManager != nullptr)
+                tree.undoManager->beginNewTransaction ("Toggle " + id);
             const bool next = ! p->get();
             p->beginChangeGesture();
             p->setValueNotifyingHost (next ? 1.0f : 0.0f);
@@ -4478,7 +4540,7 @@ namespace GraphCtxMenu
         return 0;
     }
 
-    void setChoiceIndex (juce::AudioProcessorValueTreeState& tree, const char* id, int index)
+    void setChoiceIndex (juce::AudioProcessorValueTreeState& tree, const juce::String& id, int index)
     {
         if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (tree.getParameter (id)))
         {
@@ -4488,9 +4550,24 @@ namespace GraphCtxMenu
         }
     }
 
+    void setChoiceIndex (juce::AudioProcessorValueTreeState& tree, const char* id, int index)
+    {
+        setChoiceIndex (tree, juce::String (id), index);
+    }
+
+    void setBoolParam (juce::AudioProcessorValueTreeState& tree, const juce::String& id, bool value)
+    {
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*> (tree.getParameter (id)))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (value ? 1.0f : 0.0f);
+            p->endChangeGesture();
+        }
+    }
+
     void addBoolItem (juce::PopupMenu& menu,
                       juce::AudioProcessorValueTreeState& tree,
-                      const char* id,
+                      const juce::String& id,
                       const juce::String& name)
     {
         const bool on = paramOn (tree, id);
@@ -4498,6 +4575,161 @@ namespace GraphCtxMenu
                             std::make_unique<StayOpenItem> (name, on,
                                 [&tree, id]() -> bool { return toggleBool (tree, id); }),
                             nullptr, name);
+    }
+
+    bool isBank1InternalKey (int bandKey) noexcept
+    {
+        return bandKey >= 0 && bandKey < EqBand::kBankSize;
+    }
+
+    juce::String typeIdForHandleBand (int bandKey)
+    {
+        return isBank1InternalKey (bandKey) ? FilterType::paramIDForBandIndex (bandKey)
+                                            : FilterType::paramIDForGlobal (bandKey);
+    }
+
+    juce::String channelIdForHandleBand (int bandKey)
+    {
+        return isBank1InternalKey (bandKey) ? BandChannel::paramIDForBandIndex (bandKey)
+                                            : BandChannel::paramIDForGlobal (bandKey);
+    }
+
+    juce::String dynIdForHandleBand (int bandKey)
+    {
+        return isBank1InternalKey (bandKey) ? DynamicEq::dynamicParamIDForBandIndex (bandKey)
+                                            : DynamicEq::dynamicParamIDForGlobal (bandKey);
+    }
+
+    juce::String specIdForHandleBand (int bandKey)
+    {
+        return isBank1InternalKey (bandKey) ? SpectralDynamics::spectralParamIDForBandIndex (bandKey)
+                                            : juce::String();
+    }
+
+    juce::String satIdForHandleBand (int bandKey)
+    {
+        return isBank1InternalKey (bandKey) ? BandSaturation::satParamIDForBandIndex (bandKey)
+                                            : BandSaturation::satParamIDForGlobal (bandKey);
+    }
+
+    juce::String satModelIdForHandleBand (int bandKey)
+    {
+        return isBank1InternalKey (bandKey) ? BandSaturation::satModelParamIDForBandIndex (bandKey)
+                                            : BandSaturation::satModelParamIDForGlobal (bandKey);
+    }
+
+    juce::String satPostIdForHandleBand (int bandKey)
+    {
+        return isBank1InternalKey (bandKey) ? BandSaturation::satPostParamIDForBandIndex (bandKey)
+                                            : BandSaturation::satPostParamIDForGlobal (bandKey);
+    }
+
+    void addHandleBandModeItems (juce::PopupMenu& menu,
+                                 juce::AudioProcessorValueTreeState& tree,
+                                 int bandKey)
+    {
+        const auto typeId = typeIdForHandleBand (bandKey);
+        const int type = BandChannel::readChoiceIndex (tree, typeId);
+        const bool gainOk = FilterType::usesGain (type);
+        const bool bank1 = isBank1InternalKey (bandKey);
+
+        const auto chId = channelIdForHandleBand (bandKey);
+        const int ch = BandChannel::readChoiceIndex (tree, chId);
+        juce::PopupMenu channelMenu;
+        const auto chNames = BandChannel::getChoiceNames();
+        for (int i = 0; i < chNames.size(); ++i)
+            channelMenu.addItem (10 + i, chNames[i], true, ch == i);
+        menu.addSubMenu ("Channel", channelMenu);
+
+        const auto dynId = dynIdForHandleBand (bandKey);
+        if (dynId.isNotEmpty())
+        {
+            if (gainOk)
+                addBoolItem (menu, tree, dynId, "Dynamic");
+            else
+                menu.addItem (-1, "Dynamic", false, false);
+        }
+
+        const auto specId = specIdForHandleBand (bandKey);
+        if (bank1 && specId.isNotEmpty())
+        {
+            if (gainOk)
+                addBoolItem (menu, tree, specId, "Spectral");
+            else
+                menu.addItem (-1, "Spectral", false, false);
+        }
+
+        if (bank1)
+        {
+            const auto splitId = StructuralSplit::splitModeParamIDForBandIndex (bandKey);
+            const int split = BandChannel::readChoiceIndex (tree, splitId);
+            juce::PopupMenu splitMenu;
+            const auto splitNames = StructuralSplit::modeChoiceNames();
+            for (int i = 0; i < splitNames.size(); ++i)
+                splitMenu.addItem (20 + i, splitNames[i], true, split == i);
+            menu.addSubMenu ("Transient", splitMenu);
+        }
+
+        const auto satId = satIdForHandleBand (bandKey);
+        if (satId.isNotEmpty())
+        {
+            if (gainOk)
+                addBoolItem (menu, tree, satId, "Saturation");
+            else
+                menu.addItem (-1, "Saturation", false, false);
+
+            juce::PopupMenu types;
+            const auto modelId = satModelIdForHandleBand (bandKey);
+            const int model = BandChannel::readChoiceIndex (tree, modelId);
+            const auto modelNames = BandSaturation::getModelChoiceNames();
+            for (int i = 0; i < modelNames.size(); ++i)
+                types.addItem (30 + i, modelNames[i], gainOk, model == i);
+            menu.addSubMenu ("Types", types, gainOk);
+
+            juce::PopupMenu place;
+            const auto postId = satPostIdForHandleBand (bandKey);
+            const bool post = paramOn (tree, postId, false);
+            place.addItem (40, "Pre", gainOk, ! post);
+            place.addItem (41, "Post", gainOk, post);
+            menu.addSubMenu ("Placement", place, gainOk);
+        }
+    }
+
+    bool applyHandleBandModeResult (juce::AudioProcessorValueTreeState& tree, int bandKey, int result)
+    {
+        if (result >= 10 && result < 10 + BandChannel::numModes)
+        {
+            setChoiceIndex (tree, channelIdForHandleBand (bandKey), result - 10);
+            return true;
+        }
+
+        if (isBank1InternalKey (bandKey) && result >= 20 && result <= 22)
+        {
+            setChoiceIndex (tree, StructuralSplit::splitModeParamIDForBandIndex (bandKey), result - 20);
+            return true;
+        }
+
+        if (result >= 30 && result < 30 + BandSaturation::numModels)
+        {
+            const auto modelId = satModelIdForHandleBand (bandKey);
+            if (modelId.isNotEmpty())
+            {
+                setChoiceIndex (tree, modelId, result - 30);
+                return true;
+            }
+        }
+
+        if (result == 40 || result == 41)
+        {
+            const auto postId = satPostIdForHandleBand (bandKey);
+            if (postId.isNotEmpty())
+            {
+                setBoolParam (tree, postId, result == 41);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void addGraphDisplayItems (juce::PopupMenu& menu,
@@ -4592,6 +4824,8 @@ void FrequencyResponseComponent::showGraphContextMenu (juce::Point<int> screenPo
 
     if (hitBandInternalOrGlobal >= 0)
     {
+        GraphCtxMenu::addHandleBandModeItems (menu, parameters, hitBandInternalOrGlobal);
+        menu.addSeparator();
         menu.addItem (1, "Reset this band");
         menu.addItem (2, "Band controls");
         menu.addSeparator();
@@ -4662,6 +4896,11 @@ void FrequencyResponseComponent::showGraphContextMenu (juce::Point<int> screenPo
             else if (result == 3)
             {
                 safe->resetAllBandsToDefaults();
+            }
+            else if (hitBandInternalOrGlobal >= 0 && result >= 10 && result <= 41)
+            {
+                safe->processor.getUndoManager().beginNewTransaction ("Band mode");
+                GraphCtxMenu::applyHandleBandModeResult (safe->parameters, hitBandInternalOrGlobal, result);
             }
             else if (hitBandInternalOrGlobal < 0)
             {
@@ -5391,10 +5630,20 @@ void FrequencyResponseComponent::activateOrSelectBandAtFrequency (float frequenc
 //=======================================================================================================//
 void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
 {
+    if (dynProductMode)
+        return;
+
     if (handlePianoMouseDown (event))
         return;
 
     // Learn chrome owns its clicks - do not treat as graph handle / selection work.
+    if (event.eventComponent == &matchButton)
+    {
+        if (event.mods.isPopupMenu())
+            showMatchMethodMenu();
+        return;
+    }
+
     if (event.eventComponent == &learnButton)
     {
         if (event.mods.isPopupMenu())
@@ -5429,7 +5678,20 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
                     {
                         if (safe == nullptr || r != 1)
                             return;
-                        safe->processor.getMatchEngine().saveUserPreset (aw->getTextEditorContents ("name"));
+                        auto name = aw->getTextEditorContents ("name").trim();
+                        if (name.isEmpty())
+                            name = "Match curve";
+                        auto& engine = safe->processor.getMatchEngine();
+                        PresetOverwriteConfirm::run (
+                            "match curve",
+                            name,
+                            engine.containsUserPreset (name),
+                            [safe, name]
+                            {
+                                if (safe != nullptr)
+                                    safe->processor.getMatchEngine().saveUserPreset (name);
+                            },
+                            safe.getComponent());
                     }), true);
             });
         return;
@@ -5589,9 +5851,15 @@ void FrequencyResponseComponent::mouseDown(const juce::MouseEvent& event)
         return;
     }
 
-    // Right-click a handle: context menu (reset / controls).
+    // Right-click a handle: context menu (reset / controls / band modes).
     if (event.mods.isPopupMenu() && clickedAnyHandle && ! anyHandleDragging)
     {
+        if (preferSpectralAmount && clickedSpectralSlot >= 0)
+        {
+            showGraphContextMenu (event.getScreenPosition(), clickedSpectralSlot);
+            return;
+        }
+
         int band = -1;
         if (clickedHandle1)      band = 0;
         else if (clickedHandle2) band = 1;
@@ -7014,7 +7282,15 @@ void FrequencyResponseComponent::resized()
             optionBoxMenu->updateUiScaleFromParent();
     }
 
-    // Minimize / expand - top-left on the graph so it stays usable when the faceplate is hidden.
+    if (dynOverlay != nullptr && dynProductMode)
+    {
+        dynOverlay->setBounds (0, 0, getWidth(), getPlotHeight());
+        dynOverlay->toFront (false);
+        uiModeButton.toFront (false);
+    }
+
+    // Minimize / expand - top-left on the graph. DYN reparents this into the top trim.
+    if (! dynProductMode)
     {
         constexpr int btn = 22;
         constexpr int margin = 6;
@@ -7062,24 +7338,40 @@ void FrequencyResponseComponent::resized()
         area.removeFromBottom (marginBottom);
         auto row = area.removeFromBottom (btnH);
 
-        if (outputGainScrubber.isVisible())
+        if (dynProductMode)
+        {
+            pianoDisplayButton.setVisible (false);
+            pianoDisplayButton.setBounds ({});
+            eqScaleScrubber.setVisible (false);
+            eqScaleScrubber.setBounds ({});
+            eqRangePlusButton.setVisible (false);
+            eqRangeMinusButton.setVisible (false);
+            eqRangeLabel.setVisible (false);
+            modButton.setVisible (false);
+        }
+        else if (outputGainScrubber.isVisible())
         {
             outputGainScrubber.setBounds (row.removeFromRight (outGainW));
             row.removeFromRight (gap);
             outputGainScrubber.toFront (false);
         }
 
-        if (autoGainButton.isVisible())
+        if (! dynProductMode && autoGainButton.isVisible())
         {
             autoGainButton.setBounds (row.removeFromRight (autoGainW));
             row.removeFromRight (gap);
             autoGainButton.toFront (false);
         }
 
-        pianoDisplayButton.setBounds (row.removeFromRight (pianoW));
-        row.removeFromRight (gap);
-        pianoDisplayButton.toFront (false);
+        if (! dynProductMode)
+        {
+            pianoDisplayButton.setBounds (row.removeFromRight (pianoW));
+            row.removeFromRight (gap);
+            pianoDisplayButton.toFront (false);
+        }
 
+        if (! dynProductMode)
+        {
         eqRangePlusButton.setBounds (row.removeFromRight (btnW));
         row.removeFromRight (gap);
         eqRangeMinusButton.setBounds (row.removeFromRight (btnW));
@@ -7103,6 +7395,7 @@ void FrequencyResponseComponent::resized()
         eqRangeLabel.toFront (false);
         modButton.toFront (false);
         eqScaleScrubber.toFront (false);
+        }
     }
 
     // Match - graph bottom, left of Scope (EqEditor refreshes anchor after Scope layout).
@@ -7639,6 +7932,14 @@ void FrequencyResponseComponent::layoutMatchChrome()
 
 void FrequencyResponseComponent::syncMatchChrome()
 {
+    if (dynProductMode)
+    {
+        matchButton.setVisible (false);
+        learnButton.setVisible (false);
+        learnStatusLabel.setVisible (false);
+        return;
+    }
+
     const bool on = parameters.getRawParameterValue (MatchEq::enabledParamId()) != nullptr
                     && parameters.getRawParameterValue (MatchEq::enabledParamId())->load() > 0.5f;
     matchButton.setToggleState (on, juce::dontSendNotification);
@@ -7979,10 +8280,47 @@ void FrequencyResponseComponent::showLearnMenu()
         });
 }
 
+void FrequencyResponseComponent::showMatchMethodMenu()
+{
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (
+        parameters.getParameter (MatchEq::methodParamId()));
+    if (choice == nullptr)
+        return;
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+    menu.addSectionHeader ("Match method");
+    const auto names = MatchEq::getMethodChoiceNames();
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem (1 + i, names[i], true, choice->getIndex() == i);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&matchButton),
+        [safe = juce::Component::SafePointer<FrequencyResponseComponent> (this)] (int result)
+        {
+            if (safe == nullptr || result <= 0)
+                return;
+            if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                    safe->parameters.getParameter (MatchEq::methodParamId())))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) (result - 1)));
+                p->endChangeGesture();
+            }
+        });
+}
+
 void FrequencyResponseComponent::showMatchCurveMenu()
 {
     juce::PopupMenu menu;
     menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
+
+    const int method = MatchEq::readChoiceIndex (
+        parameters, MatchEq::methodParamId(), MatchEq::lattice, MatchEq::numMethods - 1);
+    juce::PopupMenu methodMenu;
+    const auto methodNames = MatchEq::getMethodChoiceNames();
+    for (int i = 0; i < methodNames.size(); ++i)
+        methodMenu.addItem (5 + i, methodNames[i], true, method == i);
+    menu.addSubMenu ("Method", methodMenu);
 
     const int curve = MatchEq::readChoiceIndex (
         parameters, MatchEq::curveParamId(), MatchEq::pink, MatchEq::numFactoryCurves - 1);
@@ -8048,7 +8386,13 @@ void FrequencyResponseComponent::showMatchCurveMenu()
 
             processor.getUndoManager().beginNewTransaction ("Match curve");
 
-            if (result >= 10 && result < 10 + MatchEq::numFactoryCurves)
+            if (result >= 5 && result < 5 + MatchEq::numMethods)
+            {
+                if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
+                        parameters.getParameter (MatchEq::methodParamId())))
+                    *p = result - 5;
+            }
+            else if (result >= 10 && result < 10 + MatchEq::numFactoryCurves)
             {
                 const int idx = result - 10;
                 if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (
@@ -8112,8 +8456,20 @@ void FrequencyResponseComponent::showMatchCurveMenu()
                     {
                         if (safe == nullptr || r != 1)
                             return;
-                        const auto name = aw->getTextEditorContents ("name");
-                        safe->processor.getMatchEngine().saveUserPreset (name);
+                        auto name = aw->getTextEditorContents ("name").trim();
+                        if (name.isEmpty())
+                            name = "Match curve";
+                        auto& engine = safe->processor.getMatchEngine();
+                        PresetOverwriteConfirm::run (
+                            "match curve",
+                            name,
+                            engine.containsUserPreset (name),
+                            [safe, name]
+                            {
+                                if (safe != nullptr)
+                                    safe->processor.getMatchEngine().saveUserPreset (name);
+                            },
+                            safe.getComponent());
                     }), true);
             }
             else if (result >= 100 && result < 100 + MatchEq::kMaxUserPresets)

@@ -34,11 +34,11 @@ namespace PluginMenuTheme
         return colors().optionComboHighlight;
     }
 
-    /** Primary label ink on panel background + Settings Menu wash. */
+    /** Primary label ink on the popup fill (Option Combo Text — keep hue). */
     inline juce::Colour text() noexcept
     {
         const auto& c = colors();
-        return c.dropdownTextOn (c.optionComboText, c.optionComboBackground)
+        return c.legibleTextOn (c.optionComboText, c.optionComboBackground)
             .withAlpha (0.95f);
     }
 
@@ -111,19 +111,21 @@ public:
     void applyThemeColours()
     {
         const auto& c = colors();
-        // Legible text: combo / popup ink vs field fill and Menu Background.
-        const auto comboInk = c.dropdownTextOn (c.optionComboText, c.optionComboBackground);
-        const auto hlInk = c.legibleTextOn (juce::Colours::black, c.optionComboHighlight);
+        // Popup items: Option Combo Text vs the panel only (hue survives dice).
+        const auto popupInk = PluginMenuTheme::text();
+        const auto hlInk = PluginMenuTheme::textOnHighlight();
+        // Closed Settings combo still sits on the Menu page — extra wash contrast.
+        const auto fieldInk = c.dropdownTextOn (c.optionComboText, c.optionComboBackground);
         setColour (juce::PopupMenu::backgroundColourId, c.optionComboBackground);
-        setColour (juce::PopupMenu::textColourId, comboInk);
-        setColour (juce::PopupMenu::headerTextColourId, comboInk);
+        setColour (juce::PopupMenu::textColourId, popupInk);
+        setColour (juce::PopupMenu::headerTextColourId, popupInk);
         setColour (juce::PopupMenu::highlightedBackgroundColourId, c.optionComboHighlight);
         setColour (juce::PopupMenu::highlightedTextColourId, hlInk);
         setColour (juce::ComboBox::backgroundColourId, c.optionComboBackground);
         setColour (juce::ComboBox::outlineColourId, c.optionBorder);
         setColour (juce::ComboBox::buttonColourId, c.optionComboBackground);
-        setColour (juce::ComboBox::arrowColourId, comboInk);
-        setColour (juce::ComboBox::textColourId, comboInk);
+        setColour (juce::ComboBox::arrowColourId, fieldInk);
+        setColour (juce::ComboBox::textColourId, fieldInk);
         setColour (juce::ComboBox::focusedOutlineColourId, c.optionComboHighlight);
     }
 
@@ -188,13 +190,12 @@ public:
         }
 
         const bool useHighlightInk = isHighlighted && isActive;
+        const auto rowFill = useHighlightInk ? c.optionComboHighlight : c.optionComboBackground;
         auto textColour = textColourToUse != nullptr
-                              ? c.dropdownTextOn (*textColourToUse, useHighlightInk
-                                                        ? c.optionComboHighlight
-                                                        : c.optionComboBackground)
+                              ? c.legibleTextOn (*textColourToUse, rowFill)
                               : (useHighlightInk
-                                     ? c.legibleTextOn (juce::Colours::black, c.optionComboHighlight)
-                                     : c.dropdownTextOn (c.optionComboText, c.optionComboBackground));
+                                     ? PluginMenuTheme::textOnHighlight()
+                                     : PluginMenuTheme::text());
         if (! isActive)
             textColour = textColour.withMultipliedAlpha (0.45f);
 
@@ -227,8 +228,7 @@ public:
                                                       juce::PathStrokeType::rounded));
         }
 
-        g.drawFittedText (text, textArea,
-                          juce::Justification::centredLeft, 1, 0.85f);
+        g.drawText (text, textArea, juce::Justification::centredLeft, false);
 
         if (shortcutKeyText.isNotEmpty())
         {
@@ -249,6 +249,18 @@ public:
             g.setColour (textColour.withMultipliedAlpha (0.85f));
             g.fillPath (arrow);
         }
+    }
+
+    void drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area,
+                                     const juce::String& sectionName) override
+    {
+        applyThemeColours();
+        const auto& c = colors();
+        const auto ink = c.legibleTextOn (c.optionComboText, c.optionComboBackground)
+                             .withAlpha (0.88f);
+        g.setFont (c.makeUiFont (12.0f).boldened());
+        g.setColour (ink);
+        g.drawText (sectionName, area.reduced (10, 0), juce::Justification::centredLeft, false);
     }
 
     void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
@@ -370,22 +382,28 @@ public:
     {
         auto& lf = ComboBoxLookAndFeel::sharedForPopupMenus();
         auto bounds = getLocalBounds().toFloat();
-        auto fill = lf.findColour (juce::ComboBox::backgroundColourId);
+        auto fill = useChromeColours ? chromeFill
+                                     : lf.findColour (juce::ComboBox::backgroundColourId);
+        auto ink = useChromeColours ? chromeInk
+                                    : lf.findColour (juce::ComboBox::textColourId);
+        if (auto* active = SharedResources::getActive())
+            ink = active->sharedColors.legibleTextOn (ink, fill);
+
         const float corner = GraphOverlayButtonLookAndFeel::cornerRadius();
         GraphOverlayButtonLookAndFeel::paintChromeButton (g, bounds, fill,
                                                           isMouseOver(), isMouseButtonDown(),
                                                           corner);
 
         constexpr int arrowW = 16;
-        g.setColour (lf.findColour (juce::ComboBox::textColourId));
+        g.setColour (ink.withAlpha (isEnabled() ? 0.95f : 0.40f));
         if (auto* active = SharedResources::getActive())
-            g.setFont (active->sharedColors.makeUiFont (12.0f));
+            g.setFont (active->sharedColors.makeUiFont (14.0f));
         else
-            g.setFont (juce::FontOptions (12.0f));
+            g.setFont (juce::FontOptions (14.0f));
         g.drawText (currentText,
                     getLocalBounds().reduced (6, 0).withTrimmedRight (arrowW),
                     juce::Justification::centredLeft,
-                    true);
+                    false);
 
         juce::Path arrow;
         const float cx = (float) getWidth() - (float) arrowW * 0.5f;
@@ -402,6 +420,15 @@ public:
     }
 
     void enablementChanged() override { repaint(); }
+
+    /** Match faceplate chrome (Scope / Auto Gain / ?) instead of menu combo ink. */
+    void setChromeColours (juce::Colour fill, juce::Colour ink)
+    {
+        chromeFill = fill;
+        chromeInk = ink;
+        useChromeColours = true;
+        repaint();
+    }
 
 private:
     void syncFromParameter()
@@ -450,4 +477,6 @@ private:
     juce::AudioProcessorValueTreeState& treeState;
     juce::String paramId;
     juce::String currentText;
+    juce::Colour chromeFill, chromeInk;
+    bool useChromeColours = false;
 };

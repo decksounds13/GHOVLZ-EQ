@@ -1,4 +1,5 @@
 #include "ParticleForceStackComponent.h"
+#include "../../ComboBoxLookAndFeel.h"
 #include <cmath>
 
 namespace
@@ -173,7 +174,7 @@ void ParticleForceStackComponent::showAddForceMenu()
         return;
 
     juce::PopupMenu menu;
-    menu.setLookAndFeel (&getLookAndFeel());
+    menu.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
     // Item id = (int) type + 1
     for (int t = 0; t < (int) ParticleForceType::count; ++t)
         menu.addItem (t + 1, particleForceTypeName ((ParticleForceType) t));

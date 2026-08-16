@@ -6,7 +6,7 @@ juce::File getStoreFile()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
         .getChildFile ("Decksounds")
-        .getChildFile ("ParametricEq")
+        .getChildFile ("GhovlzDyn")
         .getChildFile ("scope_layouts.xml");
 }
 
@@ -101,13 +101,26 @@ std::vector<ScopeLayoutPreset> loadForMode (bool stripMode)
     return out;
 }
 
+bool containsName (const juce::String& name, bool stripMode)
+{
+    const auto trimmed = name.trim();
+    if (trimmed.isEmpty())
+        return false;
+
+    for (const auto& p : loadForMode (stripMode))
+        if (p.name.equalsIgnoreCase (trimmed))
+            return true;
+
+    return false;
+}
+
 bool savePreset (const ScopeLayoutPreset& preset)
 {
     auto all = loadAll();
     bool replaced = false;
     for (auto& p : all)
     {
-        if (p.name == preset.name && p.strip == preset.strip)
+        if (p.strip == preset.strip && p.name.equalsIgnoreCase (preset.name))
         {
             p = preset;
             replaced = true;

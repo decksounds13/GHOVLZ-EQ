@@ -9,6 +9,7 @@
 #include "BinaryData.h"
 #include "MelatoninBlur/melatonin/shadows.h"
 #include "GraphOverlayButtonLookAndFeel.h"
+#include "Dyn/DynSpectrumOverlay.h"
 #include <array>
 #include <bitset>
 #include <cmath>
@@ -281,6 +282,11 @@ public:
 
     /** Sync ^/v minimize control with editor compact state (lives on the graph, not faceplate). */
     void syncUiModeButton (bool isCompact);
+
+    /** GHOVLZ DYN: hide EQ handles / Match / Learn / Mod; show band-split overlay. */
+    void setDynProductMode (bool shouldEnable);
+    bool isDynProductMode() const noexcept { return dynProductMode; }
+    juce::Component& getUiModeButton() noexcept { return uiModeButton; }
     void syncModButton (bool isOpen);
 
     void updateBand1();
@@ -561,6 +567,7 @@ private:
     void requestMatchEnable();
     void disableMatch();
     void showMatchCurveMenu();
+    void showMatchMethodMenu();
     void updateLiveMatchCaptureIfNeeded();
     void layoutLearnChrome();
     void syncLearnChrome();
@@ -866,6 +873,9 @@ private:
     private:
         bool expandGlyph = false; // false = collapse (up), true = expand (down)
     };
+
+    bool dynProductMode = false;
+    std::unique_ptr<DynSpectrumOverlay> dynOverlay;
 
     UiModeChevronButton uiModeButton;
     juce::TextButton eqRangeMinusButton { "-" };

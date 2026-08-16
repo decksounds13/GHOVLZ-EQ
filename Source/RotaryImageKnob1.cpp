@@ -7,8 +7,9 @@ RotaryImageKnob1::RotaryImageKnob1()
     setLookAndFeel(&rotaryImageKnobLookAndFeel1);
 
     setSliderStyle(Slider::SliderStyle::RotaryHorizontalVerticalDrag);
-    setTextBoxStyle(Slider::TextBoxBelow, false, 56, 18);
-    setTextBoxIsEditable(true);
+    setTextBoxStyle(Slider::NoTextBox, true, 0, 0);
+    setTextBoxIsEditable(false);
+    setPaintingIsUnclipped (true);
     setRange(0.36, 0.80, .01);
     setControlDefault (0.36); // low end of factory range
 
@@ -18,12 +19,9 @@ RotaryImageKnob1::RotaryImageKnob1()
 
     onValueChange = [this]
     {
-        if (isMouseOverOrDragging() || hasKeyboardFocus (true))
-            refreshValuePopup (true);
+        if (isMouseOverOrDragging())
+            repaint();
     };
-
-    KnobTheme::showValueTextBox (*this, false, themeColors);
-    repaint();
 }
 
 RotaryImageKnob1::~RotaryImageKnob1()
@@ -35,13 +33,11 @@ void RotaryImageKnob1::setThemeColors (SharedResources* r) noexcept
 {
     themeColors = r;
     rotaryImageKnobLookAndFeel1.setThemeColors (r);
-    refreshValuePopup (isMouseOverOrDragging() || hasKeyboardFocus (true));
     repaint();
 }
 
-void RotaryImageKnob1::refreshValuePopup (bool show)
+void RotaryImageKnob1::refreshValuePopup (bool)
 {
-    KnobTheme::showValueTextBox (*this, show, themeColors);
 }
 
 void RotaryImageKnob1::paint(juce::Graphics& g)
@@ -55,6 +51,7 @@ void RotaryImageKnob1::paint(juce::Graphics& g)
     const int y = (getHeight() - side) / 2;
     rotaryImageKnobLookAndFeel1.drawRotarySlider (g, x, y, side, side,
         static_cast<float> (getValue()), 0.0f, 1.0f, *this);
+    KnobTheme::drawHoverValuePopup (g, *this, themeColors);
 }
 
 void RotaryImageKnob1::setCustomRange(double newMin, double newMax, double newInterval)
@@ -64,16 +61,14 @@ void RotaryImageKnob1::setCustomRange(double newMin, double newMax, double newIn
 
 void RotaryImageKnob1::mouseEnter(const juce::MouseEvent& event)
 {
-    juce::ignoreUnused (event);
-    refreshValuePopup (true);
+    juce::Slider::mouseEnter (event);
+    repaint();
 }
 
 void RotaryImageKnob1::mouseExit(const juce::MouseEvent& event)
 {
-    juce::ignoreUnused (event);
-    if (hasKeyboardFocus (true))
-        return;
-    refreshValuePopup (false);
+    juce::Slider::mouseExit (event);
+    repaint();
 }
 
 bool RotaryImageKnob1::isImageValid() const {

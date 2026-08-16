@@ -4,6 +4,7 @@
 #include "HistogramComponent.h"
 #include "ThdMeterComponent.h"
 #include "EqEditor.h"
+#include "Dyn/DynParams.h"
 #include "BinaryData.h"
 #include "Menu/Theme.h"
 #include "FrequencyResponseComponent.h"
@@ -911,7 +912,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     // Analysis thread FFTs the latest Block samples on this cadence (overlapping).
     params.push_back(std::make_unique<juce::AudioParameterInt>(
         "REFRESH_ID", "Refresh", 16, 200, analyserDefaults.getInt ("REFRESH_ID", 33)));
-    params.push_back(std::make_unique<juce::AudioParameterInt>("AVG_ID", "Avg", 1, 8, 1));
+    params.push_back(std::make_unique<juce::AudioParameterInt>("AVG_ID", "Avg", 1, 8,
+        juce::jlimit (1, 8, analyserDefaults.getInt ("AVG_ID", 1))));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MAXIMUM_ID", "Maximum", -200, 40, 12));
     params.push_back(std::make_unique<juce::AudioParameterInt>("MINIMUM_ID", "Minimum", -380, 30, -120));
     // How long spectrum peak-hold takes to fade from a peak down to the noise floor.
@@ -1237,7 +1239,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "LOUDNESS_TARGET_ID", "LoudnessTarget",
         juce::NormalisableRange<float> (-23.0f, -9.0f, 1.0f),
-        -14.0f));
+        analyserDefaults.getFloat ("LOUDNESS_TARGET_ID", -14.0f)));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "STEREOGRAM_USE_RAMP_ID", "StereogramUseRamp",
         analyserDefaults.getBool ("STEREOGRAM_USE_RAMP_ID", true)));
@@ -1493,7 +1495,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         juce::NormalisableRange<float> (-36.0f, -6.0f, 0.1f),
         -18.0f));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
-        "targetLufsEnable", "Target LUFS On", false));
+        "targetLufsEnable", "Target LUFS On",
+        analyserDefaults.getBool ("targetLufsEnable", false)));
 
     // Spectral Match — global shape match toward a target curve (noise / capture).
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -1534,6 +1537,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
         juce::NormalisableRange<float> (MatchEq::kMinHpLpHz, MatchEq::kMaxFreqHz, 1.0f, 0.2f),
         MatchEq::kDefaultLpHz));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        MatchEq::methodParamId(), "Match Method",
+        MatchEq::getMethodChoiceNames(),
+        MatchEq::lattice));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
         MatchEq::hpSlopeParamId(), "Match HP Slope",
         FilterSlope::getChoiceNames(), FilterSlope::db12));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
@@ -1570,6 +1577,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
     // HQ on = full BP lattice (default); off = 3-band shelf/bell eco path.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         SideCheck::hqParamId(), "Side Check HQ", SideCheck::kDefaultHq));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        SideCheck::methodParamId(), "Side Check Method",
+        SideCheck::getMethodChoiceNames(),
+        SideCheck::lattice));
 
     // Proportional Q (Ableton-style): tighten peaking Q as |gain| rises. Default off.
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -1851,6 +1862,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout EqProcessor::createParameter
             juce::NormalisableRange<float> (BandSaturation::kMinSatDriveDb, BandSaturation::kMaxSatDriveDb, 0.01f),
             BandSaturation::kDefaultSatDriveDb));
     }
+
+    DynParams::addParameters (params);
 
     return { params.begin(), params.end() };
 }
@@ -2596,6 +2609,7 @@ void EqProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     this->sampleRate = sampleRate;
     m_analyser.setSampleRate (sampleRate);
+    dynEngine.prepare (sampleRate, samplesPerBlock);
 #if SPEC3D_EXPORT_ENABLED
     exportAudioRing.prepare (sampleRate);
 #endif
@@ -3116,6 +3130,77 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         }
 
         processSpec3DVisualSidechain (mainBuffer, numSamples);
+        return;
+    }
+
+    // GHOVLZ DYN: compressor is the audio path. EQ DSP below is skipped.
+    {
+        take (smoothOutputGain);
+        take (smoothAutoGainOffset);
+
+        auto storeMeter = [&] (int channel, std::atomic<float>& peakOut, std::atomic<float>& rmsOut)
+        {
+            if (channel < 0 || channel >= mainBuffer.getNumChannels() || numSamples <= 0)
+            {
+                peakOut.store (-100.0f);
+                rmsOut.store (-100.0f);
+                return;
+            }
+            peakOut.store (juce::Decibels::gainToDecibels (mainBuffer.getMagnitude (channel, 0, numSamples), -100.0f));
+            rmsOut.store (juce::Decibels::gainToDecibels (mainBuffer.getRMSLevel (channel, 0, numSamples), -100.0f));
+        };
+
+        storeMeter (0, inputPeakDbLeft, inputRmsDbLeft);
+        if (mainBuffer.getNumChannels() > 1)
+            storeMeter (1, inputPeakDbRight, inputRmsDbRight);
+        else
+        {
+            inputPeakDbRight.store (inputPeakDbLeft.load());
+            inputRmsDbRight.store (inputRmsDbLeft.load());
+        }
+
+        dynEngine.process (mainBuffer, treeState, isNonRealtime());
+
+        const float outG = juce::Decibels::decibelsToGain (smoothOutputGain.getCurrentValue());
+        if (std::abs (outG - 1.0f) > 1.0e-5f)
+            mainBuffer.applyGain (outG);
+
+        storeMeter (0, postPeakDbLeft, postRmsDbLeft);
+        if (mainBuffer.getNumChannels() > 1)
+            storeMeter (1, postPeakDbRight, postRmsDbRight);
+        else
+        {
+            postPeakDbRight.store (postPeakDbLeft.load());
+            postRmsDbRight.store (postRmsDbLeft.load());
+        }
+
+        if (mainBuffer.getNumChannels() > 1)
+        {
+            m_analyser.pushPreSamplesIntoFifo (mainBuffer.getReadPointer (0),
+                                               mainBuffer.getReadPointer (1),
+                                               mainBuffer.getNumSamples());
+            m_analyser.pushSamplesIntoFifo (mainBuffer.getReadPointer (0),
+                                            mainBuffer.getReadPointer (1),
+                                            mainBuffer.getNumSamples());
+        }
+        else if (mainBuffer.getNumChannels() > 0)
+        {
+            const auto* mono = mainBuffer.getReadPointer (0);
+            m_analyser.pushPreSamplesIntoFifo (mono, mono, mainBuffer.getNumSamples());
+            m_analyser.pushSamplesIntoFifo (mono, mono, mainBuffer.getNumSamples());
+        }
+
+        if (auto* osc = oscilloscopeTarget.load (std::memory_order_acquire))
+        {
+            if (osc->isScopeEnabled() && mainBuffer.getNumChannels() > 0)
+            {
+                const auto* left = mainBuffer.getReadPointer (0);
+                const auto* right = mainBuffer.getNumChannels() > 1 ? mainBuffer.getReadPointer (1) : left;
+                osc->pushSamples (left, right, mainBuffer.getNumSamples());
+            }
+        }
+
+        updateReportedLatency();
         return;
     }
 
@@ -3843,9 +3928,11 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 
         const float* dL = matchDetectBuffer.getReadPointer (0);
         const float* dR = nChMain > 1 ? matchDetectBuffer.getReadPointer (1) : dL;
+        const int matchMethod = MatchEq::readChoiceIndex (
+            treeState, MatchEq::methodParamId(), MatchEq::lattice, MatchEq::numMethods - 1);
         matchEngine.process (mainBuffer, dL, dR, enabledHere, matchAmount, matchSpeed,
                              matchSmooth, matchHp, matchLp, matchResolution,
-                             matchHpSlope, matchLpSlope);
+                             matchHpSlope, matchLpSlope, matchMethod);
     };
 
     // Match before EQ (default): shape dry, then static bands sculpt on top.
@@ -4489,7 +4576,9 @@ void EqProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
             treeState, SideCheck::hpSlopeParamId(), FilterSlope::db12, FilterSlope::numChoices - 1);
         const int scLpSlope = MatchEq::readChoiceIndex (
             treeState, SideCheck::lpSlopeParamId(), FilterSlope::db12, FilterSlope::numChoices - 1);
-        sideCheck.process (mainBuffer, scOn, scAmount, scHp, scLp, scMode, scHq, scHpSlope, scLpSlope);
+        const int scMethod = MatchEq::readChoiceIndex (
+            treeState, SideCheck::methodParamId(), SideCheck::lattice, SideCheck::numMethods - 1);
+        sideCheck.process (mainBuffer, scOn, scAmount, scHp, scLp, scMode, scHq, scHpSlope, scLpSlope, scMethod);
     }
 
     // T/S solo: unity isolation of pre-EQ dry (mask ≤ 1 so level cannot exceed dry).
@@ -5575,18 +5664,7 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 
 int EqProcessor::computeProcessingLatencySamples() noexcept
 {
-    int latency = spectralEngine.getLatencySamples();
-    if (PhaseMode::readChoiceIndex (treeState) == PhaseMode::linearPhase)
-        latency += linearPhaseEngine.getLatencySamples();
-
-    // Sat OS latency: report max across engines (same factor on all).
-    int satLatency = 0;
-    for (auto& sat : bandSatEngines)
-        satLatency = juce::jmax (satLatency, sat.getLatencySamples());
-    satLatency = juce::jmax (satLatency, spectralSatEngine.getLatencySamples());
-    latency += satLatency;
-
-    return juce::jlimit (0, kMaxBypassCompDelay, latency);
+    return juce::jmax (0, dynEngine.getLatencySamples());
 }
 
 void EqProcessor::updateReportedLatency() noexcept

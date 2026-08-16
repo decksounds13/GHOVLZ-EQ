@@ -41,10 +41,10 @@
  #define JucePlugin_Enable_ARA             0
 #endif
 #ifndef  JucePlugin_Name
- #define JucePlugin_Name                   "Decksounds - GHOVLZ! EQ"
+ #define JucePlugin_Name                   "Decksounds - GHOVLZ! DYN"
 #endif
 #ifndef  JucePlugin_Desc
- #define JucePlugin_Desc                   "Decksounds - GHOVLZ! EQ"
+ #define JucePlugin_Desc                   "Decksounds - GHOVLZ! DYN"
 #endif
 #ifndef  JucePlugin_Manufacturer
  #define JucePlugin_Manufacturer           "Decksounds"
@@ -59,7 +59,7 @@
  #define JucePlugin_ManufacturerCode       0x4d616e75
 #endif
 #ifndef  JucePlugin_PluginCode
- #define JucePlugin_PluginCode             0x5a676c6b
+ #define JucePlugin_PluginCode             0x5a676c64
 #endif
 #ifndef  JucePlugin_IsSynth
  #define JucePlugin_IsSynth                0
@@ -104,19 +104,19 @@
  #define JucePlugin_AUSubType              JucePlugin_PluginCode
 #endif
 #ifndef  JucePlugin_AUExportPrefix
- #define JucePlugin_AUExportPrefix         ParametricEqProjectAU
+ #define JucePlugin_AUExportPrefix         GhovlzDynAU
 #endif
 #ifndef  JucePlugin_AUExportPrefixQuoted
- #define JucePlugin_AUExportPrefixQuoted   "ParametricEqProjectAU"
+ #define JucePlugin_AUExportPrefixQuoted   "GhovlzDynAU"
 #endif
 #ifndef  JucePlugin_AUManufacturerCode
  #define JucePlugin_AUManufacturerCode     JucePlugin_ManufacturerCode
 #endif
 #ifndef  JucePlugin_CFBundleIdentifier
- #define JucePlugin_CFBundleIdentifier     com.Decksounds.ParametricEqProject
+ #define JucePlugin_CFBundleIdentifier     com.Decksounds.GhovlzDyn
 #endif
 #ifndef  JucePlugin_AAXIdentifier
- #define JucePlugin_AAXIdentifier          com.Decksounds.ParametricEqProject
+ #define JucePlugin_AAXIdentifier          com.Decksounds.GhovlzDyn
 #endif
 #ifndef  JucePlugin_AAXManufacturerCode
  #define JucePlugin_AAXManufacturerCode    JucePlugin_ManufacturerCode
@@ -140,7 +140,7 @@
  #define JucePlugin_IAASubType             JucePlugin_PluginCode
 #endif
 #ifndef  JucePlugin_IAAName
- #define JucePlugin_IAAName                "Decksounds: Decksounds - GHOVLZ! EQ"
+ #define JucePlugin_IAAName                "Decksounds: Decksounds - GHOVLZ! DYN"
 #endif
 #ifndef  JucePlugin_VSTNumMidiInputs
  #define JucePlugin_VSTNumMidiInputs       16
@@ -155,10 +155,10 @@
  #define JucePlugin_ARATransformationFlags  0
 #endif
 #ifndef  JucePlugin_ARAFactoryID
- #define JucePlugin_ARAFactoryID           "com.Decksounds.ParametricEqProject.factory"
+ #define JucePlugin_ARAFactoryID           "com.Decksounds.GhovlzDyn.factory"
 #endif
 #ifndef  JucePlugin_ARADocumentArchiveID
- #define JucePlugin_ARADocumentArchiveID   "com.Decksounds.ParametricEqProject.aradocumentarchive.1.0.0"
+ #define JucePlugin_ARADocumentArchiveID   "com.Decksounds.GhovlzDyn.aradocumentarchive.1.0.0"
 #endif
 #ifndef  JucePlugin_ARACompatibleArchiveIDs
  #define JucePlugin_ARACompatibleArchiveIDs  ""

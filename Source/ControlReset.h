@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <functional>
+#include "ComboBoxLookAndFeel.h"
 
 /**
     Drop-in Slider with plugin-standard reset:
@@ -125,7 +126,7 @@ private:
     void showResetPopupMenu()
     {
         juce::PopupMenu m;
-        m.setLookAndFeel (&getLookAndFeel());
+        m.setLookAndFeel (&ComboBoxLookAndFeel::sharedForPopupMenus());
         m.addItem (1, "Reset to Default", hasDefault || isDoubleClickReturnEnabled());
 
         // Keep useful rotary mode items when relevant.

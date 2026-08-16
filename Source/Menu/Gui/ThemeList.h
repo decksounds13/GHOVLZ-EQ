@@ -73,6 +73,7 @@ public:
     juce::String getPresetName(int index) const;
     juce::String getSelectedPresetName() const;
     int findPresetIndexByName (const juce::String& name) const;
+    int findPresetIndexByNameIgnoreCase (const juce::String& name) const;
     void listBoxDataChanged();
     void textEditorReturnKeyPressed(juce::TextEditor& editor) override;
     void updateScrollBarColors(const juce::Colour& trackColor, const juce::Colour& thumbColor, const juce::Colour& outlineColor);

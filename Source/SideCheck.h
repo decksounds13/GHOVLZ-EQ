@@ -7,6 +7,8 @@
 #include <cmath>
 #include "DynamicEq.h"
 #include "FilterSlope.h"
+#include "Spectral/OverlapAddStft.h"
+#include <complex>
 
 /**
     Side Check (S<=M) — global post-EQ Mid/Side balance policeman.
@@ -45,6 +47,20 @@ namespace SideCheck
     inline constexpr const char* modeParamId() noexcept { return "sideCheckMode"; }
     /** HQ on = full BP lattice (default); off = 3-band shelf/bell eco path. */
     inline constexpr const char* hqParamId() noexcept { return "sideCheckHq"; }
+    inline constexpr const char* methodParamId() noexcept { return "sideCheckMethod"; }
+
+    /** 0 = IIR bandpass array (zero latency), 1 = FFT. */
+    enum Method : int
+    {
+        lattice = 0,
+        fft,
+        numMethods
+    };
+
+    inline juce::StringArray getMethodChoiceNames()
+    {
+        return { "Bandpass array", "FFT" };
+    }
 
     /** Envelope ballistics — Fast catches spikes; Med levels; Slow is gentlest. */
     enum SpeedMode : int
@@ -216,10 +232,15 @@ namespace SideCheck
 
             rebuildLattice();
             rebuildEco();
+            stft.prepare (sampleRate);
+            fftEnvM.fill (kSilenceFloorDb);
+            fftEnvS.fill (kSilenceFloorDb);
+            fftGrDb.fill (0.0f);
             clearPublished();
             wasEnabled = false;
             settling = false;
             lastHq = kDefaultHq;
+            useFft = false;
             prepared = true;
         }
 
@@ -227,6 +248,10 @@ namespace SideCheck
         {
             resetHqState();
             resetEcoState();
+            stft.reset();
+            fftEnvM.fill (kSilenceFloorDb);
+            fftEnvS.fill (kSilenceFloorDb);
+            fftGrDb.fill (0.0f);
             clearPublished();
             wasEnabled = false;
             settling = false;
@@ -241,9 +266,12 @@ namespace SideCheck
             @param speedMode  SideCheck::fast / med / slow (APVTS sideCheckMode).
             @param hq  true = BP lattice (default); false = 3-band shelf/bell eco path.
         */
+        int getLatencySamples() const noexcept { return useFft ? stft.latencySamples() : 0; }
+
         void process (juce::AudioBuffer<float>& buffer, bool enabled, float amount,
                       float hpHz, float lpHz, int speedMode = fast, bool hq = kDefaultHq,
-                      int hpSlope = FilterSlope::db12, int lpSlope = FilterSlope::db12) noexcept
+                      int hpSlope = FilterSlope::db12, int lpSlope = FilterSlope::db12,
+                      int method = lattice) noexcept
         {
             const int numCh = buffer.getNumChannels();
             const int n = buffer.getNumSamples();
@@ -262,6 +290,26 @@ namespace SideCheck
                     clearPublished();
                     return;
                 }
+            }
+
+            const bool wantFft = (method == Method::fft);
+            if (wantFft != useFft)
+            {
+                useFft = wantFft;
+                if (useFft)
+                {
+                    stft.prepare (sampleRate);
+                    stft.reset();
+                    fftEnvM.fill (kSilenceFloorDb);
+                    fftEnvS.fill (kSilenceFloorDb);
+                    fftGrDb.fill (0.0f);
+                }
+            }
+
+            if (useFft)
+            {
+                processFft (buffer, enabled, amount, hpHz, lpHz, speedMode, hpSlope, lpSlope);
+                return;
             }
 
             if (hq != lastHq)
@@ -783,6 +831,122 @@ namespace SideCheck
                 settling = false;
         }
 
+        void processFft (juce::AudioBuffer<float>& buffer, bool enabled, float amount,
+                         float hpHz, float lpHz, int speedMode,
+                         int hpSlope, int lpSlope) noexcept
+        {
+            if (! prepared)
+                prepare (sampleRate > 0.0 ? sampleRate : 48000.0, juce::jmax (blockSize, buffer.getNumSamples()));
+
+            if (! enabled && ! wasEnabled && ! settling)
+            {
+                clearPublished();
+                return;
+            }
+
+            if (enabled && ! wasEnabled)
+            {
+                stft.reset();
+                fftEnvM.fill (kSilenceFloorDb);
+                fftEnvS.fill (kSilenceFloorDb);
+                fftGrDb.fill (0.0f);
+            }
+
+            wasEnabled = enabled;
+            settling = ! enabled;
+
+            float attackMs = kFastAttackMs, releaseMs = kFastReleaseMs, grSmoothMs = kFastGrSmoothMs;
+            getBallisticsMs (speedMode, attackMs, releaseMs, grSmoothMs);
+            const float atk = DynamicEq::coeffForTimeMs (attackMs, sampleRate, OverlapAddStft::kHop);
+            const float rel = DynamicEq::coeffForTimeMs (releaseMs, sampleRate, OverlapAddStft::kHop);
+            const float grSmooth = DynamicEq::coeffForTimeMs (grSmoothMs, sampleRate, OverlapAddStft::kHop);
+            const float amountClamped = juce::jlimit (kMinAmount, kMaxAmount, amount);
+            const bool useHp = hpHz > 1.0f;
+            const bool useLp = lpHz > 1.0f && lpHz < (float) sampleRate * 0.49f;
+            const auto hpStages = useHp
+                ? FilterSlope::makeHighpassCoeffs (sampleRate, hpHz, 0.70710678f, hpSlope)
+                : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+            const auto lpStages = useLp
+                ? FilterSlope::makeLowpassCoeffs (sampleRate, lpHz, 0.70710678f, lpSlope)
+                : juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> {};
+
+            stft.process (buffer, buffer.getReadPointer (0),
+                         buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : buffer.getReadPointer (0),
+                [&] (float* workL, float* workR, const float*, int numBins)
+                {
+                    auto* cL = reinterpret_cast<std::complex<float>*> (workL);
+                    auto* cR = reinterpret_cast<std::complex<float>*> (workR);
+                    float peak = 0.0f;
+
+                    for (int k = 1; k < numBins - 1; ++k)
+                    {
+                        const float f = stft.binHz (k);
+                        float edgeW = 1.0f;
+                        if (useHp)
+                            edgeW *= FilterSlope::cascadeMagnitudeAt (hpStages, (double) f, sampleRate);
+                        if (useLp)
+                            edgeW *= FilterSlope::cascadeMagnitudeAt (lpStages, (double) f, sampleRate);
+                        edgeW = juce::jlimit (0.0f, 1.0f, edgeW);
+
+                        const std::complex<float> mid = 0.5f * (cL[k] + cR[k]);
+                        const std::complex<float> side = 0.5f * (cL[k] - cR[k]);
+                        const float magM = std::abs (mid) * (2.0f / (float) OverlapAddStft::kSize);
+                        const float magS = std::abs (side) * (2.0f / (float) OverlapAddStft::kSize);
+                        const float lvM = juce::Decibels::gainToDecibels (magM, kSilenceFloorDb);
+                        const float lvS = juce::Decibels::gainToDecibels (magS, kSilenceFloorDb);
+                        float& eM = fftEnvM[(size_t) k];
+                        float& eS = fftEnvS[(size_t) k];
+                        eM = (lvM > eM ? atk : rel) * eM + (1.0f - (lvM > eM ? atk : rel)) * lvM;
+                        eS = (lvS > eS ? atk : rel) * eS + (1.0f - (lvS > eS ? atk : rel)) * lvS;
+
+                        float targetGrDb = 0.0f;
+                        if (enabled && amountClamped > 1.0e-4f && edgeW > 0.02f)
+                        {
+                            const float excess = eS - eM;
+                            if (excess > kExcessEpsilonDb
+                                && (eM > kSilenceFloorDb + 1.0f || eS > kSilenceFloorDb + 1.0f))
+                                targetGrDb = -juce::jmin (kMaxGrDb, excess * amountClamped * edgeW);
+                        }
+
+                        float& g = fftGrDb[(size_t) k];
+                        g = grSmooth * g + (1.0f - grSmooth) * targetGrDb;
+                        const float gLin = juce::Decibels::decibelsToGain (g);
+                        const std::complex<float> sideOut = side * gLin;
+                        cL[k] = mid + sideOut;
+                        cR[k] = mid - sideOut;
+                        if (g < peak)
+                            peak = g;
+                    }
+
+                    publishedGrDb.store (peak, std::memory_order_relaxed);
+
+                    const int writeIdx = 1 - publishedIndex.load (std::memory_order_relaxed);
+                    auto& dest = publishedCurves[(size_t) writeIdx];
+                    dest.count = 0;
+                    const int nPub = juce::jmax (1, activeSlices);
+                    for (int i = 0; i < nPub && dest.count < kNumSlices; ++i)
+                    {
+                        const float f = juce::jmax (20.0f, slices[(size_t) i].centerHz);
+                        const int bin = juce::jlimit (1, numBins - 2,
+                                                      (int) std::lround (f * (float) OverlapAddStft::kSize
+                                                                          / (float) sampleRate));
+                        dest.centerHz[(size_t) dest.count] = f;
+                        dest.grDb[(size_t) dest.count] = fftGrDb[(size_t) bin];
+                        ++dest.count;
+                    }
+                    publishedIndex.store (writeIdx, std::memory_order_release);
+                });
+
+            if (! enabled)
+            {
+                bool any = false;
+                for (float g : fftGrDb)
+                    if (std::abs (g) > 0.05f) { any = true; break; }
+                if (! any)
+                    settling = false;
+            }
+        }
+
         void rebuildLattice() noexcept
         {
             activeSlices = 0;
@@ -911,6 +1075,11 @@ namespace SideCheck
         bool prepared = false;
         bool ecoReady = false;
         bool lastHq = kDefaultHq;
+        bool useFft = false;
+        OverlapAddStft stft;
+        std::array<float, OverlapAddStft::kBins> fftEnvM {};
+        std::array<float, OverlapAddStft::kBins> fftEnvS {};
+        std::array<float, OverlapAddStft::kBins> fftGrDb {};
 
         std::array<Slice, kNumSlices> slices {};
         std::array<EcoBand, kNumEcoBands> ecoBands {};

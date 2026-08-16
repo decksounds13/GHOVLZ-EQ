@@ -173,7 +173,7 @@ juce::File ParticleNodeGraphCanvas::defaultGraphFile()
 {
     auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                    .getChildFile ("Decksounds")
-                   .getChildFile ("ParametricEq");
+                   .getChildFile ("GhovlzDyn");
     dir.createDirectory();
     return dir.getChildFile ("particle_node_graph.xml");
 }

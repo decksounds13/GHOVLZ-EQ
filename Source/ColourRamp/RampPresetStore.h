@@ -19,6 +19,8 @@ public:
     int size() const noexcept { return presets.size(); }
 
     bool savePreset (juce::String name, const GradientRamp& ramp);
+    juce::String resolvedUserName (juce::String name) const;
+    bool containsUserName (juce::String name) const;
     bool applyPreset (int index, GradientRamp& dest) const;
     bool renamePreset (int index, juce::String newName);
     bool deletePreset (int index);

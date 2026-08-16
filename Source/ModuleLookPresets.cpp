@@ -44,7 +44,7 @@ static juce::File rootDir()
 {
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
         .getChildFile ("Decksounds")
-        .getChildFile ("ParametricEq")
+        .getChildFile ("GhovlzDyn")
         .getChildFile ("ModuleLook");
 }
 
@@ -135,6 +135,19 @@ static bool writeEntries (Kind k, const std::vector<std::pair<juce::String, juce
     return root->writeTo (f);
 }
 
+bool containsName (Kind k, const juce::String& name)
+{
+    const auto trimmed = name.trim();
+    if (trimmed.isEmpty())
+        return false;
+
+    for (const auto& n : listNames (k))
+        if (n.equalsIgnoreCase (trimmed))
+            return true;
+
+    return false;
+}
+
 bool saveNamed (Kind k, juce::String name, const juce::ValueTree& state)
 {
     name = name.trim();
@@ -149,7 +162,7 @@ bool saveNamed (Kind k, juce::String name, const juce::ValueTree& state)
     bool replaced = false;
     for (auto& e : entries)
     {
-        if (e.first == name)
+        if (e.first.equalsIgnoreCase (name))
         {
             e.second = body;
             replaced = true;
@@ -227,6 +240,7 @@ juce::StringArray parameterIdsForKind (Kind k)
         case Kind::spectrum:
             return {
                 "BLOCK_ID", "BINS_ID", "MAX_ID", "LIN_ID", "LOG_ID", "ST_ID", "MAX_HOLD_ID",
+                "REFRESH_ID", "AVG_ID",
                 "SPECTRUM_ANALYSER_ID", "SPECTRUM_PRE_CURVE_ID", "SPECTRUM_PRE_FILL_ID",
                 "SPECTRUM_POST_CURVE_ID", "SPECTRUM_POST_FILL_ID", "SPECTRUM_HOLD_FILL_ID",
                 "SPECTRUM_USE_RAMP_ID", "SPECTRUM_CURVE_RAMP_ID", "EQ_CURVE_RAMP_ID",
@@ -241,6 +255,9 @@ juce::StringArray parameterIdsForKind (Kind k)
                 "SPECTRUM_OPACITY_ID", "SPECTRUM_FILL_OPACITY_ID", "SPECTRUM_PATH_WIDTH_ID",
                 "SPECTRUM_RESOLUTION_ID", "SPECTRUM_CURVE_RES_ID", "SPECTRUM_CHANNEL_ID",
                 "SPECTRUM_OCTAVE_SMOOTH_ID", "SPECTRUM_FFT_BINS_ID",
+                "EQ_DISPLAY_RANGE_ID", "EQ_BAND_PATH_WIDTH_ID", "EQ_SUM_PATH_WIDTH_ID",
+                "EQ_SUM_GLOW_ENABLE_ID", "EQ_SUM_GLOW_RADIUS_ID",
+                "EQ_SUM_GLOW_SPREAD_ID", "EQ_SUM_GLOW_OPACITY_ID",
                 "SPECTRUM_GLOW_ENABLE_ID", "SPECTRUM_GLOW_RADIUS_ID",
                 "SPECTRUM_GLOW_SPREAD_ID", "SPECTRUM_GLOW_OPACITY_ID",
                 "SPECTRAL_METHOD_ID", "EQ_MULTICOLOR_BAND_FILL_ID",
@@ -248,6 +265,7 @@ juce::StringArray parameterIdsForKind (Kind k)
             };
         case Kind::fft:
             return {
+                "BLOCK_ID", "REFRESH_ID", "SPECTRUM_FFT_BINS_ID",
                 "FFT_FULL_HEIGHT_ID", "FFT_RESOLUTION_ID", "FFT_OPACITY_ID", "FFT_BAR_WIDTH_ID",
                 "FFT_INTENSITY_ID", "FFT_THRESHOLD_ID",
                 "FFT_GLOW_ENABLE_ID", "FFT_GLOW_RADIUS_ID", "FFT_GLOW_SPREAD_ID", "FFT_GLOW_OPACITY_ID",
@@ -276,10 +294,11 @@ juce::StringArray parameterIdsForKind (Kind k)
                 "METER_PEAK_GLOW_ENABLE_ID", "METER_PEAK_GLOW_THRESHOLD_ID",
                 "METER_PEAK_GLOW_RADIUS_ID", "METER_PEAK_GLOW_SPREAD_ID", "METER_PEAK_GLOW_OPACITY_ID",
                 "METER_RMS_GLOW_ENABLE_ID", "METER_RMS_GLOW_THRESHOLD_ID",
-                "METER_RMS_GLOW_RADIUS_ID", "METER_RMS_GLOW_SPREAD_ID", "METER_RMS_GLOW_OPACITY_ID"
+                "METER_RMS_GLOW_RADIUS_ID", "METER_RMS_GLOW_SPREAD_ID", "METER_RMS_GLOW_OPACITY_ID",
+                "DYN_GR_AVG_MS_ID", "DYN_GR_FALL_MS_ID"
             };
         case Kind::loudness:
-            return { "LOUDNESS_TARGET_ID" };
+            return { "LOUDNESS_TARGET_ID", "targetLufsEnable" };
         default:
             return {};
     }

@@ -89,6 +89,8 @@ public:
     juce::Colour graphHandleText = createColorWithOptionalAlpha (229, 189, 128, 255);
     juce::Colour graphOverlayBackground = createColorWithOptionalAlpha (65, 60, 55, 160);
     juce::Colour graphOverlayBorder = createColorWithOptionalAlpha (20, 10, 5, 150);
+    /** Per-band makeup bar on the DYN analyser. Distinct from Graph Band / threshold. */
+    juce::Colour graphMakeupBar = createColorWithOptionalAlpha (218, 165, 32, 230);
 
     //--------------------------------------------------------------------------
     // Option box

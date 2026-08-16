@@ -5,8 +5,9 @@
 RotaryImageKnob3::RotaryImageKnob3()
 {
     setSliderStyle(Slider::SliderStyle::RotaryHorizontalVerticalDrag);
-    setTextBoxStyle(Slider::TextBoxBelow, false, 56, 18);
-    setTextBoxIsEditable(true);
+    setTextBoxStyle(Slider::NoTextBox, true, 0, 0);
+    setTextBoxIsEditable(false);
+    setPaintingIsUnclipped (true);
     setRange(-24, 24.0, 0.01);
 
     
@@ -17,11 +18,9 @@ float startAngleDegrees = 40.0;
 
     onValueChange = [this]
     {
-        if (isMouseOverOrDragging() || hasKeyboardFocus (true))
-            refreshValuePopup (true);
+        if (isMouseOverOrDragging())
+            repaint();
     };
-
-    KnobTheme::showValueTextBox (*this, false, themeColors);
 }
 
 RotaryImageKnob3::~RotaryImageKnob3()
@@ -32,13 +31,11 @@ void RotaryImageKnob3::setThemeColors (SharedResources* r) noexcept
 {
     themeColors = r;
     rotaryImageKnobLookAndFeel3.setThemeColors (r);
-    refreshValuePopup (isMouseOverOrDragging() || hasKeyboardFocus (true));
     repaint();
 }
 
-void RotaryImageKnob3::refreshValuePopup (bool show)
+void RotaryImageKnob3::refreshValuePopup (bool)
 {
-    KnobTheme::showValueTextBox (*this, show, themeColors);
 }
 
 void RotaryImageKnob3::paint(juce::Graphics& g)
@@ -51,6 +48,7 @@ void RotaryImageKnob3::paint(juce::Graphics& g)
     const int y = (getHeight() - side) / 2;
     rotaryImageKnobLookAndFeel3.drawRotarySlider (g, x, y, side, side,
         static_cast<float> (getValue()), startAngleRadians, endAngleRadians, *this);
+    KnobTheme::drawHoverValuePopup (g, *this, themeColors);
 }
 
 void RotaryImageKnob3::setCustomRange(double newMin, double newMax, double newInterval)
@@ -62,14 +60,12 @@ void RotaryImageKnob3::setCustomRange(double newMin, double newMax, double newIn
 
 void RotaryImageKnob3::mouseEnter(const juce::MouseEvent& event)
 {
-    juce::ignoreUnused (event);
-    refreshValuePopup (true);
+    juce::Slider::mouseEnter (event);
+    repaint();
 }
 
 void RotaryImageKnob3::mouseExit(const juce::MouseEvent& event)
 {
-    juce::ignoreUnused (event);
-    if (hasKeyboardFocus (true))
-        return;
-    refreshValuePopup (false);
+    juce::Slider::mouseExit (event);
+    repaint();
 }

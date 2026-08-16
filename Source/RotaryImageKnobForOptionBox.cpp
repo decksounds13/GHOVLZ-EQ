@@ -5,8 +5,8 @@
 RotaryImageKnobForOptionBox::RotaryImageKnobForOptionBox()
 {
     setSliderStyle(Slider::SliderStyle::RotaryHorizontalVerticalDrag);
-    setTextBoxStyle(Slider::TextBoxBelow, false, 56, 18);
-    setTextBoxIsEditable(true);
+    setTextBoxStyle(Slider::NoTextBox, true, 0, 0);
+    setTextBoxIsEditable(false);
     setRange(0.36, 0.80, .01);
     
     setControlDefault (0.36);
@@ -17,17 +17,13 @@ RotaryImageKnobForOptionBox::RotaryImageKnobForOptionBox()
     float endAngleDegrees = 320.0;
     setRotaryParameters(juce::degreesToRadians(startAngleDegrees), juce::degreesToRadians(endAngleDegrees), true);
 
-    // Keep value box sized to full number string while scrubbing (never "...").
     onValueChange = [this]
     {
         if (compactNoValueBox)
             return;
-        if (isMouseOverOrDragging() || hasKeyboardFocus (true))
-            refreshValuePopup (true);
+        if (isMouseOverOrDragging())
+            repaint();
     };
-
-    KnobTheme::showValueTextBox (*this, false, themeColors);
-    repaint();
 }
 
 RotaryImageKnobForOptionBox::~RotaryImageKnobForOptionBox()
@@ -38,14 +34,11 @@ void RotaryImageKnobForOptionBox::setThemeColors (SharedResources* r) noexcept
 {
     themeColors = r;
     rotaryImageKnobLookAndFeel1.setThemeColors (r);
-    if (! compactNoValueBox)
-        refreshValuePopup (isMouseOverOrDragging() || hasKeyboardFocus (true));
     repaint();
 }
 
-void RotaryImageKnobForOptionBox::refreshValuePopup (bool show)
+void RotaryImageKnobForOptionBox::refreshValuePopup (bool)
 {
-    KnobTheme::showValueTextBox (*this, show, themeColors);
 }
 
 void RotaryImageKnobForOptionBox::paint(juce::Graphics& g)
@@ -71,6 +64,9 @@ void RotaryImageKnobForOptionBox::paint(juce::Graphics& g)
 
     rotaryImageKnobLookAndFeel1.drawRotarySlider (g, x, y, side, side,
         static_cast<float> (getValue()), 0.0f, 1.0f, *this);
+
+    if (! compactNoValueBox)
+        KnobTheme::drawHoverValuePopup (g, *this, themeColors);
 }
 
 void RotaryImageKnobForOptionBox::setCustomRange(double newMin, double newMax, double newInterval)
@@ -84,10 +80,8 @@ void RotaryImageKnobForOptionBox::setCompactNoValueBox (bool shouldBeCompact)
 {
     compactNoValueBox = shouldBeCompact;
 
-    if (compactNoValueBox)
-        setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-    else
-        refreshValuePopup (false);
+    setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    repaint();
 }
 
 void RotaryImageKnobForOptionBox::mouseDown (const juce::MouseEvent& event)
@@ -103,23 +97,14 @@ void RotaryImageKnobForOptionBox::mouseDown (const juce::MouseEvent& event)
 
 void RotaryImageKnobForOptionBox::mouseEnter(const juce::MouseEvent& event)
 {
-    juce::ignoreUnused (event);
-
-    if (compactNoValueBox)
-        return;
-
-    refreshValuePopup (true);
+    juce::Slider::mouseEnter (event);
+    if (! compactNoValueBox)
+        repaint();
 }
 
 void RotaryImageKnobForOptionBox::mouseExit(const juce::MouseEvent& event)
 {
-    juce::ignoreUnused (event);
-
-    if (compactNoValueBox)
-        return;
-
-    if (hasKeyboardFocus (true))
-        return;
-
-    refreshValuePopup (false);
+    juce::Slider::mouseExit (event);
+    if (! compactNoValueBox)
+        repaint();
 }

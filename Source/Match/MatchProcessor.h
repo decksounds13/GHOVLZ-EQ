@@ -8,6 +8,7 @@
 #include "MatchSettings.h"
 #include "../DynamicEq.h"
 #include "../FilterSlope.h"
+#include "../Spectral/OverlapAddStft.h"
 
 namespace MatchEq
 {
@@ -38,7 +39,10 @@ namespace MatchEq
                       float lpHz,
                       int resolutionMode,
                       int hpSlope = FilterSlope::db12,
-                      int lpSlope = FilterSlope::db12) noexcept;
+                      int lpSlope = FilterSlope::db12,
+                      int method = lattice) noexcept;
+
+        int getLatencySamples() const noexcept { return fftMethod ? stft.latencySamples() : 0; }
 
         void setFactoryTarget (int curveIndex) noexcept;
         /** Copy analyser-style magnitude (display 0..1 or linear) onto the working target. */
@@ -61,6 +65,7 @@ namespace MatchEq
         void fromUserPresetsTree (const juce::ValueTree& tree);
         int getNumUserPresets() const noexcept { return numUserPresets; }
         juce::String getUserPresetName (int index) const;
+        bool containsUserPreset (const juce::String& name) const;
         bool saveUserPreset (const juce::String& name);
         bool loadUserPreset (int index);
         bool removeUserPreset (int index);
@@ -99,6 +104,10 @@ namespace MatchEq
         void clearPublished() noexcept;
         /** Rebuild when Smooth and/or Resolution change; remaps target in log-f when count changes. */
         void ensureLatticeConfig (float smooth01, int resolutionMode) noexcept;
+        void processFft (juce::AudioBuffer<float>& buffer,
+                         const float* detectL, const float* detectR,
+                         bool enabled, float amount, int speedMode, float smooth01,
+                         float hpHz, float lpHz, int hpSlope, int lpSlope) noexcept;
         static float interpTargetDb (const float* centersHz, const float* db, int n, float fHz) noexcept;
 
         double sampleRate = 48000.0;
@@ -108,7 +117,11 @@ namespace MatchEq
         bool prepared = false;
         bool wasEnabled = false;
         bool settling = false;
+        bool fftMethod = false;
         float latticeSmooth01 = kDefaultSmooth;
+        OverlapAddStft stft;
+        std::array<float, OverlapAddStft::kBins> fftEnvDb {};
+        std::array<float, OverlapAddStft::kBins> fftGrDb {};
 
         std::array<Slice, kNumSlices> slices {};
         std::array<float, kNumSlices> workingTargetDb {};

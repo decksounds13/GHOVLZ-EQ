@@ -1,18 +1,20 @@
 #include "EqPresetStore.h"
 #include "EqProcessor.h"
+#include "Dyn/DynParams.h"
 
 EqPresetStore::EqPresetStore (EqProcessor& processorToUse)
     : processor (processorToUse)
 {
     loadFromXml();
     ensureDefault();
+    ensureFactoryOtt();
 }
 
 juce::File EqPresetStore::getPresetFile()
 {
     auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                    .getChildFile ("Decksounds")
-                   .getChildFile ("ParametricEq")
+                   .getChildFile ("GhovlzDyn")
                    .getChildFile ("Presets");
     if (! dir.exists())
         dir.createDirectory();
@@ -65,6 +67,122 @@ void EqPresetStore::ensureDefault()
 
     if (selectedIndex < 0 || selectedIndex >= names.size())
         selectedIndex = 0;
+}
+
+void EqPresetStore::setTreeParam (juce::ValueTree& root, const juce::String& id, float value)
+{
+    for (int i = 0; i < root.getNumChildren(); ++i)
+    {
+        auto child = root.getChild (i);
+        if (child.getProperty ("id").toString() == id)
+        {
+            child.setProperty ("value", (double) value, nullptr);
+            return;
+        }
+    }
+
+    juce::ValueTree p ("PARAM");
+    p.setProperty ("id", id, nullptr);
+    p.setProperty ("value", (double) value, nullptr);
+    root.appendChild (p, nullptr);
+}
+
+juce::ValueTree EqPresetStore::makeOttState (bool) const
+{
+    // Ableton Live 12 Core Library Multiband Dynamics / OTT.adv
+    const float splits[] = { 88.3f, 2500.0f };
+    return makeOttStateN (3, splits, 2);
+}
+
+juce::ValueTree EqPresetStore::makeOttStateN (int bands, const float* splits, int numSplits) const
+{
+    auto state = captureState();
+    if (! state.isValid())
+        return {};
+
+    bands = juce::jlimit (1, DynParams::kMaxBands, bands);
+    setTreeParam (state, DynParams::countId(), (float) bands);
+    setTreeParam (state, DynParams::selectedId(), 0.0f);
+    setTreeParam (state, DynParams::faceAllId(), 1.0f);
+    setTreeParam (state, DynParams::lookaheadId(), 0.0f);
+    setTreeParam (state, DynParams::timeId(), 100.0f);
+    setTreeParam (state, DynParams::amountId(), 100.0f);
+    setTreeParam (state, DynParams::downAmtId(), 100.0f);
+    setTreeParam (state, DynParams::upAmtId(), 5.0f);
+    setTreeParam (state, DynParams::detectId(), (float) DynParams::detectRms);
+
+    // Official 3-band OTT.adv (Low / Mid / High). N-band presets lerp these anchors.
+    const float atkA[3]  = { 47.8f, 22.4f, 13.5f };
+    const float relA[3]  = { 282.0f, 282.0f, 132.0f };
+    const float downA[3] = { -33.8f, -30.3f, -35.5f };
+    const float upA[3]   = { -40.8f, -41.8f, -40.8f };
+    const float mkA[3]   = { 10.3f, 5.7f, 10.3f };
+    const float ratioA[3] = { 66.7f, 66.7f, 100.0f };
+
+    auto lerp3 = [] (float t, const float* a) -> float
+    {
+        t = juce::jlimit (0.0f, 1.0f, t);
+        if (t <= 0.5f)
+            return a[0] + (a[1] - a[0]) * (t * 2.0f);
+        return a[1] + (a[2] - a[1]) * ((t - 0.5f) * 2.0f);
+    };
+
+    for (int b = 0; b < bands; ++b)
+    {
+        const float t = bands > 1 ? (float) b / (float) (bands - 1) : 0.0f;
+        setTreeParam (state, DynParams::onId (b), 1.0f);
+        setTreeParam (state, DynParams::soloId (b), 0.0f);
+        setTreeParam (state, DynParams::autoId (b), 0.0f);
+        setTreeParam (state, DynParams::thresholdId (b), lerp3 (t, downA));
+        setTreeParam (state, DynParams::upThresholdId (b), lerp3 (t, upA));
+        setTreeParam (state, DynParams::ratioId (b), lerp3 (t, ratioA));
+        setTreeParam (state, DynParams::attackId (b), lerp3 (t, atkA));
+        setTreeParam (state, DynParams::releaseId (b), lerp3 (t, relA));
+        setTreeParam (state, DynParams::kneeId (b), 8.0f);
+        setTreeParam (state, DynParams::makeupId (b), lerp3 (t, mkA));
+        setTreeParam (state, DynParams::mixId (b), 100.0f);
+        setTreeParam (state, DynParams::clipId (b), 0.0f);
+        setTreeParam (state, DynParams::clipThrId (b), 0.0f);
+        if (b < numSplits)
+            setTreeParam (state, DynParams::splitId (b), splits[b]);
+    }
+
+    return state;
+}
+
+void EqPresetStore::ensureFactoryOtt()
+{
+    bool changed = false;
+    auto upsert = [this, &changed] (const juce::String& name, juce::ValueTree s)
+    {
+        if (! s.isValid())
+            return;
+        const int i = indexOfName (name);
+        if (i >= 0)
+        {
+            states.set (i, s);
+            changed = true;
+        }
+        else
+        {
+            names.add (name);
+            states.add (s);
+            changed = true;
+        }
+    };
+
+    upsert ("OTT", makeOttState (false));
+    upsert ("OTT Xfer", makeOttState (true));
+
+    const float s4[] = { 88.3f, 400.0f, 2500.0f };
+    const float s5[] = { 80.0f, 250.0f, 800.0f, 2500.0f };
+    const float s6[] = { 80.0f, 200.0f, 500.0f, 1500.0f, 4000.0f };
+    upsert ("OTT 4", makeOttStateN (4, s4, 3));
+    upsert ("OTT 5", makeOttStateN (5, s5, 4));
+    upsert ("OTT 6", makeOttStateN (6, s6, 5));
+
+    if (changed)
+        persistToXml();
 }
 
 void EqPresetStore::apply (int index)
